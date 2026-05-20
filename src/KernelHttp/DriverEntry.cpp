@@ -1,11 +1,23 @@
 #include "KernelHttpConfig.h"
+#include "net/WskClient.h"
 
 namespace KernelHttp
 {
+    namespace
+    {
+        net::WskClient* g_wskClient = nullptr;
+    }
+
     _Use_decl_annotations_
     extern "C" void DriverUnload(PDRIVER_OBJECT driverObject)
     {
         UNREFERENCED_PARAMETER(driverObject);
+
+        if (g_wskClient != nullptr) {
+            g_wskClient->Shutdown();
+            delete g_wskClient;
+            g_wskClient = nullptr;
+        }
     }
 }
 
@@ -17,7 +29,18 @@ DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
 
     driverObject->DriverUnload = KernelHttp::DriverUnload;
 
-    return STATUS_SUCCESS;
+    KernelHttp::g_wskClient = new KernelHttp::net::WskClient();
+    if (KernelHttp::g_wskClient == nullptr) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    NTSTATUS status = KernelHttp::g_wskClient->Initialize();
+    if (!NT_SUCCESS(status)) {
+        delete KernelHttp::g_wskClient;
+        KernelHttp::g_wskClient = nullptr;
+    }
+
+    return status;
 }
 
 _Ret_maybenull_

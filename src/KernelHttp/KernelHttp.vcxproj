@@ -20,9 +20,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DriverEntry.cpp" />
+    <ClCompile Include="net\WskClient.cpp" />
+    <ClCompile Include="net\WskSocket.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="KernelHttpConfig.h" />
+    <ClInclude Include="net\WskBuffer.h" />
+    <ClInclude Include="net\WskClient.h" />
+    <ClInclude Include="net\WskSocket.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="KernelHttp.inf" />
@@ -103,7 +108,7 @@
       <AdditionalOptions>/Zc:externConstexpr /Zc:inline %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>netio.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>

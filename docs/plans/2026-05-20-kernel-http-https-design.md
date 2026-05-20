@@ -60,15 +60,15 @@
 - Create: `src/KernelHttp/net/WskSocket.cpp`
 - Create: `src/KernelHttp/net/WskBuffer.h`
 
-- [ ] **Step 1: 实现 WSK 注册与 attach**
+- [x] **Step 1: 实现 WSK 注册与 attach**
 
 完成 `WskRegister` / `WskCaptureProviderNPI` / `WskReleaseProviderNPI` / `WskDeregister` 的生命周期管理。
 
-- [ ] **Step 2: 实现连接型 socket 封装**
+- [x] **Step 2: 实现连接型 socket 封装**
 
 封装 `WskSocketConnect`、`WskSend`、`WskReceive`、关闭和错误传播。
 
-- [ ] **Step 3: 约束缓冲区与 IRQL**
+- [x] **Step 3: 约束缓冲区与 IRQL**
 
 把 socket context、MDL、buffer 都限制在 nonpaged 内存里，避免高 IRQL 访问 pageable 数据。
 
@@ -163,4 +163,3 @@
 - [ ] **Step 3: 固化回归命令**
 
 把编译、加载、请求、卸载流程整理成可重复执行的测试脚本。
-
