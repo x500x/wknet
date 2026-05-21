@@ -185,7 +185,7 @@ namespace net
             localAddressForConnect,
             const_cast<SOCKADDR*>(remoteAddress),
             0,
-            this,
+            nullptr,
             nullptr,
             nullptr,
             nullptr,
@@ -193,6 +193,13 @@ namespace net
             irp);
 
         status = CompleteSyncIrp(status, irp, &event, &information);
+
+        if (!NT_SUCCESS(status)) {
+            kprintf("WskSocketConnect failed: 0x%08X family=%u information=%Iu\r\n",
+                static_cast<ULONG>(status),
+                static_cast<unsigned>(remoteAddress->sa_family),
+                information);
+        }
 
         if (NT_SUCCESS(status)) {
             socket_ = reinterpret_cast<PWSK_SOCKET>(information);

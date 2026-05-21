@@ -428,6 +428,24 @@ namespace
         Expect(status == STATUS_MORE_PROCESSING_REQUIRED, "incomplete Content-Length body requests more data");
     }
 
+    void TestEmptyResponseNeedsMoreData()
+    {
+        const char responseBytes[] = "";
+        HttpHeader headers[4] = {};
+        HttpParseOptions options = {};
+        options.Headers = headers;
+        options.HeaderCapacity = 4;
+
+        HttpResponse response = {};
+        const NTSTATUS status = HttpParser::ParseResponse(
+            responseBytes,
+            0,
+            options,
+            response);
+
+        Expect(status == STATUS_MORE_PROCESSING_REQUIRED, "empty response buffer requests more data");
+    }
+
     void TestDuplicateContentLengthConflict()
     {
         const char responseBytes[] =
@@ -525,6 +543,7 @@ int main()
     TestHeaderCapacityFailure();
     TestParseCloseDelimitedResponse();
     TestIncompleteResponseNeedsMoreData();
+    TestEmptyResponseNeedsMoreData();
     TestDuplicateContentLengthConflict();
     TestNoBodyStatus();
     TestHeadResponseForbidsBody();

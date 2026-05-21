@@ -386,8 +386,12 @@ namespace http
     {
         response = {};
 
-        if (data == nullptr || dataLength == 0) {
+        if (data == nullptr) {
             return STATUS_INVALID_PARAMETER;
+        }
+
+        if (dataLength == 0) {
+            return STATUS_MORE_PROCESSING_REQUIRED;
         }
 
         const SIZE_T headerEnd = FindHeaderEnd(data, dataLength);

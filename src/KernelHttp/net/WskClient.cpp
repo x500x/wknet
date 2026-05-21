@@ -245,10 +245,12 @@ namespace net
         IoFreeIrp(irp);
 
         if (!NT_SUCCESS(status)) {
+            kprintf("WskGetAddressInfo failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
         if (result == nullptr) {
+            kprintf("WskGetAddressInfo returned no results\r\n");
             return STATUS_NO_MATCH;
         }
 
@@ -261,6 +263,10 @@ namespace net
         }
 
         providerDispatch->WskFreeAddressInfo(providerClient, result);
+        if (!NT_SUCCESS(status)) {
+            kprintf("WskGetAddressInfo returned no AF_INET/AF_INET6 address: 0x%08X\r\n",
+                static_cast<ULONG>(status));
+        }
         return status;
     }
 }

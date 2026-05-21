@@ -32,18 +32,21 @@ namespace client
             buffers.RequestBufferLength,
             &requestLength);
         if (!NT_SUCCESS(status)) {
+            kprintf("HttpClient build request failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
         SOCKADDR_STORAGE remoteAddress = {};
         status = wskClient.Resolve(options.ServerName, options.ServiceName, &remoteAddress);
         if (!NT_SUCCESS(status)) {
+            kprintf("HttpClient resolve failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
         net::WskSocket socket;
         status = socket.Connect(wskClient, reinterpret_cast<const SOCKADDR*>(&remoteAddress));
         if (!NT_SUCCESS(status)) {
+            kprintf("HttpClient connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -52,9 +55,18 @@ namespace client
         if (NT_SUCCESS(status) && sent != requestLength) {
             status = STATUS_CONNECTION_DISCONNECTED;
         }
+        if (!NT_SUCCESS(status)) {
+            kprintf("HttpClient send failed: 0x%08X sent=%Iu expected=%Iu\r\n",
+                static_cast<ULONG>(status),
+                sent,
+                requestLength);
+        }
 
         if (NT_SUCCESS(status)) {
             status = ReadHttpResponse(socket, options.ResponseBodyForbidden, buffers, response);
+            if (!NT_SUCCESS(status)) {
+                kprintf("HttpClient read response failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            }
         }
 
         const NTSTATUS closeStatus = socket.Close();
@@ -88,6 +100,9 @@ namespace client
             }
 
             if (status != STATUS_MORE_PROCESSING_REQUIRED) {
+                kprintf("HttpClient parse response failed: 0x%08X bytes=%Iu\r\n",
+                    static_cast<ULONG>(status),
+                    responseLength);
                 return status;
             }
 
@@ -102,6 +117,9 @@ namespace client
                 &received);
             if (!NT_SUCCESS(status)) {
                 if (status != STATUS_CONNECTION_DISCONNECTED) {
+                    kprintf("HttpClient receive failed: 0x%08X bytes=%Iu\r\n",
+                        static_cast<ULONG>(status),
+                        responseLength);
                     return status;
                 }
 
