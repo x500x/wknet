@@ -1,11 +1,21 @@
 #include "KernelHttpConfig.h"
 #include "net/WskClient.h"
+#include "samples/HttpVerbSamples.h"
 
 namespace KernelHttp
 {
     namespace
     {
         net::WskClient* g_wskClient = nullptr;
+    }
+
+    NTSTATUS RunHttpSamples(samples::HttpVerbSampleResults* results) noexcept
+    {
+        if (g_wskClient == nullptr || !g_wskClient->IsInitialized()) {
+            return STATUS_DEVICE_NOT_READY;
+        }
+
+        return samples::RunHttpVerbSamples(*g_wskClient, results);
     }
 
     _Use_decl_annotations_

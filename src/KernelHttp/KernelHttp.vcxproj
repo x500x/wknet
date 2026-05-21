@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="client\HttpClient.cpp" />
     <ClCompile Include="client\HttpsClient.cpp" />
     <ClCompile Include="crypto\CngProvider.cpp" />
     <ClCompile Include="DriverEntry.cpp" />
@@ -28,6 +29,7 @@
     <ClCompile Include="http\HttpTypes.cpp" />
     <ClCompile Include="net\WskClient.cpp" />
     <ClCompile Include="net\WskSocket.cpp" />
+    <ClCompile Include="samples\HttpVerbSamples.cpp" />
     <ClCompile Include="tls\TlsContext.cpp" />
     <ClCompile Include="tls\CertificateStore.cpp" />
     <ClCompile Include="tls\CertificateValidator.cpp" />
@@ -36,6 +38,7 @@
     <ClCompile Include="tls\TlsRecord.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="client\HttpClient.h" />
     <ClInclude Include="client\HttpsClient.h" />
     <ClInclude Include="crypto\CngProvider.h" />
     <ClInclude Include="http\HttpParser.h" />
@@ -46,6 +49,7 @@
     <ClInclude Include="net\WskBuffer.h" />
     <ClInclude Include="net\WskClient.h" />
     <ClInclude Include="net\WskSocket.h" />
+    <ClInclude Include="samples\HttpVerbSamples.h" />
     <ClInclude Include="tls\TlsContext.h" />
     <ClInclude Include="tls\CertificateStore.h" />
     <ClInclude Include="tls\CertificateValidator.h" />

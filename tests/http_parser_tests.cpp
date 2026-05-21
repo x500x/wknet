@@ -122,6 +122,80 @@ namespace
         Expect(memcmp(buffer, expected, strlen(expected)) == 0, "POST request bytes match expected output");
     }
 
+    void TestBuildPutRequest()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+        const char body[] = "{\"enabled\":true}";
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Put;
+        options.Path = MakeText("/put");
+        options.Host = MakeText("httpbin.org");
+        options.UserAgent = MakeText("KernelHttp/0.1");
+        options.ContentType = MakeText("application/json");
+        options.Connection = HttpConnectionDirective::Close;
+        options.Body = body;
+        options.BodyLength = strlen(body);
+
+        const NTSTATUS status = HttpRequestBuilder::Build(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+
+        const char expected[] =
+            "PUT /put HTTP/1.1\r\n"
+            "Host: httpbin.org\r\n"
+            "User-Agent: KernelHttp/0.1\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: 16\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "{\"enabled\":true}";
+
+        Expect(status == STATUS_SUCCESS, "PUT request builds successfully");
+        Expect(written == strlen(expected), "PUT request reports exact byte count");
+        Expect(memcmp(buffer, expected, strlen(expected)) == 0, "PUT request bytes match expected output");
+    }
+
+    void TestBuildRealHostGetRequest()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+
+        const HttpHeader extra[] = {
+            { MakeText("Accept"), MakeText("*/*") }
+        };
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Get;
+        options.Path = MakeText("/");
+        options.Host = MakeText("www.baidu.com");
+        options.UserAgent = MakeText("KernelHttp/0.1");
+        options.Connection = HttpConnectionDirective::Close;
+        options.ExtraHeaders = extra;
+        options.ExtraHeaderCount = 1;
+
+        const NTSTATUS status = HttpRequestBuilder::Build(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+
+        const char expected[] =
+            "GET / HTTP/1.1\r\n"
+            "Host: www.baidu.com\r\n"
+            "User-Agent: KernelHttp/0.1\r\n"
+            "Connection: close\r\n"
+            "Accept: */*\r\n"
+            "\r\n";
+
+        Expect(status == STATUS_SUCCESS, "real-host GET request builds successfully");
+        Expect(written == strlen(expected), "real-host GET request reports exact byte count");
+        Expect(memcmp(buffer, expected, strlen(expected)) == 0, "real-host GET request bytes match expected output");
+    }
+
     void TestRequestSizeProbe()
     {
         size_t written = 0;
@@ -415,6 +489,8 @@ int main()
 {
     TestBuildGetRequest();
     TestBuildPostRequest();
+    TestBuildPutRequest();
+    TestBuildRealHostGetRequest();
     TestRequestSizeProbe();
     TestParseContentLengthResponse();
     TestParseChunkedResponse();

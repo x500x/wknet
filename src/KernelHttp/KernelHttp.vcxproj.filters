@@ -28,6 +28,9 @@
     <Filter Include="Source Files\client">
       <UniqueIdentifier>{9D513525-581D-46E5-BCDB-B06F9F0FC8AA}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\samples">
+      <UniqueIdentifier>{8A9E1C1B-5D97-456F-A1D7-7672B8577A2E}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Header Files\net">
       <UniqueIdentifier>{F4EE822D-C34A-46DD-9A36-B44C7203571A}</UniqueIdentifier>
     </Filter>
@@ -43,8 +46,14 @@
     <Filter Include="Header Files\client">
       <UniqueIdentifier>{45F02825-5476-4470-A5E4-F08068A6F8FE}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\samples">
+      <UniqueIdentifier>{92BC7FE4-D4E4-4266-86B2-A80B9EC98525}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="client\HttpClient.cpp">
+      <Filter>Source Files\client</Filter>
+    </ClCompile>
     <ClCompile Include="client\HttpsClient.cpp">
       <Filter>Source Files\client</Filter>
     </ClCompile>
@@ -72,6 +81,9 @@
     <ClCompile Include="net\WskSocket.cpp">
       <Filter>Source Files\net</Filter>
     </ClCompile>
+    <ClCompile Include="samples\HttpVerbSamples.cpp">
+      <Filter>Source Files\samples</Filter>
+    </ClCompile>
     <ClCompile Include="tls\TlsContext.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
@@ -92,6 +104,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="client\HttpClient.h">
+      <Filter>Header Files\client</Filter>
+    </ClInclude>
     <ClInclude Include="client\HttpsClient.h">
       <Filter>Header Files\client</Filter>
     </ClInclude>
@@ -121,6 +136,9 @@
     </ClInclude>
     <ClInclude Include="net\WskSocket.h">
       <Filter>Header Files\net</Filter>
+    </ClInclude>
+    <ClInclude Include="samples\HttpVerbSamples.h">
+      <Filter>Header Files\samples</Filter>
     </ClInclude>
     <ClInclude Include="tls\TlsContext.h">
       <Filter>Header Files\tls</Filter>

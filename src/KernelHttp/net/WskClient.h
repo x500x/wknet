@@ -31,6 +31,12 @@ namespace net
         _Ret_maybenull_
         const WSK_PROVIDER_DISPATCH* ProviderDispatch() const noexcept;
 
+        _Must_inspect_result_
+        NTSTATUS Resolve(
+            _In_z_ const wchar_t* nodeName,
+            _In_z_ const wchar_t* serviceName,
+            _Out_ SOCKADDR_STORAGE* remoteAddress) noexcept;
+
     private:
         WSK_CLIENT_NPI clientNpi_ = {};
         WSK_REGISTRATION registration_ = {};
