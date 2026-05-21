@@ -81,8 +81,38 @@ namespace net
         }
 
         _Must_inspect_result_
+        bool ParseTcpPort(
+            _In_z_ const wchar_t* serviceName,
+            _Out_ USHORT* port) noexcept
+        {
+            if (serviceName == nullptr || port == nullptr) {
+                return false;
+            }
+
+            ULONG value = 0;
+            for (const wchar_t* current = serviceName; *current != L'\0'; ++current) {
+                if (*current < L'0' || *current > L'9') {
+                    return false;
+                }
+
+                value = (value * 10) + static_cast<ULONG>(*current - L'0');
+                if (value > 0xffff) {
+                    return false;
+                }
+            }
+
+            if (value == 0) {
+                return false;
+            }
+
+            *port = RtlUshortByteSwap(static_cast<USHORT>(value));
+            return true;
+        }
+
+        _Must_inspect_result_
         bool CopySocketAddress(
             _In_ const ADDRINFOEXW* addressInfo,
+            USHORT port,
             _Out_ SOCKADDR_STORAGE* remoteAddress) noexcept
         {
             if (addressInfo == nullptr ||
@@ -98,6 +128,14 @@ namespace net
 
             RtlZeroMemory(remoteAddress, sizeof(*remoteAddress));
             RtlCopyMemory(remoteAddress, addressInfo->ai_addr, addressInfo->ai_addrlen);
+
+            if (remoteAddress->ss_family == AF_INET) {
+                reinterpret_cast<SOCKADDR_IN*>(remoteAddress)->sin_port = port;
+            }
+            else if (remoteAddress->ss_family == AF_INET6) {
+                reinterpret_cast<SOCKADDR_IN6*>(remoteAddress)->sin6_port = port;
+            }
+
             return true;
         }
     }
@@ -211,12 +249,15 @@ namespace net
         }
 
         UNICODE_STRING node = {};
-        UNICODE_STRING service = {};
         RtlInitUnicodeString(&node, nodeName);
-        RtlInitUnicodeString(&service, serviceName);
+
+        USHORT port = 0;
+        if (!ParseTcpPort(serviceName, &port)) {
+            return STATUS_INVALID_PARAMETER;
+        }
 
         ADDRINFOEXW hints = {};
-        hints.ai_family = AF_UNSPEC;
+        hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_protocol = IPPROTO_TCP;
 
@@ -232,8 +273,8 @@ namespace net
         status = providerDispatch->WskGetAddressInfo(
             providerClient,
             &node,
-            &service,
-            NS_ALL,
+            nullptr,
+            NS_DNS,
             nullptr,
             &hints,
             &result,
@@ -256,7 +297,7 @@ namespace net
 
         status = STATUS_OBJECT_NAME_NOT_FOUND;
         for (const ADDRINFOEXW* current = result; current != nullptr; current = current->ai_next) {
-            if (CopySocketAddress(current, remoteAddress)) {
+            if (CopySocketAddress(current, port, remoteAddress)) {
                 status = STATUS_SUCCESS;
                 break;
             }

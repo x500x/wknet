@@ -41,29 +41,32 @@ namespace client
             return status;
         }
 
-        tls::TlsConnection tls;
+        auto* tlsConnection = new tls::TlsConnection();
+        if (tlsConnection == nullptr) {
+            const NTSTATUS closeStatus = socket.Close();
+            UNREFERENCED_PARAMETER(closeStatus);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
         tls::TlsClientConnectionOptions tlsOptions = {};
         tlsOptions.ServerName = options.ServerName;
         tlsOptions.ServerNameLength = options.ServerNameLength;
         tlsOptions.CertificateStore = options.CertificateStore;
 
-        status = tls.Connect(socket, tlsOptions);
-        if (!NT_SUCCESS(status)) {
-            const NTSTATUS closeStatus = socket.Close();
-            UNREFERENCED_PARAMETER(closeStatus);
-            return status;
-        }
-
-        SIZE_T sent = 0;
-        status = tls.Send(socket, buffers.RequestBuffer, requestLength, &sent);
-        if (NT_SUCCESS(status) && sent != requestLength) {
-            status = STATUS_CONNECTION_DISCONNECTED;
-        }
-
+        status = tlsConnection->Connect(socket, tlsOptions);
         if (NT_SUCCESS(status)) {
-            status = ReadHttpResponse(socket, tls, options.ResponseBodyForbidden, buffers, response);
+            SIZE_T sent = 0;
+            status = tlsConnection->Send(socket, buffers.RequestBuffer, requestLength, &sent);
+            if (NT_SUCCESS(status) && sent != requestLength) {
+                status = STATUS_CONNECTION_DISCONNECTED;
+            }
+
+            if (NT_SUCCESS(status)) {
+                status = ReadHttpResponse(socket, *tlsConnection, options.ResponseBodyForbidden, buffers, response);
+            }
         }
 
+        delete tlsConnection;
         const NTSTATUS closeStatus = socket.Close();
         UNREFERENCED_PARAMETER(closeStatus);
         return status;

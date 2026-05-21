@@ -82,6 +82,11 @@ namespace tls
         }
     }
 
+    TlsConnection::~TlsConnection() noexcept
+    {
+        Reset();
+    }
+
     void TlsConnection::Reset() noexcept
     {
         context_.Reset();
@@ -89,6 +94,7 @@ namespace tls
         serverWriteState_.Reset();
         transcript_.Reset();
         RtlSecureZeroMemory(inputBuffer_, sizeof(inputBuffer_));
+        RtlSecureZeroMemory(outputBuffer_, sizeof(outputBuffer_));
         RtlSecureZeroMemory(plaintextBuffer_, sizeof(plaintextBuffer_));
         RtlSecureZeroMemory(handshakeBuffer_, sizeof(handshakeBuffer_));
         inputLength_ = 0;
@@ -468,7 +474,6 @@ namespace tls
         const UCHAR* fragment,
         SIZE_T fragmentLength) noexcept
     {
-        UCHAR output[TlsRecordHeaderLength + TlsMaxPlaintextLength] = {};
         SIZE_T written = 0;
 
         TlsPlaintextRecord record = {};
@@ -477,12 +482,14 @@ namespace tls
         record.Fragment = fragment;
         record.FragmentLength = fragmentLength;
 
-        NTSTATUS status = TlsRecordLayer::EncodePlaintext(record, output, sizeof(output), &written);
+        NTSTATUS status = TlsRecordLayer::EncodePlaintext(record, outputBuffer_, sizeof(outputBuffer_), &written);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        return SendAll(socket, output, written);
+        status = SendAll(socket, outputBuffer_, written);
+        RtlSecureZeroMemory(outputBuffer_, sizeof(outputBuffer_));
+        return status;
     }
 
     NTSTATUS TlsConnection::SendProtectedRecord(
@@ -491,7 +498,6 @@ namespace tls
         const UCHAR* fragment,
         SIZE_T fragmentLength) noexcept
     {
-        UCHAR output[TlsRecordHeaderLength + TlsMaxPlaintextLength + TlsAesGcmMaxEncryptedOverhead] = {};
         SIZE_T written = 0;
 
         TlsPlaintextRecord record = {};
@@ -500,12 +506,14 @@ namespace tls
         record.Fragment = fragment;
         record.FragmentLength = fragmentLength;
 
-        NTSTATUS status = TlsRecordLayer::ProtectAesGcm(record, clientWriteState_, output, sizeof(output), &written);
+        NTSTATUS status = TlsRecordLayer::ProtectAesGcm(record, clientWriteState_, outputBuffer_, sizeof(outputBuffer_), &written);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        return SendAll(socket, output, written);
+        status = SendAll(socket, outputBuffer_, written);
+        RtlSecureZeroMemory(outputBuffer_, sizeof(outputBuffer_));
+        return status;
     }
 
     NTSTATUS TlsConnection::ReadRecord(

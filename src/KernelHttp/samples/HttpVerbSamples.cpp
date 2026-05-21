@@ -54,6 +54,9 @@ namespace samples
 
         void LogHttpText(_In_opt_ const char* label, http::HttpText value) noexcept
         {
+            UNREFERENCED_PARAMETER(label);
+            UNREFERENCED_PARAMETER(value);
+
             if (label != nullptr) {
                 kprintf("%s%.*s\r\n", label, static_cast<int>(value.Length), value.Data != nullptr ? value.Data : "");
             }
@@ -73,12 +76,17 @@ namespace samples
             for (SIZE_T offset = 0; offset < bodyLength; offset += SampleLogChunkLength) {
                 const SIZE_T remaining = bodyLength - offset;
                 const SIZE_T chunkLength = remaining < SampleLogChunkLength ? remaining : SampleLogChunkLength;
+                UNREFERENCED_PARAMETER(chunkLength);
+
                 kprintf("%.*s\r\n", static_cast<int>(chunkLength), body + offset);
             }
         }
 
         void LogResponse(const char* methodName, const http::HttpResponse& response) noexcept
         {
+            UNREFERENCED_PARAMETER(methodName);
+            UNREFERENCED_PARAMETER(response);
+
             kprintf("[%s] status=%u version=%u.%u bodyKind=%u bodyLength=%Iu consumed=%Iu\r\n",
                 methodName,
                 response.StatusCode,
@@ -92,6 +100,8 @@ namespace samples
 
             for (SIZE_T index = 0; index < response.HeaderCount; ++index) {
                 const http::HttpHeader& header = response.Headers[index];
+                UNREFERENCED_PARAMETER(header);
+
                 kprintf("[header] %.*s: %.*s\r\n",
                     static_cast<int>(header.Name.Length),
                     header.Name.Data != nullptr ? header.Name.Data : "",
@@ -107,6 +117,10 @@ namespace samples
             http::HttpText path,
             http::HttpText acceptEncoding) noexcept
         {
+            UNREFERENCED_PARAMETER(sampleName);
+            UNREFERENCED_PARAMETER(path);
+            UNREFERENCED_PARAMETER(acceptEncoding);
+
             kprintf("[%s] request path=%.*s accept-encoding=%.*s\r\n",
                 sampleName,
                 static_cast<int>(path.Length),

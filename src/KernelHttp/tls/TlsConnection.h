@@ -22,6 +22,7 @@ namespace tls
     {
     public:
         TlsConnection() noexcept = default;
+        ~TlsConnection() noexcept;
 
         TlsConnection(const TlsConnection&) = delete;
         TlsConnection& operator=(const TlsConnection&) = delete;
@@ -106,6 +107,7 @@ namespace tls
         TlsAeadCipherState serverWriteState_ = {};
         TlsTranscriptHash transcript_ = {};
         UCHAR inputBuffer_[TlsIoBufferLength] = {};
+        UCHAR outputBuffer_[TlsIoBufferLength] = {};
         SIZE_T inputLength_ = 0;
         UCHAR plaintextBuffer_[TlsApplicationBufferLength] = {};
         SIZE_T plaintextLength_ = 0;
