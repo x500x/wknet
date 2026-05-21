@@ -424,7 +424,7 @@ namespace http
         response.Headers = options.Headers;
         response.HeaderCount = headerCount;
 
-        if (StatusCodeHasNoBody(response.StatusCode)) {
+        if (options.ResponseBodyForbidden || StatusCodeHasNoBody(response.StatusCode)) {
             response.BodyKind = HttpBodyKind::None;
             response.Body = nullptr;
             response.BodyLength = 0;

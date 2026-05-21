@@ -54,7 +54,7 @@ namespace client
         }
 
         if (NT_SUCCESS(status)) {
-            status = ReadHttpResponse(socket, buffers, response);
+            status = ReadHttpResponse(socket, options.ResponseBodyForbidden, buffers, response);
         }
 
         const NTSTATUS closeStatus = socket.Close();
@@ -64,6 +64,7 @@ namespace client
 
     NTSTATUS HttpClient::ReadHttpResponse(
         net::WskSocket& socket,
+        bool responseBodyForbidden,
         const HttpResponseBuffers& buffers,
         http::HttpResponse& response) noexcept
     {
@@ -75,6 +76,7 @@ namespace client
             parseOptions.HeaderCapacity = buffers.HeaderCapacity;
             parseOptions.DecodedBody = buffers.DecodedBodyBuffer;
             parseOptions.DecodedBodyCapacity = buffers.DecodedBodyBufferLength;
+            parseOptions.ResponseBodyForbidden = responseBodyForbidden;
 
             NTSTATUS status = http::HttpParser::ParseResponse(
                 buffers.ResponseBuffer,

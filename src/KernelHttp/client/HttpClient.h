@@ -13,6 +13,7 @@ namespace client
         const wchar_t* ServerName = nullptr;
         const wchar_t* ServiceName = L"80";
         http::HttpRequestBuildOptions Request = {};
+        bool ResponseBodyForbidden = false;
     };
 
     struct HttpResponseBuffers final
@@ -46,6 +47,7 @@ namespace client
         _Must_inspect_result_
         NTSTATUS ReadHttpResponse(
             _Inout_ net::WskSocket& socket,
+            bool responseBodyForbidden,
             _In_ const HttpResponseBuffers& buffers,
             _Out_ http::HttpResponse& response) noexcept;
     };

@@ -476,6 +476,31 @@ namespace
         Expect(response.BodyLength == 0, "204 response body length is zero");
     }
 
+    void TestHeadResponseForbidsBody()
+    {
+        const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 128\r\n"
+            "\r\n";
+
+        HttpHeader headers[4] = {};
+        HttpParseOptions options = {};
+        options.Headers = headers;
+        options.HeaderCapacity = 4;
+        options.ResponseBodyForbidden = true;
+
+        HttpResponse response = {};
+        const NTSTATUS status = HttpParser::ParseResponse(
+            responseBytes,
+            strlen(responseBytes),
+            options,
+            response);
+
+        Expect(status == STATUS_SUCCESS, "HEAD response parses without waiting for Content-Length body");
+        Expect(response.BodyKind == HttpBodyKind::None, "HEAD response body kind is None");
+        Expect(response.BodyLength == 0, "HEAD response body length is zero");
+    }
+
     void TestHeaderTokenMatching()
     {
         Expect(HeaderValueHasToken(MakeText("gzip, chunked"), MakeText("chunked")), "header token matching handles comma lists");
@@ -502,6 +527,7 @@ int main()
     TestIncompleteResponseNeedsMoreData();
     TestDuplicateContentLengthConflict();
     TestNoBodyStatus();
+    TestHeadResponseForbidsBody();
     TestHeaderTokenMatching();
 
     if (g_failed) {

@@ -54,10 +54,26 @@ namespace net
         NTSTATUS CompleteSyncIrp(
             NTSTATUS requestStatus,
             _In_ PIRP irp,
-            _In_ PKEVENT event) noexcept
+            _In_ PKEVENT event,
+            ULONG timeoutMilliseconds = WskOperationTimeoutMilliseconds) noexcept
         {
             if (requestStatus == STATUS_PENDING) {
-                KeWaitForSingleObject(event, Executive, KernelMode, FALSE, nullptr);
+                LARGE_INTEGER timeout = {};
+                timeout.QuadPart = -static_cast<LONGLONG>(timeoutMilliseconds) * 10 * 1000;
+
+                const NTSTATUS waitStatus = KeWaitForSingleObject(
+                    event,
+                    Executive,
+                    KernelMode,
+                    FALSE,
+                    &timeout);
+
+                if (waitStatus == STATUS_TIMEOUT) {
+                    IoCancelIrp(irp);
+                    KeWaitForSingleObject(event, Executive, KernelMode, FALSE, nullptr);
+                    return STATUS_IO_TIMEOUT;
+                }
+
                 requestStatus = irp->IoStatus.Status;
             }
 

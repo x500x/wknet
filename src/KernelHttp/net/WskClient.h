@@ -19,7 +19,8 @@ namespace net
         ~WskClient() noexcept;
 
         _Must_inspect_result_
-        NTSTATUS Initialize(ULONG waitTimeoutMilliseconds = WSK_INFINITE_WAIT) noexcept;
+        NTSTATUS Initialize(
+            ULONG waitTimeoutMilliseconds = WskProviderCaptureTimeoutMilliseconds) noexcept;
 
         void Shutdown() noexcept;
 

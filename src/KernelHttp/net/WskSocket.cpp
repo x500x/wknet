@@ -51,10 +51,31 @@ namespace net
             NTSTATUS requestStatus,
             _In_ PIRP irp,
             _In_ PKEVENT event,
-            _Out_opt_ SIZE_T* information) noexcept
+            _Out_opt_ SIZE_T* information,
+            ULONG timeoutMilliseconds = WskOperationTimeoutMilliseconds) noexcept
         {
             if (requestStatus == STATUS_PENDING) {
-                KeWaitForSingleObject(event, Executive, KernelMode, FALSE, nullptr);
+                LARGE_INTEGER timeout = {};
+                timeout.QuadPart = -static_cast<LONGLONG>(timeoutMilliseconds) * 10 * 1000;
+
+                const NTSTATUS waitStatus = KeWaitForSingleObject(
+                    event,
+                    Executive,
+                    KernelMode,
+                    FALSE,
+                    &timeout);
+
+                if (waitStatus == STATUS_TIMEOUT) {
+                    IoCancelIrp(irp);
+                    KeWaitForSingleObject(event, Executive, KernelMode, FALSE, nullptr);
+
+                    if (information != nullptr) {
+                        *information = 0;
+                    }
+
+                    return STATUS_IO_TIMEOUT;
+                }
+
                 requestStatus = irp->IoStatus.Status;
             }
 
@@ -377,7 +398,7 @@ namespace net
         }
 
         status = dispatch_->WskDisconnect(socket_, nullptr, flags, irp);
-        status = CompleteSyncIrp(status, irp, &event, nullptr);
+        status = CompleteSyncIrp(status, irp, &event, nullptr, WskCloseTimeoutMilliseconds);
 
         IoFreeIrp(irp);
         return status;
@@ -412,7 +433,7 @@ namespace net
         socket_ = nullptr;
         dispatch_ = nullptr;
 
-        status = CompleteSyncIrp(status, irp, &event, nullptr);
+        status = CompleteSyncIrp(status, irp, &event, nullptr, WskCloseTimeoutMilliseconds);
 
         IoFreeIrp(irp);
         return status;

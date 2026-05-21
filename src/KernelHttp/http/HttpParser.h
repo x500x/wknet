@@ -13,6 +13,7 @@ namespace http
         char* DecodedBody = nullptr;
         SIZE_T DecodedBodyCapacity = 0;
         bool MessageCompleteOnConnectionClose = false;
+        bool ResponseBodyForbidden = false;
     };
 
     class HttpParser final

@@ -14,6 +14,7 @@ namespace client
         const char* ServerName = nullptr;
         SIZE_T ServerNameLength = 0;
         http::HttpRequestBuildOptions Request = {};
+        bool ResponseBodyForbidden = false;
         const tls::CertificateStore* CertificateStore = nullptr;
     };
 
@@ -49,6 +50,7 @@ namespace client
         NTSTATUS ReadHttpResponse(
             _Inout_ net::WskSocket& socket,
             _Inout_ tls::TlsConnection& tls,
+            bool responseBodyForbidden,
             _In_ const HttpsResponseBuffers& buffers,
             _Out_ http::HttpResponse& response) noexcept;
     };
