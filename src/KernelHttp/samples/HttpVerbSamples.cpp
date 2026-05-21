@@ -456,6 +456,238 @@ namespace samples
             *result);
     }
 
+    NTSTATUS RunHttpsGetHttpBinSample(
+        net::WskClient& wskClient,
+        HttpVerbSampleResult* result) noexcept
+    {
+        if (result == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *result = {};
+
+        tls::CertificateTrustAnchor anchor = {};
+        tls::CertificatePin pin = {};
+        tls::CertificateStore certificateStore;
+        NTSTATUS status = InitializePinnedCertificateStore(
+            HttpBinAmazonRootCa1SpkiSha256,
+            sizeof(HttpBinAmazonRootCa1SpkiSha256),
+            HttpBinLeafSpkiSha256,
+            sizeof(HttpBinLeafSpkiSha256),
+            HttpBinTlsServerName,
+            HttpBinTlsServerNameLength,
+            certificateStore,
+            anchor,
+            pin);
+        if (!NT_SUCCESS(status)) {
+            result->Status = status;
+            return status;
+        }
+
+        const http::HttpHeader headers[] = {
+            { http::MakeText("Accept"), http::MakeText("*/*") },
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+        };
+
+        http::HttpRequestBuildOptions request = {};
+        request.Method = http::HttpMethod::Get;
+        request.Path = http::MakeText("/get");
+        request.Host = http::MakeText("httpbin.org");
+        request.UserAgent = http::MakeText("KernelHttp/0.1");
+        request.Connection = http::HttpConnectionDirective::Close;
+        request.ExtraHeaders = headers;
+        request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        return SendHttpsSampleRequest(
+            wskClient,
+            HttpBinServerName,
+            HttpBinHttpsServiceName,
+            HttpBinTlsServerName,
+            HttpBinTlsServerNameLength,
+            "HTTPS GET",
+            request,
+            false,
+            certificateStore,
+            *result);
+    }
+
+    NTSTATUS RunHttpsPostHttpBinSample(
+        net::WskClient& wskClient,
+        HttpVerbSampleResult* result) noexcept
+    {
+        if (result == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *result = {};
+
+        tls::CertificateTrustAnchor anchor = {};
+        tls::CertificatePin pin = {};
+        tls::CertificateStore certificateStore;
+        NTSTATUS status = InitializePinnedCertificateStore(
+            HttpBinAmazonRootCa1SpkiSha256,
+            sizeof(HttpBinAmazonRootCa1SpkiSha256),
+            HttpBinLeafSpkiSha256,
+            sizeof(HttpBinLeafSpkiSha256),
+            HttpBinTlsServerName,
+            HttpBinTlsServerNameLength,
+            certificateStore,
+            anchor,
+            pin);
+        if (!NT_SUCCESS(status)) {
+            result->Status = status;
+            return status;
+        }
+
+        const http::HttpHeader headers[] = {
+            { http::MakeText("Accept"), http::MakeText("*/*") },
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+        };
+
+        const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS POST\"}";
+        http::HttpRequestBuildOptions request = {};
+        request.Method = http::HttpMethod::Post;
+        request.Path = http::MakeText("/post");
+        request.Host = http::MakeText("httpbin.org");
+        request.UserAgent = http::MakeText("KernelHttp/0.1");
+        request.ContentType = http::MakeText("application/json");
+        request.Connection = http::HttpConnectionDirective::Close;
+        request.Body = body;
+        request.BodyLength = sizeof(body) - 1;
+        request.ExtraHeaders = headers;
+        request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        return SendHttpsSampleRequest(
+            wskClient,
+            HttpBinServerName,
+            HttpBinHttpsServiceName,
+            HttpBinTlsServerName,
+            HttpBinTlsServerNameLength,
+            "HTTPS POST",
+            request,
+            false,
+            certificateStore,
+            *result);
+    }
+
+    NTSTATUS RunHttpsPutHttpBinSample(
+        net::WskClient& wskClient,
+        HttpVerbSampleResult* result) noexcept
+    {
+        if (result == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *result = {};
+
+        tls::CertificateTrustAnchor anchor = {};
+        tls::CertificatePin pin = {};
+        tls::CertificateStore certificateStore;
+        NTSTATUS status = InitializePinnedCertificateStore(
+            HttpBinAmazonRootCa1SpkiSha256,
+            sizeof(HttpBinAmazonRootCa1SpkiSha256),
+            HttpBinLeafSpkiSha256,
+            sizeof(HttpBinLeafSpkiSha256),
+            HttpBinTlsServerName,
+            HttpBinTlsServerNameLength,
+            certificateStore,
+            anchor,
+            pin);
+        if (!NT_SUCCESS(status)) {
+            result->Status = status;
+            return status;
+        }
+
+        const http::HttpHeader headers[] = {
+            { http::MakeText("Accept"), http::MakeText("*/*") },
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+        };
+
+        const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS PUT\"}";
+        http::HttpRequestBuildOptions request = {};
+        request.Method = http::HttpMethod::Put;
+        request.Path = http::MakeText("/put");
+        request.Host = http::MakeText("httpbin.org");
+        request.UserAgent = http::MakeText("KernelHttp/0.1");
+        request.ContentType = http::MakeText("application/json");
+        request.Connection = http::HttpConnectionDirective::Close;
+        request.Body = body;
+        request.BodyLength = sizeof(body) - 1;
+        request.ExtraHeaders = headers;
+        request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        return SendHttpsSampleRequest(
+            wskClient,
+            HttpBinServerName,
+            HttpBinHttpsServiceName,
+            HttpBinTlsServerName,
+            HttpBinTlsServerNameLength,
+            "HTTPS PUT",
+            request,
+            false,
+            certificateStore,
+            *result);
+    }
+
+    NTSTATUS RunHttpsPatchHttpBinSample(
+        net::WskClient& wskClient,
+        HttpVerbSampleResult* result) noexcept
+    {
+        if (result == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *result = {};
+
+        tls::CertificateTrustAnchor anchor = {};
+        tls::CertificatePin pin = {};
+        tls::CertificateStore certificateStore;
+        NTSTATUS status = InitializePinnedCertificateStore(
+            HttpBinAmazonRootCa1SpkiSha256,
+            sizeof(HttpBinAmazonRootCa1SpkiSha256),
+            HttpBinLeafSpkiSha256,
+            sizeof(HttpBinLeafSpkiSha256),
+            HttpBinTlsServerName,
+            HttpBinTlsServerNameLength,
+            certificateStore,
+            anchor,
+            pin);
+        if (!NT_SUCCESS(status)) {
+            result->Status = status;
+            return status;
+        }
+
+        const http::HttpHeader headers[] = {
+            { http::MakeText("Accept"), http::MakeText("*/*") },
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+        };
+
+        const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS PATCH\"}";
+        http::HttpRequestBuildOptions request = {};
+        request.Method = http::HttpMethod::Patch;
+        request.Path = http::MakeText("/patch");
+        request.Host = http::MakeText("httpbin.org");
+        request.UserAgent = http::MakeText("KernelHttp/0.1");
+        request.ContentType = http::MakeText("application/json");
+        request.Connection = http::HttpConnectionDirective::Close;
+        request.Body = body;
+        request.BodyLength = sizeof(body) - 1;
+        request.ExtraHeaders = headers;
+        request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        return SendHttpsSampleRequest(
+            wskClient,
+            HttpBinServerName,
+            HttpBinHttpsServiceName,
+            HttpBinTlsServerName,
+            HttpBinTlsServerNameLength,
+            "HTTPS PATCH",
+            request,
+            false,
+            certificateStore,
+            *result);
+    }
+
     NTSTATUS RunHttpVerbSamples(
         net::WskClient& wskClient,
         HttpVerbSampleResults* results) noexcept
@@ -620,6 +852,22 @@ namespace samples
                 deleteHttpBin,
                 false,
                 results->DeleteHttpBin));
+
+        status = MergeSampleStatus(
+            status,
+            RunHttpsGetHttpBinSample(wskClient, &results->HttpsGetHttpBin));
+
+        status = MergeSampleStatus(
+            status,
+            RunHttpsPostHttpBinSample(wskClient, &results->HttpsPostHttpBin));
+
+        status = MergeSampleStatus(
+            status,
+            RunHttpsPutHttpBinSample(wskClient, &results->HttpsPutHttpBin));
+
+        status = MergeSampleStatus(
+            status,
+            RunHttpsPatchHttpBinSample(wskClient, &results->HttpsPatchHttpBin));
 
         status = MergeSampleStatus(
             status,

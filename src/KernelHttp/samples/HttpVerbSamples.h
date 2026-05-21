@@ -26,6 +26,10 @@ namespace samples
         HttpVerbSampleResult PutHttpBin = {};
         HttpVerbSampleResult PatchHttpBin = {};
         HttpVerbSampleResult DeleteHttpBin = {};
+        HttpVerbSampleResult HttpsGetHttpBin = {};
+        HttpVerbSampleResult HttpsPostHttpBin = {};
+        HttpVerbSampleResult HttpsPutHttpBin = {};
+        HttpVerbSampleResult HttpsPatchHttpBin = {};
         HttpVerbSampleResult HttpsDeleteHttpBin = {};
         HttpVerbSampleResult HeadHttpBin = {};
         HttpVerbSampleResult OptionsHttpBin = {};
