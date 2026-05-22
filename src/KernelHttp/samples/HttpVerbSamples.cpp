@@ -14,7 +14,7 @@ namespace samples
         constexpr SIZE_T SampleDecodedBodyBufferLength = 8192;
         constexpr SIZE_T SampleScratchBodyBufferLength = 8192;
         constexpr SIZE_T SampleHeaderCapacity = 32;
-        constexpr SIZE_T SampleLogChunkLength = 384;
+        constexpr SIZE_T SampleLogChunkLength = 120;
         constexpr const wchar_t* HttpBinServerName = L"httpbin.org";
         constexpr const wchar_t* HttpBinServiceName = L"80";
         constexpr const wchar_t* HttpBinHttpsServiceName = L"443";
@@ -52,6 +52,24 @@ namespace samples
             http::HttpHeader Headers[SampleHeaderCapacity] = {};
         };
 
+        http::HttpText FindHeaderValue(
+            _In_reads_(headerCount) const http::HttpHeader* headers,
+            SIZE_T headerCount,
+            http::HttpText name) noexcept
+        {
+            if (headers == nullptr) {
+                return {};
+            }
+
+            for (SIZE_T index = 0; index < headerCount; ++index) {
+                if (http::TextEqualsIgnoreCase(headers[index].Name, name)) {
+                    return headers[index].Value;
+                }
+            }
+
+            return {};
+        }
+
         void LogHttpText(_In_opt_ const char* label, http::HttpText value) noexcept
         {
             UNREFERENCED_PARAMETER(label);
@@ -73,12 +91,28 @@ namespace samples
             }
 
             kprintf("[body]\r\n");
-            for (SIZE_T offset = 0; offset < bodyLength; offset += SampleLogChunkLength) {
-                const SIZE_T remaining = bodyLength - offset;
-                const SIZE_T chunkLength = remaining < SampleLogChunkLength ? remaining : SampleLogChunkLength;
-                UNREFERENCED_PARAMETER(chunkLength);
+            SIZE_T offset = 0;
+            while (offset < bodyLength) {
+                SIZE_T lineLength = 0;
+                while (offset + lineLength < bodyLength &&
+                    body[offset + lineLength] != '\r' &&
+                    body[offset + lineLength] != '\n' &&
+                    lineLength < SampleLogChunkLength) {
+                    ++lineLength;
+                }
 
-                kprintf("%.*s\r\n", static_cast<int>(chunkLength), body + offset);
+                kprintf("%.*s\r\n", static_cast<int>(lineLength), body + offset);
+                offset += lineLength;
+
+                if (offset < bodyLength && body[offset] == '\r') {
+                    ++offset;
+                    if (offset < bodyLength && body[offset] == '\n') {
+                        ++offset;
+                    }
+                }
+                else if (offset < bodyLength && body[offset] == '\n') {
+                    ++offset;
+                }
             }
         }
 
@@ -167,17 +201,10 @@ namespace samples
 
             http::HttpResponse response = {};
             client::HttpClient client;
-            http::HttpText acceptEncoding = {};
-            const http::HttpHeader* acceptEncodingHeader = nullptr;
-            for (SIZE_T index = 0; index < request.ExtraHeaderCount; ++index) {
-                if (http::TextEqualsIgnoreCase(request.ExtraHeaders[index].Name, http::MakeText("Accept-Encoding"))) {
-                    acceptEncodingHeader = &request.ExtraHeaders[index];
-                    break;
-                }
-            }
-            if (acceptEncodingHeader != nullptr) {
-                acceptEncoding = acceptEncodingHeader->Value;
-            }
+            const http::HttpText acceptEncoding = FindHeaderValue(
+                request.ExtraHeaders,
+                request.ExtraHeaderCount,
+                http::MakeText("Accept-Encoding"));
 
             LogRequestStart(methodName, request.Path, acceptEncoding);
             result.Status = client.SendRequest(wskClient, options, responseBuffers, response);
@@ -248,8 +275,12 @@ namespace samples
 
             http::HttpResponse response = {};
             client::HttpsClient client;
+            const http::HttpText acceptEncoding = FindHeaderValue(
+                request.ExtraHeaders,
+                request.ExtraHeaderCount,
+                http::MakeText("Accept-Encoding"));
 
-            LogRequestStart(methodName, request.Path, {});
+            LogRequestStart(methodName, request.Path, acceptEncoding);
             result.Status = client.SendRequest(wskClient, options, responseBuffers, response);
             if (NT_SUCCESS(result.Status)) {
                 result.StatusCode = response.StatusCode;

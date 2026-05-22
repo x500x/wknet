@@ -280,6 +280,7 @@ namespace client
                 response.HeaderCount = respHeaderCount;
                 response.Body = buffers.ResponseBuffer;
                 response.BodyLength = respBodyLen;
+                response.BytesConsumed = respBodyLen;
                 response.BodyKind = http::HttpBodyKind::ContentLength;
             } else {
                 kprintf("HttpsClient H2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
