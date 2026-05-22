@@ -19,6 +19,9 @@
     <Filter Include="Source Files\http">
       <UniqueIdentifier>{8C7D6B33-B850-4F04-9CC0-F6721F61B7DD}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\http2">
+      <UniqueIdentifier>{9B7EAA2E-6E7E-4B4F-9B6C-28E4C0F3B2B5}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\crypto">
       <UniqueIdentifier>{1271C8D8-04BC-4EE0-9A2A-2C4D27E15DBD}</UniqueIdentifier>
     </Filter>
@@ -37,6 +40,9 @@
     <Filter Include="Header Files\http">
       <UniqueIdentifier>{90686895-27C3-470B-B1FF-7CF9562088A3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\http2">
+      <UniqueIdentifier>{2E6B0494-D9B1-4D13-8E4E-5D6D67D1CF11}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Header Files\crypto">
       <UniqueIdentifier>{4F1C3587-045F-47F1-A184-706C5F0E2C2F}</UniqueIdentifier>
     </Filter>
@@ -52,6 +58,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="client\HttpClient.cpp">
+      <Filter>Source Files\client</Filter>
+    </ClCompile>
+    <ClCompile Include="client\Http2Client.cpp">
       <Filter>Source Files\client</Filter>
     </ClCompile>
     <ClCompile Include="client\HttpsClient.cpp">
@@ -78,6 +87,18 @@
     <ClCompile Include="http\HttpTypes.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
+    <ClCompile Include="http2\Hpack.cpp">
+      <Filter>Source Files\http2</Filter>
+    </ClCompile>
+    <ClCompile Include="http2\Http2Connection.cpp">
+      <Filter>Source Files\http2</Filter>
+    </ClCompile>
+    <ClCompile Include="http2\Http2Frame.cpp">
+      <Filter>Source Files\http2</Filter>
+    </ClCompile>
+    <ClCompile Include="http2\Http2Stream.cpp">
+      <Filter>Source Files\http2</Filter>
+    </ClCompile>
     <ClCompile Include="net\WskClient.cpp">
       <Filter>Source Files\net</Filter>
     </ClCompile>
@@ -85,6 +106,9 @@
       <Filter>Source Files\net</Filter>
     </ClCompile>
     <ClCompile Include="samples\HttpVerbSamples.cpp">
+      <Filter>Source Files\samples</Filter>
+    </ClCompile>
+    <ClCompile Include="samples\Http2VerbSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
     <ClCompile Include="tls\TlsContext.cpp">
@@ -110,6 +134,9 @@
     <ClInclude Include="client\HttpClient.h">
       <Filter>Header Files\client</Filter>
     </ClInclude>
+    <ClInclude Include="client\Http2Client.h">
+      <Filter>Header Files\client</Filter>
+    </ClInclude>
     <ClInclude Include="client\HttpsClient.h">
       <Filter>Header Files\client</Filter>
     </ClInclude>
@@ -131,6 +158,24 @@
     <ClInclude Include="http\HttpTypes.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>
+    <ClInclude Include="http2\Hpack.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="http2\HpackHuffman.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="http2\HpackStaticTable.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="http2\Http2Connection.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="http2\Http2Frame.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="http2\Http2Stream.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
     <ClInclude Include="KernelHttpConfig.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -144,6 +189,9 @@
       <Filter>Header Files\net</Filter>
     </ClInclude>
     <ClInclude Include="samples\HttpVerbSamples.h">
+      <Filter>Header Files\samples</Filter>
+    </ClInclude>
+    <ClInclude Include="samples\Http2VerbSamples.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
     <ClInclude Include="tls\TlsContext.h">

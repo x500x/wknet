@@ -16,6 +16,8 @@ namespace tls
         const char* ServerName = nullptr;
         SIZE_T ServerNameLength = 0;
         const CertificateStore* CertificateStore = nullptr;
+        const TlsAlpnProtocol* AlpnProtocols = nullptr;
+        SIZE_T AlpnProtocolCount = 0;
     };
 
     class TlsConnection final
@@ -52,6 +54,10 @@ namespace tls
         bool IsEstablished() const noexcept;
 
         const TlsContext& Context() const noexcept;
+
+        // ALPN negotiation result (valid after Connect succeeds)
+        const char* NegotiatedAlpn() const noexcept;
+        SIZE_T NegotiatedAlpnLength() const noexcept;
 
     private:
         _Must_inspect_result_
@@ -128,6 +134,8 @@ namespace tls
         SIZE_T lastHandshakeOffset_ = 0;
         SIZE_T lastHandshakeLength_ = 0;
         bool encrypted_ = false;
+        char negotiatedAlpn_[16] = {};
+        SIZE_T negotiatedAlpnLength_ = 0;
     };
 }
 }

@@ -16,6 +16,7 @@ namespace client
         http::HttpRequestBuildOptions Request = {};
         bool ResponseBodyForbidden = false;
         const tls::CertificateStore* CertificateStore = nullptr;
+        bool PreferHttp2 = true;
     };
 
     struct HttpsResponseBuffers final

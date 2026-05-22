@@ -46,6 +46,12 @@ namespace tls
         SIZE_T BytesConsumed = 0;
     };
 
+    struct TlsAlpnProtocol final
+    {
+        const char* Name = nullptr;
+        SIZE_T NameLength = 0;
+    };
+
     struct TlsClientHelloOptions final
     {
         const char* ServerName = nullptr;
@@ -56,6 +62,8 @@ namespace tls
         SIZE_T NamedGroupCount = 0;
         const TlsSignatureScheme* SignatureSchemes = nullptr;
         SIZE_T SignatureSchemeCount = 0;
+        const TlsAlpnProtocol* AlpnProtocols = nullptr;
+        SIZE_T AlpnProtocolCount = 0;
     };
 
     struct TlsServerHelloView final

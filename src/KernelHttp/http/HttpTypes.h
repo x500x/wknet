@@ -8,6 +8,7 @@
 using NTSTATUS = long;
 using SIZE_T = size_t;
 using ULONG = uint32_t;
+using LONG = int32_t;
 using USHORT = uint16_t;
 using UCHAR = uint8_t;
 
@@ -101,6 +102,10 @@ using UCHAR = uint8_t;
 
 #ifndef _Out_writes_bytes_
 #define _Out_writes_bytes_(x)
+#endif
+
+#ifndef _Out_writes_
+#define _Out_writes_(x)
 #endif
 
 #ifndef _Out_

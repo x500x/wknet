@@ -1,6 +1,7 @@
 #include "KernelHttpConfig.h"
 #include "net/WskClient.h"
 #include "samples/HttpVerbSamples.h"
+#include "samples/Http2VerbSamples.h"
 
 namespace KernelHttp
 {
@@ -37,6 +38,17 @@ namespace KernelHttp
         else {
             kprintf("HTTP/HTTPS samples completed successfully\r\n");
         }
+
+#if defined(KERNEL_HTTP_ENABLE_HTTP2_SAMPLE)
+        samples::Http2VerbSampleResults http2Results = {};
+        const NTSTATUS http2Status = samples::RunHttp2VerbSamples(*g_wskClient, &http2Results);
+        if (!NT_SUCCESS(http2Status)) {
+            kprintf("HTTP/2 samples completed with failures: 0x%08X\r\n", static_cast<ULONG>(http2Status));
+        }
+        else {
+            kprintf("HTTP/2 samples completed successfully\r\n");
+        }
+#endif
     }
 
     _Use_decl_annotations_

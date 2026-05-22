@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="client\HttpClient.cpp" />
+    <ClCompile Include="client\Http2Client.cpp" />
     <ClCompile Include="client\HttpsClient.cpp" />
     <ClCompile Include="crypto\CngProvider.cpp" />
     <ClCompile Include="DriverEntry.cpp" />
@@ -28,8 +29,13 @@
     <ClCompile Include="http\HttpRequest.cpp" />
     <ClCompile Include="http\HttpResponse.cpp" />
     <ClCompile Include="http\HttpTypes.cpp" />
+    <ClCompile Include="http2\Hpack.cpp" />
+    <ClCompile Include="http2\Http2Connection.cpp" />
+    <ClCompile Include="http2\Http2Frame.cpp" />
+    <ClCompile Include="http2\Http2Stream.cpp" />
     <ClCompile Include="net\WskClient.cpp" />
     <ClCompile Include="net\WskSocket.cpp" />
+    <ClCompile Include="samples\Http2VerbSamples.cpp" />
     <ClCompile Include="samples\HttpVerbSamples.cpp" />
     <ClCompile Include="tls\TlsContext.cpp" />
     <ClCompile Include="tls\CertificateStore.cpp" />
@@ -88,6 +94,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="client\HttpClient.h" />
+    <ClInclude Include="client\Http2Client.h" />
     <ClInclude Include="client\HttpsClient.h" />
     <ClInclude Include="crypto\CngProvider.h" />
     <ClInclude Include="http\HttpContentEncoding.h" />
@@ -95,10 +102,17 @@
     <ClInclude Include="http\HttpRequest.h" />
     <ClInclude Include="http\HttpResponse.h" />
     <ClInclude Include="http\HttpTypes.h" />
+    <ClInclude Include="http2\Hpack.h" />
+    <ClInclude Include="http2\HpackHuffman.h" />
+    <ClInclude Include="http2\HpackStaticTable.h" />
+    <ClInclude Include="http2\Http2Connection.h" />
+    <ClInclude Include="http2\Http2Frame.h" />
+    <ClInclude Include="http2\Http2Stream.h" />
     <ClInclude Include="KernelHttpConfig.h" />
     <ClInclude Include="net\WskBuffer.h" />
     <ClInclude Include="net\WskClient.h" />
     <ClInclude Include="net\WskSocket.h" />
+    <ClInclude Include="samples\Http2VerbSamples.h" />
     <ClInclude Include="samples\HttpVerbSamples.h" />
     <ClInclude Include="tls\TlsContext.h" />
     <ClInclude Include="tls\CertificateStore.h" />

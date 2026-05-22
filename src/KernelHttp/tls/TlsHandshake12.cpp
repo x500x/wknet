@@ -11,6 +11,7 @@ namespace tls
         constexpr USHORT ExtensionSupportedGroups = 10;
         constexpr USHORT ExtensionSignatureAlgorithms = 13;
         constexpr USHORT ExtensionSessionTicket = 35;
+        constexpr USHORT ExtensionAlpn = 16;
 
         const TlsCipherSuite DefaultCipherSuites[] = {
             TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256,
@@ -450,6 +451,58 @@ namespace tls
         }
 
         _Must_inspect_result_
+        NTSTATUS BuildAlpnExtension(
+            _In_ const TlsClientHelloOptions& options,
+            _Out_writes_bytes_(capacity) UCHAR* destination,
+            SIZE_T capacity,
+            _Inout_ SIZE_T* offset) noexcept
+        {
+            if (options.AlpnProtocols == nullptr || options.AlpnProtocolCount == 0) {
+                return STATUS_SUCCESS;
+            }
+
+            // Compute total list length
+            SIZE_T listLength = 0;
+            for (SIZE_T i = 0; i < options.AlpnProtocolCount; ++i) {
+                const TlsAlpnProtocol& proto = options.AlpnProtocols[i];
+                if (proto.Name == nullptr || proto.NameLength == 0 || proto.NameLength > 255) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                listLength += 1 + proto.NameLength;
+            }
+
+            if (listLength > 0xfffd) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            const USHORT extensionLength = static_cast<USHORT>(listLength + 2);
+
+            NTSTATUS status = WriteUint16(ExtensionAlpn, destination, capacity, offset);
+            if (!NT_SUCCESS(status)) return status;
+
+            status = WriteUint16(extensionLength, destination, capacity, offset);
+            if (!NT_SUCCESS(status)) return status;
+
+            status = WriteUint16(static_cast<USHORT>(listLength), destination, capacity, offset);
+            if (!NT_SUCCESS(status)) return status;
+
+            for (SIZE_T i = 0; i < options.AlpnProtocolCount; ++i) {
+                const TlsAlpnProtocol& proto = options.AlpnProtocols[i];
+                status = WriteByte(static_cast<UCHAR>(proto.NameLength), destination, capacity, offset);
+                if (!NT_SUCCESS(status)) return status;
+                status = WriteBytes(
+                    reinterpret_cast<const UCHAR*>(proto.Name),
+                    proto.NameLength,
+                    destination,
+                    capacity,
+                    offset);
+                if (!NT_SUCCESS(status)) return status;
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
         NTSTATUS ComputeVerifyData(
             const TlsContext& context,
             bool clientFinished,
@@ -710,6 +763,11 @@ namespace tls
             extensions,
             sizeof(extensions),
             &extensionOffset);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = BuildAlpnExtension(options, extensions, sizeof(extensions), &extensionOffset);
         if (!NT_SUCCESS(status)) {
             return status;
         }

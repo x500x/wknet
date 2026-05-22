@@ -57,6 +57,7 @@ namespace tls
         }
 
         constexpr USHORT TlsExtensionSessionTicket = 35;
+        constexpr USHORT TlsExtensionAlpn = 16;
 
         _Must_inspect_result_
         NTSTATUS ServerHelloHasEmptyExtension(
@@ -101,6 +102,69 @@ namespace tls
                     }
 
                     *found = true;
+                }
+
+                offset += currentLength;
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ParseServerHelloAlpn(
+            const TlsServerHelloView& serverHello,
+            char* alpnOut,
+            SIZE_T alpnCapacity,
+            SIZE_T* alpnLength) noexcept
+        {
+            if (alpnOut == nullptr || alpnLength == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            *alpnLength = 0;
+
+            if (serverHello.ExtensionsLength == 0 || serverHello.Extensions == nullptr) {
+                return STATUS_SUCCESS;
+            }
+
+            SIZE_T offset = 0;
+            while (offset < serverHello.ExtensionsLength) {
+                if (serverHello.ExtensionsLength - offset < 4) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
+                const USHORT currentType = static_cast<USHORT>(
+                    (static_cast<USHORT>(serverHello.Extensions[offset]) << 8) |
+                    serverHello.Extensions[offset + 1]);
+                const SIZE_T currentLength =
+                    (static_cast<SIZE_T>(serverHello.Extensions[offset + 2]) << 8) |
+                    serverHello.Extensions[offset + 3];
+                offset += 4;
+
+                if (currentLength > serverHello.ExtensionsLength - offset) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
+                if (currentType == TlsExtensionAlpn) {
+                    // ALPN extension: 2 bytes list length, then 1 byte proto length + proto
+                    if (currentLength < 4) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    const UCHAR* extData = serverHello.Extensions + offset;
+                    // Skip list length (2 bytes)
+                    SIZE_T protoLen = extData[2];
+                    if (protoLen == 0 || protoLen + 3 > currentLength) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    if (protoLen >= alpnCapacity) {
+                        return STATUS_BUFFER_TOO_SMALL;
+                    }
+                    for (SIZE_T i = 0; i < protoLen; ++i) {
+                        alpnOut[i] = static_cast<char>(extData[3 + i]);
+                    }
+                    alpnOut[protoLen] = '\0';
+                    *alpnLength = protoLen;
+                    return STATUS_SUCCESS;
                 }
 
                 offset += currentLength;
@@ -157,6 +221,8 @@ namespace tls
         lastHandshakeOffset_ = 0;
         lastHandshakeLength_ = 0;
         encrypted_ = false;
+        RtlSecureZeroMemory(negotiatedAlpn_, sizeof(negotiatedAlpn_));
+        negotiatedAlpnLength_ = 0;
     }
 
     NTSTATUS TlsConnection::Connect(
@@ -186,6 +252,8 @@ namespace tls
         TlsClientHelloOptions hello = {};
         hello.ServerName = options.ServerName;
         hello.ServerNameLength = options.ServerNameLength;
+        hello.AlpnProtocols = options.AlpnProtocols;
+        hello.AlpnProtocolCount = options.AlpnProtocolCount;
 
         status = TlsHandshake12::EncodeClientHello(
             context_,
@@ -244,6 +312,17 @@ namespace tls
             static_cast<unsigned>(serverHello.CipherSuite),
             serverMaySendNewSessionTicket ? 1u : 0u,
             serverHello.ExtensionsLength);
+
+        // Parse ALPN from ServerHello
+        status = ParseServerHelloAlpn(serverHello, negotiatedAlpn_, sizeof(negotiatedAlpn_), &negotiatedAlpnLength_);
+        if (!NT_SUCCESS(status)) {
+            kprintf("TlsConnection parse ALPN failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            return status;
+        }
+        if (negotiatedAlpnLength_ > 0) {
+            kprintf("TlsConnection ALPN negotiated: %.*s\r\n",
+                static_cast<int>(negotiatedAlpnLength_), negotiatedAlpn_);
+        }
 
         status = transcript_.Initialize(TlsHandshake12::PrfHashForCipherSuite(context_.CipherSuite()));
         if (!NT_SUCCESS(status)) {
@@ -601,6 +680,16 @@ namespace tls
     const TlsContext& TlsConnection::Context() const noexcept
     {
         return context_;
+    }
+
+    const char* TlsConnection::NegotiatedAlpn() const noexcept
+    {
+        return negotiatedAlpnLength_ > 0 ? negotiatedAlpn_ : nullptr;
+    }
+
+    SIZE_T TlsConnection::NegotiatedAlpnLength() const noexcept
+    {
+        return negotiatedAlpnLength_;
     }
 
     NTSTATUS TlsConnection::SendPlainRecord(
