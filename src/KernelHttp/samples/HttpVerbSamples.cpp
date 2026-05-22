@@ -20,6 +20,12 @@ namespace samples
         constexpr const wchar_t* HttpBinHttpsServiceName = L"443";
         constexpr const char* HttpBinTlsServerName = "httpbin.org";
         constexpr SIZE_T HttpBinTlsServerNameLength = sizeof("httpbin.org") - 1;
+        constexpr const wchar_t* NgHttp2ServerName = L"nghttp2.org";
+        constexpr const wchar_t* NgHttp2HttpsServiceName = L"443";
+        constexpr const char* NgHttp2TlsServerName = "nghttp2.org";
+        constexpr SIZE_T NgHttp2TlsServerNameLength = sizeof("nghttp2.org") - 1;
+        constexpr const char* NgHttp2HostName = "nghttp2.org";
+        constexpr SIZE_T NgHttp2HostNameLength = sizeof("nghttp2.org") - 1;
         constexpr UCHAR HttpBinLeafSpkiSha256[tls::CertificateSha256ThumbprintLength] = {
             0xE4, 0x15, 0x98, 0x36, 0xD3, 0xF1, 0xBE, 0x3B,
             0x25, 0xFA, 0xA8, 0x50, 0x2F, 0x1A, 0x37, 0x8F,
@@ -31,6 +37,18 @@ namespace samples
             0xCB, 0xF4, 0x17, 0x27, 0xE4, 0x17, 0xB7, 0xD1,
             0xC4, 0x5C, 0x2F, 0x47, 0xF9, 0x3B, 0xE3, 0x72,
             0xA1, 0x7B, 0x96, 0xB5, 0x07, 0x57, 0xD5, 0xA2
+        };
+        constexpr UCHAR NgHttp2LeafSpkiSha256[tls::CertificateSha256ThumbprintLength] = {
+            0x6A, 0x61, 0x41, 0x3D, 0xDF, 0xF5, 0x7B, 0x64,
+            0x3D, 0x10, 0x6D, 0x23, 0x5C, 0x6C, 0x3B, 0xA9,
+            0x39, 0x46, 0xE1, 0xC5, 0xDC, 0xDF, 0xEB, 0x5A,
+            0xB4, 0x69, 0x0C, 0xDC, 0xEB, 0x8D, 0x9D, 0xF7
+        };
+        constexpr UCHAR NgHttp2LetsEncryptE8SpkiSha256[tls::CertificateSha256ThumbprintLength] = {
+            0x88, 0x5B, 0xF0, 0x57, 0x22, 0x52, 0xC6, 0x74,
+            0x1D, 0xC9, 0xA5, 0x2F, 0x50, 0x44, 0x48, 0x7F,
+            0xEF, 0x2A, 0x93, 0xB8, 0x11, 0xCD, 0xED, 0xFA,
+            0xD7, 0x62, 0x4C, 0xC2, 0x83, 0xB7, 0xCD, 0xD5
         };
         constexpr const wchar_t* LocalHttpsServerName = L"127.0.0.1";
         constexpr const wchar_t* LocalHttpsServiceName = L"8443";
@@ -272,6 +290,9 @@ namespace samples
             options.Request = request;
             options.ResponseBodyForbidden = responseBodyForbidden;
             options.CertificateStore = &certificateStore;
+            options.PreferHttp2 = request.Host.Data != nullptr &&
+                request.Host.Length == NgHttp2HostNameLength &&
+                http::TextEqualsIgnoreCase(request.Host, http::MakeText("nghttp2.org"));
 
             http::HttpResponse response = {};
             client::HttpsClient client;
@@ -371,6 +392,42 @@ namespace samples
 
             return certificateStore.Initialize(storeOptions);
         }
+
+        _Must_inspect_result_
+        NTSTATUS InitializeHttpBinCertificateStore(
+            _Out_ tls::CertificateStore& certificateStore,
+            _Out_ tls::CertificateTrustAnchor& anchor,
+            _Out_ tls::CertificatePin& pin) noexcept
+        {
+            return InitializePinnedCertificateStore(
+                HttpBinAmazonRootCa1SpkiSha256,
+                sizeof(HttpBinAmazonRootCa1SpkiSha256),
+                HttpBinLeafSpkiSha256,
+                sizeof(HttpBinLeafSpkiSha256),
+                HttpBinTlsServerName,
+                HttpBinTlsServerNameLength,
+                certificateStore,
+                anchor,
+                pin);
+        }
+
+        _Must_inspect_result_
+        NTSTATUS InitializeNgHttp2CertificateStore(
+            _Out_ tls::CertificateStore& certificateStore,
+            _Out_ tls::CertificateTrustAnchor& anchor,
+            _Out_ tls::CertificatePin& pin) noexcept
+        {
+            return InitializePinnedCertificateStore(
+                NgHttp2LetsEncryptE8SpkiSha256,
+                sizeof(NgHttp2LetsEncryptE8SpkiSha256),
+                NgHttp2LeafSpkiSha256,
+                sizeof(NgHttp2LeafSpkiSha256),
+                NgHttp2TlsServerName,
+                NgHttp2TlsServerNameLength,
+                certificateStore,
+                anchor,
+                pin);
+        }
     }
 
     NTSTATUS RunLocalHttpsSmokeSample(
@@ -441,16 +498,7 @@ namespace samples
         tls::CertificateTrustAnchor anchor = {};
         tls::CertificatePin pin = {};
         tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializePinnedCertificateStore(
-            HttpBinAmazonRootCa1SpkiSha256,
-            sizeof(HttpBinAmazonRootCa1SpkiSha256),
-            HttpBinLeafSpkiSha256,
-            sizeof(HttpBinLeafSpkiSha256),
-            HttpBinTlsServerName,
-            HttpBinTlsServerNameLength,
-            certificateStore,
-            anchor,
-            pin);
+        NTSTATUS status = InitializeHttpBinCertificateStore(certificateStore, anchor, pin);
         if (!NT_SUCCESS(status)) {
             result->Status = status;
             return status;
@@ -500,16 +548,7 @@ namespace samples
         tls::CertificateTrustAnchor anchor = {};
         tls::CertificatePin pin = {};
         tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializePinnedCertificateStore(
-            HttpBinAmazonRootCa1SpkiSha256,
-            sizeof(HttpBinAmazonRootCa1SpkiSha256),
-            HttpBinLeafSpkiSha256,
-            sizeof(HttpBinLeafSpkiSha256),
-            HttpBinTlsServerName,
-            HttpBinTlsServerNameLength,
-            certificateStore,
-            anchor,
-            pin);
+        NTSTATUS status = InitializeHttpBinCertificateStore(certificateStore, anchor, pin);
         if (!NT_SUCCESS(status)) {
             result->Status = status;
             return status;
@@ -555,16 +594,7 @@ namespace samples
         tls::CertificateTrustAnchor anchor = {};
         tls::CertificatePin pin = {};
         tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializePinnedCertificateStore(
-            HttpBinAmazonRootCa1SpkiSha256,
-            sizeof(HttpBinAmazonRootCa1SpkiSha256),
-            HttpBinLeafSpkiSha256,
-            sizeof(HttpBinLeafSpkiSha256),
-            HttpBinTlsServerName,
-            HttpBinTlsServerNameLength,
-            certificateStore,
-            anchor,
-            pin);
+        NTSTATUS status = InitializeHttpBinCertificateStore(certificateStore, anchor, pin);
         if (!NT_SUCCESS(status)) {
             result->Status = status;
             return status;
@@ -614,16 +644,7 @@ namespace samples
         tls::CertificateTrustAnchor anchor = {};
         tls::CertificatePin pin = {};
         tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializePinnedCertificateStore(
-            HttpBinAmazonRootCa1SpkiSha256,
-            sizeof(HttpBinAmazonRootCa1SpkiSha256),
-            HttpBinLeafSpkiSha256,
-            sizeof(HttpBinLeafSpkiSha256),
-            HttpBinTlsServerName,
-            HttpBinTlsServerNameLength,
-            certificateStore,
-            anchor,
-            pin);
+        NTSTATUS status = InitializeHttpBinCertificateStore(certificateStore, anchor, pin);
         if (!NT_SUCCESS(status)) {
             result->Status = status;
             return status;
@@ -673,16 +694,7 @@ namespace samples
         tls::CertificateTrustAnchor anchor = {};
         tls::CertificatePin pin = {};
         tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializePinnedCertificateStore(
-            HttpBinAmazonRootCa1SpkiSha256,
-            sizeof(HttpBinAmazonRootCa1SpkiSha256),
-            HttpBinLeafSpkiSha256,
-            sizeof(HttpBinLeafSpkiSha256),
-            HttpBinTlsServerName,
-            HttpBinTlsServerNameLength,
-            certificateStore,
-            anchor,
-            pin);
+        NTSTATUS status = InitializeHttpBinCertificateStore(certificateStore, anchor, pin);
         if (!NT_SUCCESS(status)) {
             result->Status = status;
             return status;
@@ -713,6 +725,252 @@ namespace samples
             HttpBinTlsServerName,
             HttpBinTlsServerNameLength,
             "HTTPS PATCH",
+            request,
+            false,
+            certificateStore,
+            *result);
+    }
+
+    NTSTATUS RunHttpsGetNgHttp2HttpBinSample(
+        net::WskClient& wskClient,
+        HttpVerbSampleResult* result) noexcept
+    {
+        if (result == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *result = {};
+
+        tls::CertificateTrustAnchor anchor = {};
+        tls::CertificatePin pin = {};
+        tls::CertificateStore certificateStore;
+        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
+        if (!NT_SUCCESS(status)) {
+            result->Status = status;
+            return status;
+        }
+
+        const http::HttpHeader headers[] = {
+            { http::MakeText("Accept"), http::MakeText("*/*") },
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+        };
+
+        http::HttpRequestBuildOptions request = {};
+        request.Method = http::HttpMethod::Get;
+        request.Path = http::MakeText("/httpbin/get");
+        request.Host = http::MakeText("nghttp2.org");
+        request.UserAgent = http::MakeText("KernelHttp/0.1");
+        request.Connection = http::HttpConnectionDirective::Close;
+        request.ExtraHeaders = headers;
+        request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        return SendHttpsSampleRequest(
+            wskClient,
+            NgHttp2ServerName,
+            NgHttp2HttpsServiceName,
+            NgHttp2TlsServerName,
+            NgHttp2TlsServerNameLength,
+            "HTTPS GET",
+            request,
+            false,
+            certificateStore,
+            *result);
+    }
+
+    NTSTATUS RunHttpsPostNgHttp2HttpBinSample(
+        net::WskClient& wskClient,
+        HttpVerbSampleResult* result) noexcept
+    {
+        if (result == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *result = {};
+
+        tls::CertificateTrustAnchor anchor = {};
+        tls::CertificatePin pin = {};
+        tls::CertificateStore certificateStore;
+        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
+        if (!NT_SUCCESS(status)) {
+            result->Status = status;
+            return status;
+        }
+
+        const http::HttpHeader headers[] = {
+            { http::MakeText("Accept"), http::MakeText("*/*") },
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+        };
+
+        const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS POST\"}";
+        http::HttpRequestBuildOptions request = {};
+        request.Method = http::HttpMethod::Post;
+        request.Path = http::MakeText("/httpbin/post");
+        request.Host = http::MakeText("nghttp2.org");
+        request.UserAgent = http::MakeText("KernelHttp/0.1");
+        request.ContentType = http::MakeText("application/json");
+        request.Connection = http::HttpConnectionDirective::Close;
+        request.Body = body;
+        request.BodyLength = sizeof(body) - 1;
+        request.ExtraHeaders = headers;
+        request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        return SendHttpsSampleRequest(
+            wskClient,
+            NgHttp2ServerName,
+            NgHttp2HttpsServiceName,
+            NgHttp2TlsServerName,
+            NgHttp2TlsServerNameLength,
+            "HTTPS POST",
+            request,
+            false,
+            certificateStore,
+            *result);
+    }
+
+    NTSTATUS RunHttpsPutNgHttp2HttpBinSample(
+        net::WskClient& wskClient,
+        HttpVerbSampleResult* result) noexcept
+    {
+        if (result == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *result = {};
+
+        tls::CertificateTrustAnchor anchor = {};
+        tls::CertificatePin pin = {};
+        tls::CertificateStore certificateStore;
+        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
+        if (!NT_SUCCESS(status)) {
+            result->Status = status;
+            return status;
+        }
+
+        const http::HttpHeader headers[] = {
+            { http::MakeText("Accept"), http::MakeText("*/*") },
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+        };
+
+        const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS PUT\"}";
+        http::HttpRequestBuildOptions request = {};
+        request.Method = http::HttpMethod::Put;
+        request.Path = http::MakeText("/httpbin/put");
+        request.Host = http::MakeText("nghttp2.org");
+        request.UserAgent = http::MakeText("KernelHttp/0.1");
+        request.ContentType = http::MakeText("application/json");
+        request.Connection = http::HttpConnectionDirective::Close;
+        request.Body = body;
+        request.BodyLength = sizeof(body) - 1;
+        request.ExtraHeaders = headers;
+        request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        return SendHttpsSampleRequest(
+            wskClient,
+            NgHttp2ServerName,
+            NgHttp2HttpsServiceName,
+            NgHttp2TlsServerName,
+            NgHttp2TlsServerNameLength,
+            "HTTPS PUT",
+            request,
+            false,
+            certificateStore,
+            *result);
+    }
+
+    NTSTATUS RunHttpsPatchNgHttp2HttpBinSample(
+        net::WskClient& wskClient,
+        HttpVerbSampleResult* result) noexcept
+    {
+        if (result == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *result = {};
+
+        tls::CertificateTrustAnchor anchor = {};
+        tls::CertificatePin pin = {};
+        tls::CertificateStore certificateStore;
+        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
+        if (!NT_SUCCESS(status)) {
+            result->Status = status;
+            return status;
+        }
+
+        const http::HttpHeader headers[] = {
+            { http::MakeText("Accept"), http::MakeText("*/*") },
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+        };
+
+        const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS PATCH\"}";
+        http::HttpRequestBuildOptions request = {};
+        request.Method = http::HttpMethod::Patch;
+        request.Path = http::MakeText("/httpbin/patch");
+        request.Host = http::MakeText("nghttp2.org");
+        request.UserAgent = http::MakeText("KernelHttp/0.1");
+        request.ContentType = http::MakeText("application/json");
+        request.Connection = http::HttpConnectionDirective::Close;
+        request.Body = body;
+        request.BodyLength = sizeof(body) - 1;
+        request.ExtraHeaders = headers;
+        request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        return SendHttpsSampleRequest(
+            wskClient,
+            NgHttp2ServerName,
+            NgHttp2HttpsServiceName,
+            NgHttp2TlsServerName,
+            NgHttp2TlsServerNameLength,
+            "HTTPS PATCH",
+            request,
+            false,
+            certificateStore,
+            *result);
+    }
+
+    NTSTATUS RunHttpsDeleteNgHttp2HttpBinSample(
+        net::WskClient& wskClient,
+        HttpVerbSampleResult* result) noexcept
+    {
+        if (result == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *result = {};
+
+        tls::CertificateTrustAnchor anchor = {};
+        tls::CertificatePin pin = {};
+        tls::CertificateStore certificateStore;
+        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
+        if (!NT_SUCCESS(status)) {
+            result->Status = status;
+            return status;
+        }
+
+        const http::HttpHeader headers[] = {
+            { http::MakeText("Accept"), http::MakeText("*/*") },
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+        };
+
+        const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS DELETE\"}";
+        http::HttpRequestBuildOptions request = {};
+        request.Method = http::HttpMethod::DeleteMethod;
+        request.Path = http::MakeText("/httpbin/delete");
+        request.Host = http::MakeText("nghttp2.org");
+        request.UserAgent = http::MakeText("KernelHttp/0.1");
+        request.ContentType = http::MakeText("application/json");
+        request.Connection = http::HttpConnectionDirective::Close;
+        request.Body = body;
+        request.BodyLength = sizeof(body) - 1;
+        request.ExtraHeaders = headers;
+        request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        return SendHttpsSampleRequest(
+            wskClient,
+            NgHttp2ServerName,
+            NgHttp2HttpsServiceName,
+            NgHttp2TlsServerName,
+            NgHttp2TlsServerNameLength,
+            "HTTPS DELETE",
             request,
             false,
             certificateStore,
@@ -886,23 +1144,23 @@ namespace samples
 
         status = MergeSampleStatus(
             status,
-            RunHttpsGetHttpBinSample(wskClient, &results->HttpsGetHttpBin));
+            RunHttpsGetNgHttp2HttpBinSample(wskClient, &results->HttpsGetHttpBin));
 
         status = MergeSampleStatus(
             status,
-            RunHttpsPostHttpBinSample(wskClient, &results->HttpsPostHttpBin));
+            RunHttpsPostNgHttp2HttpBinSample(wskClient, &results->HttpsPostHttpBin));
 
         status = MergeSampleStatus(
             status,
-            RunHttpsPutHttpBinSample(wskClient, &results->HttpsPutHttpBin));
+            RunHttpsPutNgHttp2HttpBinSample(wskClient, &results->HttpsPutHttpBin));
 
         status = MergeSampleStatus(
             status,
-            RunHttpsPatchHttpBinSample(wskClient, &results->HttpsPatchHttpBin));
+            RunHttpsPatchNgHttp2HttpBinSample(wskClient, &results->HttpsPatchHttpBin));
 
         status = MergeSampleStatus(
             status,
-            RunHttpsDeleteHttpBinSample(wskClient, &results->HttpsDeleteHttpBin));
+            RunHttpsDeleteNgHttp2HttpBinSample(wskClient, &results->HttpsDeleteHttpBin));
 
         http::HttpRequestBuildOptions headHttpBin = {};
         headHttpBin.Method = http::HttpMethod::Head;

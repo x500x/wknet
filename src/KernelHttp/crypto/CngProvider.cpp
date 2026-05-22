@@ -11,6 +11,190 @@ namespace crypto
         constexpr ULONG AesGcmTagLength = 16;
 
         _Must_inspect_result_
+        NTSTATUS ReadDerLength(
+            _In_reads_bytes_(dataLength) const UCHAR* data,
+            SIZE_T dataLength,
+            _Inout_ SIZE_T* offset,
+            _Out_ SIZE_T* length) noexcept
+        {
+            if (data == nullptr || offset == nullptr || length == nullptr || *offset >= dataLength) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            UCHAR lengthByte = data[*offset];
+            ++(*offset);
+
+            if ((lengthByte & 0x80) == 0) {
+                *length = lengthByte;
+                return STATUS_SUCCESS;
+            }
+
+            UCHAR lengthBytes = static_cast<UCHAR>(lengthByte & 0x7f);
+            if (lengthBytes == 0 || lengthBytes > sizeof(SIZE_T) || lengthBytes > dataLength - *offset) {
+                return STATUS_INVALID_SIGNATURE;
+            }
+
+            SIZE_T value = 0;
+            for (UCHAR index = 0; index < lengthBytes; ++index) {
+                value = (value << 8) | data[*offset + index];
+            }
+
+            *offset += lengthBytes;
+            *length = value;
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS CopyDerIntegerToFixed(
+            _In_reads_bytes_(integerLength) const UCHAR* integer,
+            SIZE_T integerLength,
+            _Out_writes_bytes_(componentLength) UCHAR* component,
+            SIZE_T componentLength) noexcept
+        {
+            if (integer == nullptr || integerLength == 0 || component == nullptr || componentLength == 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            while (integerLength > componentLength && integer[0] == 0) {
+                ++integer;
+                --integerLength;
+            }
+
+            if (integerLength > componentLength) {
+                return STATUS_INVALID_SIGNATURE;
+            }
+
+            RtlZeroMemory(component, componentLength);
+            RtlCopyMemory(component + (componentLength - integerLength), integer, integerLength);
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ConvertDerEcdsaSignature(
+            _In_reads_bytes_(derLength) const UCHAR* der,
+            SIZE_T derLength,
+            _Out_writes_bytes_(rawCapacity) UCHAR* raw,
+            SIZE_T rawCapacity,
+            SIZE_T rawLength) noexcept
+        {
+            if (der == nullptr || derLength == 0 || raw == nullptr || rawLength == 0 || rawLength > rawCapacity || (rawLength % 2) != 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            SIZE_T offset = 0;
+            if (der[offset] != 0x30) {
+                return STATUS_INVALID_SIGNATURE;
+            }
+            ++offset;
+
+            SIZE_T sequenceLength = 0;
+            NTSTATUS status = ReadDerLength(der, derLength, &offset, &sequenceLength);
+            if (!NT_SUCCESS(status) || sequenceLength != derLength - offset) {
+                return NT_SUCCESS(status) ? STATUS_INVALID_SIGNATURE : status;
+            }
+
+            if (offset >= derLength || der[offset] != 0x02) {
+                return STATUS_INVALID_SIGNATURE;
+            }
+            ++offset;
+
+            SIZE_T rLength = 0;
+            status = ReadDerLength(der, derLength, &offset, &rLength);
+            if (!NT_SUCCESS(status) || rLength == 0 || rLength > derLength - offset) {
+                return NT_SUCCESS(status) ? STATUS_INVALID_SIGNATURE : status;
+            }
+            const UCHAR* r = der + offset;
+            offset += rLength;
+
+            if (offset >= derLength || der[offset] != 0x02) {
+                return STATUS_INVALID_SIGNATURE;
+            }
+            ++offset;
+
+            SIZE_T sLength = 0;
+            status = ReadDerLength(der, derLength, &offset, &sLength);
+            if (!NT_SUCCESS(status) || sLength == 0 || sLength > derLength - offset) {
+                return NT_SUCCESS(status) ? STATUS_INVALID_SIGNATURE : status;
+            }
+            const UCHAR* s = der + offset;
+            offset += sLength;
+
+            if (offset != derLength) {
+                return STATUS_INVALID_SIGNATURE;
+            }
+
+            const SIZE_T componentLength = rawLength / 2;
+            status = CopyDerIntegerToFixed(r, rLength, raw, componentLength);
+            if (NT_SUCCESS(status)) {
+                status = CopyDerIntegerToFixed(s, sLength, raw + componentLength, componentLength);
+            }
+
+            return status;
+        }
+
+        _Must_inspect_result_
+        SIZE_T EcdsaSignatureLength(SignatureAlgorithm algorithm) noexcept
+        {
+            switch (algorithm) {
+            case SignatureAlgorithm::EcdsaSha256:
+                return 64;
+            case SignatureAlgorithm::EcdsaSha384:
+                return 96;
+            default:
+                return 0;
+            }
+        }
+
+        _Must_inspect_result_
+        NTSTATUS VerifyEcdsaSignature(
+            SignatureAlgorithm algorithm,
+            _In_ const CngKey& publicKey,
+            _In_reads_bytes_(hashSize) PUCHAR hash,
+            ULONG hashSize,
+            _In_reads_bytes_(signatureLength) const UCHAR* signature,
+            SIZE_T signatureLength) noexcept
+        {
+            const SIZE_T rawLength = EcdsaSignatureLength(algorithm);
+            if (rawLength == 0) {
+                return STATUS_NOT_SUPPORTED;
+            }
+
+            UCHAR rawSignature[96] = {};
+            const UCHAR* signatureToVerify = signature;
+            SIZE_T signatureToVerifyLength = signatureLength;
+
+            if (signatureLength != rawLength) {
+                NTSTATUS status = ConvertDerEcdsaSignature(signature, signatureLength, rawSignature, sizeof(rawSignature), rawLength);
+                if (!NT_SUCCESS(status)) {
+                    RtlSecureZeroMemory(rawSignature, sizeof(rawSignature));
+                    return status;
+                }
+
+                signatureToVerify = rawSignature;
+                signatureToVerifyLength = rawLength;
+            }
+
+            NTSTATUS status = STATUS_SUCCESS;
+            if (signatureToVerifyLength > MAXULONG) {
+                status = STATUS_INTEGER_OVERFLOW;
+            }
+            ULONG signatureSize = static_cast<ULONG>(signatureToVerifyLength);
+            if (NT_SUCCESS(status)) {
+                status = BCryptVerifySignature(
+                    publicKey.Handle(),
+                    nullptr,
+                    hash,
+                    hashSize,
+                    const_cast<PUCHAR>(signatureToVerify),
+                    signatureSize,
+                    0);
+            }
+
+            RtlSecureZeroMemory(rawSignature, sizeof(rawSignature));
+            return status;
+        }
+
+        _Must_inspect_result_
         ULONG ToUlong(SIZE_T value, _Out_ NTSTATUS* status) noexcept
         {
             if (status == nullptr) {
@@ -923,7 +1107,13 @@ namespace crypto
             break;
         case SignatureAlgorithm::EcdsaSha256:
         case SignatureAlgorithm::EcdsaSha384:
-            break;
+            return VerifyEcdsaSignature(
+                algorithm,
+                publicKey,
+                const_cast<PUCHAR>(hash),
+                hashSize,
+                signature,
+                signatureLength);
         default:
             return STATUS_NOT_SUPPORTED;
         }
