@@ -2,6 +2,9 @@
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <time.h>
+#define kprintf(...)
+#else
+#include "KernelHttpConfig.h"
 #endif
 
 namespace KernelHttp
@@ -1001,11 +1004,13 @@ namespace tls
         long long now = 0;
         NTSTATUS status = CurrentPackedTime(&now);
         if (!NT_SUCCESS(status)) {
+            kprintf("CertificateValidator: CurrentPackedTime failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
         for (SIZE_T index = 0; index < chain.CertificateCount; ++index) {
             if (now < parsed[index].NotBefore || now > parsed[index].NotAfter) {
+                kprintf("CertificateValidator: Certificate %Iu time validation failed\r\n", index);
                 return STATUS_TRUST_FAILURE;
             }
         }
@@ -1013,26 +1018,31 @@ namespace tls
         if (options.RequireServerAuthEku &&
             parsed[0].HasExtendedKeyUsage &&
             !parsed[0].AllowsServerAuth) {
+            kprintf("CertificateValidator: ServerAuth EKU validation failed\r\n");
             return STATUS_TRUST_FAILURE;
         }
 
         status = ValidateHostName(parsed[0], options);
         if (!NT_SUCCESS(status)) {
+            kprintf("CertificateValidator: HostName validation failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
         for (SIZE_T index = 0; index + 1 < chain.CertificateCount; ++index) {
             if (parsed[index].IssuerLength != parsed[index + 1].SubjectLength ||
                 !MemoryEquals(parsed[index].Issuer, parsed[index + 1].Subject, parsed[index].IssuerLength)) {
+                kprintf("CertificateValidator: Chain issuer/subject mismatch at %Iu\r\n", index);
                 return STATUS_TRUST_FAILURE;
             }
 
             if (!parsed[index + 1].HasBasicConstraints || !parsed[index + 1].IsCa) {
+                kprintf("CertificateValidator: Certificate %Iu is not a CA\r\n", index + 1);
                 return STATUS_TRUST_FAILURE;
             }
 
             status = VerifyCertificateSignature(parsed[index], parsed[index + 1]);
             if (!NT_SUCCESS(status)) {
+                kprintf("CertificateValidator: Signature verification failed at %Iu: 0x%08X\r\n", index, static_cast<ULONG>(status));
                 return status;
             }
         }
@@ -1047,41 +1057,64 @@ namespace tls
             sizeof(spkiSha256),
             &hashLength);
         if (!NT_SUCCESS(status)) {
+            kprintf("CertificateValidator: Leaf SPKI hash failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
         if (hashLength != CertificateSha256ThumbprintLength) {
+            kprintf("CertificateValidator: Invalid hash length: %Iu\r\n", hashLength);
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
+        kprintf("CertificateValidator: Leaf SPKI SHA256: %02X%02X%02X%02X...\r\n",
+            spkiSha256[0], spkiSha256[1], spkiSha256[2], spkiSha256[3]);
+
         if (!options.Store->MatchesPin(options.HostName, options.HostNameLength, spkiSha256, sizeof(spkiSha256))) {
+            kprintf("CertificateValidator: Pin validation failed\r\n");
             return STATUS_TRUST_FAILURE;
         }
 
-        const ParsedCertificate& anchor = parsed[chain.CertificateCount - 1];
-        UCHAR anchorSpkiSha256[CertificateSha256ThumbprintLength] = {};
-        status = crypto::CngProvider::Hash(
-            crypto::HashAlgorithm::Sha256,
-            anchor.SubjectPublicKeyInfo,
-            anchor.SubjectPublicKeyInfoLength,
-            anchorSpkiSha256,
-            sizeof(anchorSpkiSha256),
-            &hashLength);
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
+        bool foundTrustedAnchor = false;
+        SIZE_T trustedAnchorIndex = chain.CertificateCount;
 
-        if (!options.Store->IsTrustedAnchor(
-            anchor.Subject,
-            anchor.SubjectLength,
-            anchorSpkiSha256,
-            sizeof(anchorSpkiSha256))) {
-            return STATUS_TRUST_FAILURE;
-        }
-
-        if (chain.CertificateCount == 1) {
-            status = VerifyCertificateSignature(anchor, anchor);
+        for (SIZE_T index = 0; index < chain.CertificateCount; ++index) {
+            UCHAR certSpkiSha256[CertificateSha256ThumbprintLength] = {};
+            status = crypto::CngProvider::Hash(
+                crypto::HashAlgorithm::Sha256,
+                parsed[index].SubjectPublicKeyInfo,
+                parsed[index].SubjectPublicKeyInfoLength,
+                certSpkiSha256,
+                sizeof(certSpkiSha256),
+                &hashLength);
             if (!NT_SUCCESS(status)) {
+                kprintf("CertificateValidator: Cert %Iu SPKI hash failed: 0x%08X\r\n", index, static_cast<ULONG>(status));
+                return status;
+            }
+
+            kprintf("CertificateValidator: Cert %Iu SPKI SHA256: %02X%02X%02X%02X...\r\n",
+                index, certSpkiSha256[0], certSpkiSha256[1], certSpkiSha256[2], certSpkiSha256[3]);
+
+            if (options.Store->IsTrustedAnchor(
+                parsed[index].Subject,
+                parsed[index].SubjectLength,
+                certSpkiSha256,
+                sizeof(certSpkiSha256))) {
+                kprintf("CertificateValidator: Found trusted anchor at index %Iu\r\n", index);
+                foundTrustedAnchor = true;
+                trustedAnchorIndex = index;
+                break;
+            }
+        }
+
+        if (!foundTrustedAnchor) {
+            kprintf("CertificateValidator: No trusted anchor found in chain\r\n");
+            return STATUS_TRUST_FAILURE;
+        }
+
+        if (trustedAnchorIndex == 0 && chain.CertificateCount == 1) {
+            status = VerifyCertificateSignature(parsed[0], parsed[0]);
+            if (!NT_SUCCESS(status)) {
+                kprintf("CertificateValidator: Self-signed signature verification failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 return status;
             }
         }
