@@ -178,7 +178,7 @@ namespace client
         if (options.UseTls &&
             (options.TlsServerName == nullptr ||
                 options.TlsServerNameLength == 0 ||
-                options.CertificateStore == nullptr)) {
+                (options.VerifyCertificate && options.CertificateStore == nullptr))) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -232,6 +232,7 @@ namespace client
             tlsOptions.ServerName = options.TlsServerName;
             tlsOptions.ServerNameLength = options.TlsServerNameLength;
             tlsOptions.CertificateStore = options.CertificateStore;
+            tlsOptions.VerifyCertificate = options.VerifyCertificate;
 
             status = tls_->Connect(socket_, tlsOptions);
             if (!NT_SUCCESS(status)) {

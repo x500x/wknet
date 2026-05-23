@@ -260,7 +260,7 @@ namespace tls
         if (!socket.IsConnected() ||
             options.ServerName == nullptr ||
             options.ServerNameLength == 0 ||
-            options.CertificateStore == nullptr) {
+            (options.VerifyCertificate && options.CertificateStore == nullptr)) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -391,6 +391,7 @@ namespace tls
         validation.HostName = options.ServerName;
         validation.HostNameLength = options.ServerNameLength;
         validation.Store = options.CertificateStore;
+        validation.VerifyCertificate = options.VerifyCertificate;
 
         CertificateValidationResult validationResult = {};
         CertificateChainView chain = {};

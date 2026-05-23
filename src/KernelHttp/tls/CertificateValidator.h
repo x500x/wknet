@@ -74,6 +74,7 @@ namespace tls
         const char* HostName = nullptr;
         SIZE_T HostNameLength = 0;
         const CertificateStore* Store = nullptr;
+        bool VerifyCertificate = true;
         bool RequireServerAuthEku = true;
     };
 

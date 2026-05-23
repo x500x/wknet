@@ -4,6 +4,7 @@
 
 #include "../src/KernelHttp/tls/TlsContext.h"
 #include "../src/KernelHttp/tls/CertificateStore.h"
+#include "../src/KernelHttp/tls/CertificateValidator.h"
 #include "../src/KernelHttp/tls/TlsHandshake12.h"
 #include "../src/KernelHttp/tls/TlsRecord.h"
 
@@ -11,10 +12,15 @@
 #include <string.h>
 
 using KernelHttp::crypto::HashAlgorithm;
+using KernelHttp::tls::CertificateAuthorityBundle;
+using KernelHttp::tls::CertificateChainView;
 using KernelHttp::tls::CertificatePin;
 using KernelHttp::tls::CertificateStore;
 using KernelHttp::tls::CertificateStoreOptions;
 using KernelHttp::tls::CertificateTrustAnchor;
+using KernelHttp::tls::CertificateValidationOptions;
+using KernelHttp::tls::CertificateValidationResult;
+using KernelHttp::tls::CertificateValidator;
 using KernelHttp::tls::TlsAeadCipherState;
 using KernelHttp::tls::CertificateSha256ThumbprintLength;
 using KernelHttp::tls::TlsCipherSuite;
@@ -45,6 +51,13 @@ using KernelHttp::tls::TlsVerifyDataLength;
 
 namespace
 {
+    constexpr SIZE_T TestMaxPemCertificateLength = 4096;
+    constexpr SIZE_T TestMaxDerCertificateLength = 2048;
+    constexpr SIZE_T TestMaxCertificateListLength = TestMaxDerCertificateLength + 3;
+    const char LocalhostCertificatePath[] = "tests\\testdata\\localhost.cert.pem";
+    const char PemCertificateBegin[] = "-----BEGIN CERTIFICATE-----";
+    const char PemCertificateEnd[] = "-----END CERTIFICATE-----";
+
     bool g_failed = false;
 
     void Expect(bool condition, const char* message)
@@ -53,6 +66,238 @@ namespace
             g_failed = true;
             printf("FAIL: %s\n", message);
         }
+    }
+
+    bool ReadFileBytes(const char* path, UCHAR* buffer, SIZE_T bufferCapacity, SIZE_T* bytesRead)
+    {
+        if (bytesRead != nullptr) {
+            *bytesRead = 0;
+        }
+
+        if (path == nullptr || buffer == nullptr || bytesRead == nullptr || bufferCapacity == 0) {
+            return false;
+        }
+
+        FILE* file = nullptr;
+        if (fopen_s(&file, path, "rb") != 0 || file == nullptr) {
+            return false;
+        }
+
+        bool ok = false;
+        if (fseek(file, 0, SEEK_END) == 0) {
+            const long fileLength = ftell(file);
+            if (fileLength > 0 && static_cast<SIZE_T>(fileLength) <= bufferCapacity && fseek(file, 0, SEEK_SET) == 0) {
+                const SIZE_T expectedLength = static_cast<SIZE_T>(fileLength);
+                const SIZE_T actualLength = fread(buffer, 1, expectedLength, file);
+                ok = actualLength == expectedLength && ferror(file) == 0;
+                if (ok) {
+                    *bytesRead = actualLength;
+                }
+            }
+        }
+
+        fclose(file);
+        return ok;
+    }
+
+    bool MatchAscii(const UCHAR* data, SIZE_T dataLength, const char* text, SIZE_T textLength)
+    {
+        if (data == nullptr || text == nullptr || dataLength != textLength) {
+            return false;
+        }
+
+        for (SIZE_T index = 0; index < dataLength; ++index) {
+            if (data[index] != static_cast<UCHAR>(text[index])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool FindAscii(
+        const UCHAR* data,
+        SIZE_T dataLength,
+        const char* text,
+        SIZE_T textLength,
+        SIZE_T start,
+        SIZE_T* foundAt)
+    {
+        if (foundAt != nullptr) {
+            *foundAt = 0;
+        }
+
+        if (data == nullptr ||
+            text == nullptr ||
+            foundAt == nullptr ||
+            textLength == 0 ||
+            start > dataLength ||
+            textLength > dataLength - start) {
+            return false;
+        }
+
+        for (SIZE_T index = start; index <= dataLength - textLength; ++index) {
+            if (MatchAscii(data + index, textLength, text, textLength)) {
+                *foundAt = index;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool DecodeBase64Char(UCHAR input, UCHAR* value)
+    {
+        if (value == nullptr) {
+            return false;
+        }
+
+        if (input >= 'A' && input <= 'Z') {
+            *value = static_cast<UCHAR>(input - 'A');
+            return true;
+        }
+
+        if (input >= 'a' && input <= 'z') {
+            *value = static_cast<UCHAR>(input - 'a' + 26);
+            return true;
+        }
+
+        if (input >= '0' && input <= '9') {
+            *value = static_cast<UCHAR>(input - '0' + 52);
+            return true;
+        }
+
+        if (input == '+') {
+            *value = 62;
+            return true;
+        }
+
+        if (input == '/') {
+            *value = 63;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool DecodePemCertificate(
+        const UCHAR* pem,
+        SIZE_T pemLength,
+        UCHAR* der,
+        SIZE_T derCapacity,
+        SIZE_T* derLength)
+    {
+        if (derLength != nullptr) {
+            *derLength = 0;
+        }
+
+        if (pem == nullptr || der == nullptr || derLength == nullptr) {
+            return false;
+        }
+
+        SIZE_T begin = 0;
+        if (!FindAscii(pem, pemLength, PemCertificateBegin, sizeof(PemCertificateBegin) - 1, 0, &begin)) {
+            return false;
+        }
+
+        const SIZE_T bodyStart = begin + sizeof(PemCertificateBegin) - 1;
+        SIZE_T end = 0;
+        if (!FindAscii(pem, pemLength, PemCertificateEnd, sizeof(PemCertificateEnd) - 1, bodyStart, &end)) {
+            return false;
+        }
+
+        UCHAR quartet[4] = {};
+        bool padding[4] = {};
+        SIZE_T quartetLength = 0;
+        bool completed = false;
+
+        for (SIZE_T index = bodyStart; index < end; ++index) {
+            const UCHAR input = pem[index];
+            if (input == ' ' || input == '\r' || input == '\n' || input == '\t') {
+                continue;
+            }
+
+            if (completed) {
+                return false;
+            }
+
+            UCHAR value = 0;
+            bool isPadding = false;
+            if (input == '=') {
+                isPadding = true;
+            }
+            else if (!DecodeBase64Char(input, &value)) {
+                return false;
+            }
+
+            quartet[quartetLength] = value;
+            padding[quartetLength] = isPadding;
+            ++quartetLength;
+
+            if (quartetLength == 4) {
+                if (padding[0] || padding[1] || (padding[2] && !padding[3])) {
+                    return false;
+                }
+
+                const SIZE_T bytesToWrite = padding[2] ? 1 : (padding[3] ? 2 : 3);
+                if (*derLength > derCapacity || bytesToWrite > derCapacity - *derLength) {
+                    return false;
+                }
+
+                const ULONG decoded =
+                    (static_cast<ULONG>(quartet[0]) << 18) |
+                    (static_cast<ULONG>(quartet[1]) << 12) |
+                    (static_cast<ULONG>(quartet[2]) << 6) |
+                    quartet[3];
+
+                der[(*derLength)++] = static_cast<UCHAR>((decoded >> 16) & 0xff);
+                if (bytesToWrite > 1) {
+                    der[(*derLength)++] = static_cast<UCHAR>((decoded >> 8) & 0xff);
+                }
+                if (bytesToWrite > 2) {
+                    der[(*derLength)++] = static_cast<UCHAR>(decoded & 0xff);
+                }
+
+                completed = padding[2] || padding[3];
+                memset(quartet, 0, sizeof(quartet));
+                memset(padding, 0, sizeof(padding));
+                quartetLength = 0;
+            }
+        }
+
+        return quartetLength == 0 && *derLength != 0;
+    }
+
+    bool LoadLocalhostCertificate(
+        UCHAR* pem,
+        SIZE_T pemCapacity,
+        SIZE_T* pemLength,
+        UCHAR* der,
+        SIZE_T derCapacity,
+        SIZE_T* derLength,
+        UCHAR* certificateList,
+        SIZE_T certificateListCapacity,
+        SIZE_T* certificateListLength)
+    {
+        if (certificateListLength != nullptr) {
+            *certificateListLength = 0;
+        }
+
+        if (!ReadFileBytes(LocalhostCertificatePath, pem, pemCapacity, pemLength) ||
+            !DecodePemCertificate(pem, *pemLength, der, derCapacity, derLength) ||
+            *derLength > 0x00ffffff ||
+            certificateList == nullptr ||
+            certificateListLength == nullptr ||
+            certificateListCapacity < *derLength + 3) {
+            return false;
+        }
+
+        certificateList[0] = static_cast<UCHAR>((*derLength >> 16) & 0xff);
+        certificateList[1] = static_cast<UCHAR>((*derLength >> 8) & 0xff);
+        certificateList[2] = static_cast<UCHAR>(*derLength & 0xff);
+        memcpy(certificateList + 3, der, *derLength);
+        *certificateListLength = *derLength + 3;
+        return true;
     }
 
     void TestPlainRecordRoundTrip()
@@ -555,6 +800,141 @@ namespace
         Expect(store.MatchesPin("other.example", strlen("other.example"), otherSpki, sizeof(otherSpki)), "host without configured pin is allowed by pin policy");
     }
 
+    void TestCertificateValidationCanSkipVerification()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost certificate fixture loads for skipped verification");
+        if (!loaded) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        CertificateValidationOptions options = {};
+        options.VerifyCertificate = false;
+
+        CertificateValidationResult result = {};
+        const NTSTATUS status = CertificateValidator::ValidateChain(chain, options, &result);
+
+        Expect(status == STATUS_SUCCESS, "certificate validation skip succeeds without trust store");
+        Expect(result.Leaf.DerLength == derLength, "skipped verification leaf length matches DER");
+        Expect(result.Leaf.Der != nullptr && memcmp(result.Leaf.Der, der, derLength) == 0, "skipped verification still parses the leaf certificate");
+    }
+
+    void TestCertificateValidationRequiresTrustMaterial()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost certificate fixture loads for missing trust test");
+        if (!loaded) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "localhost";
+        options.HostNameLength = strlen(options.HostName);
+
+        const NTSTATUS status = CertificateValidator::ValidateChain(chain, options);
+        Expect(status == STATUS_TRUST_FAILURE, "verified validation fails without external trust material");
+    }
+
+    void TestCertificateValidationAcceptsExternalPemBundle()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost certificate fixture loads for external bundle test");
+        if (!loaded) {
+            return;
+        }
+
+        CertificateAuthorityBundle bundle = {};
+        bundle.Data = pem;
+        bundle.DataLength = pemLength;
+
+        CertificateStoreOptions storeOptions = {};
+        storeOptions.AuthorityBundles = &bundle;
+        storeOptions.AuthorityBundleCount = 1;
+
+        CertificateStore store;
+        NTSTATUS status = store.Initialize(storeOptions);
+        Expect(status == STATUS_SUCCESS, "certificate store accepts external PEM bundle");
+        Expect(store.AuthorityBundleCount() == 1, "certificate store exposes external bundle count");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "localhost";
+        options.HostNameLength = strlen(options.HostName);
+        options.Store = &store;
+
+        CertificateValidationResult result = {};
+        status = CertificateValidator::ValidateChain(chain, options, &result);
+
+        Expect(status == STATUS_SUCCESS, "verified validation trusts external PEM bundle");
+        Expect(result.Leaf.DerLength == derLength, "external bundle validation leaf length matches DER");
+        Expect(result.Leaf.Der != nullptr && memcmp(result.Leaf.Der, der, derLength) == 0, "external bundle validation returns the leaf certificate");
+    }
+
     void TestEncodeClientKeyExchange()
     {
         const UCHAR publicKey[] = { 4, 1, 2, 3, 4 };
@@ -667,6 +1047,9 @@ int main()
     TestParseServerKeyExchange();
     TestParseCertificateListState();
     TestCertificateStoreTrustAndPin();
+    TestCertificateValidationCanSkipVerification();
+    TestCertificateValidationRequiresTrustMaterial();
+    TestCertificateValidationAcceptsExternalPemBundle();
     TestEncodeClientKeyExchange();
     TestFinishedVerifyData();
     TestTranscriptHash();

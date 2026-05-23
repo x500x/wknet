@@ -16,6 +16,7 @@ namespace tls
         const char* ServerName = nullptr;
         SIZE_T ServerNameLength = 0;
         const CertificateStore* CertificateStore = nullptr;
+        bool VerifyCertificate = true;
         const TlsAlpnProtocol* AlpnProtocols = nullptr;
         SIZE_T AlpnProtocolCount = 0;
     };

@@ -57,7 +57,9 @@ namespace tls
     NTSTATUS CertificateStore::Initialize(const CertificateStoreOptions& options) noexcept
     {
         if (options.TrustAnchorCount > CertificateMaxTrustAnchors ||
+            options.AuthorityBundleCount > CertificateMaxAuthorityBundles ||
             (options.TrustAnchorCount != 0 && options.TrustAnchors == nullptr) ||
+            (options.AuthorityBundleCount != 0 && options.AuthorityBundles == nullptr) ||
             (options.PinCount != 0 && options.Pins == nullptr)) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -65,6 +67,13 @@ namespace tls
         for (SIZE_T index = 0; index < options.TrustAnchorCount; ++index) {
             const CertificateTrustAnchor& anchor = options.TrustAnchors[index];
             if (!IsValidBuffer(anchor.SubjectName, anchor.SubjectNameLength)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+        }
+
+        for (SIZE_T index = 0; index < options.AuthorityBundleCount; ++index) {
+            const CertificateAuthorityBundle& bundle = options.AuthorityBundles[index];
+            if (!IsValidBuffer(bundle.Data, bundle.DataLength) || bundle.DataLength == 0) {
                 return STATUS_INVALID_PARAMETER;
             }
         }
@@ -78,6 +87,8 @@ namespace tls
 
         trustAnchors_ = options.TrustAnchors;
         trustAnchorCount_ = options.TrustAnchorCount;
+        authorityBundles_ = options.AuthorityBundles;
+        authorityBundleCount_ = options.AuthorityBundleCount;
         pins_ = options.Pins;
         pinCount_ = options.PinCount;
         return STATUS_SUCCESS;
@@ -87,6 +98,8 @@ namespace tls
     {
         trustAnchors_ = nullptr;
         trustAnchorCount_ = 0;
+        authorityBundles_ = nullptr;
+        authorityBundleCount_ = 0;
         pins_ = nullptr;
         pinCount_ = 0;
     }
@@ -157,9 +170,19 @@ namespace tls
         return trustAnchorCount_;
     }
 
+    SIZE_T CertificateStore::AuthorityBundleCount() const noexcept
+    {
+        return authorityBundleCount_;
+    }
+
     SIZE_T CertificateStore::PinCount() const noexcept
     {
         return pinCount_;
+    }
+
+    const CertificateAuthorityBundle* CertificateStore::AuthorityBundleAt(SIZE_T index) const noexcept
+    {
+        return index < authorityBundleCount_ ? authorityBundles_ + index : nullptr;
     }
 }
 }

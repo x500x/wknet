@@ -34,6 +34,7 @@ namespace client
         const UCHAR* Body = nullptr;
         SIZE_T BodyLength = 0;
         const tls::CertificateStore* CertificateStore = nullptr;
+        bool VerifyCertificate = true;
     };
 
     struct Http2ResponseBuffers final

@@ -16,6 +16,7 @@ namespace client
         http::HttpRequestBuildOptions Request = {};
         bool ResponseBodyForbidden = false;
         const tls::CertificateStore* CertificateStore = nullptr;
+        bool VerifyCertificate = true;
         bool PreferHttp2 = true;
     };
 

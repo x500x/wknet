@@ -44,6 +44,10 @@ namespace tls
         const UCHAR OidSubjectAltName[] = { 0x55, 0x1d, 0x11 };
         const UCHAR OidExtendedKeyUsage[] = { 0x55, 0x1d, 0x25 };
         const UCHAR OidServerAuth[] = { 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01 };
+        constexpr SIZE_T CertificateMaxAuthorityDerLength = 8192;
+
+        const char PemCertificateBegin[] = "-----BEGIN CERTIFICATE-----";
+        const char PemCertificateEnd[] = "-----END CERTIFICATE-----";
 
         struct DerElement final
         {
@@ -830,6 +834,526 @@ namespace tls
             *offset += *certificateLength;
             return STATUS_SUCCESS;
         }
+
+        _Must_inspect_result_
+        NTSTATUS HashSubjectPublicKey(
+            _In_ const ParsedCertificate& certificate,
+            _Out_writes_bytes_(CertificateSha256ThumbprintLength) UCHAR* spkiSha256) noexcept
+        {
+            if (spkiSha256 == nullptr ||
+                certificate.SubjectPublicKeyInfo == nullptr ||
+                certificate.SubjectPublicKeyInfoLength == 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            SIZE_T hashLength = 0;
+            NTSTATUS status = crypto::CngProvider::Hash(
+                crypto::HashAlgorithm::Sha256,
+                certificate.SubjectPublicKeyInfo,
+                certificate.SubjectPublicKeyInfoLength,
+                spkiSha256,
+                CertificateSha256ThumbprintLength,
+                &hashLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            return hashLength == CertificateSha256ThumbprintLength ?
+                STATUS_SUCCESS :
+                STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        void FillLeafResult(
+            _In_ const ParsedCertificate& leaf,
+            _In_reads_bytes_(CertificateSha256ThumbprintLength) const UCHAR* spkiSha256,
+            _Out_opt_ CertificateValidationResult* result) noexcept
+        {
+            if (result == nullptr) {
+                return;
+            }
+
+            result->Leaf = leaf;
+            RtlCopyMemory(
+                result->LeafSubjectPublicKeySha256,
+                spkiSha256,
+                CertificateSha256ThumbprintLength);
+        }
+
+        _Must_inspect_result_
+        bool MatchBytes(
+            _In_reads_bytes_(leftLength) const UCHAR* left,
+            SIZE_T leftLength,
+            _In_reads_bytes_(rightLength) const char* right,
+            SIZE_T rightLength) noexcept
+        {
+            if (left == nullptr || right == nullptr || leftLength != rightLength) {
+                return false;
+            }
+
+            for (SIZE_T index = 0; index < leftLength; ++index) {
+                if (left[index] != static_cast<UCHAR>(right[index])) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        _Must_inspect_result_
+        bool FindPattern(
+            _In_reads_bytes_(dataLength) const UCHAR* data,
+            SIZE_T dataLength,
+            _In_reads_bytes_(patternLength) const char* pattern,
+            SIZE_T patternLength,
+            SIZE_T start,
+            _Out_ SIZE_T* foundAt) noexcept
+        {
+            if (foundAt == nullptr) {
+                return false;
+            }
+
+            *foundAt = 0;
+            if (data == nullptr ||
+                pattern == nullptr ||
+                patternLength == 0 ||
+                start > dataLength ||
+                patternLength > dataLength - start) {
+                return false;
+            }
+
+            for (SIZE_T index = start; index <= dataLength - patternLength; ++index) {
+                if (MatchBytes(data + index, patternLength, pattern, patternLength)) {
+                    *foundAt = index;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        _Must_inspect_result_
+        bool IsPemWhitespace(UCHAR value) noexcept
+        {
+            return value == ' ' ||
+                value == '\r' ||
+                value == '\n' ||
+                value == '\t';
+        }
+
+        _Must_inspect_result_
+        bool DecodeBase64Char(UCHAR input, _Out_ UCHAR* value) noexcept
+        {
+            if (value == nullptr) {
+                return false;
+            }
+
+            if (input >= 'A' && input <= 'Z') {
+                *value = static_cast<UCHAR>(input - 'A');
+                return true;
+            }
+
+            if (input >= 'a' && input <= 'z') {
+                *value = static_cast<UCHAR>(input - 'a' + 26);
+                return true;
+            }
+
+            if (input >= '0' && input <= '9') {
+                *value = static_cast<UCHAR>(input - '0' + 52);
+                return true;
+            }
+
+            if (input == '+') {
+                *value = 62;
+                return true;
+            }
+
+            if (input == '/') {
+                *value = 63;
+                return true;
+            }
+
+            return false;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS FlushBase64Quartet(
+            _In_reads_(4) const UCHAR* quartet,
+            _In_reads_(4) const bool* padding,
+            _Out_writes_bytes_(destinationCapacity) UCHAR* destination,
+            SIZE_T destinationCapacity,
+            _Inout_ SIZE_T* destinationLength,
+            _Out_ bool* completed) noexcept
+        {
+            if (quartet == nullptr ||
+                padding == nullptr ||
+                destination == nullptr ||
+                destinationLength == nullptr ||
+                completed == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            *completed = false;
+            if (padding[0] ||
+                padding[1] ||
+                (padding[2] && !padding[3])) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            const SIZE_T bytesToWrite = padding[2] ? 1 : (padding[3] ? 2 : 3);
+            if (*destinationLength > destinationCapacity ||
+                bytesToWrite > destinationCapacity - *destinationLength) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            const ULONG value =
+                (static_cast<ULONG>(quartet[0]) << 18) |
+                (static_cast<ULONG>(quartet[1]) << 12) |
+                (static_cast<ULONG>(quartet[2]) << 6) |
+                quartet[3];
+
+            destination[(*destinationLength)++] = static_cast<UCHAR>((value >> 16) & 0xff);
+            if (bytesToWrite > 1) {
+                destination[(*destinationLength)++] = static_cast<UCHAR>((value >> 8) & 0xff);
+            }
+
+            if (bytesToWrite > 2) {
+                destination[(*destinationLength)++] = static_cast<UCHAR>(value & 0xff);
+            }
+
+            *completed = padding[2] || padding[3];
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS DecodePemCertificate(
+            _In_reads_bytes_(dataLength) const UCHAR* data,
+            SIZE_T dataLength,
+            SIZE_T start,
+            _Out_writes_bytes_(destinationCapacity) UCHAR* destination,
+            SIZE_T destinationCapacity,
+            _Out_ SIZE_T* destinationLength,
+            _Out_ SIZE_T* nextOffset) noexcept
+        {
+            if (destinationLength != nullptr) {
+                *destinationLength = 0;
+            }
+
+            if (nextOffset != nullptr) {
+                *nextOffset = start;
+            }
+
+            if (data == nullptr ||
+                destination == nullptr ||
+                destinationLength == nullptr ||
+                nextOffset == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            SIZE_T begin = 0;
+            if (!FindPattern(
+                data,
+                dataLength,
+                PemCertificateBegin,
+                sizeof(PemCertificateBegin) - 1,
+                start,
+                &begin)) {
+                return STATUS_NOT_FOUND;
+            }
+
+            SIZE_T bodyStart = begin + (sizeof(PemCertificateBegin) - 1);
+            SIZE_T end = 0;
+            if (!FindPattern(
+                data,
+                dataLength,
+                PemCertificateEnd,
+                sizeof(PemCertificateEnd) - 1,
+                bodyStart,
+                &end)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            UCHAR quartet[4] = {};
+            bool padding[4] = {};
+            SIZE_T quartetLength = 0;
+            bool completed = false;
+
+            for (SIZE_T index = bodyStart; index < end; ++index) {
+                const UCHAR input = data[index];
+                if (IsPemWhitespace(input)) {
+                    continue;
+                }
+
+                if (completed) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
+                UCHAR value = 0;
+                bool isPadding = false;
+                if (input == '=') {
+                    isPadding = true;
+                }
+                else if (!DecodeBase64Char(input, &value)) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
+                quartet[quartetLength] = value;
+                padding[quartetLength] = isPadding;
+                ++quartetLength;
+
+                if (quartetLength == 4) {
+                    NTSTATUS status = FlushBase64Quartet(
+                        quartet,
+                        padding,
+                        destination,
+                        destinationCapacity,
+                        destinationLength,
+                        &completed);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+
+                    RtlZeroMemory(quartet, sizeof(quartet));
+                    RtlZeroMemory(padding, sizeof(padding));
+                    quartetLength = 0;
+                }
+            }
+
+            if (quartetLength != 0 || *destinationLength == 0) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            *nextOffset = end + (sizeof(PemCertificateEnd) - 1);
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        bool IsExactAnchorMatch(
+            _In_ const ParsedCertificate& certificate,
+            _In_ const ParsedCertificate& anchor) noexcept
+        {
+            return certificate.SubjectLength == anchor.SubjectLength &&
+                certificate.SubjectPublicKeyInfoLength == anchor.SubjectPublicKeyInfoLength &&
+                MemoryEquals(certificate.Subject, anchor.Subject, certificate.SubjectLength) &&
+                MemoryEquals(
+                    certificate.SubjectPublicKeyInfo,
+                    anchor.SubjectPublicKeyInfo,
+                    certificate.SubjectPublicKeyInfoLength);
+        }
+
+        _Must_inspect_result_
+        NTSTATUS AnchorSignsCertificate(
+            _In_ const ParsedCertificate& certificate,
+            _In_ const ParsedCertificate& anchor,
+            _Out_ bool* trusted) noexcept
+        {
+            if (trusted == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            *trusted = false;
+            if (IsExactAnchorMatch(certificate, anchor)) {
+                *trusted = true;
+                return STATUS_SUCCESS;
+            }
+
+            if (!anchor.HasBasicConstraints ||
+                !anchor.IsCa ||
+                certificate.IssuerLength != anchor.SubjectLength ||
+                !MemoryEquals(certificate.Issuer, anchor.Subject, certificate.IssuerLength)) {
+                return STATUS_SUCCESS;
+            }
+
+            NTSTATUS status = VerifyCertificateSignature(certificate, anchor);
+            if (NT_SUCCESS(status)) {
+                *trusted = true;
+                return STATUS_SUCCESS;
+            }
+
+            return status == STATUS_INVALID_SIGNATURE ? STATUS_SUCCESS : status;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ParsedCertificateMatchesAuthorityBundle(
+            _In_ const ParsedCertificate& certificate,
+            _In_ const CertificateAuthorityBundle& bundle,
+            _Out_writes_bytes_(scratchCapacity) UCHAR* scratch,
+            SIZE_T scratchCapacity,
+            _Out_ bool* trusted) noexcept
+        {
+            if (trusted != nullptr) {
+                *trusted = false;
+            }
+
+            if (certificate.Der == nullptr ||
+                bundle.Data == nullptr ||
+                bundle.DataLength == 0 ||
+                scratch == nullptr ||
+                trusted == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            SIZE_T firstPem = 0;
+            if (!FindPattern(
+                bundle.Data,
+                bundle.DataLength,
+                PemCertificateBegin,
+                sizeof(PemCertificateBegin) - 1,
+                0,
+                &firstPem)) {
+                ParsedCertificate anchor = {};
+                NTSTATUS status = CertificateValidator::ParseCertificate(
+                    bundle.Data,
+                    bundle.DataLength,
+                    anchor);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                return AnchorSignsCertificate(certificate, anchor, trusted);
+            }
+
+            SIZE_T offset = firstPem;
+            while (offset < bundle.DataLength) {
+                SIZE_T derLength = 0;
+                SIZE_T nextOffset = offset;
+                NTSTATUS status = DecodePemCertificate(
+                    bundle.Data,
+                    bundle.DataLength,
+                    offset,
+                    scratch,
+                    scratchCapacity,
+                    &derLength,
+                    &nextOffset);
+                if (status == STATUS_NOT_FOUND) {
+                    return STATUS_SUCCESS;
+                }
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                ParsedCertificate anchor = {};
+                status = CertificateValidator::ParseCertificate(scratch, derLength, anchor);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                status = AnchorSignsCertificate(certificate, anchor, trusted);
+                if (!NT_SUCCESS(status) || *trusted) {
+                    return status;
+                }
+
+                offset = nextOffset;
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS StoreHasTrustedAnchor(
+            _In_opt_ const CertificateStore* store,
+            _In_ const ParsedCertificate& certificate,
+            _In_reads_bytes_(CertificateSha256ThumbprintLength) const UCHAR* certificateSpkiSha256,
+            _Out_writes_bytes_(scratchCapacity) UCHAR* scratch,
+            SIZE_T scratchCapacity,
+            _Out_ bool* trusted) noexcept
+        {
+            if (trusted != nullptr) {
+                *trusted = false;
+            }
+
+            if (certificateSpkiSha256 == nullptr || scratch == nullptr || trusted == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (store != nullptr &&
+                store->IsTrustedAnchor(
+                    certificate.Subject,
+                    certificate.SubjectLength,
+                    certificateSpkiSha256,
+                    CertificateSha256ThumbprintLength)) {
+                *trusted = true;
+                return STATUS_SUCCESS;
+            }
+
+            if (store != nullptr) {
+                for (SIZE_T index = 0; index < store->AuthorityBundleCount(); ++index) {
+                    const CertificateAuthorityBundle* bundle = store->AuthorityBundleAt(index);
+                    if (bundle == nullptr) {
+                        return STATUS_INVALID_DEVICE_STATE;
+                    }
+
+                    NTSTATUS status = ParsedCertificateMatchesAuthorityBundle(
+                        certificate,
+                        *bundle,
+                        scratch,
+                        scratchCapacity,
+                        trusted);
+                    if (!NT_SUCCESS(status) || *trusted) {
+                        return status;
+                    }
+                }
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS FindTrustedAnchor(
+            _In_opt_ const CertificateStore* store,
+            _In_reads_(certificateCount) const ParsedCertificate* certificates,
+            SIZE_T certificateCount,
+            _Out_ SIZE_T* trustedAnchorIndex) noexcept
+        {
+            if (trustedAnchorIndex != nullptr) {
+                *trustedAnchorIndex = certificateCount;
+            }
+
+            if (certificates == nullptr ||
+                certificateCount == 0 ||
+                trustedAnchorIndex == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            UCHAR* scratch = new UCHAR[CertificateMaxAuthorityDerLength];
+            if (scratch == nullptr) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            NTSTATUS status = STATUS_SUCCESS;
+            for (SIZE_T index = 0; index < certificateCount; ++index) {
+                UCHAR certSpkiSha256[CertificateSha256ThumbprintLength] = {};
+                status = HashSubjectPublicKey(certificates[index], certSpkiSha256);
+                if (!NT_SUCCESS(status)) {
+                    kprintf("CertificateValidator: Cert %Iu SPKI hash failed: 0x%08X\r\n", index, static_cast<ULONG>(status));
+                    break;
+                }
+
+                kprintf("CertificateValidator: Cert %Iu SPKI SHA256: %02X%02X%02X%02X...\r\n",
+                    index, certSpkiSha256[0], certSpkiSha256[1], certSpkiSha256[2], certSpkiSha256[3]);
+
+                bool trusted = false;
+                status = StoreHasTrustedAnchor(
+                    store,
+                    certificates[index],
+                    certSpkiSha256,
+                    scratch,
+                    CertificateMaxAuthorityDerLength,
+                    &trusted);
+                if (!NT_SUCCESS(status)) {
+                    break;
+                }
+
+                if (trusted) {
+                    kprintf("CertificateValidator: Found trusted anchor at index %Iu\r\n", index);
+                    *trustedAnchorIndex = index;
+                    break;
+                }
+            }
+
+            RtlSecureZeroMemory(scratch, CertificateMaxAuthorityDerLength);
+            delete[] scratch;
+            return status;
+        }
     }
 
     NTSTATUS CertificateValidator::ParseCertificate(
@@ -977,15 +1501,20 @@ namespace tls
         if (chain.Certificates == nullptr ||
             chain.CertificatesLength == 0 ||
             chain.CertificateCount == 0 ||
-            chain.CertificateCount > CertificateMaxChainLength ||
-            options.Store == nullptr) {
+            chain.CertificateCount > CertificateMaxChainLength) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (options.VerifyCertificate &&
+            (options.HostName == nullptr || options.HostNameLength == 0)) {
             return STATUS_INVALID_PARAMETER;
         }
 
         ParsedCertificate parsed[CertificateMaxChainLength] = {};
         SIZE_T offset = 0;
+        const SIZE_T certificatesToParse = options.VerifyCertificate ? chain.CertificateCount : 1;
 
-        for (SIZE_T index = 0; index < chain.CertificateCount; ++index) {
+        for (SIZE_T index = 0; index < certificatesToParse; ++index) {
             const UCHAR* der = nullptr;
             SIZE_T derLength = 0;
             NTSTATUS status = ReadNextCertificate(chain, &offset, &der, &derLength);
@@ -997,12 +1526,27 @@ namespace tls
             }
         }
 
-        if (offset != chain.CertificatesLength) {
+        if (options.VerifyCertificate && offset != chain.CertificatesLength) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
+        UCHAR spkiSha256[CertificateSha256ThumbprintLength] = {};
+        NTSTATUS status = HashSubjectPublicKey(parsed[0], spkiSha256);
+        if (!NT_SUCCESS(status)) {
+            kprintf("CertificateValidator: Leaf SPKI hash failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            return status;
+        }
+
+        kprintf("CertificateValidator: Leaf SPKI SHA256: %02X%02X%02X%02X...\r\n",
+            spkiSha256[0], spkiSha256[1], spkiSha256[2], spkiSha256[3]);
+
+        if (!options.VerifyCertificate) {
+            FillLeafResult(parsed[0], spkiSha256, result);
+            return STATUS_SUCCESS;
+        }
+
         long long now = 0;
-        NTSTATUS status = CurrentPackedTime(&now);
+        status = CurrentPackedTime(&now);
         if (!NT_SUCCESS(status)) {
             kprintf("CertificateValidator: CurrentPackedTime failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -1047,71 +1591,28 @@ namespace tls
             }
         }
 
-        UCHAR spkiSha256[CertificateSha256ThumbprintLength] = {};
-        SIZE_T hashLength = 0;
-        status = crypto::CngProvider::Hash(
-            crypto::HashAlgorithm::Sha256,
-            parsed[0].SubjectPublicKeyInfo,
-            parsed[0].SubjectPublicKeyInfoLength,
-            spkiSha256,
-            sizeof(spkiSha256),
-            &hashLength);
-        if (!NT_SUCCESS(status)) {
-            kprintf("CertificateValidator: Leaf SPKI hash failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            return status;
-        }
-
-        if (hashLength != CertificateSha256ThumbprintLength) {
-            kprintf("CertificateValidator: Invalid hash length: %Iu\r\n", hashLength);
-            return STATUS_INVALID_NETWORK_RESPONSE;
-        }
-
-        kprintf("CertificateValidator: Leaf SPKI SHA256: %02X%02X%02X%02X...\r\n",
-            spkiSha256[0], spkiSha256[1], spkiSha256[2], spkiSha256[3]);
-
-        if (!options.Store->MatchesPin(options.HostName, options.HostNameLength, spkiSha256, sizeof(spkiSha256))) {
+        if (options.Store != nullptr &&
+            !options.Store->MatchesPin(options.HostName, options.HostNameLength, spkiSha256, sizeof(spkiSha256))) {
             kprintf("CertificateValidator: Pin validation failed\r\n");
             return STATUS_TRUST_FAILURE;
         }
 
-        bool foundTrustedAnchor = false;
         SIZE_T trustedAnchorIndex = chain.CertificateCount;
-
-        for (SIZE_T index = 0; index < chain.CertificateCount; ++index) {
-            UCHAR certSpkiSha256[CertificateSha256ThumbprintLength] = {};
-            status = crypto::CngProvider::Hash(
-                crypto::HashAlgorithm::Sha256,
-                parsed[index].SubjectPublicKeyInfo,
-                parsed[index].SubjectPublicKeyInfoLength,
-                certSpkiSha256,
-                sizeof(certSpkiSha256),
-                &hashLength);
-            if (!NT_SUCCESS(status)) {
-                kprintf("CertificateValidator: Cert %Iu SPKI hash failed: 0x%08X\r\n", index, static_cast<ULONG>(status));
-                return status;
-            }
-
-            kprintf("CertificateValidator: Cert %Iu SPKI SHA256: %02X%02X%02X%02X...\r\n",
-                index, certSpkiSha256[0], certSpkiSha256[1], certSpkiSha256[2], certSpkiSha256[3]);
-
-            if (options.Store->IsTrustedAnchor(
-                parsed[index].Subject,
-                parsed[index].SubjectLength,
-                certSpkiSha256,
-                sizeof(certSpkiSha256))) {
-                kprintf("CertificateValidator: Found trusted anchor at index %Iu\r\n", index);
-                foundTrustedAnchor = true;
-                trustedAnchorIndex = index;
-                break;
-            }
+        status = FindTrustedAnchor(options.Store, parsed, chain.CertificateCount, &trustedAnchorIndex);
+        if (!NT_SUCCESS(status)) {
+            kprintf("CertificateValidator: Trust anchor search failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            return status;
         }
 
-        if (!foundTrustedAnchor) {
+        if (trustedAnchorIndex == chain.CertificateCount) {
             kprintf("CertificateValidator: No trusted anchor found in chain\r\n");
             return STATUS_TRUST_FAILURE;
         }
 
-        if (trustedAnchorIndex == 0 && chain.CertificateCount == 1) {
+        if (trustedAnchorIndex == 0 &&
+            chain.CertificateCount == 1 &&
+            parsed[0].IssuerLength == parsed[0].SubjectLength &&
+            MemoryEquals(parsed[0].Issuer, parsed[0].Subject, parsed[0].IssuerLength)) {
             status = VerifyCertificateSignature(parsed[0], parsed[0]);
             if (!NT_SUCCESS(status)) {
                 kprintf("CertificateValidator: Self-signed signature verification failed: 0x%08X\r\n", static_cast<ULONG>(status));
@@ -1119,11 +1620,7 @@ namespace tls
             }
         }
 
-        if (result != nullptr) {
-            result->Leaf = parsed[0];
-            RtlCopyMemory(result->LeafSubjectPublicKeySha256, spkiSha256, sizeof(spkiSha256));
-        }
-
+        FillLeafResult(parsed[0], spkiSha256, result);
         return STATUS_SUCCESS;
     }
 

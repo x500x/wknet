@@ -22,6 +22,7 @@ namespace client
         SIZE_T PathLength = 1;
         const tls::CertificateStore* CertificateStore = nullptr;
         bool UseTls = false;
+        bool VerifyCertificate = true;
     };
 
     struct WebSocketIoBuffers final

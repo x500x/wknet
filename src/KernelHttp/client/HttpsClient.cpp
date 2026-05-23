@@ -92,7 +92,7 @@ namespace client
         if (options.RemoteAddress == nullptr ||
             options.ServerName == nullptr ||
             options.ServerNameLength == 0 ||
-            options.CertificateStore == nullptr ||
+            (options.VerifyCertificate && options.CertificateStore == nullptr) ||
             buffers.RequestBuffer == nullptr ||
             buffers.RequestBufferLength == 0 ||
             buffers.ResponseBuffer == nullptr ||
@@ -136,6 +136,7 @@ namespace client
         tlsOptions.ServerName = options.ServerName;
         tlsOptions.ServerNameLength = options.ServerNameLength;
         tlsOptions.CertificateStore = options.CertificateStore;
+        tlsOptions.VerifyCertificate = options.VerifyCertificate;
         if (options.PreferHttp2) {
             tlsOptions.AlpnProtocols = alpnProtocols;
             tlsOptions.AlpnProtocolCount = 2;

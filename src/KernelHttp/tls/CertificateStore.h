@@ -8,6 +8,7 @@ namespace tls
 {
     constexpr SIZE_T CertificateSha256ThumbprintLength = 32;
     constexpr SIZE_T CertificateMaxTrustAnchors = 16;
+    constexpr SIZE_T CertificateMaxAuthorityBundles = 8;
 
     struct CertificateTrustAnchor final
     {
@@ -24,10 +25,19 @@ namespace tls
         UCHAR LeafSubjectPublicKeySha256[CertificateSha256ThumbprintLength] = {};
     };
 
+    struct CertificateAuthorityBundle final
+    {
+        // Caller-owned PEM bundle or single DER certificate loaded from external trust data.
+        const UCHAR* Data = nullptr;
+        SIZE_T DataLength = 0;
+    };
+
     struct CertificateStoreOptions final
     {
         const CertificateTrustAnchor* TrustAnchors = nullptr;
         SIZE_T TrustAnchorCount = 0;
+        const CertificateAuthorityBundle* AuthorityBundles = nullptr;
+        SIZE_T AuthorityBundleCount = 0;
         const CertificatePin* Pins = nullptr;
         SIZE_T PinCount = 0;
     };
@@ -57,11 +67,16 @@ namespace tls
             SIZE_T spkiSha256Length) const noexcept;
 
         SIZE_T TrustAnchorCount() const noexcept;
+        SIZE_T AuthorityBundleCount() const noexcept;
         SIZE_T PinCount() const noexcept;
+        _Must_inspect_result_
+        const CertificateAuthorityBundle* AuthorityBundleAt(SIZE_T index) const noexcept;
 
     private:
         const CertificateTrustAnchor* trustAnchors_ = nullptr;
         SIZE_T trustAnchorCount_ = 0;
+        const CertificateAuthorityBundle* authorityBundles_ = nullptr;
+        SIZE_T authorityBundleCount_ = 0;
         const CertificatePin* pins_ = nullptr;
         SIZE_T pinCount_ = 0;
     };
