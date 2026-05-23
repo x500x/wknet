@@ -1,4 +1,5 @@
 #include "client/HttpsClient.h"
+#include "api/KernelHttpWorkspace.h"
 #include "client/Http2Client.h"
 #include "http/HttpContentEncoding.h"
 #include "http2/Http2Connection.h"
@@ -27,6 +28,65 @@ namespace client
             }
 
             return {};
+        }
+
+        struct Http2HeaderScratch final
+        {
+            http::HttpHeader* Headers = nullptr;
+            char (*LowerHeaderNames)[Http2MaxHeaderNameLength] = nullptr;
+            char* ContentLengthBuffer = nullptr;
+            UCHAR* Owned = nullptr;
+            SIZE_T OwnedLength = 0;
+        };
+
+        void ReleaseHttp2HeaderScratch(_Inout_ Http2HeaderScratch& scratch) noexcept
+        {
+            if (scratch.Owned != nullptr) {
+                RtlSecureZeroMemory(scratch.Owned, scratch.OwnedLength);
+                delete[] scratch.Owned;
+            }
+
+            scratch = {};
+        }
+
+        _Must_inspect_result_
+        NTSTATUS PrepareHttp2HeaderScratch(
+            _In_opt_ api::KhWorkspace* workspace,
+            _Out_ Http2HeaderScratch& scratch) noexcept
+        {
+            scratch = {};
+
+            constexpr SIZE_T headersBytes = sizeof(http::HttpHeader) * Http2MaxRequestHeaders;
+            constexpr SIZE_T lowerNamesBytes = Http2MaxRequestHeaders * Http2MaxHeaderNameLength;
+            constexpr SIZE_T totalBytes = headersBytes + lowerNamesBytes + Http2ContentLengthBufferLength;
+
+            UCHAR* base = nullptr;
+            SIZE_T capacity = 0;
+            if (workspace != nullptr) {
+                base = workspace->Http2HeaderScratch.Data;
+                capacity = workspace->Http2HeaderScratch.Length;
+                if (base == nullptr || capacity < totalBytes) {
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+            }
+            else {
+                base = new UCHAR[totalBytes];
+                if (base == nullptr) {
+                    return STATUS_INSUFFICIENT_RESOURCES;
+                }
+
+                capacity = totalBytes;
+                scratch.Owned = base;
+                scratch.OwnedLength = capacity;
+            }
+
+            RtlZeroMemory(base, capacity);
+            scratch.Headers = reinterpret_cast<http::HttpHeader*>(base);
+            scratch.LowerHeaderNames =
+                reinterpret_cast<char (*)[Http2MaxHeaderNameLength]>(base + headersBytes);
+            scratch.ContentLengthBuffer =
+                reinterpret_cast<char*>(base + headersBytes + lowerNamesBytes);
+            return STATUS_SUCCESS;
         }
     }
 
@@ -89,6 +149,8 @@ namespace client
         tlsOptions.MinimumProtocol = options.MinimumTlsProtocol;
         tlsOptions.MaximumProtocol = options.MaximumTlsProtocol;
         tlsOptions.SessionCache = options.SessionCache;
+        tlsOptions.Workspace = options.Workspace;
+        tlsOptions.ProviderCache = options.ProviderCache;
         tlsOptions.EnableSessionResumption = options.EnableSessionResumption;
         tlsOptions.EnableEarlyData = options.EnableEarlyData;
         if (options.EnableEarlyData && !options.PreferHttp2) {
@@ -144,19 +206,26 @@ namespace client
             h2Options.Body = reinterpret_cast<const UCHAR*>(options.Request.Body);
             h2Options.BodyLength = options.Request.BodyLength;
 
-            http::HttpHeader h2Headers[Http2MaxRequestHeaders] = {};
-            char lowerHeaderNames[Http2MaxRequestHeaders][Http2MaxHeaderNameLength] = {};
-            char contentLengthBuffer[Http2ContentLengthBufferLength] = {};
+            Http2HeaderScratch h2Scratch = {};
+            status = PrepareHttp2HeaderScratch(options.Workspace, h2Scratch);
+            if (!NT_SUCCESS(status)) {
+                h2conn.Shutdown(transport);
+                delete tlsConnection;
+                const NTSTATUS closeStatus = socket.Close();
+                UNREFERENCED_PARAMETER(closeStatus);
+                return status;
+            }
             SIZE_T h2HeaderCount = 0;
 
             status = BuildHttp2RequestHeaders(
                 h2Options,
-                h2Headers,
+                h2Scratch.Headers,
                 Http2MaxRequestHeaders,
-                lowerHeaderNames,
-                contentLengthBuffer,
+                h2Scratch.LowerHeaderNames,
+                h2Scratch.ContentLengthBuffer,
                 &h2HeaderCount);
             if (!NT_SUCCESS(status)) {
+                ReleaseHttp2HeaderScratch(h2Scratch);
                 h2conn.Shutdown(transport);
                 delete tlsConnection;
                 const NTSTATUS closeStatus = socket.Close();
@@ -170,7 +239,7 @@ namespace client
 
             status = h2conn.SendRequest(
                 transport,
-                h2Headers, h2HeaderCount,
+                h2Scratch.Headers, h2HeaderCount,
                 reinterpret_cast<const UCHAR*>(options.Request.Body),
                 options.Request.BodyLength,
                 buffers.Headers, buffers.HeaderCapacity,
@@ -215,6 +284,7 @@ namespace client
                 kprintf("HttpsClient H2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
             }
 
+            ReleaseHttp2HeaderScratch(h2Scratch);
             h2conn.Shutdown(transport);
         } else {
             // HTTP/1.1 path (original behavior)

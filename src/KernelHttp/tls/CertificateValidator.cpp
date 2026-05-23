@@ -1,4 +1,6 @@
 #include "tls/CertificateValidator.h"
+#include "api/KernelHttpWorkspace.h"
+#include "crypto/CngProviderCache.h"
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <time.h>
@@ -45,6 +47,9 @@ namespace tls
         const UCHAR OidExtendedKeyUsage[] = { 0x55, 0x1d, 0x25 };
         const UCHAR OidServerAuth[] = { 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01 };
         constexpr SIZE_T CertificateMaxAuthorityDerLength = 8192;
+        constexpr SIZE_T CertificateScratchParsedBytes = sizeof(ParsedCertificate) * CertificateMaxChainLength;
+        constexpr SIZE_T CertificateScratchRequiredBytes =
+            CertificateScratchParsedBytes + CertificateMaxAuthorityDerLength;
 
         const char PemCertificateBegin[] = "-----BEGIN CERTIFICATE-----";
         const char PemCertificateEnd[] = "-----END CERTIFICATE-----";
@@ -59,6 +64,62 @@ namespace tls
             const UCHAR* Full = nullptr;
             SIZE_T FullLength = 0;
         };
+
+        struct CertificateValidationScratch final
+        {
+            UCHAR* Data = nullptr;
+            SIZE_T Length = 0;
+            bool Owned = false;
+            ParsedCertificate* Parsed = nullptr;
+            UCHAR* Authority = nullptr;
+            SIZE_T AuthorityLength = 0;
+        };
+
+        _Must_inspect_result_
+        NTSTATUS PrepareCertificateValidationScratch(
+            _In_ const CertificateValidationOptions& options,
+            _Out_ CertificateValidationScratch& scratch) noexcept
+        {
+            scratch = {};
+
+            if (options.Workspace != nullptr) {
+                if (options.Workspace->CertificateScratch.Data == nullptr ||
+                    options.Workspace->CertificateScratch.Length < CertificateScratchRequiredBytes) {
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+
+                scratch.Data = options.Workspace->CertificateScratch.Data;
+                scratch.Length = options.Workspace->CertificateScratch.Length;
+            }
+            else {
+                scratch.Data = new UCHAR[CertificateScratchRequiredBytes];
+                if (scratch.Data == nullptr) {
+                    return STATUS_INSUFFICIENT_RESOURCES;
+                }
+
+                scratch.Length = CertificateScratchRequiredBytes;
+                scratch.Owned = true;
+            }
+
+            RtlZeroMemory(scratch.Data, scratch.Length);
+            scratch.Parsed = reinterpret_cast<ParsedCertificate*>(scratch.Data);
+            scratch.Authority = scratch.Data + CertificateScratchParsedBytes;
+            scratch.AuthorityLength = scratch.Length - CertificateScratchParsedBytes;
+            return STATUS_SUCCESS;
+        }
+
+        void ReleaseCertificateValidationScratch(_Inout_ CertificateValidationScratch& scratch) noexcept
+        {
+            if (scratch.Data != nullptr && scratch.Length != 0) {
+                RtlSecureZeroMemory(scratch.Data, scratch.Length);
+            }
+
+            if (scratch.Owned) {
+                delete[] scratch.Data;
+            }
+
+            scratch = {};
+        }
 
         _Must_inspect_result_
         bool HasCapacity(SIZE_T capacity, SIZE_T offset, SIZE_T length) noexcept
@@ -739,6 +800,7 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS HashForSignature(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
             CertificateSignatureAlgorithm algorithm,
             _In_reads_bytes_(dataLength) const UCHAR* data,
             SIZE_T dataLength,
@@ -764,16 +826,17 @@ namespace tls
                 return STATUS_NOT_SUPPORTED;
             }
 
-            return crypto::CngProvider::Hash(hashAlgorithm, data, dataLength, hash, hashCapacity, hashLength);
+            return crypto::CngProvider::Hash(providerCache, hashAlgorithm, data, dataLength, hash, hashCapacity, hashLength);
         }
 
         _Must_inspect_result_
         NTSTATUS VerifyCertificateSignature(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
             _In_ const ParsedCertificate& certificate,
             _In_ const ParsedCertificate& issuer) noexcept
         {
             crypto::CngKey issuerKey;
-            NTSTATUS status = CertificateValidator::ImportSubjectPublicKey(issuer, issuerKey);
+            NTSTATUS status = CertificateValidator::ImportSubjectPublicKey(providerCache, issuer, issuerKey);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -781,6 +844,7 @@ namespace tls
             UCHAR hash[48] = {};
             SIZE_T hashLength = 0;
             status = HashForSignature(
+                providerCache,
                 certificate.SignatureAlgorithm,
                 certificate.TbsCertificate,
                 certificate.TbsCertificateLength,
@@ -792,6 +856,7 @@ namespace tls
             }
 
             status = crypto::CngProvider::VerifySignature(
+                providerCache,
                 CertificateValidator::ToSignatureAlgorithm(certificate.SignatureAlgorithm),
                 issuerKey,
                 hash,
@@ -837,6 +902,7 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS HashSubjectPublicKey(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
             _In_ const ParsedCertificate& certificate,
             _Out_writes_bytes_(CertificateSha256ThumbprintLength) UCHAR* spkiSha256) noexcept
         {
@@ -848,6 +914,7 @@ namespace tls
 
             SIZE_T hashLength = 0;
             NTSTATUS status = crypto::CngProvider::Hash(
+                providerCache,
                 crypto::HashAlgorithm::Sha256,
                 certificate.SubjectPublicKeyInfo,
                 certificate.SubjectPublicKeyInfoLength,
@@ -1142,6 +1209,7 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS AnchorSignsCertificate(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
             _In_ const ParsedCertificate& certificate,
             _In_ const ParsedCertificate& anchor,
             _Out_ bool* trusted) noexcept
@@ -1163,7 +1231,7 @@ namespace tls
                 return STATUS_SUCCESS;
             }
 
-            NTSTATUS status = VerifyCertificateSignature(certificate, anchor);
+            NTSTATUS status = VerifyCertificateSignature(providerCache, certificate, anchor);
             if (NT_SUCCESS(status)) {
                 *trusted = true;
                 return STATUS_SUCCESS;
@@ -1174,6 +1242,7 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS ParsedCertificateMatchesAuthorityBundle(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
             _In_ const ParsedCertificate& certificate,
             _In_ const CertificateAuthorityBundle& bundle,
             _Out_writes_bytes_(scratchCapacity) UCHAR* scratch,
@@ -1209,7 +1278,7 @@ namespace tls
                     return status;
                 }
 
-                return AnchorSignsCertificate(certificate, anchor, trusted);
+                return AnchorSignsCertificate(providerCache, certificate, anchor, trusted);
             }
 
             SIZE_T offset = firstPem;
@@ -1237,7 +1306,7 @@ namespace tls
                     return status;
                 }
 
-                status = AnchorSignsCertificate(certificate, anchor, trusted);
+                status = AnchorSignsCertificate(providerCache, certificate, anchor, trusted);
                 if (!NT_SUCCESS(status) || *trusted) {
                     return status;
                 }
@@ -1250,6 +1319,7 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS StoreHasTrustedAnchor(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
             _In_opt_ const CertificateStore* store,
             _In_ const ParsedCertificate& certificate,
             _In_reads_bytes_(CertificateSha256ThumbprintLength) const UCHAR* certificateSpkiSha256,
@@ -1283,6 +1353,7 @@ namespace tls
                     }
 
                     NTSTATUS status = ParsedCertificateMatchesAuthorityBundle(
+                        providerCache,
                         certificate,
                         *bundle,
                         scratch,
@@ -1299,9 +1370,12 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS FindTrustedAnchor(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
             _In_opt_ const CertificateStore* store,
             _In_reads_(certificateCount) const ParsedCertificate* certificates,
             SIZE_T certificateCount,
+            _Out_writes_bytes_(scratchCapacity) UCHAR* scratch,
+            SIZE_T scratchCapacity,
             _Out_ SIZE_T* trustedAnchorIndex) noexcept
         {
             if (trustedAnchorIndex != nullptr) {
@@ -1310,19 +1384,16 @@ namespace tls
 
             if (certificates == nullptr ||
                 certificateCount == 0 ||
+                scratch == nullptr ||
+                scratchCapacity < CertificateMaxAuthorityDerLength ||
                 trustedAnchorIndex == nullptr) {
                 return STATUS_INVALID_PARAMETER;
-            }
-
-            UCHAR* scratch = new UCHAR[CertificateMaxAuthorityDerLength];
-            if (scratch == nullptr) {
-                return STATUS_INSUFFICIENT_RESOURCES;
             }
 
             NTSTATUS status = STATUS_SUCCESS;
             for (SIZE_T index = 0; index < certificateCount; ++index) {
                 UCHAR certSpkiSha256[CertificateSha256ThumbprintLength] = {};
-                status = HashSubjectPublicKey(certificates[index], certSpkiSha256);
+                status = HashSubjectPublicKey(providerCache, certificates[index], certSpkiSha256);
                 if (!NT_SUCCESS(status)) {
                     kprintf("CertificateValidator: Cert %Iu SPKI hash failed: 0x%08X\r\n", index, static_cast<ULONG>(status));
                     break;
@@ -1333,11 +1404,12 @@ namespace tls
 
                 bool trusted = false;
                 status = StoreHasTrustedAnchor(
+                    providerCache,
                     store,
                     certificates[index],
                     certSpkiSha256,
                     scratch,
-                    CertificateMaxAuthorityDerLength,
+                    scratchCapacity,
                     &trusted);
                 if (!NT_SUCCESS(status)) {
                     break;
@@ -1350,8 +1422,6 @@ namespace tls
                 }
             }
 
-            RtlSecureZeroMemory(scratch, CertificateMaxAuthorityDerLength);
-            delete[] scratch;
             return status;
         }
     }
@@ -1510,30 +1580,40 @@ namespace tls
             return STATUS_INVALID_PARAMETER;
         }
 
-        ParsedCertificate parsed[CertificateMaxChainLength] = {};
+        CertificateValidationScratch scratch = {};
+        NTSTATUS status = PrepareCertificateValidationScratch(options, scratch);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        ParsedCertificate* const parsed = scratch.Parsed;
         SIZE_T offset = 0;
         const SIZE_T certificatesToParse = options.VerifyCertificate ? chain.CertificateCount : 1;
 
         for (SIZE_T index = 0; index < certificatesToParse; ++index) {
             const UCHAR* der = nullptr;
             SIZE_T derLength = 0;
-            NTSTATUS status = ReadNextCertificate(chain, &offset, &der, &derLength);
+            status = ReadNextCertificate(chain, &offset, &der, &derLength);
             if (NT_SUCCESS(status)) {
                 status = ParseCertificate(der, derLength, parsed[index]);
             }
             if (!NT_SUCCESS(status)) {
+                ReleaseCertificateValidationScratch(scratch);
                 return status;
             }
         }
 
         if (options.VerifyCertificate && offset != chain.CertificatesLength) {
+            ReleaseCertificateValidationScratch(scratch);
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
         UCHAR spkiSha256[CertificateSha256ThumbprintLength] = {};
-        NTSTATUS status = HashSubjectPublicKey(parsed[0], spkiSha256);
+        status = HashSubjectPublicKey(options.ProviderCache, parsed[0], spkiSha256);
         if (!NT_SUCCESS(status)) {
             kprintf("CertificateValidator: Leaf SPKI hash failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+            ReleaseCertificateValidationScratch(scratch);
             return status;
         }
 
@@ -1542,6 +1622,8 @@ namespace tls
 
         if (!options.VerifyCertificate) {
             FillLeafResult(parsed[0], spkiSha256, result);
+            RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+            ReleaseCertificateValidationScratch(scratch);
             return STATUS_SUCCESS;
         }
 
@@ -1549,12 +1631,16 @@ namespace tls
         status = CurrentPackedTime(&now);
         if (!NT_SUCCESS(status)) {
             kprintf("CertificateValidator: CurrentPackedTime failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+            ReleaseCertificateValidationScratch(scratch);
             return status;
         }
 
         for (SIZE_T index = 0; index < chain.CertificateCount; ++index) {
             if (now < parsed[index].NotBefore || now > parsed[index].NotAfter) {
                 kprintf("CertificateValidator: Certificate %Iu time validation failed\r\n", index);
+                RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+                ReleaseCertificateValidationScratch(scratch);
                 return STATUS_TRUST_FAILURE;
             }
         }
@@ -1563,12 +1649,16 @@ namespace tls
             parsed[0].HasExtendedKeyUsage &&
             !parsed[0].AllowsServerAuth) {
             kprintf("CertificateValidator: ServerAuth EKU validation failed\r\n");
+            RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+            ReleaseCertificateValidationScratch(scratch);
             return STATUS_TRUST_FAILURE;
         }
 
         status = ValidateHostName(parsed[0], options);
         if (!NT_SUCCESS(status)) {
             kprintf("CertificateValidator: HostName validation failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+            ReleaseCertificateValidationScratch(scratch);
             return status;
         }
 
@@ -1576,17 +1666,23 @@ namespace tls
             if (parsed[index].IssuerLength != parsed[index + 1].SubjectLength ||
                 !MemoryEquals(parsed[index].Issuer, parsed[index + 1].Subject, parsed[index].IssuerLength)) {
                 kprintf("CertificateValidator: Chain issuer/subject mismatch at %Iu\r\n", index);
+                RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+                ReleaseCertificateValidationScratch(scratch);
                 return STATUS_TRUST_FAILURE;
             }
 
             if (!parsed[index + 1].HasBasicConstraints || !parsed[index + 1].IsCa) {
                 kprintf("CertificateValidator: Certificate %Iu is not a CA\r\n", index + 1);
+                RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+                ReleaseCertificateValidationScratch(scratch);
                 return STATUS_TRUST_FAILURE;
             }
 
-            status = VerifyCertificateSignature(parsed[index], parsed[index + 1]);
+            status = VerifyCertificateSignature(options.ProviderCache, parsed[index], parsed[index + 1]);
             if (!NT_SUCCESS(status)) {
                 kprintf("CertificateValidator: Signature verification failed at %Iu: 0x%08X\r\n", index, static_cast<ULONG>(status));
+                RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+                ReleaseCertificateValidationScratch(scratch);
                 return status;
             }
         }
@@ -1594,33 +1690,50 @@ namespace tls
         if (options.Store != nullptr &&
             !options.Store->MatchesPin(options.HostName, options.HostNameLength, spkiSha256, sizeof(spkiSha256))) {
             kprintf("CertificateValidator: Pin validation failed\r\n");
+            RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+            ReleaseCertificateValidationScratch(scratch);
             return STATUS_TRUST_FAILURE;
         }
 
         SIZE_T trustedAnchorIndex = chain.CertificateCount;
-        status = FindTrustedAnchor(options.Store, parsed, chain.CertificateCount, &trustedAnchorIndex);
+        status = FindTrustedAnchor(
+            options.ProviderCache,
+            options.Store,
+            parsed,
+            chain.CertificateCount,
+            scratch.Authority,
+            scratch.AuthorityLength,
+            &trustedAnchorIndex);
         if (!NT_SUCCESS(status)) {
             kprintf("CertificateValidator: Trust anchor search failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+            ReleaseCertificateValidationScratch(scratch);
             return status;
         }
 
         if (trustedAnchorIndex == chain.CertificateCount) {
             kprintf("CertificateValidator: No trusted anchor found in chain\r\n");
+            RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+            ReleaseCertificateValidationScratch(scratch);
             return STATUS_TRUST_FAILURE;
         }
 
         if (trustedAnchorIndex == 0 &&
-            chain.CertificateCount == 1 &&
-            parsed[0].IssuerLength == parsed[0].SubjectLength &&
-            MemoryEquals(parsed[0].Issuer, parsed[0].Subject, parsed[0].IssuerLength)) {
-            status = VerifyCertificateSignature(parsed[0], parsed[0]);
+             chain.CertificateCount == 1 &&
+             parsed[0].IssuerLength == parsed[0].SubjectLength &&
+             MemoryEquals(parsed[0].Issuer, parsed[0].Subject, parsed[0].IssuerLength)) {
+            status = VerifyCertificateSignature(options.ProviderCache, parsed[0], parsed[0]);
             if (!NT_SUCCESS(status)) {
                 kprintf("CertificateValidator: Self-signed signature verification failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+                ReleaseCertificateValidationScratch(scratch);
                 return status;
             }
         }
 
         FillLeafResult(parsed[0], spkiSha256, result);
+        RtlSecureZeroMemory(spkiSha256, sizeof(spkiSha256));
+        ReleaseCertificateValidationScratch(scratch);
         return STATUS_SUCCESS;
     }
 
@@ -1628,9 +1741,18 @@ namespace tls
         const ParsedCertificate& certificate,
         crypto::CngKey& publicKey) noexcept
     {
+        return ImportSubjectPublicKey(nullptr, certificate, publicKey);
+    }
+
+    NTSTATUS CertificateValidator::ImportSubjectPublicKey(
+        const crypto::CngProviderCache* providerCache,
+        const ParsedCertificate& certificate,
+        crypto::CngKey& publicKey) noexcept
+    {
         switch (certificate.PublicKeyAlgorithm) {
         case CertificatePublicKeyAlgorithm::Rsa:
             return crypto::CngProvider::ImportRsaPublicKey(
+                providerCache,
                 certificate.RsaExponent,
                 certificate.RsaExponentLength,
                 certificate.RsaModulus,
@@ -1638,18 +1760,21 @@ namespace tls
                 publicKey);
         case CertificatePublicKeyAlgorithm::EcdsaP256:
             return crypto::CngProvider::ImportEcdsaPublicKey(
+                providerCache,
                 crypto::EcCurve::P256,
                 certificate.PublicKey,
                 certificate.PublicKeyLength,
                 publicKey);
         case CertificatePublicKeyAlgorithm::EcdsaP384:
             return crypto::CngProvider::ImportEcdsaPublicKey(
+                providerCache,
                 crypto::EcCurve::P384,
                 certificate.PublicKey,
                 certificate.PublicKeyLength,
                 publicKey);
         case CertificatePublicKeyAlgorithm::EcdsaP521:
             return crypto::CngProvider::ImportEcdsaPublicKey(
+                providerCache,
                 crypto::EcCurve::P521,
                 certificate.PublicKey,
                 certificate.PublicKeyLength,

@@ -8,6 +8,16 @@
 
 namespace KernelHttp
 {
+namespace api
+{
+    struct KhWorkspace;
+}
+
+namespace crypto
+{
+    class CngProviderCache;
+}
+
 namespace client
 {
     struct WebSocketConnectOptions final
@@ -21,6 +31,8 @@ namespace client
         const char* Path = "/";
         SIZE_T PathLength = 1;
         const tls::CertificateStore* CertificateStore = nullptr;
+        api::KhWorkspace* Workspace = nullptr;
+        const crypto::CngProviderCache* ProviderCache = nullptr;
         bool UseTls = false;
         bool VerifyCertificate = true;
     };

@@ -5,6 +5,16 @@
 
 namespace KernelHttp
 {
+namespace api
+{
+    struct KhWorkspace;
+}
+
+namespace crypto
+{
+    class CngProviderCache;
+}
+
 namespace tls
 {
     constexpr SIZE_T CertificateMaxChainLength = 8;
@@ -74,6 +84,8 @@ namespace tls
         const char* HostName = nullptr;
         SIZE_T HostNameLength = 0;
         const CertificateStore* Store = nullptr;
+        api::KhWorkspace* Workspace = nullptr;
+        const crypto::CngProviderCache* ProviderCache = nullptr;
         bool VerifyCertificate = true;
         bool RequireServerAuthEku = true;
     };
@@ -103,6 +115,12 @@ namespace tls
 
         _Must_inspect_result_
         static NTSTATUS ImportSubjectPublicKey(
+            _In_ const ParsedCertificate& certificate,
+            _Out_ crypto::CngKey& publicKey) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS ImportSubjectPublicKey(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
             _In_ const ParsedCertificate& certificate,
             _Out_ crypto::CngKey& publicKey) noexcept;
 

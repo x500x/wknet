@@ -1,5 +1,7 @@
 #include "tls/TlsConnection.h"
 
+#include "api/KernelHttpWorkspace.h"
+#include "crypto/CngProviderCache.h"
 #include "tls/TlsHandshake13.h"
 
 namespace KernelHttp
@@ -8,6 +10,29 @@ namespace tls
 {
     namespace
     {
+        constexpr SIZE_T TlsScratchClientHelloOffset = 0;
+        constexpr SIZE_T TlsScratchClientHelloLength = 2048;
+        constexpr SIZE_T TlsScratchFirstClientHelloOffset =
+            TlsScratchClientHelloOffset + TlsScratchClientHelloLength;
+        constexpr SIZE_T TlsScratchFirstClientHelloLength = 2048;
+        constexpr SIZE_T TlsScratchSecondClientHelloOffset =
+            TlsScratchFirstClientHelloOffset + TlsScratchFirstClientHelloLength;
+        constexpr SIZE_T TlsScratchSecondClientHelloLength = 2048;
+        constexpr SIZE_T TlsScratchHelloRetryOffset =
+            TlsScratchSecondClientHelloOffset + TlsScratchSecondClientHelloLength;
+        constexpr SIZE_T TlsScratchHelloRetryLength = 512;
+        constexpr SIZE_T TlsScratchLegacyCertificateOffset =
+            TlsScratchHelloRetryOffset + TlsScratchHelloRetryLength;
+        constexpr SIZE_T TlsScratchLegacyCertificateLength = TlsHandshakeBufferLength;
+        constexpr SIZE_T TlsScratchSignedInputOffset =
+            TlsScratchLegacyCertificateOffset + TlsScratchLegacyCertificateLength;
+        constexpr SIZE_T TlsScratchSignedInputLength = 128;
+        constexpr SIZE_T TlsScratchSignedDataOffset =
+            TlsScratchSignedInputOffset + TlsScratchSignedInputLength;
+        constexpr SIZE_T TlsScratchSignedDataLength = (TlsRandomLength * 2) + 256;
+        constexpr SIZE_T TlsScratchRequiredLength =
+            TlsScratchSignedDataOffset + TlsScratchSignedDataLength;
+
         _Must_inspect_result_
         crypto::EcCurve ToEcCurve(TlsNamedGroup group) noexcept
         {
@@ -342,6 +367,12 @@ namespace tls
     TlsConnection::~TlsConnection() noexcept
     {
         Reset();
+        if (ownedTlsScratch_ != nullptr) {
+            RtlSecureZeroMemory(ownedTlsScratch_, ownedTlsScratchLength_);
+            delete[] ownedTlsScratch_;
+            ownedTlsScratch_ = nullptr;
+            ownedTlsScratchLength_ = 0;
+        }
     }
 
     void TlsConnection::Reset() noexcept
@@ -354,6 +385,18 @@ namespace tls
         RtlSecureZeroMemory(outputBuffer_, sizeof(outputBuffer_));
         RtlSecureZeroMemory(plaintextBuffer_, sizeof(plaintextBuffer_));
         RtlSecureZeroMemory(handshakeBuffer_, sizeof(handshakeBuffer_));
+        if (workspace_ != nullptr &&
+            workspace_->TlsHandshakeScratch.Data != nullptr &&
+            workspace_->TlsHandshakeScratch.Length != 0) {
+            RtlSecureZeroMemory(
+                workspace_->TlsHandshakeScratch.Data,
+                workspace_->TlsHandshakeScratch.Length);
+        }
+        if (ownedTlsScratch_ != nullptr && ownedTlsScratchLength_ != 0) {
+            RtlSecureZeroMemory(ownedTlsScratch_, ownedTlsScratchLength_);
+        }
+        workspace_ = nullptr;
+        providerCache_ = nullptr;
         inputLength_ = 0;
         plaintextLength_ = 0;
         handshakeLength_ = 0;
@@ -364,6 +407,73 @@ namespace tls
         tls13RecordProtection_ = false;
         RtlSecureZeroMemory(negotiatedAlpn_, sizeof(negotiatedAlpn_));
         negotiatedAlpnLength_ = 0;
+    }
+
+    NTSTATUS TlsConnection::PrepareScratch(const TlsClientConnectionOptions& options) noexcept
+    {
+        workspace_ = options.Workspace;
+        providerCache_ = options.ProviderCache;
+
+        if (workspace_ != nullptr) {
+            if (workspace_->TlsHandshakeScratch.Data == nullptr ||
+                workspace_->TlsHandshakeScratch.Length < TlsScratchRequiredLength) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            RtlSecureZeroMemory(workspace_->TlsHandshakeScratch.Data, workspace_->TlsHandshakeScratch.Length);
+            return STATUS_SUCCESS;
+        }
+
+        if (ownedTlsScratch_ == nullptr || ownedTlsScratchLength_ < TlsScratchRequiredLength) {
+            if (ownedTlsScratch_ != nullptr) {
+                RtlSecureZeroMemory(ownedTlsScratch_, ownedTlsScratchLength_);
+                delete[] ownedTlsScratch_;
+                ownedTlsScratch_ = nullptr;
+                ownedTlsScratchLength_ = 0;
+            }
+
+            ownedTlsScratch_ = new UCHAR[TlsScratchRequiredLength];
+            if (ownedTlsScratch_ == nullptr) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            ownedTlsScratchLength_ = TlsScratchRequiredLength;
+        }
+
+        RtlSecureZeroMemory(ownedTlsScratch_, ownedTlsScratchLength_);
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS TlsConnection::GetHandshakeScratch(
+        SIZE_T offset,
+        SIZE_T length,
+        UCHAR** buffer) noexcept
+    {
+        if (buffer != nullptr) {
+            *buffer = nullptr;
+        }
+
+        if (buffer == nullptr || length == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        UCHAR* base = nullptr;
+        SIZE_T capacity = 0;
+        if (workspace_ != nullptr) {
+            base = workspace_->TlsHandshakeScratch.Data;
+            capacity = workspace_->TlsHandshakeScratch.Length;
+        }
+        else {
+            base = ownedTlsScratch_;
+            capacity = ownedTlsScratchLength_;
+        }
+
+        if (base == nullptr || offset > capacity || length > capacity - offset) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        *buffer = base + offset;
+        return STATUS_SUCCESS;
     }
 
     NTSTATUS TlsConnection::Connect(
@@ -379,6 +489,11 @@ namespace tls
         }
 
         Reset();
+
+        NTSTATUS status = PrepareScratch(options);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
 
         if (ProtocolAllowed(options, TlsProtocol::Tls13)) {
             return ConnectTls13(socket, options);
@@ -408,7 +523,15 @@ namespace tls
             return STATUS_NOT_SUPPORTED;
         }
 
-        UCHAR message[2048] = {};
+        UCHAR* message = nullptr;
+        status = GetHandshakeScratch(
+            TlsScratchClientHelloOffset,
+            TlsScratchClientHelloLength,
+            &message);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        RtlSecureZeroMemory(message, TlsScratchClientHelloLength);
         SIZE_T messageLength = 0;
 
         TlsClientHelloOptions hello = {};
@@ -421,15 +544,23 @@ namespace tls
             context_,
             hello,
             message,
-            sizeof(message),
+            TlsScratchClientHelloLength,
             &messageLength);
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection encode ClientHello failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
-        UCHAR clientHello[2048] = {};
-        if (messageLength > sizeof(clientHello)) {
+        UCHAR* clientHello = nullptr;
+        status = GetHandshakeScratch(
+            TlsScratchFirstClientHelloOffset,
+            TlsScratchFirstClientHelloLength,
+            &clientHello);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        RtlSecureZeroMemory(clientHello, TlsScratchFirstClientHelloLength);
+        if (messageLength > TlsScratchFirstClientHelloLength) {
             return STATUS_BUFFER_TOO_SMALL;
         }
 
@@ -496,7 +627,7 @@ namespace tls
         if (NT_SUCCESS(status)) {
             status = transcript_.Update(handshakeBuffer_ + lastHandshakeOffset_, lastHandshakeLength_);
         }
-        RtlSecureZeroMemory(clientHello, sizeof(clientHello));
+        RtlSecureZeroMemory(clientHello, TlsScratchFirstClientHelloLength);
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection update transcript after ServerHello failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -525,6 +656,8 @@ namespace tls
         validation.HostName = options.ServerName;
         validation.HostNameLength = options.ServerNameLength;
         validation.Store = options.CertificateStore;
+        validation.Workspace = options.Workspace;
+        validation.ProviderCache = options.ProviderCache;
         validation.VerifyCertificate = options.VerifyCertificate;
 
         CertificateValidationResult validationResult = {};
@@ -542,7 +675,7 @@ namespace tls
         }
 
         crypto::CngKey serverPublicKey;
-        status = CertificateValidator::ImportSubjectPublicKey(validationResult.Leaf, serverPublicKey);
+        status = CertificateValidator::ImportSubjectPublicKey(providerCache_, validationResult.Leaf, serverPublicKey);
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection import server public key failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -572,6 +705,7 @@ namespace tls
 
         crypto::CngKey peerKey;
         status = crypto::CngProvider::ImportEcdhPublicKey(
+            providerCache_,
             ToEcCurve(keyExchange.NamedGroup),
             keyExchange.EcPoint,
             keyExchange.EcPointLength,
@@ -629,7 +763,12 @@ namespace tls
             return status;
         }
 
-        status = GenerateClientKeyExchange(keyExchange.NamedGroup, peerKey, message, sizeof(message), &messageLength);
+        status = GenerateClientKeyExchange(
+            keyExchange.NamedGroup,
+            peerKey,
+            message,
+            TlsScratchClientHelloLength,
+            &messageLength);
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection generate ClientKeyExchange failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -665,7 +804,7 @@ namespace tls
             transcriptHash,
             transcriptHashLength,
             message,
-            sizeof(message),
+            TlsScratchClientHelloLength,
             &messageLength);
         RtlSecureZeroMemory(transcriptHash, sizeof(transcriptHash));
         if (!NT_SUCCESS(status)) {
@@ -758,7 +897,7 @@ namespace tls
         }
 
         crypto::CngKey privateKey;
-        status = crypto::CngProvider::GenerateEcdhKeyPair(crypto::EcCurve::P256, privateKey);
+        status = crypto::CngProvider::GenerateEcdhKeyPair(providerCache_, crypto::EcCurve::P256, privateKey);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -829,9 +968,22 @@ namespace tls
         hello.PskIdentityCount = pskIdentity.IdentityLength != 0 ? 1 : 0;
         hello.OfferEarlyData = options.EnableEarlyData && earlyDataAllowed;
 
-        UCHAR message[2048] = {};
+        UCHAR* message = nullptr;
+        status = GetHandshakeScratch(
+            TlsScratchClientHelloOffset,
+            TlsScratchClientHelloLength,
+            &message);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        RtlSecureZeroMemory(message, TlsScratchClientHelloLength);
         SIZE_T messageLength = 0;
-        status = TlsHandshake13::EncodeClientHello(context_, hello, message, sizeof(message), &messageLength);
+        status = TlsHandshake13::EncodeClientHello(
+            context_,
+            hello,
+            message,
+            TlsScratchClientHelloLength,
+            &messageLength);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -846,6 +998,7 @@ namespace tls
                 &binderTranscriptLength);
             if (NT_SUCCESS(status)) {
                 status = crypto::CngProvider::Hash(
+                    providerCache_,
                     TlsHandshake13::HashForCipherSuite(context_.CipherSuite()),
                     message,
                     binderTranscriptLength,
@@ -869,22 +1022,51 @@ namespace tls
                 return status;
             }
 
-            status = TlsHandshake13::EncodeClientHello(context_, hello, message, sizeof(message), &messageLength);
+            status = TlsHandshake13::EncodeClientHello(
+                context_,
+                hello,
+                message,
+                TlsScratchClientHelloLength,
+                &messageLength);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
         }
 
-        UCHAR firstClientHello[2048] = {};
+        UCHAR* firstClientHello = nullptr;
+        status = GetHandshakeScratch(
+            TlsScratchFirstClientHelloOffset,
+            TlsScratchFirstClientHelloLength,
+            &firstClientHello);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        RtlSecureZeroMemory(firstClientHello, TlsScratchFirstClientHelloLength);
         SIZE_T firstClientHelloLength = messageLength;
-        if (firstClientHelloLength > sizeof(firstClientHello)) {
+        if (firstClientHelloLength > TlsScratchFirstClientHelloLength) {
             return STATUS_BUFFER_TOO_SMALL;
         }
         RtlCopyMemory(firstClientHello, message, firstClientHelloLength);
 
-        UCHAR secondClientHello[2048] = {};
+        UCHAR* secondClientHello = nullptr;
+        status = GetHandshakeScratch(
+            TlsScratchSecondClientHelloOffset,
+            TlsScratchSecondClientHelloLength,
+            &secondClientHello);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        RtlSecureZeroMemory(secondClientHello, TlsScratchSecondClientHelloLength);
         SIZE_T secondClientHelloLength = 0;
-        UCHAR helloRetryRequest[512] = {};
+        UCHAR* helloRetryRequest = nullptr;
+        status = GetHandshakeScratch(
+            TlsScratchHelloRetryOffset,
+            TlsScratchHelloRetryLength,
+            &helloRetryRequest);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        RtlSecureZeroMemory(helloRetryRequest, TlsScratchHelloRetryLength);
         SIZE_T helloRetryRequestLength = 0;
         bool usedHelloRetryRequest = false;
 
@@ -949,7 +1131,7 @@ namespace tls
         if (serverHello.IsHelloRetryRequest) {
             usedHelloRetryRequest = true;
             helloRetryRequestLength = lastHandshakeLength_;
-            if (helloRetryRequestLength > sizeof(helloRetryRequest)) {
+            if (helloRetryRequestLength > TlsScratchHelloRetryLength) {
                 return STATUS_BUFFER_TOO_SMALL;
             }
             RtlCopyMemory(helloRetryRequest, handshakeBuffer_ + lastHandshakeOffset_, helloRetryRequestLength);
@@ -961,7 +1143,10 @@ namespace tls
             }
 
             privateKey.Close();
-            status = crypto::CngProvider::GenerateEcdhKeyPair(ToEcCurve(serverHello.RetryGroup), privateKey);
+            status = crypto::CngProvider::GenerateEcdhKeyPair(
+                providerCache_,
+                ToEcCurve(serverHello.RetryGroup),
+                privateKey);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -994,12 +1179,17 @@ namespace tls
             keyShare.Group = serverHello.RetryGroup;
             keyShare.KeyExchange = publicPoint;
             keyShare.KeyExchangeLength = publicPointLength;
-            status = TlsHandshake13::EncodeClientHello(context_, hello, message, sizeof(message), &messageLength);
+            status = TlsHandshake13::EncodeClientHello(
+                context_,
+                hello,
+                message,
+                TlsScratchClientHelloLength,
+                &messageLength);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
             secondClientHelloLength = messageLength;
-            if (secondClientHelloLength > sizeof(secondClientHello)) {
+            if (secondClientHelloLength > TlsScratchSecondClientHelloLength) {
                 return STATUS_BUFFER_TOO_SMALL;
             }
             RtlCopyMemory(secondClientHello, message, secondClientHelloLength);
@@ -1028,6 +1218,7 @@ namespace tls
 
         crypto::CngKey peerKey;
         status = crypto::CngProvider::ImportEcdhPublicKey(
+            providerCache_,
             ToEcCurve(serverHello.KeyShare.Group),
             serverHello.KeyShare.KeyExchange,
             serverHello.KeyShare.KeyExchangeLength,
@@ -1039,6 +1230,7 @@ namespace tls
         UCHAR sharedSecret[66] = {};
         SIZE_T sharedSecretLength = 0;
         status = crypto::CngProvider::DeriveEcdhSecret(
+            providerCache_,
             privateKey,
             peerKey,
             sharedSecret,
@@ -1090,9 +1282,9 @@ namespace tls
         if (NT_SUCCESS(status)) {
             status = transcript_.Update(handshakeBuffer_ + lastHandshakeOffset_, lastHandshakeLength_);
         }
-        RtlSecureZeroMemory(firstClientHello, sizeof(firstClientHello));
-        RtlSecureZeroMemory(secondClientHello, sizeof(secondClientHello));
-        RtlSecureZeroMemory(helloRetryRequest, sizeof(helloRetryRequest));
+        RtlSecureZeroMemory(firstClientHello, TlsScratchFirstClientHelloLength);
+        RtlSecureZeroMemory(secondClientHello, TlsScratchSecondClientHelloLength);
+        RtlSecureZeroMemory(helloRetryRequest, TlsScratchHelloRetryLength);
         if (!NT_SUCCESS(status)) {
             RtlSecureZeroMemory(sharedSecret, sizeof(sharedSecret));
             return status;
@@ -1258,7 +1450,7 @@ namespace tls
                 transcriptHash,
                 transcriptHashLength,
                 message,
-                sizeof(message),
+                TlsScratchClientHelloLength,
                 &messageLength);
         }
         RtlSecureZeroMemory(transcriptHash, sizeof(transcriptHash));
@@ -1728,23 +1920,26 @@ namespace tls
         const TlsClientConnectionOptions& options,
         crypto::CngKey& serverPublicKey) noexcept
     {
-        UCHAR* legacyCertificateList = new UCHAR[TlsHandshakeBufferLength];
-        if (legacyCertificateList == nullptr) {
-            return STATUS_INSUFFICIENT_RESOURCES;
+        UCHAR* legacyCertificateList = nullptr;
+        NTSTATUS status = GetHandshakeScratch(
+            TlsScratchLegacyCertificateOffset,
+            TlsScratchLegacyCertificateLength,
+            &legacyCertificateList);
+        if (!NT_SUCCESS(status)) {
+            return status;
         }
 
-        RtlZeroMemory(legacyCertificateList, TlsHandshakeBufferLength);
+        RtlZeroMemory(legacyCertificateList, TlsScratchLegacyCertificateLength);
         SIZE_T legacyCertificateListLength = 0;
         SIZE_T certificateCount = 0;
-        NTSTATUS status = ConvertTls13CertificateListToLegacy(
+        status = ConvertTls13CertificateListToLegacy(
             certificate,
             legacyCertificateList,
-            TlsHandshakeBufferLength,
+            TlsScratchLegacyCertificateLength,
             &legacyCertificateListLength,
             &certificateCount);
         if (!NT_SUCCESS(status)) {
-            RtlSecureZeroMemory(legacyCertificateList, TlsHandshakeBufferLength);
-            delete[] legacyCertificateList;
+            RtlSecureZeroMemory(legacyCertificateList, TlsScratchLegacyCertificateLength);
             return status;
         }
 
@@ -1752,6 +1947,8 @@ namespace tls
         validation.HostName = options.ServerName;
         validation.HostNameLength = options.ServerNameLength;
         validation.Store = options.CertificateStore;
+        validation.Workspace = options.Workspace;
+        validation.ProviderCache = options.ProviderCache;
         validation.VerifyCertificate = options.VerifyCertificate;
 
         CertificateChainView chain = {};
@@ -1762,10 +1959,9 @@ namespace tls
         CertificateValidationResult result = {};
         status = CertificateValidator::ValidateChain(chain, validation, &result);
         if (NT_SUCCESS(status)) {
-            status = CertificateValidator::ImportSubjectPublicKey(result.Leaf, serverPublicKey);
+            status = CertificateValidator::ImportSubjectPublicKey(providerCache_, result.Leaf, serverPublicKey);
         }
-        RtlSecureZeroMemory(legacyCertificateList, TlsHandshakeBufferLength);
-        delete[] legacyCertificateList;
+        RtlSecureZeroMemory(legacyCertificateList, TlsScratchLegacyCertificateLength);
         return status;
     }
 
@@ -1775,14 +1971,22 @@ namespace tls
         const UCHAR* transcriptHash,
         SIZE_T transcriptHashLength) noexcept
     {
-        UCHAR signedInput[128] = {};
+        UCHAR* signedInput = nullptr;
+        NTSTATUS status = GetHandshakeScratch(
+            TlsScratchSignedInputOffset,
+            TlsScratchSignedInputLength,
+            &signedInput);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        RtlSecureZeroMemory(signedInput, TlsScratchSignedInputLength);
         SIZE_T signedInputLength = 0;
-        NTSTATUS status = TlsHandshake13::BuildCertificateVerifyInput(
+        status = TlsHandshake13::BuildCertificateVerifyInput(
             true,
             transcriptHash,
             transcriptHashLength,
             signedInput,
-            sizeof(signedInput),
+            TlsScratchSignedInputLength,
             &signedInputLength);
         if (!NT_SUCCESS(status)) {
             return status;
@@ -1791,18 +1995,20 @@ namespace tls
         UCHAR hash[48] = {};
         SIZE_T hashLength = 0;
         status = crypto::CngProvider::Hash(
+            providerCache_,
             HashForTls13Signature(certificateVerify.SignatureScheme),
             signedInput,
             signedInputLength,
             hash,
             sizeof(hash),
             &hashLength);
-        RtlSecureZeroMemory(signedInput, sizeof(signedInput));
+        RtlSecureZeroMemory(signedInput, TlsScratchSignedInputLength);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
         status = crypto::CngProvider::VerifySignature(
+            providerCache_,
             ToTls13SignatureAlgorithm(certificateVerify.SignatureScheme),
             serverPublicKey,
             hash,
@@ -2065,8 +2271,17 @@ namespace tls
         const TlsServerKeyExchangeView& keyExchange,
         const crypto::CngKey& serverPublicKey) noexcept
     {
-        UCHAR signedData[(TlsRandomLength * 2) + 256] = {};
-        if (keyExchange.ParametersLength > sizeof(signedData) - (TlsRandomLength * 2)) {
+        UCHAR* signedData = nullptr;
+        NTSTATUS status = GetHandshakeScratch(
+            TlsScratchSignedDataOffset,
+            TlsScratchSignedDataLength,
+            &signedData);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        RtlSecureZeroMemory(signedData, TlsScratchSignedDataLength);
+
+        if (keyExchange.ParametersLength > TlsScratchSignedDataLength - (TlsRandomLength * 2)) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -2076,19 +2291,21 @@ namespace tls
 
         UCHAR hash[48] = {};
         SIZE_T hashLength = 0;
-        NTSTATUS status = crypto::CngProvider::Hash(
+        status = crypto::CngProvider::Hash(
+            providerCache_,
             HashForSignature(keyExchange.SignatureScheme),
             signedData,
             (TlsRandomLength * 2) + keyExchange.ParametersLength,
             hash,
             sizeof(hash),
             &hashLength);
-        RtlSecureZeroMemory(signedData, sizeof(signedData));
+        RtlSecureZeroMemory(signedData, TlsScratchSignedDataLength);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
         status = crypto::CngProvider::VerifySignature(
+            providerCache_,
             ToSignatureAlgorithm(keyExchange.SignatureScheme),
             serverPublicKey,
             hash,
@@ -2113,7 +2330,10 @@ namespace tls
         *bytesWritten = 0;
 
         crypto::CngKey privateKey;
-        NTSTATUS status = crypto::CngProvider::GenerateEcdhKeyPair(ToEcCurve(namedGroup), privateKey);
+        NTSTATUS status = crypto::CngProvider::GenerateEcdhKeyPair(
+            providerCache_,
+            ToEcCurve(namedGroup),
+            privateKey);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -2152,6 +2372,7 @@ namespace tls
         UCHAR premasterSecret[66] = {};
         SIZE_T secretLength = 0;
         status = crypto::CngProvider::DeriveEcdhSecret(
+            providerCache_,
             privateKey,
             peerKey,
             premasterSecret,

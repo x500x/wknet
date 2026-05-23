@@ -1528,12 +1528,13 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS EnsureTlsConnected(
+        _In_ KH_SESSION session,
         const KhRequest& request,
         _Inout_ KhPooledConnection& connection,
         _In_reads_bytes_(earlyDataLength) const UCHAR* earlyData,
         SIZE_T earlyDataLength) noexcept
     {
-        if (connection.Socket == nullptr) {
+        if (session == nullptr || connection.Socket == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -1561,6 +1562,8 @@ namespace
         tlsOptions.VerifyCertificate = request.Tls.CertificatePolicy == KhCertificatePolicy::Verify;
         tlsOptions.MinimumProtocol = ToTlsProtocol(request.Tls.MinVersion);
         tlsOptions.MaximumProtocol = ToTlsProtocol(request.Tls.MaxVersion);
+        tlsOptions.Workspace = session->Workspace;
+        tlsOptions.ProviderCache = session->ProviderCache;
         tlsOptions.EnableSessionResumption = true;
 
         if (request.Tls.Alpn != nullptr && request.Tls.AlpnLength != 0) {
@@ -1685,6 +1688,7 @@ namespace
         tls::TlsConnection* tlsConnection = nullptr;
         if (TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https")) {
             status = EnsureTlsConnected(
+                session,
                 request,
                 *pooledConnection,
                 reinterpret_cast<const UCHAR*>(workspace.Request.Data),
@@ -1989,6 +1993,8 @@ namespace
         connectOptions.Path = newWebSocket->Path;
         connectOptions.PathLength = newWebSocket->PathLength;
         connectOptions.CertificateStore = options.Tls.CertificateStore;
+        connectOptions.Workspace = session->Workspace;
+        connectOptions.ProviderCache = session->ProviderCache;
         connectOptions.UseTls = TextEqualsLiteralIgnoreCase(newWebSocket->Scheme, newWebSocket->SchemeLength, "wss");
         connectOptions.VerifyCertificate = options.Tls.CertificatePolicy == KhCertificatePolicy::Verify;
 

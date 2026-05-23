@@ -232,6 +232,8 @@ namespace client
             tlsOptions.ServerName = options.TlsServerName;
             tlsOptions.ServerNameLength = options.TlsServerNameLength;
             tlsOptions.CertificateStore = options.CertificateStore;
+            tlsOptions.Workspace = options.Workspace;
+            tlsOptions.ProviderCache = options.ProviderCache;
             tlsOptions.VerifyCertificate = options.VerifyCertificate;
 
             status = tls_->Connect(socket_, tlsOptions);

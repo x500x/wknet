@@ -6,6 +6,16 @@
 
 namespace KernelHttp
 {
+namespace api
+{
+    struct KhWorkspace;
+}
+
+namespace crypto
+{
+    class CngProviderCache;
+}
+
 namespace tls
 {
     constexpr SIZE_T TlsIoBufferLength = TlsRecordHeaderLength + TlsMaxPlaintextLength + 2048;
@@ -27,6 +37,8 @@ namespace tls
         TlsProtocol MinimumProtocol = TlsProtocol::Tls12;
         TlsProtocol MaximumProtocol = TlsProtocol::Tls13;
         Tls13SessionCache* SessionCache = nullptr;
+        api::KhWorkspace* Workspace = nullptr;
+        const crypto::CngProviderCache* ProviderCache = nullptr;
         bool EnableSessionResumption = true;
         bool EnableEarlyData = false;
     };
@@ -71,6 +83,16 @@ namespace tls
         SIZE_T NegotiatedAlpnLength() const noexcept;
 
     private:
+        _Must_inspect_result_
+        NTSTATUS PrepareScratch(
+            _In_ const TlsClientConnectionOptions& options) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS GetHandshakeScratch(
+            SIZE_T offset,
+            SIZE_T length,
+            _Outptr_result_bytebuffer_(length) UCHAR** buffer) noexcept;
+
         _Must_inspect_result_
         NTSTATUS ConnectTls12(
             _Inout_ net::WskSocket& socket,
@@ -195,6 +217,10 @@ namespace tls
         TlsAeadCipherState clientWriteState_ = {};
         TlsAeadCipherState serverWriteState_ = {};
         TlsTranscriptHash transcript_ = {};
+        api::KhWorkspace* workspace_ = nullptr;
+        const crypto::CngProviderCache* providerCache_ = nullptr;
+        UCHAR* ownedTlsScratch_ = nullptr;
+        SIZE_T ownedTlsScratchLength_ = 0;
         UCHAR inputBuffer_[TlsIoBufferLength] = {};
         UCHAR outputBuffer_[TlsIoBufferLength] = {};
         SIZE_T inputLength_ = 0;

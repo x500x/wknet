@@ -1428,6 +1428,47 @@ namespace
 
         KhTestResetCurrentIrql();
     }
+
+    bool FileContains(const char* path, const char* needle)
+    {
+        FILE* file = nullptr;
+        if (fopen_s(&file, path, "rb") != 0 || file == nullptr) {
+            g_failed = true;
+            printf("FAIL: unable to open %s\n", path);
+            return false;
+        }
+
+        char line[1024] = {};
+        bool found = false;
+        while (fgets(line, sizeof(line), file) != nullptr) {
+            if (strstr(line, needle) != nullptr) {
+                found = true;
+                break;
+            }
+        }
+
+        fclose(file);
+        return found;
+    }
+
+    void TestBlueScreenPathUsesWorkspaceAndProviderCache()
+    {
+        Expect(
+            FileContains("src\\KernelHttp\\tls\\TlsConnection.cpp", "providerCache_ = options.ProviderCache"),
+            "TLS connection options carry provider cache");
+        Expect(
+            FileContains("src\\KernelHttp\\tls\\TlsConnection.cpp", "validation.ProviderCache = options.ProviderCache"),
+            "TLS certificate validation receives provider cache");
+        Expect(
+            FileContains("src\\KernelHttp\\tls\\CertificateValidator.cpp", "PrepareCertificateValidationScratch"),
+            "certificate validation uses explicit scratch storage");
+        Expect(
+            FileContains("src\\KernelHttp\\tls\\CertificateValidator.cpp", "options.Workspace->CertificateScratch"),
+            "certificate validation uses workspace certificate scratch");
+        Expect(
+            FileContains("src\\KernelHttp\\api\\KernelHttpApi.cpp", "tlsOptions.ProviderCache = session->ProviderCache"),
+            "high-level API passes session provider cache into TLS");
+    }
 }
 
 int main()
@@ -1450,6 +1491,7 @@ int main()
     TestWebSocketAsyncBehavior();
     TestAsyncValidation();
     TestIrqlGuards();
+    TestBlueScreenPathUsesWorkspaceAndProviderCache();
 
     if (g_failed) {
         return 1;
