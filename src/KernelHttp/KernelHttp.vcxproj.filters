@@ -72,6 +72,9 @@
     <ClCompile Include="api\KernelHttpApi.cpp">
       <Filter>Source Files\api</Filter>
     </ClCompile>
+    <ClCompile Include="api\KernelHttpConnectionPool.cpp">
+      <Filter>Source Files\api</Filter>
+    </ClCompile>
     <ClCompile Include="api\KernelHttpWorkspace.cpp">
       <Filter>Source Files\api</Filter>
     </ClCompile>
@@ -162,6 +165,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="api\KernelHttpApi.h">
+      <Filter>Header Files\api</Filter>
+    </ClInclude>
+    <ClInclude Include="api\KernelHttpConnectionPool.h">
       <Filter>Header Files\api</Filter>
     </ClInclude>
     <ClInclude Include="api\KernelHttpWorkspace.h">

@@ -3,6 +3,7 @@
 #endif
 
 #include "../src/KernelHttp/api/KernelHttpApi.h"
+#include "../src/KernelHttp/api/KernelHttpConnectionPool.h"
 #include "../src/KernelHttp/api/KernelHttpWorkspace.h"
 #include "../src/KernelHttp/crypto/CngProviderCache.h"
 
@@ -18,6 +19,14 @@ using KernelHttp::api::KhAsyncCancel;
 using KernelHttp::api::KhAsyncRelease;
 using KernelHttp::api::KhAsyncWait;
 using KernelHttp::api::KhCertificatePolicy;
+using KernelHttp::api::KhConnectionPool;
+using KernelHttp::api::KhConnectionPoolAcquire;
+using KernelHttp::api::KhConnectionPoolClose;
+using KernelHttp::api::KhConnectionPoolInitialize;
+using KernelHttp::api::KhConnectionPoolKey;
+using KernelHttp::api::KhConnectionPoolKeysEqual;
+using KernelHttp::api::KhConnectionPoolRelease;
+using KernelHttp::api::KhConnectionPoolShutdown;
 using KernelHttp::api::KhConnectionPolicy;
 using KernelHttp::api::KhDefaultConnectionPoolCapacity;
 using KernelHttp::api::KhDefaultConnectionsPerHost;
@@ -32,6 +41,7 @@ using KernelHttp::api::KhHttpRequestSetHeader;
 using KernelHttp::api::KhHttpRequestSetMethod;
 using KernelHttp::api::KhHttpRequestSetTlsOptions;
 using KernelHttp::api::KhHttpRequestSetUrl;
+using KernelHttp::api::KhResponseGetHeader;
 using KernelHttp::api::KhHttpSendAsync;
 using KernelHttp::api::KhHttpSendFlagAggregateWithCallbacks;
 using KernelHttp::api::KhHttpSendOptions;
@@ -46,6 +56,9 @@ using KernelHttp::api::KhSessionClose;
 using KernelHttp::api::KhSessionCreate;
 using KernelHttp::api::KhSessionOptions;
 using KernelHttp::api::KhTestResetCurrentIrql;
+using KernelHttp::api::KhTestHttpTransportRequest;
+using KernelHttp::api::KhTestHttpTransportResponse;
+using KernelHttp::api::KhTestSetHttpTransport;
 using KernelHttp::api::KhTestSetCurrentIrql;
 using KernelHttp::api::KhTlsOptions;
 using KernelHttp::api::KhTlsVersion;
@@ -131,6 +144,115 @@ namespace
         UNREFERENCED_PARAMETER(data);
         UNREFERENCED_PARAMETER(dataLength);
         UNREFERENCED_PARAMETER(finalFragment);
+        return STATUS_SUCCESS;
+    }
+
+    struct HeaderCapture
+    {
+        SIZE_T Count = 0;
+        char LastName[32] = {};
+        SIZE_T LastNameLength = 0;
+        char LastValue[64] = {};
+        SIZE_T LastValueLength = 0;
+    };
+
+    struct BodyCapture
+    {
+        SIZE_T Count = 0;
+        UCHAR Data[128] = {};
+        SIZE_T DataLength = 0;
+        bool FinalChunk = false;
+        NTSTATUS ReturnStatus = STATUS_SUCCESS;
+    };
+
+    struct TransportContext
+    {
+        SIZE_T CallCount = 0;
+        ULONG LastConnectionId = 0;
+        bool LastReused = false;
+        KhConnectionPolicy LastPolicy = KhConnectionPolicy::ReuseOrCreate;
+        bool LastPoolable = false;
+        char LastHost[64] = {};
+        USHORT LastPort = 0;
+        char LastRequest[512] = {};
+        SIZE_T LastRequestLength = 0;
+        const char* Response = nullptr;
+        SIZE_T ResponseLength = 0;
+        bool ConnectionReusable = true;
+    };
+
+    NTSTATUS CapturingHeaderCallback(
+        void* context,
+        const char* name,
+        SIZE_T nameLength,
+        const char* value,
+        SIZE_T valueLength)
+    {
+        auto* capture = static_cast<HeaderCapture*>(context);
+        if (capture == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->Count;
+        capture->LastNameLength = nameLength < sizeof(capture->LastName) ? nameLength : sizeof(capture->LastName);
+        capture->LastValueLength = valueLength < sizeof(capture->LastValue) ? valueLength : sizeof(capture->LastValue);
+        RtlCopyMemory(capture->LastName, name, capture->LastNameLength);
+        RtlCopyMemory(capture->LastValue, value, capture->LastValueLength);
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS CapturingBodyCallback(void* context, const UCHAR* data, SIZE_T dataLength, bool finalChunk)
+    {
+        auto* capture = static_cast<BodyCapture*>(context);
+        if (capture == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->Count;
+        capture->DataLength = dataLength < sizeof(capture->Data) ? dataLength : sizeof(capture->Data);
+        if (capture->DataLength != 0) {
+            RtlCopyMemory(capture->Data, data, capture->DataLength);
+        }
+        capture->FinalChunk = finalChunk;
+        return capture->ReturnStatus;
+    }
+
+    NTSTATUS TestHttpTransport(
+        void* context,
+        const KhTestHttpTransportRequest* request,
+        KhTestHttpTransportResponse* response)
+    {
+        auto* transport = static_cast<TransportContext*>(context);
+        if (transport == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++transport->CallCount;
+        transport->LastConnectionId = request->ConnectionId;
+        transport->LastReused = request->ReusedConnection;
+        transport->LastPolicy = request->ConnectionPolicy;
+        transport->LastPoolable = request->PoolableConnection;
+        transport->LastPort = request->Port;
+
+        const SIZE_T hostLength = request->HostLength < sizeof(transport->LastHost) - 1 ?
+            request->HostLength :
+            sizeof(transport->LastHost) - 1;
+        if (hostLength != 0) {
+            RtlCopyMemory(transport->LastHost, request->Host, hostLength);
+        }
+        transport->LastHost[hostLength] = '\0';
+
+        transport->LastRequestLength = request->BuiltRequestLength < sizeof(transport->LastRequest) - 1 ?
+            request->BuiltRequestLength :
+            sizeof(transport->LastRequest) - 1;
+        if (transport->LastRequestLength != 0) {
+            RtlCopyMemory(transport->LastRequest, request->BuiltRequest, transport->LastRequestLength);
+        }
+        transport->LastRequest[transport->LastRequestLength] = '\0';
+
+        response->RawResponse = transport->Response;
+        response->RawResponseLength = transport->ResponseLength;
+        response->ConnectionReusable = transport->ConnectionReusable;
         return STATUS_SUCCESS;
     }
 
@@ -405,8 +527,10 @@ namespace
         Expect(status == STATUS_INVALID_PARAMETER, "set header rejects empty name");
         status = KhHttpRequestSetHeader(request, "Name", 4, nullptr, 0);
         Expect(status == STATUS_INVALID_PARAMETER, "set header rejects null value");
+        status = KhHttpRequestSetHeader(request, "Name", 4, "", 0);
+        Expect(status == STATUS_INVALID_PARAMETER, "set header rejects empty value");
         status = KhHttpRequestSetHeader(request, "Name", 4, "Value", 5);
-        Expect(status == STATUS_NOT_SUPPORTED, "set header is explicit not-supported until header store chunk");
+        Expect(status == STATUS_SUCCESS, "set header stores valid header");
 
         const UCHAR body[] = { 'o', 'k' };
         status = KhHttpRequestSetBody(request, nullptr, sizeof(body));
@@ -474,12 +598,12 @@ namespace
         options.BodyCallback = TestBodyCallback;
         options.CallbackContext = &options;
         status = KhHttpSendSync(session, request, &options, nullptr);
-        Expect(status == STATUS_NOT_SUPPORTED, "send sync validates callback-only mode before transport chunk");
+        Expect(status == STATUS_NOT_SUPPORTED, "send sync reports not-supported when no test transport is installed");
 
         options = {};
         options.HeaderCallback = TestHeaderCallback;
         status = KhHttpSendSync(session, request, &options, nullptr);
-        Expect(status == STATUS_NOT_SUPPORTED, "send sync validates header callback mode before transport chunk");
+        Expect(status == STATUS_INVALID_PARAMETER, "send sync rejects aggregation without response output");
 
         KH_ASYNC_OPERATION operation = reinterpret_cast<KH_ASYNC_OPERATION>(static_cast<size_t>(1));
         status = KhHttpSendAsync(session, request, nullptr, nullptr);
@@ -492,6 +616,292 @@ namespace
         KhSessionClose(session);
     }
 
+    void TestConnectionPoolKeys()
+    {
+        KhConnectionPoolKey first = {};
+        RtlCopyMemory(first.Scheme, "https", 5);
+        first.SchemeLength = 5;
+        RtlCopyMemory(first.Host, "example.com", 11);
+        first.HostLength = 11;
+        first.Port = 443;
+        first.MinTlsVersion = KhTlsVersion::Tls12;
+        first.MaxTlsVersion = KhTlsVersion::Tls13;
+        first.CertificatePolicy = KhCertificatePolicy::Verify;
+        RtlCopyMemory(first.Alpn, "h2", 2);
+        first.AlpnLength = 2;
+
+        KhConnectionPoolKey second = first;
+        Expect(KhConnectionPoolKeysEqual(first, second), "pool keys match when all dimensions match");
+
+        second = first;
+        RtlCopyMemory(second.Scheme, "http", 4);
+        second.SchemeLength = 4;
+        Expect(!KhConnectionPoolKeysEqual(first, second), "pool key includes scheme");
+
+        second = first;
+        RtlCopyMemory(second.Host, "other.test", 10);
+        second.HostLength = 10;
+        Expect(!KhConnectionPoolKeysEqual(first, second), "pool key includes host");
+
+        second = first;
+        second.Port = 8443;
+        Expect(!KhConnectionPoolKeysEqual(first, second), "pool key includes port");
+
+        second = first;
+        second.MinTlsVersion = KhTlsVersion::Tls13;
+        Expect(!KhConnectionPoolKeysEqual(first, second), "pool key includes min TLS version");
+
+        second = first;
+        second.CertificatePolicy = KhCertificatePolicy::NoVerify;
+        Expect(!KhConnectionPoolKeysEqual(first, second), "pool key includes certificate policy");
+
+        second = first;
+        RtlCopyMemory(second.Alpn, "http/1.1", 8);
+        second.AlpnLength = 8;
+        Expect(!KhConnectionPoolKeysEqual(first, second), "pool key includes ALPN");
+    }
+
+    void TestConnectionPoolAcquireRelease()
+    {
+        KhConnectionPool pool = {};
+        NTSTATUS status = KhConnectionPoolInitialize(&pool, 2);
+        Expect(status == STATUS_SUCCESS, "connection pool initializes");
+
+        KhConnectionPoolKey key = {};
+        RtlCopyMemory(key.Scheme, "https", 5);
+        key.SchemeLength = 5;
+        RtlCopyMemory(key.Host, "example.com", 11);
+        key.HostLength = 11;
+        key.Port = 443;
+
+        KernelHttp::api::KhPooledConnection* first = nullptr;
+        bool reused = true;
+        status = KhConnectionPoolAcquire(&pool, key, KhConnectionPolicy::ReuseOrCreate, &first, &reused);
+        Expect(status == STATUS_SUCCESS, "pool acquire creates first connection");
+        Expect(first != nullptr && !reused, "pool acquire reports new connection");
+        const ULONG firstId = first != nullptr ? first->Id : 0;
+        KhConnectionPoolRelease(&pool, first, true);
+
+        KernelHttp::api::KhPooledConnection* second = nullptr;
+        status = KhConnectionPoolAcquire(&pool, key, KhConnectionPolicy::ReuseOrCreate, &second, &reused);
+        Expect(status == STATUS_SUCCESS, "pool acquire reuses compatible connection");
+        Expect(second == first && reused, "pool returns same compatible idle connection");
+        Expect(second != nullptr && second->Id == firstId, "reused connection keeps identity");
+        KhConnectionPoolRelease(&pool, second, true);
+
+        KernelHttp::api::KhPooledConnection* forced = nullptr;
+        status = KhConnectionPoolAcquire(&pool, key, KhConnectionPolicy::ForceNew, &forced, &reused);
+        Expect(status == STATUS_SUCCESS, "pool force-new creates distinct connection");
+        Expect(forced != nullptr && forced != first && !reused, "force-new bypasses idle reuse");
+        KhConnectionPoolRelease(&pool, forced, false);
+
+        KernelHttp::api::KhPooledConnection* noPool = nullptr;
+        status = KhConnectionPoolAcquire(&pool, key, KhConnectionPolicy::NoPool, &noPool, &reused);
+        Expect(status == STATUS_SUCCESS, "pool no-pool creates fresh connection record");
+        Expect(noPool != nullptr && !reused, "no-pool never reports reuse");
+        KhConnectionPoolRelease(&pool, noPool, false);
+
+        KhConnectionPoolShutdown(&pool);
+    }
+
+    void TestHttpSyncSendResponseManagement()
+    {
+        WskClient* wskClient = FakeWskClient();
+        KH_SESSION session = CreateValidSession(wskClient);
+        KH_REQUEST request = CreateValidRequest(session);
+
+        const char rawResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "X-Test: yes\r\n"
+            "Content-Length: 5\r\n"
+            "\r\n"
+            "hello";
+
+        TransportContext transport = {};
+        transport.Response = rawResponse;
+        transport.ResponseLength = strlen(rawResponse);
+        KhTestSetHttpTransport(TestHttpTransport, &transport);
+
+        NTSTATUS status = KhHttpRequestSetHeader(request, "Accept", 6, "text/plain", 10);
+        Expect(status == STATUS_SUCCESS, "request stores accept header for sync send");
+
+        KH_RESPONSE response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "send sync aggregates full response");
+        Expect(response != nullptr, "send sync returns response handle");
+        Expect(transport.CallCount == 1, "transport called once");
+        Expect(transport.LastPort == 443, "url parser applies HTTPS default port");
+        Expect(strcmp(transport.LastHost, "example.com") == 0, "transport receives parsed host");
+        Expect(strstr(transport.LastRequest, "GET /path HTTP/1.1\r\n") != nullptr, "request builder emits parsed path");
+        Expect(strstr(transport.LastRequest, "Host: example.com\r\n") != nullptr, "request builder emits host");
+        Expect(strstr(transport.LastRequest, "Accept: text/plain\r\n") != nullptr, "request builder emits stored header");
+
+        KhResponseView view = {};
+        status = KhResponseGetView(response, &view);
+        Expect(status == STATUS_SUCCESS, "response view succeeds");
+        Expect(view.StatusCode == 200, "response view exposes status code");
+        Expect(view.BodyLength == 5 && memcmp(view.Body, "hello", 5) == 0, "response view exposes body");
+
+        const char* headerValue = nullptr;
+        SIZE_T headerValueLength = 0;
+        status = KhResponseGetHeader(response, "x-test", 6, &headerValue, &headerValueLength);
+        Expect(status == STATUS_SUCCESS, "response header lookup is case-insensitive");
+        Expect(headerValueLength == 3 && memcmp(headerValue, "yes", 3) == 0, "response header lookup returns value");
+        KhResponseRelease(response);
+
+        BodyCapture bodyCapture = {};
+        KhHttpSendOptions callbackOptions = {};
+        callbackOptions.BodyCallback = CapturingBodyCallback;
+        callbackOptions.CallbackContext = &bodyCapture;
+        status = KhHttpSendSync(session, request, &callbackOptions, nullptr);
+        Expect(status == STATUS_SUCCESS, "callback-only body response succeeds without response handle");
+        Expect(bodyCapture.Count == 1, "body callback invoked once");
+        Expect(bodyCapture.FinalChunk, "body callback marks final chunk");
+        Expect(bodyCapture.DataLength == 5 && memcmp(bodyCapture.Data, "hello", 5) == 0, "body callback receives body");
+
+        bodyCapture = {};
+        callbackOptions = {};
+        callbackOptions.BodyCallback = CapturingBodyCallback;
+        callbackOptions.CallbackContext = &bodyCapture;
+        callbackOptions.Flags = KhHttpSendFlagAggregateWithCallbacks;
+        response = nullptr;
+        status = KhHttpSendSync(session, request, &callbackOptions, &response);
+        Expect(status == STATUS_SUCCESS, "callback plus aggregation succeeds");
+        Expect(response != nullptr, "callback plus aggregation returns response");
+        Expect(bodyCapture.Count == 1, "callback plus aggregation invokes body callback");
+        KhResponseRelease(response);
+
+        HeaderCapture headerCapture = {};
+        callbackOptions = {};
+        callbackOptions.HeaderCallback = CapturingHeaderCallback;
+        callbackOptions.CallbackContext = &headerCapture;
+        response = nullptr;
+        status = KhHttpSendSync(session, request, &callbackOptions, &response);
+        Expect(status == STATUS_SUCCESS, "header callback with aggregation succeeds");
+        Expect(headerCapture.Count > 0, "header callback is invoked");
+        KhResponseRelease(response);
+
+        KhHttpSendOptions maxOptions = {};
+        maxOptions.MaxResponseBytes = 8;
+        response = nullptr;
+        status = KhHttpSendSync(session, request, &maxOptions, &response);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "send sync enforces max response bytes");
+        Expect(response == nullptr, "oversized response does not return handle");
+
+        bodyCapture = {};
+        bodyCapture.ReturnStatus = STATUS_ACCESS_DENIED;
+        callbackOptions = {};
+        callbackOptions.BodyCallback = CapturingBodyCallback;
+        callbackOptions.CallbackContext = &bodyCapture;
+        status = KhHttpSendSync(session, request, &callbackOptions, nullptr);
+        Expect(status == STATUS_ACCESS_DENIED, "send sync returns callback failure");
+
+        KhTestSetHttpTransport(nullptr, nullptr);
+        KhHttpRequestRelease(request);
+        KhSessionClose(session);
+    }
+
+    void TestHttpSyncConnectionPolicies()
+    {
+        WskClient* wskClient = FakeWskClient();
+        KH_SESSION session = CreateValidSession(wskClient);
+        KH_REQUEST request = CreateValidRequest(session);
+
+        const char rawResponse[] =
+            "HTTP/1.1 204 No Content\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+        TransportContext transport = {};
+        transport.Response = rawResponse;
+        transport.ResponseLength = strlen(rawResponse);
+        transport.ConnectionReusable = true;
+        KhTestSetHttpTransport(TestHttpTransport, &transport);
+
+        KH_RESPONSE response = nullptr;
+        NTSTATUS status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "first pooled request succeeds");
+        const ULONG firstConnectionId = transport.LastConnectionId;
+        Expect(firstConnectionId != 0, "first request obtains connection id");
+        Expect(!transport.LastReused, "first request is not reused");
+        KhResponseRelease(response);
+
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "second pooled request succeeds");
+        Expect(transport.LastConnectionId == firstConnectionId, "second request reuses same connection id");
+        Expect(transport.LastReused, "second request reports reuse");
+        KhResponseRelease(response);
+
+        status = KhHttpRequestSetConnectionPolicy(request, KhConnectionPolicy::ForceNew);
+        Expect(status == STATUS_SUCCESS, "request sets force-new policy");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "force-new request succeeds");
+        Expect(transport.LastConnectionId != firstConnectionId, "force-new request gets different connection id");
+        Expect(!transport.LastReused, "force-new request does not reuse");
+        KhResponseRelease(response);
+
+        status = KhHttpRequestSetConnectionPolicy(request, KhConnectionPolicy::NoPool);
+        Expect(status == STATUS_SUCCESS, "request sets no-pool policy");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "no-pool request succeeds");
+        Expect(!transport.LastPoolable, "no-pool request tells transport it is not poolable");
+        KhResponseRelease(response);
+
+        KhTestSetHttpTransport(nullptr, nullptr);
+        KhHttpRequestRelease(request);
+        KhSessionClose(session);
+    }
+
+    void TestHttpUrlRequestTargetParsing()
+    {
+        WskClient* wskClient = FakeWskClient();
+        KH_SESSION session = CreateValidSession(wskClient);
+        KH_REQUEST request = nullptr;
+        NTSTATUS status = KhHttpRequestCreate(session, &request);
+        Expect(status == STATUS_SUCCESS, "request create succeeds for URL target parsing");
+
+        const char rawResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+        TransportContext transport = {};
+        transport.Response = rawResponse;
+        transport.ResponseLength = strlen(rawResponse);
+        KhTestSetHttpTransport(TestHttpTransport, &transport);
+
+        const char queryOnlyUrl[] = "http://Example.com?x=1#frag";
+        status = KhHttpRequestSetUrl(request, queryOnlyUrl, strlen(queryOnlyUrl));
+        Expect(status == STATUS_SUCCESS, "set URL accepts query-only target with fragment");
+
+        KH_RESPONSE response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "query-only URL send succeeds");
+        Expect(strstr(transport.LastRequest, "GET /?x=1 HTTP/1.1\r\n") != nullptr, "query-only URL adds slash and strips fragment");
+        Expect(strstr(transport.LastRequest, "Host: example.com\r\n") != nullptr, "URL parser lowercases host");
+        KhResponseRelease(response);
+
+        const char explicitPortUrl[] = "http://example.com:8080/path";
+        status = KhHttpRequestSetUrl(request, explicitPortUrl, strlen(explicitPortUrl));
+        Expect(status == STATUS_SUCCESS, "set URL accepts explicit port");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "explicit port URL send succeeds");
+        Expect(transport.LastPort == 8080, "URL parser captures explicit port");
+        Expect(strstr(transport.LastRequest, "Host: example.com:8080\r\n") != nullptr, "host header includes non-default port");
+        KhResponseRelease(response);
+
+        const char unsupportedUrl[] = "ftp://example.com/";
+        status = KhHttpRequestSetUrl(request, unsupportedUrl, strlen(unsupportedUrl));
+        Expect(status == STATUS_NOT_SUPPORTED, "set URL rejects unsupported scheme");
+
+        KhTestSetHttpTransport(nullptr, nullptr);
+        KhHttpRequestRelease(request);
+        KhSessionClose(session);
+    }
+
     void TestResponseValidation()
     {
         KhResponseView view = {};
@@ -499,6 +909,11 @@ namespace
         Expect(status == STATUS_INVALID_PARAMETER, "response view rejects null response");
         status = KhResponseGetView(nullptr, nullptr);
         Expect(status == STATUS_INVALID_PARAMETER, "response view rejects null output");
+        const char* value = reinterpret_cast<const char*>(static_cast<size_t>(1));
+        SIZE_T valueLength = 1;
+        status = KhResponseGetHeader(nullptr, "X-Test", 6, &value, &valueLength);
+        Expect(status == STATUS_INVALID_PARAMETER, "response header lookup rejects null response");
+        Expect(value == nullptr && valueLength == 0, "response header lookup clears outputs on invalid response");
         KhResponseRelease(nullptr);
     }
 
@@ -638,6 +1053,11 @@ int main()
     TestProviderCache();
     TestRequestValidation();
     TestHttpSendValidation();
+    TestConnectionPoolKeys();
+    TestConnectionPoolAcquireRelease();
+    TestHttpSyncSendResponseManagement();
+    TestHttpSyncConnectionPolicies();
+    TestHttpUrlRequestTargetParsing();
     TestResponseValidation();
     TestWebSocketValidation();
     TestAsyncValidation();

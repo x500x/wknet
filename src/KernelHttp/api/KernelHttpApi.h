@@ -3,6 +3,14 @@
 #include "../http/HttpTypes.h"
 #include "../net/WskClient.h"
 
+namespace KernelHttp
+{
+namespace tls
+{
+    class CertificateStore;
+}
+}
+
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 #ifndef STATUS_INVALID_DEVICE_REQUEST
 #define STATUS_INVALID_DEVICE_REQUEST ((NTSTATUS)0xC0000010L)
@@ -108,6 +116,7 @@ namespace api
         KhTlsVersion MinVersion = KhTlsVersion::Tls12;
         KhTlsVersion MaxVersion = KhTlsVersion::Tls13;
         KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
+        const tls::CertificateStore* CertificateStore = nullptr;
         const char* ServerName = nullptr;
         SIZE_T ServerNameLength = 0;
         const char* Alpn = nullptr;
@@ -243,6 +252,14 @@ namespace api
         _In_ KH_RESPONSE response,
         _Out_ KhResponseView* view) noexcept;
 
+    _Must_inspect_result_
+    NTSTATUS KhResponseGetHeader(
+        _In_ KH_RESPONSE response,
+        _In_reads_bytes_(nameLength) const char* name,
+        SIZE_T nameLength,
+        _Outptr_result_bytebuffer_(*valueLength) const char** value,
+        _Out_ SIZE_T* valueLength) noexcept;
+
     void KhResponseRelease(_In_opt_ KH_RESPONSE response) noexcept;
 
     _Must_inspect_result_
@@ -291,6 +308,37 @@ namespace api
     void KhAsyncRelease(_In_opt_ KH_ASYNC_OPERATION operation) noexcept;
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
+    struct KhTestHttpTransportRequest final
+    {
+        const char* Scheme = nullptr;
+        SIZE_T SchemeLength = 0;
+        const char* Host = nullptr;
+        SIZE_T HostLength = 0;
+        USHORT Port = 0;
+        const char* BuiltRequest = nullptr;
+        SIZE_T BuiltRequestLength = 0;
+        KhConnectionPolicy ConnectionPolicy = KhConnectionPolicy::ReuseOrCreate;
+        bool PoolableConnection = false;
+        bool ReusedConnection = false;
+        ULONG ConnectionId = 0;
+    };
+
+    struct KhTestHttpTransportResponse final
+    {
+        const char* RawResponse = nullptr;
+        SIZE_T RawResponseLength = 0;
+        bool ConnectionReusable = true;
+    };
+
+    typedef NTSTATUS (*KhTestHttpTransportCallback)(
+        void* context,
+        const KhTestHttpTransportRequest* request,
+        KhTestHttpTransportResponse* response);
+
+    void KhTestSetHttpTransport(
+        KhTestHttpTransportCallback callback,
+        void* context) noexcept;
+
     void KhTestSetCurrentIrql(ULONG irql) noexcept;
     void KhTestResetCurrentIrql() noexcept;
     bool KhTestSessionHasWorkspace(KH_SESSION session) noexcept;
