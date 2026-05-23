@@ -1,0 +1,298 @@
+#pragma once
+
+#include "../http/HttpTypes.h"
+#include "../net/WskClient.h"
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+#ifndef STATUS_INVALID_DEVICE_REQUEST
+#define STATUS_INVALID_DEVICE_REQUEST ((NTSTATUS)0xC0000010L)
+#endif
+#endif
+
+namespace KernelHttp
+{
+namespace api
+{
+    struct KhSession;
+    struct KhRequest;
+    struct KhResponse;
+    struct KhWebSocket;
+    struct KhAsyncOperation;
+
+    typedef KhSession* KH_SESSION;
+    typedef KhRequest* KH_REQUEST;
+    typedef KhResponse* KH_RESPONSE;
+    typedef KhWebSocket* KH_WEBSOCKET;
+    typedef KhAsyncOperation* KH_ASYNC_OPERATION;
+
+    constexpr SIZE_T KhDefaultMaxResponseBytes = 1024 * 1024;
+    constexpr ULONG KhDefaultConnectionPoolCapacity = 8;
+    constexpr ULONG KhDefaultConnectionsPerHost = 2;
+    constexpr ULONG KhDefaultIdleTimeoutMilliseconds = 30000;
+
+    enum class KhPoolType : ULONG
+    {
+        NonPaged = 0,
+        Paged = 1
+    };
+
+    enum class KhHttpMethod : ULONG
+    {
+        Get = 0,
+        Post = 1,
+        Put = 2,
+        Patch = 3,
+        Delete = 4,
+        Head = 5
+    };
+
+    enum class KhTlsVersion : ULONG
+    {
+        Tls12 = 0x0303,
+        Tls13 = 0x0304
+    };
+
+    enum class KhCertificatePolicy : ULONG
+    {
+        Verify = 0,
+        NoVerify = 1
+    };
+
+    enum class KhConnectionPolicy : ULONG
+    {
+        ReuseOrCreate = 0,
+        ForceNew = 1,
+        NoPool = 2
+    };
+
+    enum KhHttpSendFlags : ULONG
+    {
+        KhHttpSendFlagNone = 0,
+        KhHttpSendFlagAggregateWithCallbacks = 0x00000001
+    };
+
+    enum class KhWebSocketMessageType : ULONG
+    {
+        Text = 0,
+        Binary = 1,
+        Close = 2
+    };
+
+    typedef NTSTATUS (*KhHeaderCallback)(
+        void* context,
+        const char* name,
+        SIZE_T nameLength,
+        const char* value,
+        SIZE_T valueLength);
+
+    typedef NTSTATUS (*KhBodyCallback)(
+        void* context,
+        const UCHAR* data,
+        SIZE_T dataLength,
+        bool finalChunk);
+
+    typedef void (*KhAsyncCompletionCallback)(
+        void* context,
+        KH_ASYNC_OPERATION operation,
+        NTSTATUS status);
+
+    typedef NTSTATUS (*KhWebSocketMessageCallback)(
+        void* context,
+        KhWebSocketMessageType type,
+        const UCHAR* data,
+        SIZE_T dataLength,
+        bool finalFragment);
+
+    struct KhTlsOptions final
+    {
+        KhTlsVersion MinVersion = KhTlsVersion::Tls12;
+        KhTlsVersion MaxVersion = KhTlsVersion::Tls13;
+        KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
+        const char* ServerName = nullptr;
+        SIZE_T ServerNameLength = 0;
+        const char* Alpn = nullptr;
+        SIZE_T AlpnLength = 0;
+    };
+
+    struct KhSessionOptions final
+    {
+        KhPoolType ResponsePoolType = KhPoolType::NonPaged;
+        SIZE_T MaxResponseBytes = KhDefaultMaxResponseBytes;
+        ULONG ConnectionPoolCapacity = KhDefaultConnectionPoolCapacity;
+        ULONG MaxConnectionsPerHost = KhDefaultConnectionsPerHost;
+        ULONG IdleTimeoutMilliseconds = KhDefaultIdleTimeoutMilliseconds;
+        KhTlsOptions Tls = {};
+    };
+
+    struct KhHttpSendOptions final
+    {
+        SIZE_T MaxResponseBytes = 0;
+        ULONG Flags = KhHttpSendFlagNone;
+        KhHeaderCallback HeaderCallback = nullptr;
+        KhBodyCallback BodyCallback = nullptr;
+        void* CallbackContext = nullptr;
+        KhAsyncCompletionCallback CompletionCallback = nullptr;
+        void* CompletionContext = nullptr;
+    };
+
+    struct KhResponseView final
+    {
+        ULONG StatusCode = 0;
+        const UCHAR* Body = nullptr;
+        SIZE_T BodyLength = 0;
+    };
+
+    struct KhWebSocketConnectOptions final
+    {
+        const char* Url = nullptr;
+        SIZE_T UrlLength = 0;
+        const char* Subprotocol = nullptr;
+        SIZE_T SubprotocolLength = 0;
+        KhTlsOptions Tls = {};
+        SIZE_T MaxMessageBytes = KhDefaultMaxResponseBytes;
+        bool AutoReplyPing = true;
+    };
+
+    struct KhWebSocketSendOptions final
+    {
+        bool FinalFragment = true;
+    };
+
+    struct KhWebSocketReceiveOptions final
+    {
+        SIZE_T MaxMessageBytes = 0;
+        bool AutoAllocate = true;
+        KhWebSocketMessageCallback MessageCallback = nullptr;
+        void* CallbackContext = nullptr;
+    };
+
+    struct KhWebSocketMessage final
+    {
+        KhWebSocketMessageType Type = KhWebSocketMessageType::Binary;
+        const UCHAR* Data = nullptr;
+        SIZE_T DataLength = 0;
+        bool FinalFragment = true;
+    };
+
+    _Must_inspect_result_
+    NTSTATUS KhSessionCreate(
+        _In_ net::WskClient* wskClient,
+        _In_opt_ const KhSessionOptions* options,
+        _Out_ KH_SESSION* session) noexcept;
+
+    void KhSessionClose(_In_opt_ KH_SESSION session) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestCreate(
+        _In_ KH_SESSION session,
+        _Out_ KH_REQUEST* request) noexcept;
+
+    void KhHttpRequestRelease(_In_opt_ KH_REQUEST request) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetUrl(
+        _In_ KH_REQUEST request,
+        _In_reads_bytes_(urlLength) const char* url,
+        SIZE_T urlLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetMethod(
+        _In_ KH_REQUEST request,
+        KhHttpMethod method) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetHeader(
+        _In_ KH_REQUEST request,
+        _In_reads_bytes_(nameLength) const char* name,
+        SIZE_T nameLength,
+        _In_reads_bytes_(valueLength) const char* value,
+        SIZE_T valueLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetBody(
+        _In_ KH_REQUEST request,
+        _In_reads_bytes_opt_(bodyLength) const UCHAR* body,
+        SIZE_T bodyLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetTlsOptions(
+        _In_ KH_REQUEST request,
+        _In_ const KhTlsOptions* options) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetConnectionPolicy(
+        _In_ KH_REQUEST request,
+        KhConnectionPolicy policy) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpSendSync(
+        _In_ KH_SESSION session,
+        _In_ KH_REQUEST request,
+        _In_opt_ const KhHttpSendOptions* options,
+        _Out_opt_ KH_RESPONSE* response) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpSendAsync(
+        _In_ KH_SESSION session,
+        _In_ KH_REQUEST request,
+        _In_opt_ const KhHttpSendOptions* options,
+        _Out_ KH_ASYNC_OPERATION* operation) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhResponseGetView(
+        _In_ KH_RESPONSE response,
+        _Out_ KhResponseView* view) noexcept;
+
+    void KhResponseRelease(_In_opt_ KH_RESPONSE response) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhWebSocketConnectSync(
+        _In_ KH_SESSION session,
+        _In_ const KhWebSocketConnectOptions* options,
+        _Out_ KH_WEBSOCKET* websocket) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhWebSocketConnectAsync(
+        _In_ KH_SESSION session,
+        _In_ const KhWebSocketConnectOptions* options,
+        _Out_ KH_ASYNC_OPERATION* operation) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhWebSocketSendTextSync(
+        _In_ KH_WEBSOCKET websocket,
+        _In_reads_bytes_(textLength) const char* text,
+        SIZE_T textLength,
+        _In_opt_ const KhWebSocketSendOptions* options) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhWebSocketSendBinarySync(
+        _In_ KH_WEBSOCKET websocket,
+        _In_reads_bytes_(dataLength) const UCHAR* data,
+        SIZE_T dataLength,
+        _In_opt_ const KhWebSocketSendOptions* options) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhWebSocketReceiveSync(
+        _In_ KH_WEBSOCKET websocket,
+        _In_opt_ const KhWebSocketReceiveOptions* options,
+        _Out_opt_ KhWebSocketMessage* message) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhWebSocketCloseSync(_In_opt_ KH_WEBSOCKET websocket) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhAsyncCancel(_In_ KH_ASYNC_OPERATION operation) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhAsyncWait(
+        _In_ KH_ASYNC_OPERATION operation,
+        ULONG timeoutMilliseconds) noexcept;
+
+    void KhAsyncRelease(_In_opt_ KH_ASYNC_OPERATION operation) noexcept;
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+    void KhTestSetCurrentIrql(ULONG irql) noexcept;
+    void KhTestResetCurrentIrql() noexcept;
+#endif
+}
+}

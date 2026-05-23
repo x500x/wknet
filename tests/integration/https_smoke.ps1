@@ -181,6 +181,13 @@ function Invoke-HostRegression {
             'src\KernelHttp\crypto\CngProvider.cpp'
         )
 
+    Compile-UserModeTest `
+        -Name 'high_level_api_tests' `
+        -Source 'tests\high_level_api_tests.cpp' `
+        -ProjectSources @(
+            'src\KernelHttp\api\KernelHttpApi.cpp'
+        )
+
     if (-not $SkipDriverBuild) {
         $driverBuildArguments = @(
             (Join-Path $script:Root 'KernelHttp.sln'),

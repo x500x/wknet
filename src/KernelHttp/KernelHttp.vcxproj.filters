@@ -37,6 +37,9 @@
     <Filter Include="Source Files\websocket">
       <UniqueIdentifier>{6113F4C7-2EF7-49AB-887E-77C9F19FAD29}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\api">
+      <UniqueIdentifier>{8D47DFA0-8D10-4A7E-BD38-3EC67D48B7AA}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Header Files\net">
       <UniqueIdentifier>{F4EE822D-C34A-46DD-9A36-B44C7203571A}</UniqueIdentifier>
     </Filter>
@@ -61,8 +64,14 @@
     <Filter Include="Header Files\websocket">
       <UniqueIdentifier>{61867DA1-8B32-4F10-ABAF-FB3DF5C58664}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\api">
+      <UniqueIdentifier>{A1A92D02-F456-4D36-963F-3B1C11323D37}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="api\KernelHttpApi.cpp">
+      <Filter>Source Files\api</Filter>
+    </ClCompile>
     <ClCompile Include="client\HttpClient.cpp">
       <Filter>Source Files\client</Filter>
     </ClCompile>
@@ -146,6 +155,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="api\KernelHttpApi.h">
+      <Filter>Header Files\api</Filter>
+    </ClInclude>
     <ClInclude Include="client\HttpClient.h">
       <Filter>Header Files\client</Filter>
     </ClInclude>

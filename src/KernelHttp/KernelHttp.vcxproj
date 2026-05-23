@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="api\KernelHttpApi.cpp" />
     <ClCompile Include="client\HttpClient.cpp" />
     <ClCompile Include="client\Http2Client.cpp" />
     <ClCompile Include="client\HttpsClient.cpp" />
@@ -96,6 +97,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="api\KernelHttpApi.h" />
     <ClInclude Include="client\HttpClient.h" />
     <ClInclude Include="client\Http2Client.h" />
     <ClInclude Include="client\HttpsClient.h" />
