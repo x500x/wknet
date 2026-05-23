@@ -1,11 +1,14 @@
 #include "KernelHttpApi.h"
+#include "api/KernelHttpAsync.h"
 #include "api/KernelHttpConnectionPool.h"
 #include "api/KernelHttpWorkspace.h"
 #include "crypto/CngProviderCache.h"
+#include "client/WebSocketClient.h"
 #include "http/HttpParser.h"
 #include "http/HttpRequest.h"
 #include "net/WskSocket.h"
 #include "tls/TlsConnection.h"
+#include "websocket/WebSocketFrame.h"
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <stdlib.h>
@@ -24,6 +27,11 @@ namespace
     ULONG g_testCurrentIrql = PassiveLevel;
     KhTestHttpTransportCallback g_testHttpTransport = nullptr;
     void* g_testHttpTransportContext = nullptr;
+    KhTestWebSocketConnectCallback g_testWebSocketConnect = nullptr;
+    KhTestWebSocketSendCallback g_testWebSocketSend = nullptr;
+    KhTestWebSocketReceiveCallback g_testWebSocketReceive = nullptr;
+    KhTestWebSocketCloseCallback g_testWebSocketClose = nullptr;
+    void* g_testWebSocketTransportContext = nullptr;
 #else
     constexpr ULONG PassiveLevel = PASSIVE_LEVEL;
 #endif
@@ -290,8 +298,10 @@ namespace
 
     bool IsDefaultPort(const char* scheme, SIZE_T schemeLength, USHORT port) noexcept
     {
-        return (TextEqualsLiteralIgnoreCase(scheme, schemeLength, "http") && port == 80) ||
-            (TextEqualsLiteralIgnoreCase(scheme, schemeLength, "https") && port == 443);
+        return ((TextEqualsLiteralIgnoreCase(scheme, schemeLength, "http") ||
+            TextEqualsLiteralIgnoreCase(scheme, schemeLength, "ws")) && port == 80) ||
+            ((TextEqualsLiteralIgnoreCase(scheme, schemeLength, "https") ||
+                TextEqualsLiteralIgnoreCase(scheme, schemeLength, "wss")) && port == 443);
     }
 
     _Must_inspect_result_
@@ -352,7 +362,6 @@ namespace
     bool IsRequestHandle(KH_REQUEST request) noexcept;
     bool IsResponseHandle(KH_RESPONSE response) noexcept;
     bool IsWebSocketHandle(KH_WEBSOCKET websocket) noexcept;
-    bool IsAsyncHandle(KH_ASYNC_OPERATION operation) noexcept;
 }
 
     struct KhSession
@@ -416,14 +425,26 @@ namespace
     {
         KhHandleHeader Header = { KhHandleKind::WebSocket, false };
         KH_SESSION Session = nullptr;
+        char* Url = nullptr;
+        SIZE_T UrlLength = 0;
+        char Scheme[KhMaxSchemeLength + 1] = {};
+        SIZE_T SchemeLength = 0;
+        char Host[KhMaxHostLength + 1] = {};
+        SIZE_T HostLength = 0;
+        char Path[KhMaxPathLength + 1] = {};
+        SIZE_T PathLength = 0;
+        USHORT Port = 0;
+        char* Subprotocol = nullptr;
+        SIZE_T SubprotocolLength = 0;
+        UCHAR* LastMessage = nullptr;
+        SIZE_T LastMessageLength = 0;
+        KhWebSocketMessageType LastMessageType = KhWebSocketMessageType::Binary;
+        SIZE_T MaxMessageBytes = KhDefaultMaxResponseBytes;
+        bool AutoReplyPing = true;
         bool Connected = false;
-    };
-
-    struct KhAsyncOperation
-    {
-        KhHandleHeader Header = { KhHandleKind::AsyncOperation, false };
-        NTSTATUS Status = STATUS_PENDING;
-        bool Canceled = false;
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        client::WebSocketClient* Client = nullptr;
+#endif
     };
 
 namespace
@@ -470,11 +491,6 @@ namespace
         return IsHandleHeader(websocket == nullptr ? nullptr : &websocket->Header, KhHandleKind::WebSocket);
     }
 
-    bool IsAsyncHandle(KH_ASYNC_OPERATION operation) noexcept
-    {
-        return IsHandleHeader(operation == nullptr ? nullptr : &operation->Header, KhHandleKind::AsyncOperation);
-    }
-
     void ReleaseStoredHeader(_Inout_ KhStoredHeader& header) noexcept
     {
         FreeApiMemory(header.Name);
@@ -516,6 +532,30 @@ namespace
         response.HeaderValueStorage = nullptr;
         response.HeaderValueStorageLength = 0;
         response.StatusCode = 0;
+    }
+
+    void ReleaseWebSocketStorage(_Inout_ KhWebSocket& websocket) noexcept
+    {
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (websocket.Client != nullptr) {
+            delete websocket.Client;
+            websocket.Client = nullptr;
+        }
+#endif
+        FreeApiMemory(websocket.Url);
+        FreeApiMemory(websocket.Subprotocol);
+        FreeApiMemory(websocket.LastMessage);
+        websocket.Url = nullptr;
+        websocket.UrlLength = 0;
+        websocket.Subprotocol = nullptr;
+        websocket.SubprotocolLength = 0;
+        websocket.LastMessage = nullptr;
+        websocket.LastMessageLength = 0;
+        websocket.SchemeLength = 0;
+        websocket.HostLength = 0;
+        websocket.PathLength = 0;
+        websocket.Port = 0;
+        websocket.Connected = false;
     }
 
     _Must_inspect_result_
@@ -674,6 +714,158 @@ namespace
         }
 
         request.Port = port;
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS ParseUrlParts(
+        const char* url,
+        SIZE_T urlLength,
+        bool websocketUrl,
+        _Out_writes_bytes_(schemeCapacity) char* scheme,
+        SIZE_T schemeCapacity,
+        _Out_ SIZE_T* schemeLength,
+        _Out_writes_bytes_(hostCapacity) char* host,
+        SIZE_T hostCapacity,
+        _Out_ SIZE_T* hostLength,
+        _Out_writes_bytes_(pathCapacity) char* path,
+        SIZE_T pathCapacity,
+        _Out_ SIZE_T* pathLength,
+        _Out_ USHORT* port) noexcept
+    {
+        if (schemeLength != nullptr) {
+            *schemeLength = 0;
+        }
+        if (hostLength != nullptr) {
+            *hostLength = 0;
+        }
+        if (pathLength != nullptr) {
+            *pathLength = 0;
+        }
+        if (port != nullptr) {
+            *port = 0;
+        }
+
+        if (url == nullptr ||
+            urlLength == 0 ||
+            scheme == nullptr ||
+            schemeLength == nullptr ||
+            host == nullptr ||
+            hostLength == nullptr ||
+            path == nullptr ||
+            pathLength == nullptr ||
+            port == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        SIZE_T schemeEnd = 0;
+        while (schemeEnd < urlLength && url[schemeEnd] != ':') {
+            ++schemeEnd;
+        }
+
+        if (schemeEnd == 0 ||
+            schemeEnd + 3 > urlLength ||
+            url[schemeEnd + 1] != '/' ||
+            url[schemeEnd + 2] != '/') {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const bool supported =
+            websocketUrl ?
+            (TextEqualsLiteralIgnoreCase(url, schemeEnd, "ws") ||
+                TextEqualsLiteralIgnoreCase(url, schemeEnd, "wss")) :
+            (TextEqualsLiteralIgnoreCase(url, schemeEnd, "http") ||
+                TextEqualsLiteralIgnoreCase(url, schemeEnd, "https"));
+        if (!supported) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        const SIZE_T authorityStart = schemeEnd + 3;
+        SIZE_T authorityEnd = authorityStart;
+        while (authorityEnd < urlLength && url[authorityEnd] != '/' && url[authorityEnd] != '?' && url[authorityEnd] != '#') {
+            ++authorityEnd;
+        }
+
+        if (authorityEnd == authorityStart) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        SIZE_T parsedHostLength = authorityEnd - authorityStart;
+        SIZE_T portStart = 0;
+        for (SIZE_T index = authorityStart; index < authorityEnd; ++index) {
+            if (url[index] == ':') {
+                if (portStart != 0) {
+                    return STATUS_NOT_SUPPORTED;
+                }
+
+                portStart = index + 1;
+                parsedHostLength = index - authorityStart;
+            }
+        }
+
+        if (parsedHostLength == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        USHORT parsedPort =
+            (TextEqualsLiteralIgnoreCase(url, schemeEnd, "https") ||
+                TextEqualsLiteralIgnoreCase(url, schemeEnd, "wss")) ? 443 : 80;
+        if (portStart != 0) {
+            NTSTATUS status = ParsePort(url + portStart, authorityEnd - portStart, &parsedPort);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        SIZE_T fragmentStart = authorityEnd;
+        while (fragmentStart < urlLength && url[fragmentStart] != '#') {
+            ++fragmentStart;
+        }
+
+        SIZE_T targetStart = authorityEnd;
+        SIZE_T targetLength = fragmentStart - authorityEnd;
+        if (targetLength == 0) {
+            if (pathCapacity < 2) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            path[0] = '/';
+            path[1] = '\0';
+            *pathLength = 1;
+        }
+        else {
+            const bool queryOnly = url[targetStart] == '?';
+            const SIZE_T requestTargetLength = targetLength + (queryOnly ? 1 : 0);
+            if (requestTargetLength >= pathCapacity) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            SIZE_T outputOffset = 0;
+            if (queryOnly) {
+                path[outputOffset++] = '/';
+            }
+
+            RtlCopyMemory(path + outputOffset, url + targetStart, targetLength);
+            path[requestTargetLength] = '\0';
+            *pathLength = requestTargetLength;
+        }
+
+        NTSTATUS status = CopyLowerText(url, schemeEnd, scheme, schemeCapacity, schemeLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = CopyLowerText(
+            url + authorityStart,
+            parsedHostLength,
+            host,
+            hostCapacity,
+            hostLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        *port = parsedPort;
         return STATUS_SUCCESS;
     }
 
@@ -1055,6 +1247,71 @@ namespace
         if (!NT_SUCCESS(status)) {
             return status;
         }
+
+        return http::HttpRequestBuilder::Build(
+            buildOptions,
+            reinterpret_cast<char*>(workspace.Request.Data),
+            workspace.Request.Length,
+            requestLength);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS BuildWebSocketHandshakeRequest(
+        const KhWebSocket& websocket,
+        _Inout_ KhWorkspace& workspace,
+        _Out_ SIZE_T* requestLength) noexcept
+    {
+        if (requestLength != nullptr) {
+            *requestLength = 0;
+        }
+
+        if (requestLength == nullptr || websocket.HostLength == 0 || websocket.PathLength == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        char hostHeader[KhMaxHostLength + 8] = {};
+        SIZE_T hostLength = 0;
+        KhRequest hostRequest = {};
+        RtlCopyMemory(hostRequest.Scheme, websocket.Scheme, sizeof(hostRequest.Scheme));
+        hostRequest.SchemeLength = websocket.SchemeLength;
+        RtlCopyMemory(hostRequest.Host, websocket.Host, sizeof(hostRequest.Host));
+        hostRequest.HostLength = websocket.HostLength;
+        hostRequest.Port = websocket.Port;
+        NTSTATUS status = BuildHostHeaderValue(hostRequest, hostHeader, sizeof(hostHeader), &hostLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        char clientKey[websocket::WebSocketClientKeyBase64Length] = {};
+        SIZE_T clientKeyLength = 0;
+        status = websocket::WebSocketCodec::GenerateClientKey(
+            clientKey,
+            sizeof(clientKey),
+            &clientKeyLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        http::HttpHeader headers[5] = {};
+        SIZE_T headerCount = 0;
+        headers[headerCount++] = { http::MakeText("Upgrade"), http::MakeText("websocket") };
+        headers[headerCount++] = { http::MakeText("Connection"), http::MakeText("Upgrade") };
+        headers[headerCount++] = { http::MakeText("Sec-WebSocket-Key"), { clientKey, clientKeyLength } };
+        headers[headerCount++] = { http::MakeText("Sec-WebSocket-Version"), http::MakeText("13") };
+        if (websocket.Subprotocol != nullptr && websocket.SubprotocolLength != 0) {
+            headers[headerCount++] = {
+                http::MakeText("Sec-WebSocket-Protocol"),
+                { websocket.Subprotocol, websocket.SubprotocolLength }
+            };
+        }
+
+        http::HttpRequestBuildOptions buildOptions = {};
+        buildOptions.Method = http::HttpMethod::Get;
+        buildOptions.Path = { websocket.Path, websocket.PathLength };
+        buildOptions.Host = { hostHeader, hostLength };
+        buildOptions.Connection = http::HttpConnectionDirective::KeepAlive;
+        buildOptions.ExtraHeaders = headers;
+        buildOptions.ExtraHeaderCount = headerCount;
 
         return http::HttpRequestBuilder::Build(
             buildOptions,
@@ -1474,6 +1731,309 @@ namespace
         *connectionReusable = !parsed->HasConnectionClose();
         return STATUS_SUCCESS;
 #endif
+    }
+
+    struct KhAsyncHttpContext final
+    {
+        KH_SESSION Session = nullptr;
+        KH_REQUEST Request = nullptr;
+        KhHttpSendOptions Options = {};
+        KH_RESPONSE Response = nullptr;
+    };
+
+    struct KhAsyncWebSocketConnectContext final
+    {
+        KH_SESSION Session = nullptr;
+        KhWebSocketConnectOptions Options = {};
+        char* Url = nullptr;
+        char* Subprotocol = nullptr;
+        KH_WEBSOCKET WebSocket = nullptr;
+    };
+
+    void CleanupAsyncHttpContext(void* context) noexcept
+    {
+        auto* httpContext = static_cast<KhAsyncHttpContext*>(context);
+        if (httpContext != nullptr && httpContext->Response != nullptr) {
+            KhResponseRelease(httpContext->Response);
+            httpContext->Response = nullptr;
+        }
+        FreeHandle(httpContext);
+    }
+
+    void CleanupAsyncWebSocketConnectContext(void* context) noexcept
+    {
+        auto* connectContext = static_cast<KhAsyncWebSocketConnectContext*>(context);
+        if (connectContext == nullptr) {
+            return;
+        }
+
+        FreeApiMemory(connectContext->Url);
+        FreeApiMemory(connectContext->Subprotocol);
+        if (connectContext->WebSocket != nullptr) {
+            const NTSTATUS status = KhWebSocketCloseSync(connectContext->WebSocket);
+            UNREFERENCED_PARAMETER(status);
+            connectContext->WebSocket = nullptr;
+        }
+        FreeHandle(connectContext);
+    }
+
+    NTSTATUS RunHttpAsyncOperation(KH_ASYNC_OPERATION operation, void* context) noexcept
+    {
+        auto* httpContext = static_cast<KhAsyncHttpContext*>(context);
+        if (httpContext == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (KhAsyncOperationIsCanceled(operation)) {
+            return STATUS_CANCELLED;
+        }
+
+        KH_RESPONSE response = nullptr;
+        KH_RESPONSE* responseOutput = nullptr;
+        const bool bodyCallbackOnly =
+            httpContext->Options.BodyCallback != nullptr &&
+            ((httpContext->Options.Flags & KhHttpSendFlagAggregateWithCallbacks) == 0);
+        if (!bodyCallbackOnly) {
+            responseOutput = &response;
+        }
+
+        NTSTATUS status = KhHttpSendSync(
+            httpContext->Session,
+            httpContext->Request,
+            &httpContext->Options,
+            responseOutput);
+        if (NT_SUCCESS(status)) {
+            httpContext->Response = response;
+        }
+        else if (response != nullptr) {
+            KhResponseRelease(response);
+        }
+
+        if (KhAsyncOperationIsCanceled(operation) && status == STATUS_SUCCESS) {
+            return STATUS_CANCELLED;
+        }
+
+        return status;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS StoreWebSocketMessage(
+        _Inout_ KhWebSocket& websocket,
+        KhWebSocketMessageType type,
+        _In_reads_bytes_opt_(dataLength) const UCHAR* data,
+        SIZE_T dataLength) noexcept
+    {
+        if (data == nullptr && dataLength != 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (dataLength > websocket.MaxMessageBytes) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        UCHAR* copy = nullptr;
+        if (dataLength != 0) {
+            copy = AllocateBytesCopy(data, dataLength);
+            if (copy == nullptr) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+        }
+
+        FreeApiMemory(websocket.LastMessage);
+        websocket.LastMessage = copy;
+        websocket.LastMessageLength = dataLength;
+        websocket.LastMessageType = type;
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS CompleteWebSocketConnect(
+        KH_SESSION session,
+        const KhWebSocketConnectOptions& options,
+        _Out_ KH_WEBSOCKET* websocket) noexcept
+    {
+        if (websocket != nullptr) {
+            *websocket = nullptr;
+        }
+
+        if (!IsSessionHandle(session) || websocket == nullptr || !IsValidWebSocketConnectOptions(options)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        char* urlCopy = AllocateTextCopy(options.Url, options.UrlLength);
+        if (urlCopy == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        KH_WEBSOCKET newWebSocket = AllocateHandle<KhWebSocket>();
+        if (newWebSocket == nullptr) {
+            FreeApiMemory(urlCopy);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        newWebSocket->Header = { KhHandleKind::WebSocket, false };
+        newWebSocket->Session = session;
+        newWebSocket->Url = urlCopy;
+        newWebSocket->UrlLength = options.UrlLength;
+        newWebSocket->MaxMessageBytes = options.MaxMessageBytes;
+        newWebSocket->AutoReplyPing = options.AutoReplyPing;
+        NTSTATUS status = ParseUrlParts(
+            newWebSocket->Url,
+            newWebSocket->UrlLength,
+            true,
+            newWebSocket->Scheme,
+            sizeof(newWebSocket->Scheme),
+            &newWebSocket->SchemeLength,
+            newWebSocket->Host,
+            sizeof(newWebSocket->Host),
+            &newWebSocket->HostLength,
+            newWebSocket->Path,
+            sizeof(newWebSocket->Path),
+            &newWebSocket->PathLength,
+            &newWebSocket->Port);
+        if (!NT_SUCCESS(status)) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return status;
+        }
+
+        if (options.Subprotocol != nullptr && options.SubprotocolLength != 0) {
+            newWebSocket->Subprotocol = AllocateTextCopy(options.Subprotocol, options.SubprotocolLength);
+            if (newWebSocket->Subprotocol == nullptr) {
+                ReleaseWebSocketStorage(*newWebSocket);
+                FreeHandle(newWebSocket);
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            newWebSocket->SubprotocolLength = options.SubprotocolLength;
+        }
+
+        session->Workspace->MaxResponseBytes = options.MaxMessageBytes;
+        KhWorkspaceReset(session->Workspace);
+
+        SIZE_T handshakeLength = 0;
+        status = BuildWebSocketHandshakeRequest(*newWebSocket, *session->Workspace, &handshakeLength);
+        if (!NT_SUCCESS(status)) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return status;
+        }
+        UNREFERENCED_PARAMETER(handshakeLength);
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (g_testWebSocketConnect == nullptr) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        KhTestWebSocketConnectRequest testRequest = {};
+        testRequest.Scheme = newWebSocket->Scheme;
+        testRequest.SchemeLength = newWebSocket->SchemeLength;
+        testRequest.Host = newWebSocket->Host;
+        testRequest.HostLength = newWebSocket->HostLength;
+        testRequest.Path = newWebSocket->Path;
+        testRequest.PathLength = newWebSocket->PathLength;
+        testRequest.Port = newWebSocket->Port;
+        testRequest.Subprotocol = newWebSocket->Subprotocol;
+        testRequest.SubprotocolLength = newWebSocket->SubprotocolLength;
+        testRequest.AutoReplyPing = newWebSocket->AutoReplyPing;
+        testRequest.MaxMessageBytes = newWebSocket->MaxMessageBytes;
+
+        status = g_testWebSocketConnect(g_testWebSocketTransportContext, &testRequest);
+        if (!NT_SUCCESS(status)) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return status;
+        }
+
+        newWebSocket->Connected = true;
+        *websocket = newWebSocket;
+        return STATUS_SUCCESS;
+#else
+        newWebSocket->Client = new client::WebSocketClient();
+        if (newWebSocket->Client == nullptr) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        wchar_t serverName[KhMaxHostLength + 1] = {};
+        wchar_t serviceName[KhMaxServiceNameLength + 1] = {};
+        status = CopyAsciiToWide(newWebSocket->Host, newWebSocket->HostLength, serverName, RTL_NUMBER_OF(serverName));
+        if (NT_SUCCESS(status)) {
+            status = FormatServiceName(newWebSocket->Port, serviceName, RTL_NUMBER_OF(serviceName));
+        }
+
+        client::WebSocketIoBuffers buffers = {};
+        buffers.RequestBuffer = reinterpret_cast<char*>(session->Workspace->Request.Data);
+        buffers.RequestBufferLength = session->Workspace->Request.Length;
+        buffers.ResponseBuffer = reinterpret_cast<char*>(session->Workspace->Response.Data);
+        buffers.ResponseBufferLength = session->Workspace->Response.Length;
+        buffers.FrameBuffer = session->Workspace->WebSocketFrameScratch.Data;
+        buffers.FrameBufferLength = session->Workspace->WebSocketFrameScratch.Length;
+        buffers.PayloadBuffer = session->Workspace->DecodedBody.Data;
+        buffers.PayloadBufferLength = session->Workspace->DecodedBody.Length;
+        http::HttpHeader responseHeaders[KhMaxHeadersPerResponse] = {};
+        buffers.Headers = responseHeaders;
+        buffers.HeaderCapacity = KhMaxHeadersPerResponse;
+
+        client::WebSocketConnectOptions connectOptions = {};
+        connectOptions.ServerName = serverName;
+        connectOptions.ServiceName = serviceName;
+        connectOptions.TlsServerName = options.Tls.ServerName != nullptr ? options.Tls.ServerName : newWebSocket->Host;
+        connectOptions.TlsServerNameLength = options.Tls.ServerName != nullptr ?
+            options.Tls.ServerNameLength :
+            newWebSocket->HostLength;
+        connectOptions.Host = newWebSocket->Host;
+        connectOptions.HostLength = newWebSocket->HostLength;
+        connectOptions.Path = newWebSocket->Path;
+        connectOptions.PathLength = newWebSocket->PathLength;
+        connectOptions.CertificateStore = options.Tls.CertificateStore;
+        connectOptions.UseTls = TextEqualsLiteralIgnoreCase(newWebSocket->Scheme, newWebSocket->SchemeLength, "wss");
+        connectOptions.VerifyCertificate = options.Tls.CertificatePolicy == KhCertificatePolicy::Verify;
+
+        if (NT_SUCCESS(status)) {
+            status = newWebSocket->Client->Connect(*session->WskClient, connectOptions, buffers);
+        }
+
+        if (!NT_SUCCESS(status)) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return status;
+        }
+
+        newWebSocket->Connected = true;
+        *websocket = newWebSocket;
+        return STATUS_SUCCESS;
+#endif
+    }
+
+    NTSTATUS RunWebSocketConnectAsyncOperation(KH_ASYNC_OPERATION operation, void* context) noexcept
+    {
+        auto* connectContext = static_cast<KhAsyncWebSocketConnectContext*>(context);
+        if (connectContext == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (KhAsyncOperationIsCanceled(operation)) {
+            return STATUS_CANCELLED;
+        }
+
+        KH_WEBSOCKET websocket = nullptr;
+        NTSTATUS status = CompleteWebSocketConnect(connectContext->Session, connectContext->Options, &websocket);
+        if (NT_SUCCESS(status)) {
+            connectContext->WebSocket = websocket;
+        }
+        else if (websocket != nullptr) {
+            const NTSTATUS closeStatus = KhWebSocketCloseSync(websocket);
+            UNREFERENCED_PARAMETER(closeStatus);
+        }
+
+        if (KhAsyncOperationIsCanceled(operation) && status == STATUS_SUCCESS) {
+            return STATUS_CANCELLED;
+        }
+
+        return status;
     }
 }
 
@@ -1965,7 +2525,36 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        return STATUS_NOT_SUPPORTED;
+        if (effectiveOptions.BodyCallback != nullptr &&
+            ((effectiveOptions.Flags & KhHttpSendFlagAggregateWithCallbacks) != 0) &&
+            operation == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        auto* context = AllocateHandle<KhAsyncHttpContext>();
+        if (context == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        context->Session = session;
+        context->Request = request;
+        context->Options = effectiveOptions;
+        context->Response = nullptr;
+
+        KhAsyncCreateOptions createOptions = {};
+        createOptions.Kind = KhAsyncOperationKind::HttpSend;
+        createOptions.WorkerRoutine = RunHttpAsyncOperation;
+        createOptions.CleanupRoutine = CleanupAsyncHttpContext;
+        createOptions.Context = context;
+        createOptions.CompletionCallback = effectiveOptions.CompletionCallback;
+        createOptions.CompletionContext = effectiveOptions.CompletionContext;
+
+        status = KhAsyncOperationCreate(createOptions, operation);
+        if (!NT_SUCCESS(status)) {
+            CleanupAsyncHttpContext(context);
+        }
+
+        return status;
     }
 
     NTSTATUS KhResponseGetView(KH_RESPONSE response, KhResponseView* view) noexcept
@@ -2057,7 +2646,7 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        return STATUS_NOT_SUPPORTED;
+        return CompleteWebSocketConnect(session, *options, websocket);
     }
 
     NTSTATUS KhWebSocketConnectAsync(
@@ -2078,7 +2667,41 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        return STATUS_NOT_SUPPORTED;
+        auto* context = AllocateHandle<KhAsyncWebSocketConnectContext>();
+        if (context == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        context->Session = session;
+        context->Options = *options;
+        context->Url = AllocateTextCopy(options->Url, options->UrlLength);
+        if (context->Url == nullptr) {
+            CleanupAsyncWebSocketConnectContext(context);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        context->Options.Url = context->Url;
+
+        if (options->Subprotocol != nullptr && options->SubprotocolLength != 0) {
+            context->Subprotocol = AllocateTextCopy(options->Subprotocol, options->SubprotocolLength);
+            if (context->Subprotocol == nullptr) {
+                CleanupAsyncWebSocketConnectContext(context);
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            context->Options.Subprotocol = context->Subprotocol;
+        }
+
+        KhAsyncCreateOptions createOptions = {};
+        createOptions.Kind = KhAsyncOperationKind::WebSocketConnect;
+        createOptions.WorkerRoutine = RunWebSocketConnectAsyncOperation;
+        createOptions.CleanupRoutine = CleanupAsyncWebSocketConnectContext;
+        createOptions.Context = context;
+
+        status = KhAsyncOperationCreate(createOptions, operation);
+        if (!NT_SUCCESS(status)) {
+            CleanupAsyncWebSocketConnectContext(context);
+        }
+
+        return status;
     }
 
     NTSTATUS KhWebSocketSendTextSync(
@@ -2092,12 +2715,38 @@ namespace
             return status;
         }
 
-        UNREFERENCED_PARAMETER(options);
-        if (!IsWebSocketHandle(websocket) || text == nullptr || textLength == 0) {
+        const bool finalFragment = options == nullptr ? true : options->FinalFragment;
+        if (!IsWebSocketHandle(websocket) || !websocket->Connected || text == nullptr || textLength == 0) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        return STATUS_NOT_SUPPORTED;
+        if (textLength > websocket->MaxMessageBytes) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (g_testWebSocketSend == nullptr) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        return g_testWebSocketSend(
+            g_testWebSocketTransportContext,
+            websocket,
+            KhWebSocketMessageType::Text,
+            reinterpret_cast<const UCHAR*>(text),
+            textLength,
+            finalFragment);
+#else
+        UNREFERENCED_PARAMETER(finalFragment);
+        if (websocket->Client == nullptr || websocket->Session == nullptr || websocket->Session->Workspace == nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        client::WebSocketIoBuffers buffers = {};
+        buffers.FrameBuffer = websocket->Session->Workspace->WebSocketFrameScratch.Data;
+        buffers.FrameBufferLength = websocket->Session->Workspace->WebSocketFrameScratch.Length;
+        return websocket->Client->SendText(text, textLength, buffers);
+#endif
     }
 
     NTSTATUS KhWebSocketSendBinarySync(
@@ -2111,12 +2760,38 @@ namespace
             return status;
         }
 
-        UNREFERENCED_PARAMETER(options);
-        if (!IsWebSocketHandle(websocket) || data == nullptr || dataLength == 0) {
+        const bool finalFragment = options == nullptr ? true : options->FinalFragment;
+        if (!IsWebSocketHandle(websocket) || !websocket->Connected || data == nullptr || dataLength == 0) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        return STATUS_NOT_SUPPORTED;
+        if (dataLength > websocket->MaxMessageBytes) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (g_testWebSocketSend == nullptr) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        return g_testWebSocketSend(
+            g_testWebSocketTransportContext,
+            websocket,
+            KhWebSocketMessageType::Binary,
+            data,
+            dataLength,
+            finalFragment);
+#else
+        UNREFERENCED_PARAMETER(finalFragment);
+        if (websocket->Client == nullptr || websocket->Session == nullptr || websocket->Session->Workspace == nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        client::WebSocketIoBuffers buffers = {};
+        buffers.FrameBuffer = websocket->Session->Workspace->WebSocketFrameScratch.Data;
+        buffers.FrameBufferLength = websocket->Session->Workspace->WebSocketFrameScratch.Length;
+        return websocket->Client->SendBinary(data, dataLength, buffers);
+#endif
     }
 
     NTSTATUS KhWebSocketReceiveSync(
@@ -2133,7 +2808,7 @@ namespace
             *message = {};
         }
 
-        if (!IsWebSocketHandle(websocket)) {
+        if (!IsWebSocketHandle(websocket) || !websocket->Connected) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -2150,7 +2825,118 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        return STATUS_NOT_SUPPORTED;
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (g_testWebSocketReceive == nullptr) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        KhTestWebSocketMessage received = {};
+        status = g_testWebSocketReceive(g_testWebSocketTransportContext, websocket, &received);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (received.Data == nullptr && received.DataLength != 0) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        const SIZE_T maxMessageBytes =
+            effectiveOptions.MaxMessageBytes != 0 ? effectiveOptions.MaxMessageBytes : websocket->MaxMessageBytes;
+        if (received.DataLength > maxMessageBytes) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        if (effectiveOptions.MessageCallback != nullptr) {
+            status = effectiveOptions.MessageCallback(
+                effectiveOptions.CallbackContext,
+                received.Type,
+                received.Data,
+                received.DataLength,
+                received.FinalFragment);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        if (effectiveOptions.AutoAllocate) {
+            status = StoreWebSocketMessage(*websocket, received.Type, received.Data, received.DataLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            message->Type = websocket->LastMessageType;
+            message->Data = websocket->LastMessage;
+            message->DataLength = websocket->LastMessageLength;
+            message->FinalFragment = received.FinalFragment;
+        }
+
+        if (received.Type == KhWebSocketMessageType::Close) {
+            websocket->Connected = false;
+        }
+
+        return STATUS_SUCCESS;
+#else
+        if (websocket->Client == nullptr || websocket->Session == nullptr || websocket->Session->Workspace == nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        const SIZE_T maxMessageBytes =
+            effectiveOptions.MaxMessageBytes != 0 ? effectiveOptions.MaxMessageBytes : websocket->MaxMessageBytes;
+        if (maxMessageBytes > websocket->Session->Workspace->DecodedBody.Length) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        client::WebSocketIoBuffers buffers = {};
+        buffers.FrameBuffer = websocket->Session->Workspace->WebSocketFrameScratch.Data;
+        buffers.FrameBufferLength = websocket->Session->Workspace->WebSocketFrameScratch.Length;
+        KernelHttp::websocket::WebSocketOpcode opcode = KernelHttp::websocket::WebSocketOpcode::Continuation;
+        SIZE_T bytesReceived = 0;
+        status = websocket->Client->ReceiveMessage(
+            buffers,
+            &opcode,
+            websocket->Session->Workspace->DecodedBody.Data,
+            maxMessageBytes,
+            &bytesReceived);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        KhWebSocketMessageType type = KhWebSocketMessageType::Binary;
+        if (opcode == KernelHttp::websocket::WebSocketOpcode::Text) {
+            type = KhWebSocketMessageType::Text;
+        }
+        else if (opcode == KernelHttp::websocket::WebSocketOpcode::Close) {
+            type = KhWebSocketMessageType::Close;
+            websocket->Connected = false;
+        }
+
+        const UCHAR* data = websocket->Session->Workspace->DecodedBody.Data;
+        if (effectiveOptions.MessageCallback != nullptr) {
+            status = effectiveOptions.MessageCallback(
+                effectiveOptions.CallbackContext,
+                type,
+                data,
+                bytesReceived,
+                true);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        if (effectiveOptions.AutoAllocate) {
+            status = StoreWebSocketMessage(*websocket, type, data, bytesReceived);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            message->Type = websocket->LastMessageType;
+            message->Data = websocket->LastMessage;
+            message->DataLength = websocket->LastMessageLength;
+            message->FinalFragment = true;
+        }
+
+        return STATUS_SUCCESS;
+#endif
     }
 
     NTSTATUS KhWebSocketCloseSync(KH_WEBSOCKET websocket) noexcept
@@ -2164,7 +2950,22 @@ namespace
             return websocket == nullptr ? STATUS_SUCCESS : STATUS_INVALID_PARAMETER;
         }
 
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (g_testWebSocketClose != nullptr) {
+            g_testWebSocketClose(g_testWebSocketTransportContext, websocket);
+        }
+#endif
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (websocket->Client != nullptr && websocket->Session != nullptr && websocket->Session->Workspace != nullptr) {
+            client::WebSocketIoBuffers buffers = {};
+            buffers.FrameBuffer = websocket->Session->Workspace->WebSocketFrameScratch.Data;
+            buffers.FrameBufferLength = websocket->Session->Workspace->WebSocketFrameScratch.Length;
+            const NTSTATUS closeStatus = websocket->Client->Close(buffers);
+            UNREFERENCED_PARAMETER(closeStatus);
+        }
+#endif
         websocket->Connected = false;
+        ReleaseWebSocketStorage(*websocket);
         websocket->Header.Closed = true;
         FreeHandle(websocket);
         return STATUS_SUCCESS;
@@ -2177,12 +2978,7 @@ namespace
             return status;
         }
 
-        if (!IsAsyncHandle(operation)) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        operation->Canceled = true;
-        return STATUS_SUCCESS;
+        return KhAsyncOperationCancel(operation);
     }
 
     NTSTATUS KhAsyncWait(KH_ASYNC_OPERATION operation, ULONG timeoutMilliseconds) noexcept
@@ -2192,12 +2988,71 @@ namespace
             return status;
         }
 
-        UNREFERENCED_PARAMETER(timeoutMilliseconds);
-        if (!IsAsyncHandle(operation)) {
+        return KhAsyncOperationWait(operation, timeoutMilliseconds);
+    }
+
+    NTSTATUS KhAsyncGetHttpResponse(KH_ASYNC_OPERATION operation, KH_RESPONSE* response) noexcept
+    {
+        NTSTATUS status = CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (response != nullptr) {
+            *response = nullptr;
+        }
+
+        if (!KhAsyncOperationIsValid(operation) ||
+            response == nullptr ||
+            KhAsyncOperationGetKind(operation) != KhAsyncOperationKind::HttpSend) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        return operation->Status;
+        status = KhAsyncOperationStatus(operation);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        auto* context = static_cast<KhAsyncHttpContext*>(KhAsyncOperationContext(operation));
+        if (context == nullptr || context->Response == nullptr) {
+            return STATUS_NOT_FOUND;
+        }
+
+        *response = context->Response;
+        context->Response = nullptr;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS KhAsyncGetWebSocket(KH_ASYNC_OPERATION operation, KH_WEBSOCKET* websocket) noexcept
+    {
+        NTSTATUS status = CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (websocket != nullptr) {
+            *websocket = nullptr;
+        }
+
+        if (!KhAsyncOperationIsValid(operation) ||
+            websocket == nullptr ||
+            KhAsyncOperationGetKind(operation) != KhAsyncOperationKind::WebSocketConnect) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        status = KhAsyncOperationStatus(operation);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        auto* context = static_cast<KhAsyncWebSocketConnectContext*>(KhAsyncOperationContext(operation));
+        if (context == nullptr || context->WebSocket == nullptr) {
+            return STATUS_NOT_FOUND;
+        }
+
+        *websocket = context->WebSocket;
+        context->WebSocket = nullptr;
+        return STATUS_SUCCESS;
     }
 
     void KhAsyncRelease(KH_ASYNC_OPERATION operation) noexcept
@@ -2206,12 +3061,7 @@ namespace
             return;
         }
 
-        if (!IsAsyncHandle(operation)) {
-            return;
-        }
-
-        operation->Header.Closed = true;
-        FreeHandle(operation);
+        KhAsyncOperationRelease(operation);
     }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -2219,6 +3069,35 @@ namespace
     {
         g_testHttpTransport = callback;
         g_testHttpTransportContext = context;
+    }
+
+    void KhTestSetWebSocketTransport(
+        KhTestWebSocketConnectCallback connectCallback,
+        KhTestWebSocketSendCallback sendCallback,
+        KhTestWebSocketReceiveCallback receiveCallback,
+        KhTestWebSocketCloseCallback closeCallback,
+        void* context) noexcept
+    {
+        g_testWebSocketConnect = connectCallback;
+        g_testWebSocketSend = sendCallback;
+        g_testWebSocketReceive = receiveCallback;
+        g_testWebSocketClose = closeCallback;
+        g_testWebSocketTransportContext = context;
+    }
+
+    NTSTATUS KhTestAsyncStatus(KH_ASYNC_OPERATION operation) noexcept
+    {
+        return KhAsyncOperationStatus(operation);
+    }
+
+    bool KhTestAsyncIsCompleted(KH_ASYNC_OPERATION operation) noexcept
+    {
+        return KhAsyncOperationIsCompleted(operation);
+    }
+
+    bool KhTestAsyncIsCanceled(KH_ASYNC_OPERATION operation) noexcept
+    {
+        return KhAsyncOperationIsCanceled(operation);
     }
 
     void KhTestSetCurrentIrql(ULONG irql) noexcept

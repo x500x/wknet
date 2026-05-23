@@ -16,6 +16,8 @@ using KernelHttp::api::KH_RESPONSE;
 using KernelHttp::api::KH_SESSION;
 using KernelHttp::api::KH_WEBSOCKET;
 using KernelHttp::api::KhAsyncCancel;
+using KernelHttp::api::KhAsyncGetHttpResponse;
+using KernelHttp::api::KhAsyncGetWebSocket;
 using KernelHttp::api::KhAsyncRelease;
 using KernelHttp::api::KhAsyncWait;
 using KernelHttp::api::KhCertificatePolicy;
@@ -55,11 +57,19 @@ using KernelHttp::api::KhResponseView;
 using KernelHttp::api::KhSessionClose;
 using KernelHttp::api::KhSessionCreate;
 using KernelHttp::api::KhSessionOptions;
+using KernelHttp::api::KhTestAsyncIsCanceled;
+using KernelHttp::api::KhTestAsyncIsCompleted;
+using KernelHttp::api::KhTestAsyncStatus;
+using KernelHttp::api::KhTestRunAsyncOperation;
+using KernelHttp::api::KhTestSetAsyncAutoRun;
 using KernelHttp::api::KhTestResetCurrentIrql;
 using KernelHttp::api::KhTestHttpTransportRequest;
 using KernelHttp::api::KhTestHttpTransportResponse;
 using KernelHttp::api::KhTestSetHttpTransport;
 using KernelHttp::api::KhTestSetCurrentIrql;
+using KernelHttp::api::KhTestSetWebSocketTransport;
+using KernelHttp::api::KhTestWebSocketConnectRequest;
+using KernelHttp::api::KhTestWebSocketMessage;
 using KernelHttp::api::KhTlsOptions;
 using KernelHttp::api::KhTlsVersion;
 using KernelHttp::api::KhWebSocketCloseSync;
@@ -132,21 +142,6 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TestMessageCallback(
-        void* context,
-        KernelHttp::api::KhWebSocketMessageType type,
-        const UCHAR* data,
-        SIZE_T dataLength,
-        bool finalFragment)
-    {
-        UNREFERENCED_PARAMETER(context);
-        UNREFERENCED_PARAMETER(type);
-        UNREFERENCED_PARAMETER(data);
-        UNREFERENCED_PARAMETER(dataLength);
-        UNREFERENCED_PARAMETER(finalFragment);
-        return STATUS_SUCCESS;
-    }
-
     struct HeaderCapture
     {
         SIZE_T Count = 0;
@@ -163,6 +158,61 @@ namespace
         SIZE_T DataLength = 0;
         bool FinalChunk = false;
         NTSTATUS ReturnStatus = STATUS_SUCCESS;
+    };
+
+    NTSTATUS TestMessageCallback(
+        void* context,
+        KernelHttp::api::KhWebSocketMessageType type,
+        const UCHAR* data,
+        SIZE_T dataLength,
+        bool finalFragment)
+    {
+        auto* capture = static_cast<BodyCapture*>(context);
+        UNREFERENCED_PARAMETER(type);
+        if (capture != nullptr) {
+            ++capture->Count;
+            capture->DataLength = dataLength < sizeof(capture->Data) ? dataLength : sizeof(capture->Data);
+            if (capture->DataLength != 0) {
+                RtlCopyMemory(capture->Data, data, capture->DataLength);
+            }
+            capture->FinalChunk = finalFragment;
+            return capture->ReturnStatus;
+        }
+
+        UNREFERENCED_PARAMETER(data);
+        UNREFERENCED_PARAMETER(dataLength);
+        UNREFERENCED_PARAMETER(finalFragment);
+        return STATUS_SUCCESS;
+    }
+
+    struct CompletionCapture
+    {
+        SIZE_T Count = 0;
+        KH_ASYNC_OPERATION Operation = nullptr;
+        NTSTATUS Status = STATUS_PENDING;
+    };
+
+    struct WebSocketCapture
+    {
+        SIZE_T ConnectCount = 0;
+        SIZE_T SendCount = 0;
+        SIZE_T ReceiveCount = 0;
+        SIZE_T CloseCount = 0;
+        char LastScheme[8] = {};
+        char LastHost[64] = {};
+        char LastPath[128] = {};
+        char LastSubprotocol[32] = {};
+        USHORT LastPort = 0;
+        SIZE_T LastMaxMessageBytes = 0;
+        bool LastAutoReplyPing = false;
+        KernelHttp::api::KhWebSocketMessageType LastSendType = KernelHttp::api::KhWebSocketMessageType::Binary;
+        UCHAR LastSendData[128] = {};
+        SIZE_T LastSendLength = 0;
+        bool LastSendFinal = false;
+        NTSTATUS ConnectStatus = STATUS_SUCCESS;
+        NTSTATUS SendStatus = STATUS_SUCCESS;
+        NTSTATUS ReceiveStatus = STATUS_SUCCESS;
+        KhTestWebSocketMessage NextMessage = {};
     };
 
     struct TransportContext
@@ -254,6 +304,111 @@ namespace
         response->RawResponseLength = transport->ResponseLength;
         response->ConnectionReusable = transport->ConnectionReusable;
         return STATUS_SUCCESS;
+    }
+
+    void TestCompletionCallback(void* context, KH_ASYNC_OPERATION operation, NTSTATUS status)
+    {
+        auto* capture = static_cast<CompletionCapture*>(context);
+        if (capture == nullptr) {
+            return;
+        }
+
+        ++capture->Count;
+        capture->Operation = operation;
+        capture->Status = status;
+    }
+
+    NTSTATUS TestWebSocketConnectTransport(void* context, const KhTestWebSocketConnectRequest* request)
+    {
+        auto* capture = static_cast<WebSocketCapture*>(context);
+        if (capture == nullptr || request == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->ConnectCount;
+        capture->LastPort = request->Port;
+        capture->LastMaxMessageBytes = request->MaxMessageBytes;
+        capture->LastAutoReplyPing = request->AutoReplyPing;
+
+        const SIZE_T schemeLength = request->SchemeLength < sizeof(capture->LastScheme) - 1 ?
+            request->SchemeLength :
+            sizeof(capture->LastScheme) - 1;
+        if (schemeLength != 0) {
+            RtlCopyMemory(capture->LastScheme, request->Scheme, schemeLength);
+        }
+        capture->LastScheme[schemeLength] = '\0';
+
+        const SIZE_T hostLength = request->HostLength < sizeof(capture->LastHost) - 1 ?
+            request->HostLength :
+            sizeof(capture->LastHost) - 1;
+        if (hostLength != 0) {
+            RtlCopyMemory(capture->LastHost, request->Host, hostLength);
+        }
+        capture->LastHost[hostLength] = '\0';
+
+        const SIZE_T pathLength = request->PathLength < sizeof(capture->LastPath) - 1 ?
+            request->PathLength :
+            sizeof(capture->LastPath) - 1;
+        if (pathLength != 0) {
+            RtlCopyMemory(capture->LastPath, request->Path, pathLength);
+        }
+        capture->LastPath[pathLength] = '\0';
+
+        const SIZE_T subprotocolLength = request->SubprotocolLength < sizeof(capture->LastSubprotocol) - 1 ?
+            request->SubprotocolLength :
+            sizeof(capture->LastSubprotocol) - 1;
+        if (subprotocolLength != 0) {
+            RtlCopyMemory(capture->LastSubprotocol, request->Subprotocol, subprotocolLength);
+        }
+        capture->LastSubprotocol[subprotocolLength] = '\0';
+
+        return capture->ConnectStatus;
+    }
+
+    NTSTATUS TestWebSocketSendTransport(
+        void* context,
+        KH_WEBSOCKET websocket,
+        KernelHttp::api::KhWebSocketMessageType type,
+        const UCHAR* data,
+        SIZE_T dataLength,
+        bool finalFragment)
+    {
+        UNREFERENCED_PARAMETER(websocket);
+        auto* capture = static_cast<WebSocketCapture*>(context);
+        if (capture == nullptr || (data == nullptr && dataLength != 0)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->SendCount;
+        capture->LastSendType = type;
+        capture->LastSendLength = dataLength < sizeof(capture->LastSendData) ? dataLength : sizeof(capture->LastSendData);
+        if (capture->LastSendLength != 0) {
+            RtlCopyMemory(capture->LastSendData, data, capture->LastSendLength);
+        }
+        capture->LastSendFinal = finalFragment;
+        return capture->SendStatus;
+    }
+
+    NTSTATUS TestWebSocketReceiveTransport(void* context, KH_WEBSOCKET websocket, KhTestWebSocketMessage* message)
+    {
+        UNREFERENCED_PARAMETER(websocket);
+        auto* capture = static_cast<WebSocketCapture*>(context);
+        if (capture == nullptr || message == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->ReceiveCount;
+        *message = capture->NextMessage;
+        return capture->ReceiveStatus;
+    }
+
+    void TestWebSocketCloseTransport(void* context, KH_WEBSOCKET websocket)
+    {
+        UNREFERENCED_PARAMETER(websocket);
+        auto* capture = static_cast<WebSocketCapture*>(context);
+        if (capture != nullptr) {
+            ++capture->CloseCount;
+        }
     }
 
     WskClient* FakeWskClient()
@@ -605,12 +760,18 @@ namespace
         status = KhHttpSendSync(session, request, &options, nullptr);
         Expect(status == STATUS_INVALID_PARAMETER, "send sync rejects aggregation without response output");
 
+        KhTestSetAsyncAutoRun(false);
         KH_ASYNC_OPERATION operation = reinterpret_cast<KH_ASYNC_OPERATION>(static_cast<size_t>(1));
         status = KhHttpSendAsync(session, request, nullptr, nullptr);
         Expect(status == STATUS_INVALID_PARAMETER, "send async rejects null operation output");
         status = KhHttpSendAsync(session, request, nullptr, &operation);
-        Expect(status == STATUS_NOT_SUPPORTED, "send async validates inputs before async worker chunk");
-        Expect(operation == nullptr, "send async clears operation output before not-supported");
+        Expect(status == STATUS_SUCCESS, "send async accepts valid inputs before worker runs");
+        Expect(operation != nullptr, "send async returns operation when validation succeeds");
+        if (operation != nullptr) {
+            Expect(!KhTestAsyncIsCompleted(operation), "send async stays pending under test control");
+            KhAsyncRelease(operation);
+        }
+        KhTestSetAsyncAutoRun(true);
 
         KhHttpRequestRelease(request);
         KhSessionClose(session);
@@ -855,6 +1016,77 @@ namespace
         KhSessionClose(session);
     }
 
+    void TestHttpAsyncState()
+    {
+        WskClient* wskClient = FakeWskClient();
+        KH_SESSION session = CreateValidSession(wskClient);
+        KH_REQUEST request = CreateValidRequest(session);
+
+        const char rawResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 5\r\n"
+            "\r\n"
+            "async";
+        TransportContext transport = {};
+        transport.Response = rawResponse;
+        transport.ResponseLength = strlen(rawResponse);
+        KhTestSetHttpTransport(TestHttpTransport, &transport);
+
+        CompletionCapture completion = {};
+        KhHttpSendOptions options = {};
+        options.CompletionCallback = TestCompletionCallback;
+        options.CompletionContext = &completion;
+
+        KH_ASYNC_OPERATION operation = nullptr;
+        NTSTATUS status = KhHttpSendAsync(session, request, &options, &operation);
+        Expect(status == STATUS_SUCCESS, "send async queues and completes HTTP operation");
+        Expect(operation != nullptr, "send async returns operation handle");
+        Expect(completion.Count == 1, "send async invokes completion callback");
+        Expect(completion.Operation == operation, "completion receives operation handle");
+        Expect(completion.Status == STATUS_SUCCESS, "completion receives success status");
+        Expect(KhTestAsyncIsCompleted(operation), "send async marks operation completed");
+        Expect(KhAsyncWait(operation, 0) == STATUS_SUCCESS, "send async wait returns stored status");
+
+        KH_RESPONSE response = nullptr;
+        status = KhAsyncGetHttpResponse(operation, &response);
+        Expect(status == STATUS_SUCCESS, "send async exposes owned response");
+        KhResponseView view = {};
+        status = KhResponseGetView(response, &view);
+        Expect(status == STATUS_SUCCESS, "send async response view succeeds");
+        Expect(view.BodyLength == 5 && memcmp(view.Body, "async", 5) == 0, "send async response body matches");
+        KhResponseRelease(response);
+        KhAsyncRelease(operation);
+
+        KhTestSetAsyncAutoRun(false);
+        operation = nullptr;
+        status = KhHttpSendAsync(session, request, nullptr, &operation);
+        Expect(status == STATUS_SUCCESS, "send async can remain pending under test control");
+        Expect(operation != nullptr, "pending send async returns operation");
+        Expect(!KhTestAsyncIsCompleted(operation), "pending send async is not completed before worker runs");
+        Expect(KhAsyncWait(operation, 0) == STATUS_PENDING, "pending send async wait returns pending");
+        status = KhTestRunAsyncOperation(operation);
+        Expect(status == STATUS_SUCCESS, "test worker runs pending HTTP operation");
+        Expect(KhTestAsyncIsCompleted(operation), "pending send async completes after worker run");
+        KhAsyncRelease(operation);
+
+        operation = nullptr;
+        status = KhHttpSendAsync(session, request, nullptr, &operation);
+        Expect(status == STATUS_SUCCESS, "send async creates operation for cancel-before-start");
+        status = KhAsyncCancel(operation);
+        Expect(status == STATUS_SUCCESS, "async cancel succeeds before worker start");
+        Expect(KhTestAsyncIsCanceled(operation), "async cancel marks operation canceled");
+        Expect(KhTestAsyncIsCompleted(operation), "cancel-before-start completes operation");
+        Expect(KhAsyncWait(operation, 0) == STATUS_CANCELLED, "cancel-before-start wait returns canceled");
+        status = KhTestRunAsyncOperation(operation);
+        Expect(status == STATUS_CANCELLED, "worker preserves canceled status");
+        KhAsyncRelease(operation);
+        KhTestSetAsyncAutoRun(true);
+
+        KhTestSetHttpTransport(nullptr, nullptr);
+        KhHttpRequestRelease(request);
+        KhSessionClose(session);
+    }
+
     void TestHttpUrlRequestTargetParsing()
     {
         WskClient* wskClient = FakeWskClient();
@@ -947,9 +1179,15 @@ namespace
         KH_ASYNC_OPERATION operation = reinterpret_cast<KH_ASYNC_OPERATION>(static_cast<size_t>(1));
         status = KhWebSocketConnectAsync(session, &connectOptions, nullptr);
         Expect(status == STATUS_INVALID_PARAMETER, "websocket connect async rejects null operation output");
+        KhTestSetAsyncAutoRun(false);
         status = KhWebSocketConnectAsync(session, &connectOptions, &operation);
-        Expect(status == STATUS_NOT_SUPPORTED, "websocket connect async validates before worker chunk");
-        Expect(operation == nullptr, "websocket connect async clears operation output before not-supported");
+        Expect(status == STATUS_SUCCESS, "websocket connect async accepts valid inputs before worker runs");
+        Expect(operation != nullptr, "websocket connect async returns operation handle");
+        if (operation != nullptr) {
+            Expect(!KhTestAsyncIsCompleted(operation), "websocket connect async remains pending under test control");
+            KhAsyncRelease(operation);
+        }
+        KhTestSetAsyncAutoRun(true);
 
         const char text[] = "hello";
         KhWebSocketSendOptions sendOptions = {};
@@ -973,12 +1211,155 @@ namespace
         KhSessionClose(session);
     }
 
+    void TestWebSocketApiBehavior()
+    {
+        WskClient* wskClient = FakeWskClient();
+        KH_SESSION session = CreateValidSession(wskClient);
+
+        WebSocketCapture capture = {};
+        const UCHAR receivedData[] = { 'p', 'o', 'n', 'g' };
+        capture.NextMessage.Type = KernelHttp::api::KhWebSocketMessageType::Text;
+        capture.NextMessage.Data = receivedData;
+        capture.NextMessage.DataLength = sizeof(receivedData);
+        capture.NextMessage.FinalFragment = true;
+        KhTestSetWebSocketTransport(
+            TestWebSocketConnectTransport,
+            TestWebSocketSendTransport,
+            TestWebSocketReceiveTransport,
+            TestWebSocketCloseTransport,
+            &capture);
+
+        const char url[] = "wss://Example.com:9443/socket?x=1#fragment";
+        const char subprotocol[] = "chat";
+        KhWebSocketConnectOptions connectOptions = {};
+        connectOptions.Url = url;
+        connectOptions.UrlLength = strlen(url);
+        connectOptions.Subprotocol = subprotocol;
+        connectOptions.SubprotocolLength = strlen(subprotocol);
+        connectOptions.MaxMessageBytes = 16;
+        connectOptions.AutoReplyPing = false;
+
+        KH_WEBSOCKET websocket = nullptr;
+        NTSTATUS status = KhWebSocketConnectSync(session, &connectOptions, &websocket);
+        Expect(status == STATUS_SUCCESS, "websocket connect sync succeeds through test transport");
+        Expect(websocket != nullptr, "websocket connect sync returns handle");
+        Expect(capture.ConnectCount == 1, "websocket connect transport called once");
+        Expect(strcmp(capture.LastScheme, "wss") == 0, "websocket parser lowercases scheme");
+        Expect(strcmp(capture.LastHost, "example.com") == 0, "websocket parser lowercases host");
+        Expect(strcmp(capture.LastPath, "/socket?x=1") == 0, "websocket parser strips fragment");
+        Expect(strcmp(capture.LastSubprotocol, "chat") == 0, "websocket connect passes subprotocol");
+        Expect(capture.LastPort == 9443, "websocket parser captures explicit port");
+        Expect(capture.LastMaxMessageBytes == 16, "websocket connect passes max message bytes");
+        Expect(!capture.LastAutoReplyPing, "websocket connect passes ping option");
+
+        const char text[] = "ping";
+        KhWebSocketSendOptions sendOptions = {};
+        sendOptions.FinalFragment = false;
+        status = KhWebSocketSendTextSync(websocket, text, strlen(text), &sendOptions);
+        Expect(status == STATUS_SUCCESS, "websocket send text succeeds");
+        Expect(capture.SendCount == 1, "websocket send transport called for text");
+        Expect(capture.LastSendType == KernelHttp::api::KhWebSocketMessageType::Text, "websocket send text type recorded");
+        Expect(capture.LastSendLength == 4 && memcmp(capture.LastSendData, "ping", 4) == 0, "websocket send text data recorded");
+        Expect(!capture.LastSendFinal, "websocket send passes final-fragment option");
+
+        const UCHAR binary[] = { 1, 2, 3 };
+        status = KhWebSocketSendBinarySync(websocket, binary, sizeof(binary), nullptr);
+        Expect(status == STATUS_SUCCESS, "websocket send binary succeeds");
+        Expect(capture.SendCount == 2, "websocket send transport called for binary");
+        Expect(capture.LastSendType == KernelHttp::api::KhWebSocketMessageType::Binary, "websocket send binary type recorded");
+
+        KhWebSocketMessage message = {};
+        status = KhWebSocketReceiveSync(websocket, nullptr, &message);
+        Expect(status == STATUS_SUCCESS, "websocket receive auto-allocates message");
+        Expect(capture.ReceiveCount == 1, "websocket receive transport called");
+        Expect(message.Type == KernelHttp::api::KhWebSocketMessageType::Text, "websocket receive preserves message type");
+        Expect(message.DataLength == sizeof(receivedData) && memcmp(message.Data, receivedData, sizeof(receivedData)) == 0, "websocket receive exposes message data");
+
+        BodyCapture callbackCapture = {};
+        KhWebSocketReceiveOptions receiveOptions = {};
+        receiveOptions.AutoAllocate = false;
+        receiveOptions.MessageCallback = TestMessageCallback;
+        receiveOptions.CallbackContext = &callbackCapture;
+        status = KhWebSocketReceiveSync(websocket, &receiveOptions, nullptr);
+        Expect(status == STATUS_SUCCESS, "websocket receive callback-only succeeds");
+        Expect(capture.ReceiveCount == 2, "websocket receive callback path calls transport");
+        Expect(callbackCapture.Count == 1, "websocket receive callback is invoked");
+        Expect(callbackCapture.DataLength == sizeof(receivedData) && memcmp(callbackCapture.Data, receivedData, sizeof(receivedData)) == 0, "websocket receive callback data matches");
+
+        receiveOptions = {};
+        receiveOptions.MaxMessageBytes = 2;
+        status = KhWebSocketReceiveSync(websocket, &receiveOptions, &message);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "websocket receive enforces per-call max message size");
+
+        status = KhWebSocketCloseSync(websocket);
+        Expect(status == STATUS_SUCCESS, "websocket close succeeds");
+        Expect(capture.CloseCount == 1, "websocket close transport called");
+
+        KhTestSetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+        KhSessionClose(session);
+    }
+
+    void TestWebSocketAsyncBehavior()
+    {
+        WskClient* wskClient = FakeWskClient();
+        KH_SESSION session = CreateValidSession(wskClient);
+
+        WebSocketCapture capture = {};
+        KhTestSetWebSocketTransport(
+            TestWebSocketConnectTransport,
+            TestWebSocketSendTransport,
+            TestWebSocketReceiveTransport,
+            TestWebSocketCloseTransport,
+            &capture);
+
+        const char url[] = "ws://example.com/socket";
+        KhWebSocketConnectOptions connectOptions = {};
+        connectOptions.Url = url;
+        connectOptions.UrlLength = strlen(url);
+        connectOptions.MaxMessageBytes = 64;
+
+        KH_ASYNC_OPERATION operation = nullptr;
+        NTSTATUS status = KhWebSocketConnectAsync(session, &connectOptions, &operation);
+        Expect(status == STATUS_SUCCESS, "websocket connect async succeeds");
+        Expect(operation != nullptr, "websocket connect async returns operation");
+        Expect(KhTestAsyncIsCompleted(operation), "websocket connect async completes with auto-run");
+        Expect(KhAsyncWait(operation, 0) == STATUS_SUCCESS, "websocket connect async wait succeeds");
+        KH_WEBSOCKET websocket = nullptr;
+        status = KhAsyncGetWebSocket(operation, &websocket);
+        Expect(status == STATUS_SUCCESS, "websocket connect async exposes websocket handle");
+        Expect(websocket != nullptr, "websocket connect async returns websocket handle");
+        KhWebSocketCloseSync(websocket);
+        KhAsyncRelease(operation);
+
+        KhTestSetAsyncAutoRun(false);
+        operation = nullptr;
+        status = KhWebSocketConnectAsync(session, &connectOptions, &operation);
+        Expect(status == STATUS_SUCCESS, "websocket connect async can remain pending");
+        Expect(!KhTestAsyncIsCompleted(operation), "pending websocket operation is not completed");
+        status = KhAsyncCancel(operation);
+        Expect(status == STATUS_SUCCESS, "websocket async cancel succeeds before start");
+        Expect(KhAsyncWait(operation, 0) == STATUS_CANCELLED, "websocket cancel-before-start waits canceled");
+        KhAsyncRelease(operation);
+        KhTestSetAsyncAutoRun(true);
+
+        KhTestSetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+        KhSessionClose(session);
+    }
+
     void TestAsyncValidation()
     {
         NTSTATUS status = KhAsyncCancel(nullptr);
         Expect(status == STATUS_INVALID_PARAMETER, "async cancel rejects null operation");
         status = KhAsyncWait(nullptr, 0);
         Expect(status == STATUS_INVALID_PARAMETER, "async wait rejects null operation");
+        KH_RESPONSE response = reinterpret_cast<KH_RESPONSE>(static_cast<size_t>(1));
+        status = KhAsyncGetHttpResponse(nullptr, &response);
+        Expect(status == STATUS_INVALID_PARAMETER, "async get HTTP response rejects null operation");
+        Expect(response == nullptr, "async get HTTP response clears output");
+        KH_WEBSOCKET websocket = reinterpret_cast<KH_WEBSOCKET>(static_cast<size_t>(1));
+        status = KhAsyncGetWebSocket(nullptr, &websocket);
+        Expect(status == STATUS_INVALID_PARAMETER, "async get websocket rejects null operation");
+        Expect(websocket == nullptr, "async get websocket clears output");
         KhAsyncRelease(nullptr);
     }
 
@@ -1035,6 +1416,10 @@ namespace
         Expect(status == STATUS_INVALID_DEVICE_REQUEST, "async cancel fails first at raised IRQL");
         status = KhAsyncWait(nullptr, 0);
         Expect(status == STATUS_INVALID_DEVICE_REQUEST, "async wait fails first at raised IRQL");
+        status = KhAsyncGetHttpResponse(nullptr, &response);
+        Expect(status == STATUS_INVALID_DEVICE_REQUEST, "async get HTTP response fails first at raised IRQL");
+        status = KhAsyncGetWebSocket(nullptr, &websocket);
+        Expect(status == STATUS_INVALID_DEVICE_REQUEST, "async get websocket fails first at raised IRQL");
 
         KhSessionClose(nullptr);
         KhHttpRequestRelease(nullptr);
@@ -1057,9 +1442,12 @@ int main()
     TestConnectionPoolAcquireRelease();
     TestHttpSyncSendResponseManagement();
     TestHttpSyncConnectionPolicies();
+    TestHttpAsyncState();
     TestHttpUrlRequestTargetParsing();
     TestResponseValidation();
     TestWebSocketValidation();
+    TestWebSocketApiBehavior();
+    TestWebSocketAsyncBehavior();
     TestAsyncValidation();
     TestIrqlGuards();
 

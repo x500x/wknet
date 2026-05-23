@@ -69,6 +69,12 @@ namespace client
             _In_ const WebSocketIoBuffers& buffers) noexcept;
 
         _Must_inspect_result_
+        NTSTATUS SendBinary(
+            _In_reads_bytes_(messageLength) const UCHAR* message,
+            SIZE_T messageLength,
+            _In_ const WebSocketIoBuffers& buffers) noexcept;
+
+        _Must_inspect_result_
         NTSTATUS ReceiveMessage(
             _In_ const WebSocketIoBuffers& buffers,
             _Out_ websocket::WebSocketOpcode* opcode,

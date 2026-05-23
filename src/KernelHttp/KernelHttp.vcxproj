@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="api\KernelHttpApi.cpp" />
+    <ClCompile Include="api\KernelHttpAsync.cpp" />
     <ClCompile Include="api\KernelHttpConnectionPool.cpp" />
     <ClCompile Include="api\KernelHttpWorkspace.cpp" />
     <ClCompile Include="client\HttpClient.cpp" />
@@ -101,6 +102,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="api\KernelHttpApi.h" />
+    <ClInclude Include="api\KernelHttpAsync.h" />
     <ClInclude Include="api\KernelHttpConnectionPool.h" />
     <ClInclude Include="api\KernelHttpWorkspace.h" />
     <ClInclude Include="client\HttpClient.h" />

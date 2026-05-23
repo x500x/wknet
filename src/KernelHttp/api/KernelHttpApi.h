@@ -305,6 +305,16 @@ namespace api
         _In_ KH_ASYNC_OPERATION operation,
         ULONG timeoutMilliseconds) noexcept;
 
+    _Must_inspect_result_
+    NTSTATUS KhAsyncGetHttpResponse(
+        _In_ KH_ASYNC_OPERATION operation,
+        _Out_ KH_RESPONSE* response) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhAsyncGetWebSocket(
+        _In_ KH_ASYNC_OPERATION operation,
+        _Out_ KH_WEBSOCKET* websocket) noexcept;
+
     void KhAsyncRelease(_In_opt_ KH_ASYNC_OPERATION operation) noexcept;
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -335,9 +345,70 @@ namespace api
         const KhTestHttpTransportRequest* request,
         KhTestHttpTransportResponse* response);
 
+    struct KhTestWebSocketConnectRequest final
+    {
+        const char* Scheme = nullptr;
+        SIZE_T SchemeLength = 0;
+        const char* Host = nullptr;
+        SIZE_T HostLength = 0;
+        const char* Path = nullptr;
+        SIZE_T PathLength = 0;
+        USHORT Port = 0;
+        const char* Subprotocol = nullptr;
+        SIZE_T SubprotocolLength = 0;
+        bool AutoReplyPing = true;
+        SIZE_T MaxMessageBytes = 0;
+    };
+
+    struct KhTestWebSocketMessage final
+    {
+        KhWebSocketMessageType Type = KhWebSocketMessageType::Binary;
+        const UCHAR* Data = nullptr;
+        SIZE_T DataLength = 0;
+        bool FinalFragment = true;
+    };
+
+    typedef NTSTATUS (*KhTestWebSocketConnectCallback)(
+        void* context,
+        const KhTestWebSocketConnectRequest* request);
+
+    typedef NTSTATUS (*KhTestWebSocketSendCallback)(
+        void* context,
+        KH_WEBSOCKET websocket,
+        KhWebSocketMessageType type,
+        const UCHAR* data,
+        SIZE_T dataLength,
+        bool finalFragment);
+
+    typedef NTSTATUS (*KhTestWebSocketReceiveCallback)(
+        void* context,
+        KH_WEBSOCKET websocket,
+        KhTestWebSocketMessage* message);
+
+    typedef void (*KhTestWebSocketCloseCallback)(
+        void* context,
+        KH_WEBSOCKET websocket);
+
     void KhTestSetHttpTransport(
         KhTestHttpTransportCallback callback,
         void* context) noexcept;
+
+    void KhTestSetWebSocketTransport(
+        KhTestWebSocketConnectCallback connectCallback,
+        KhTestWebSocketSendCallback sendCallback,
+        KhTestWebSocketReceiveCallback receiveCallback,
+        KhTestWebSocketCloseCallback closeCallback,
+        void* context) noexcept;
+
+    void KhTestSetAsyncAutoRun(bool enabled) noexcept;
+
+    NTSTATUS KhTestRunAsyncOperation(_In_ KH_ASYNC_OPERATION operation) noexcept;
+
+    NTSTATUS KhTestAsyncStatus(_In_ KH_ASYNC_OPERATION operation) noexcept;
+
+    bool KhTestAsyncIsCompleted(_In_ KH_ASYNC_OPERATION operation) noexcept;
+
+    bool KhTestAsyncIsCanceled(_In_ KH_ASYNC_OPERATION operation) noexcept;
 
     void KhTestSetCurrentIrql(ULONG irql) noexcept;
     void KhTestResetCurrentIrql() noexcept;

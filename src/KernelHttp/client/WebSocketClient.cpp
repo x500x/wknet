@@ -319,6 +319,47 @@ namespace client
         return status;
     }
 
+    NTSTATUS WebSocketClient::SendBinary(
+        const UCHAR* message,
+        SIZE_T messageLength,
+        const WebSocketIoBuffers& buffers) noexcept
+    {
+        if (!connected_ ||
+            (message == nullptr && messageLength != 0) ||
+            buffers.FrameBuffer == nullptr ||
+            buffers.FrameBufferLength == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        UCHAR maskingKey[websocket::WebSocketMaskingKeyLength] = {};
+        NTSTATUS status = crypto::CngProvider::GenerateRandom(maskingKey, sizeof(maskingKey));
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        SIZE_T frameLength = 0;
+        status = websocket::WebSocketCodec::EncodeClientFrame(
+            websocket::WebSocketOpcode::Binary,
+            true,
+            message,
+            messageLength,
+            maskingKey,
+            buffers.FrameBuffer,
+            buffers.FrameBufferLength,
+            &frameLength);
+        RtlSecureZeroMemory(maskingKey, sizeof(maskingKey));
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        SIZE_T sent = 0;
+        status = SendRaw(buffers.FrameBuffer, frameLength, &sent);
+        if (NT_SUCCESS(status) && sent != frameLength) {
+            status = STATUS_CONNECTION_DISCONNECTED;
+        }
+        return status;
+    }
+
     NTSTATUS WebSocketClient::ReceiveMessage(
         const WebSocketIoBuffers& buffers,
         websocket::WebSocketOpcode* opcode,

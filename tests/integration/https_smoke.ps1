@@ -188,6 +188,7 @@ function Invoke-HostRegression {
         -Source 'tests\high_level_api_tests.cpp' `
         -ProjectSources @(
             'src\KernelHttp\api\KernelHttpApi.cpp',
+            'src\KernelHttp\api\KernelHttpAsync.cpp',
             'src\KernelHttp\api\KernelHttpConnectionPool.cpp',
             'src\KernelHttp\api\KernelHttpWorkspace.cpp',
             'src\KernelHttp\http\HttpTypes.cpp',
@@ -197,6 +198,7 @@ function Invoke-HostRegression {
             'src\KernelHttp\http\HttpParser.cpp',
             'src\KernelHttp\crypto\CngProvider.cpp',
             'src\KernelHttp\crypto\CngProviderCache.cpp',
+            'src\KernelHttp\websocket\WebSocketFrame.cpp',
             'third_party\brotli\c\common\constants.c',
             'third_party\brotli\c\common\context.c',
             'third_party\brotli\c\common\dictionary.c',
