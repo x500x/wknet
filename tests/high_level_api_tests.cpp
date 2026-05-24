@@ -36,22 +36,31 @@ using KernelHttp::api::KhDefaultConnectionsPerHost;
 using KernelHttp::api::KhDefaultIdleTimeoutMilliseconds;
 using KernelHttp::api::KhDefaultMaxResponseBytes;
 using KernelHttp::api::KhHttpMethod;
+using KernelHttp::api::KhHttpRequestClearBody;
 using KernelHttp::api::KhHttpRequestCreate;
 using KernelHttp::api::KhHttpRequestRelease;
 using KernelHttp::api::KhHttpRequestSetBody;
 using KernelHttp::api::KhHttpRequestSetConnectionPolicy;
+using KernelHttp::api::KhHttpRequestSetFileBody;
 using KernelHttp::api::KhHttpRequestSetHeader;
 using KernelHttp::api::KhHttpRequestSetMethod;
+using KernelHttp::api::KhHttpRequestSetMultipartFormDataBody;
+using KernelHttp::api::KhHttpRequestSetRawBody;
+using KernelHttp::api::KhHttpRequestSetTextBody;
 using KernelHttp::api::KhHttpRequestSetTlsOptions;
 using KernelHttp::api::KhHttpRequestSetUrl;
+using KernelHttp::api::KhHttpRequestSetUrlEncodedBody;
 using KernelHttp::api::KhResponseGetHeader;
 using KernelHttp::api::KhHttpSendAsync;
 using KernelHttp::api::KhHttpSendFlagAggregateWithCallbacks;
 using KernelHttp::api::KhHttpSendOptions;
+using KernelHttp::api::KhMultipartFormDataPart;
+using KernelHttp::api::KhNameValuePair;
 using KernelHttp::api::KhTestSessionHasProviderCache;
 using KernelHttp::api::KhTestSessionHasWorkspace;
 using KernelHttp::api::KhHttpSendSync;
 using KernelHttp::api::KhPoolType;
+using KernelHttp::api::KhRequestBodyPartKind;
 using KernelHttp::api::KhResponseGetView;
 using KernelHttp::api::KhResponseRelease;
 using KernelHttp::api::KhResponseView;
@@ -241,7 +250,7 @@ namespace
         bool LastPoolable = false;
         char LastHost[64] = {};
         USHORT LastPort = 0;
-        char LastRequest[512] = {};
+        char LastRequest[4096] = {};
         SIZE_T LastRequestLength = 0;
         const char* Response = nullptr;
         SIZE_T ResponseLength = 0;
@@ -745,6 +754,20 @@ namespace
         Expect(status == STATUS_INVALID_PARAMETER, "set body rejects null non-empty body");
         status = KhHttpRequestSetBody(request, body, sizeof(body));
         Expect(status == STATUS_SUCCESS, "set body accepts valid body");
+        status = KhHttpRequestSetTextBody(request, nullptr, sizeof(body), nullptr, 0);
+        Expect(status == STATUS_INVALID_PARAMETER, "set text body rejects null non-empty text");
+        status = KhHttpRequestSetRawBody(request, nullptr, sizeof(body), nullptr, 0);
+        Expect(status == STATUS_INVALID_PARAMETER, "set raw body rejects null non-empty data");
+        KhNameValuePair invalidPair = {};
+        status = KhHttpRequestSetUrlEncodedBody(request, &invalidPair, 1);
+        Expect(status == STATUS_INVALID_PARAMETER, "set urlencoded body rejects invalid pair");
+        KhMultipartFormDataPart invalidPart = {};
+        status = KhHttpRequestSetMultipartFormDataBody(request, &invalidPart, 1);
+        Expect(status == STATUS_INVALID_PARAMETER, "set multipart body rejects invalid part");
+        status = KhHttpRequestSetFileBody(request, nullptr, 1, nullptr, 0);
+        Expect(status == STATUS_INVALID_PARAMETER, "set file body rejects null path");
+        status = KhHttpRequestClearBody(request);
+        Expect(status == STATUS_SUCCESS, "clear body accepts request");
 
         KhTlsOptions tlsOptions = {};
         tlsOptions.MinVersion = KhTlsVersion::Tls13;
@@ -1010,6 +1033,144 @@ namespace
         callbackOptions.CallbackContext = &bodyCapture;
         status = KhHttpSendSync(session, request, &callbackOptions, nullptr);
         Expect(status == STATUS_ACCESS_DENIED, "send sync returns callback failure");
+
+        KhTestSetHttpTransport(nullptr, nullptr);
+        KhHttpRequestRelease(request);
+        KhSessionClose(session);
+    }
+
+    void TestHighLevelRequestBodyTypes()
+    {
+        const char rawResponse[] =
+            "HTTP/1.1 204 No Content\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        WskClient* wskClient = FakeWskClient();
+        KH_SESSION session = CreateValidSession(wskClient);
+        KH_REQUEST request = CreateValidRequest(session);
+
+        TransportContext transport = {};
+        transport.Response = rawResponse;
+        transport.ResponseLength = strlen(rawResponse);
+        KhTestSetHttpTransport(TestHttpTransport, &transport);
+
+        NTSTATUS status = KhHttpRequestSetMethod(request, KhHttpMethod::Post);
+        Expect(status == STATUS_SUCCESS, "body tests set POST method");
+        KhResponseView view = {};
+        KH_RESPONSE response = nullptr;
+
+        const char textBody[] = "plain text";
+        status = KhHttpRequestSetTextBody(request, textBody, strlen(textBody), nullptr, 0);
+        Expect(status == STATUS_SUCCESS, "text body setter succeeds");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "text body send succeeds");
+        Expect(strstr(transport.LastRequest, "Content-Type: text/plain; charset=utf-8\r\n") != nullptr, "text body sets default content type");
+        Expect(strstr(transport.LastRequest, "Content-Length: 10\r\n") != nullptr, "text body sets content length");
+        Expect(strstr(transport.LastRequest, "\r\n\r\nplain text") != nullptr, "text body is appended");
+        if (response != nullptr) {
+            status = KhResponseGetView(response, &view);
+            Expect(status == STATUS_SUCCESS && view.StatusCode == 204, "text body response is readable");
+            KhResponseRelease(response);
+        }
+
+        const UCHAR rawBody[] = { 0x00, 'R', 'A', 'W' };
+        status = KhHttpRequestSetRawBody(request, rawBody, sizeof(rawBody), "application/octet-stream", strlen("application/octet-stream"));
+        Expect(status == STATUS_SUCCESS, "raw body setter succeeds");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "raw body send succeeds");
+        Expect(strstr(transport.LastRequest, "Content-Type: application/octet-stream\r\n") != nullptr, "raw body sets supplied content type");
+        Expect(strstr(transport.LastRequest, "Content-Length: 4\r\n") != nullptr, "raw body sets content length");
+        const char* rawSeparator = strstr(transport.LastRequest, "\r\n\r\n");
+        Expect(rawSeparator != nullptr && rawSeparator[4] == '\0' && rawSeparator[5] == 'R', "raw body preserves leading zero byte");
+        KhResponseRelease(response);
+
+        KhNameValuePair pairs[2] = {};
+        pairs[0].Name = "a b";
+        pairs[0].NameLength = strlen(pairs[0].Name);
+        pairs[0].Value = "x+y";
+        pairs[0].ValueLength = strlen(pairs[0].Value);
+        pairs[1].Name = "sym";
+        pairs[1].NameLength = strlen(pairs[1].Name);
+        pairs[1].Value = "%";
+        pairs[1].ValueLength = strlen(pairs[1].Value);
+        status = KhHttpRequestSetUrlEncodedBody(request, pairs, 2);
+        Expect(status == STATUS_SUCCESS, "urlencoded body setter succeeds");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "urlencoded body send succeeds");
+        Expect(strstr(transport.LastRequest, "Content-Type: application/x-www-form-urlencoded\r\n") != nullptr, "urlencoded body sets content type");
+        Expect(strstr(transport.LastRequest, "\r\n\r\na+b=x%2By&sym=%25") != nullptr, "urlencoded body encodes fields");
+        KhResponseRelease(response);
+
+        KhMultipartFormDataPart parts[2] = {};
+        parts[0].Kind = KhRequestBodyPartKind::Field;
+        parts[0].Name = "field";
+        parts[0].NameLength = strlen(parts[0].Name);
+        parts[0].Value = "value";
+        parts[0].ValueLength = strlen(parts[0].Value);
+        const UCHAR fileBytes[] = "bytes-file";
+        parts[1].Kind = KhRequestBodyPartKind::FileBytes;
+        parts[1].Name = "upload";
+        parts[1].NameLength = strlen(parts[1].Name);
+        parts[1].Data = fileBytes;
+        parts[1].DataLength = sizeof(fileBytes) - 1;
+        parts[1].FileName = "upload.bin";
+        parts[1].FileNameLength = strlen(parts[1].FileName);
+        parts[1].ContentType = "application/octet-stream";
+        parts[1].ContentTypeLength = strlen(parts[1].ContentType);
+        status = KhHttpRequestSetMultipartFormDataBody(request, parts, 2);
+        Expect(status == STATUS_SUCCESS, "multipart body setter succeeds");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "multipart body send succeeds");
+        Expect(strstr(transport.LastRequest, "Content-Type: multipart/form-data; boundary=----KernelHttpBoundary") != nullptr, "multipart body sets boundary content type");
+        Expect(strstr(transport.LastRequest, "Content-Disposition: form-data; name=\"field\"") != nullptr, "multipart body contains field part");
+        Expect(strstr(transport.LastRequest, "Content-Disposition: form-data; name=\"upload\"; filename=\"upload.bin\"") != nullptr, "multipart body contains file part");
+        Expect(strstr(transport.LastRequest, "\r\n\r\nbytes-file\r\n") != nullptr, "multipart body contains file bytes");
+        KhResponseRelease(response);
+
+        KhMultipartFormDataPart filePathPart = {};
+        filePathPart.Kind = KhRequestBodyPartKind::FilePath;
+        filePathPart.Name = "file";
+        filePathPart.NameLength = strlen(filePathPart.Name);
+        filePathPart.FilePath = "tests\\testdata\\request_body_file.txt";
+        filePathPart.FilePathLength = strlen(filePathPart.FilePath);
+        filePathPart.ContentType = "text/plain";
+        filePathPart.ContentTypeLength = strlen(filePathPart.ContentType);
+        status = KhHttpRequestSetMultipartFormDataBody(request, &filePathPart, 1);
+        Expect(status == STATUS_SUCCESS, "multipart file path body setter succeeds");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "multipart file path body send succeeds");
+        Expect(strstr(transport.LastRequest, "filename=\"request_body_file.txt\"") != nullptr, "multipart file path derives filename");
+        Expect(strstr(transport.LastRequest, "file-body-from-testdata") != nullptr, "multipart file path reads file body");
+        KhResponseRelease(response);
+
+        status = KhHttpRequestSetFileBody(
+            request,
+            "tests\\testdata\\request_body_file.txt",
+            strlen("tests\\testdata\\request_body_file.txt"),
+            nullptr,
+            0);
+        Expect(status == STATUS_SUCCESS, "file body setter succeeds");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "file body send succeeds");
+        Expect(strstr(transport.LastRequest, "Content-Type: application/octet-stream\r\n") != nullptr, "file body sets default content type");
+        Expect(strstr(transport.LastRequest, "\r\n\r\nfile-body-from-testdata") != nullptr, "file body reads file contents");
+        KhResponseRelease(response);
+
+        status = KhHttpRequestClearBody(request);
+        Expect(status == STATUS_SUCCESS, "clear body succeeds");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "clear body send succeeds");
+        Expect(strstr(transport.LastRequest, "Content-Length:") == nullptr, "clear body omits content length");
+        Expect(strstr(transport.LastRequest, "Content-Type:") == nullptr, "clear body removes generated content type");
+        KhResponseRelease(response);
 
         KhTestSetHttpTransport(nullptr, nullptr);
         KhHttpRequestRelease(request);
@@ -1696,6 +1857,7 @@ int main()
     TestConnectionPoolKeys();
     TestConnectionPoolAcquireRelease();
     TestHttpSyncSendResponseManagement();
+    TestHighLevelRequestBodyTypes();
     TestHttpSyncConnectionPolicies();
     TestHttpAsyncState();
     TestHttpUrlRequestTargetParsing();

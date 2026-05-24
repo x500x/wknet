@@ -74,6 +74,13 @@ namespace api
         NoPool = 2
     };
 
+    enum class KhRequestBodyPartKind : ULONG
+    {
+        Field = 0,
+        FileBytes = 1,
+        FilePath = 2
+    };
+
     enum KhHttpSendFlags : ULONG
     {
         KhHttpSendFlagNone = 0,
@@ -143,6 +150,31 @@ namespace api
         void* CallbackContext = nullptr;
         KhAsyncCompletionCallback CompletionCallback = nullptr;
         void* CompletionContext = nullptr;
+    };
+
+    struct KhNameValuePair final
+    {
+        const char* Name = nullptr;
+        SIZE_T NameLength = 0;
+        const char* Value = nullptr;
+        SIZE_T ValueLength = 0;
+    };
+
+    struct KhMultipartFormDataPart final
+    {
+        KhRequestBodyPartKind Kind = KhRequestBodyPartKind::Field;
+        const char* Name = nullptr;
+        SIZE_T NameLength = 0;
+        const char* Value = nullptr;
+        SIZE_T ValueLength = 0;
+        const UCHAR* Data = nullptr;
+        SIZE_T DataLength = 0;
+        const char* FilePath = nullptr;
+        SIZE_T FilePathLength = 0;
+        const char* FileName = nullptr;
+        SIZE_T FileNameLength = 0;
+        const char* ContentType = nullptr;
+        SIZE_T ContentTypeLength = 0;
     };
 
     struct KhResponseView final
@@ -223,6 +255,45 @@ namespace api
         _In_ KH_REQUEST request,
         _In_reads_bytes_opt_(bodyLength) const UCHAR* body,
         SIZE_T bodyLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestClearBody(_In_ KH_REQUEST request) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetTextBody(
+        _In_ KH_REQUEST request,
+        _In_reads_bytes_opt_(textLength) const char* text,
+        SIZE_T textLength,
+        _In_reads_bytes_opt_(contentTypeLength) const char* contentType,
+        SIZE_T contentTypeLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetRawBody(
+        _In_ KH_REQUEST request,
+        _In_reads_bytes_opt_(dataLength) const UCHAR* data,
+        SIZE_T dataLength,
+        _In_reads_bytes_opt_(contentTypeLength) const char* contentType,
+        SIZE_T contentTypeLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetUrlEncodedBody(
+        _In_ KH_REQUEST request,
+        _In_reads_(pairCount) const KhNameValuePair* pairs,
+        SIZE_T pairCount) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetMultipartFormDataBody(
+        _In_ KH_REQUEST request,
+        _In_reads_(partCount) const KhMultipartFormDataPart* parts,
+        SIZE_T partCount) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetFileBody(
+        _In_ KH_REQUEST request,
+        _In_reads_bytes_(filePathLength) const char* filePath,
+        SIZE_T filePathLength,
+        _In_reads_bytes_opt_(contentTypeLength) const char* contentType,
+        SIZE_T contentTypeLength) noexcept;
 
     _Must_inspect_result_
     NTSTATUS KhHttpRequestSetTlsOptions(

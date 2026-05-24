@@ -218,6 +218,7 @@ namespace client
             h2Options.ExtraHeaderCount = options.Request.ExtraHeaderCount;
             h2Options.Body = reinterpret_cast<const UCHAR*>(options.Request.Body);
             h2Options.BodyLength = options.Request.BodyLength;
+            h2Options.IncludeContentLength = options.Request.IncludeContentLength;
 
             Http2HeaderScratch h2Scratch = {};
             status = PrepareHttp2HeaderScratch(options.Workspace, h2Scratch);

@@ -325,7 +325,7 @@ namespace client
             ++headerIdx;
         }
 
-        if (options.Body != nullptr && options.BodyLength > 0) {
+        if ((options.Body != nullptr && options.BodyLength > 0) || options.IncludeContentLength) {
             requestHeaders[headerIdx].Name = { "content-length", 14 };
             if (!WriteDecimal(
                 options.BodyLength,
