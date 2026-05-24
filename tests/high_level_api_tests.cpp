@@ -6,6 +6,7 @@
 #include "../src/KernelHttp/api/KernelHttpConnectionPool.h"
 #include "../src/KernelHttp/api/KernelHttpWorkspace.h"
 #include "../src/KernelHttp/crypto/CngProviderCache.h"
+#include "../src/KernelHttp/samples/HighLevelApiSamples.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -221,6 +222,16 @@ namespace
         ULONG LastConnectionId = 0;
         bool LastReused = false;
         KhConnectionPolicy LastPolicy = KhConnectionPolicy::ReuseOrCreate;
+        KhCertificatePolicy LastCertificatePolicy = KhCertificatePolicy::Verify;
+        SIZE_T H2AlpnCount = 0;
+        SIZE_T NoVerifyCount = 0;
+        bool SawGet = false;
+        bool SawPost = false;
+        bool SawPut = false;
+        bool SawPatch = false;
+        bool SawDelete = false;
+        bool SawHead = false;
+        bool SawOptions = false;
         bool LastPoolable = false;
         char LastHost[64] = {};
         USHORT LastPort = 0;
@@ -281,8 +292,17 @@ namespace
         transport->LastConnectionId = request->ConnectionId;
         transport->LastReused = request->ReusedConnection;
         transport->LastPolicy = request->ConnectionPolicy;
+        transport->LastCertificatePolicy = request->CertificatePolicy;
         transport->LastPoolable = request->PoolableConnection;
         transport->LastPort = request->Port;
+        if (request->CertificatePolicy == KhCertificatePolicy::NoVerify) {
+            ++transport->NoVerifyCount;
+        }
+        if (request->AlpnLength == 2 &&
+            request->Alpn != nullptr &&
+            memcmp(request->Alpn, "h2", 2) == 0) {
+            ++transport->H2AlpnCount;
+        }
 
         const SIZE_T hostLength = request->HostLength < sizeof(transport->LastHost) - 1 ?
             request->HostLength :
@@ -299,6 +319,13 @@ namespace
             RtlCopyMemory(transport->LastRequest, request->BuiltRequest, transport->LastRequestLength);
         }
         transport->LastRequest[transport->LastRequestLength] = '\0';
+        transport->SawGet = transport->SawGet || strstr(transport->LastRequest, "GET ") == transport->LastRequest;
+        transport->SawPost = transport->SawPost || strstr(transport->LastRequest, "POST ") == transport->LastRequest;
+        transport->SawPut = transport->SawPut || strstr(transport->LastRequest, "PUT ") == transport->LastRequest;
+        transport->SawPatch = transport->SawPatch || strstr(transport->LastRequest, "PATCH ") == transport->LastRequest;
+        transport->SawDelete = transport->SawDelete || strstr(transport->LastRequest, "DELETE ") == transport->LastRequest;
+        transport->SawHead = transport->SawHead || strstr(transport->LastRequest, "HEAD ") == transport->LastRequest;
+        transport->SawOptions = transport->SawOptions || strstr(transport->LastRequest, "OPTIONS ") == transport->LastRequest;
 
         response->RawResponse = transport->Response;
         response->RawResponseLength = transport->ResponseLength;
@@ -1346,6 +1373,102 @@ namespace
         KhSessionClose(session);
     }
 
+    void TestHighLevelSampleRunners()
+    {
+        const char rawResponse[] =
+            "HTTP/1.1 204 No Content\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        const UCHAR echoData[] = "kernel-http high-level websocket echo";
+
+        WskClient* wskClient = FakeWskClient();
+        KH_SESSION session = CreateValidSession(wskClient);
+
+        TransportContext transport = {};
+        transport.Response = rawResponse;
+        transport.ResponseLength = strlen(rawResponse);
+        KhTestSetHttpTransport(TestHttpTransport, &transport);
+
+        WebSocketCapture capture = {};
+        capture.NextMessage.Type = KernelHttp::api::KhWebSocketMessageType::Text;
+        capture.NextMessage.Data = echoData;
+        capture.NextMessage.DataLength = sizeof(echoData) - 1;
+        capture.NextMessage.FinalFragment = true;
+        KhTestSetWebSocketTransport(
+            TestWebSocketConnectTransport,
+            TestWebSocketSendTransport,
+            TestWebSocketReceiveTransport,
+            TestWebSocketCloseTransport,
+            &capture);
+
+        KernelHttp::samples::HighLevelApiSampleResults results = {};
+        NTSTATUS status = KernelHttp::samples::RunHighLevelApiSamples(session, &results);
+        Expect(status == STATUS_SUCCESS, "main high-level sample runner succeeds through API test transports");
+        Expect(results.HttpGet.Status == STATUS_SUCCESS, "main samples include HTTP GET");
+        Expect(results.HttpPost.Status == STATUS_SUCCESS, "main samples include HTTP POST");
+        Expect(results.HttpsTlsOptions.Status == STATUS_SUCCESS, "main samples include HTTPS TLS options");
+        Expect(results.Http2Alpn.Status == STATUS_SUCCESS, "main samples include HTTP/2 ALPN option");
+        Expect(results.WebSocketEcho.Status == STATUS_SUCCESS, "main samples include WebSocket echo");
+        Expect(transport.SawGet, "main samples send GET through high-level API");
+        Expect(transport.SawPost, "main samples send POST through high-level API");
+        Expect(transport.H2AlpnCount == 1, "main samples request h2 ALPN exactly once");
+        Expect(transport.NoVerifyCount == 0, "main samples do not use no-verify TLS");
+        Expect(capture.ConnectCount == 1 && capture.SendCount == 1 && capture.ReceiveCount == 1, "main samples run websocket connect send receive");
+
+        KhSessionClose(session);
+
+        session = CreateValidSession(wskClient);
+        transport = {};
+        transport.Response = rawResponse;
+        transport.ResponseLength = strlen(rawResponse);
+        KhTestSetHttpTransport(TestHttpTransport, &transport);
+        capture = {};
+        capture.NextMessage.Type = KernelHttp::api::KhWebSocketMessageType::Text;
+        capture.NextMessage.Data = echoData;
+        capture.NextMessage.DataLength = sizeof(echoData) - 1;
+        capture.NextMessage.FinalFragment = true;
+        KhTestSetWebSocketTransport(
+            TestWebSocketConnectTransport,
+            TestWebSocketSendTransport,
+            TestWebSocketReceiveTransport,
+            TestWebSocketCloseTransport,
+            &capture);
+
+        results = {};
+        status = KernelHttp::samples::RunHighLevelApiTestDriverSamples(session, &results);
+        Expect(status == STATUS_SUCCESS, "test-driver high-level sample matrix succeeds through API test transports");
+        Expect(results.HttpPut.Status == STATUS_SUCCESS, "test-driver matrix includes HTTP PUT");
+        Expect(results.HttpPatch.Status == STATUS_SUCCESS, "test-driver matrix includes HTTP PATCH");
+        Expect(results.HttpDelete.Status == STATUS_SUCCESS, "test-driver matrix includes HTTP DELETE");
+        Expect(results.HttpHead.Status == STATUS_SUCCESS, "test-driver matrix includes HTTP HEAD");
+        Expect(results.HttpOptions.Status == STATUS_SUCCESS, "test-driver matrix includes HTTP OPTIONS");
+        Expect(results.HttpsPost.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS POST");
+        Expect(results.HttpsPut.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS PUT");
+        Expect(results.HttpsPatch.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS PATCH");
+        Expect(results.HttpsDelete.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS DELETE");
+        Expect(results.HttpsNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS no-verify");
+        Expect(results.HttpsPostNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS POST no-verify");
+        Expect(results.HttpsPutNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS PUT no-verify");
+        Expect(results.HttpsPatchNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS PATCH no-verify");
+        Expect(results.HttpsDeleteNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS DELETE no-verify");
+        Expect(results.WebSocketEchoNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes WebSocket no-verify");
+        Expect(transport.SawGet, "test-driver matrix sends GET");
+        Expect(transport.SawPost, "test-driver matrix sends POST");
+        Expect(transport.SawPut, "test-driver matrix sends PUT");
+        Expect(transport.SawPatch, "test-driver matrix sends PATCH");
+        Expect(transport.SawDelete, "test-driver matrix sends DELETE");
+        Expect(transport.SawHead, "test-driver matrix sends HEAD");
+        Expect(transport.SawOptions, "test-driver matrix sends OPTIONS");
+        Expect(transport.NoVerifyCount >= 5, "test-driver matrix exercises explicit no-verify HTTPS scenarios");
+        Expect(transport.H2AlpnCount >= 1, "test-driver matrix exercises HTTP/2 ALPN");
+        Expect(capture.ConnectCount == 2 && capture.SendCount == 2 && capture.ReceiveCount == 2, "test-driver matrix runs verified and no-verify websocket scenarios");
+
+        KhTestSetHttpTransport(nullptr, nullptr);
+        KhTestSetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+        KhSessionClose(session);
+    }
+
     void TestAsyncValidation()
     {
         NTSTATUS status = KhAsyncCancel(nullptr);
@@ -1469,6 +1592,40 @@ namespace
             FileContains("src\\KernelHttp\\api\\KernelHttpApi.cpp", "tlsOptions.ProviderCache = session->ProviderCache"),
             "high-level API passes session provider cache into TLS");
     }
+
+    void TestMainDriverUsesHighLevelSamples()
+    {
+        Expect(
+            FileContains("src\\KernelHttp\\DriverEntry.cpp", "samples/HighLevelApiSamples.h"),
+            "DriverEntry includes high-level sample runner");
+        Expect(
+            !FileContains("src\\KernelHttp\\DriverEntry.cpp", "samples/HttpVerbSamples.h"),
+            "DriverEntry does not include legacy HTTP verb samples");
+        Expect(
+            !FileContains("src\\KernelHttp\\DriverEntry.cpp", "RunHttpVerbSamples"),
+            "DriverEntry does not call legacy HTTP verb sample matrix");
+        Expect(
+            !FileContains("src\\KernelHttp\\DriverEntry.cpp", "RunHttp2VerbSamples"),
+            "DriverEntry does not call legacy HTTP/2 sample matrix");
+        Expect(
+            FileContains("src\\KernelHttp\\DriverEntry.cpp", "KhSessionCreate"),
+            "DriverEntry creates a high-level API session");
+        Expect(
+            FileContains("src\\KernelHttp\\DriverEntry.cpp", "KhSessionClose"),
+            "DriverEntry closes the high-level API session");
+        Expect(
+            !FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "client/HttpsClient.h"),
+            "high-level samples do not include HttpsClient directly");
+        Expect(
+            !FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "client/WebSocketClient.h"),
+            "high-level samples do not include WebSocketClient directly");
+        Expect(
+            !FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "tls/TlsConnection.h"),
+            "high-level samples do not include TlsConnection directly");
+        Expect(
+            FileContains("src\\KernelHttp\\DriverEntry.cpp", "KERNEL_HTTP_TEST_DRIVER_SCENARIOS"),
+            "DriverEntry has explicit test-driver scenario matrix switch");
+    }
 }
 
 int main()
@@ -1489,9 +1646,11 @@ int main()
     TestWebSocketValidation();
     TestWebSocketApiBehavior();
     TestWebSocketAsyncBehavior();
+    TestHighLevelSampleRunners();
     TestAsyncValidation();
     TestIrqlGuards();
     TestBlueScreenPathUsesWorkspaceAndProviderCache();
+    TestMainDriverUsesHighLevelSamples();
 
     if (g_failed) {
         return 1;

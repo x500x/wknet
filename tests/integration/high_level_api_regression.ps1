@@ -7,6 +7,7 @@ param(
 
     [switch]$SkipDriverBuild,
     [switch]$VmSmoke,
+    [switch]$TestDriverScenarios,
     [switch]$KeepService,
 
     [int]$HttpsPort = 8443,
@@ -32,6 +33,10 @@ if ($SkipDriverBuild) {
 
 if ($VmSmoke) {
     $arguments.VmSmoke = $true
+}
+
+if ($TestDriverScenarios -or (-not $SkipDriverBuild -and -not $VmSmoke)) {
+    $arguments.TestDriverScenarios = $true
 }
 
 if ($KeepService) {
@@ -81,5 +86,35 @@ function Invoke-StaticStackCleanupCheck {
     }
 }
 
+function Invoke-MainDriverSamplePathCheck {
+    Write-Host '[kernel-http] checking main driver sample path uses high-level API'
+
+    $driverEntryPath = Join-Path $script:Root 'src\KernelHttp\DriverEntry.cpp'
+    $driverEntry = Get-Content -LiteralPath $driverEntryPath -Raw
+    if ($driverEntry -notmatch 'samples/HighLevelApiSamples\.h') {
+        throw 'DriverEntry must include HighLevelApiSamples.h for load-time samples.'
+    }
+    if ($driverEntry -match 'samples/HttpVerbSamples\.h' -or
+        $driverEntry -match 'RunHttpVerbSamples' -or
+        $driverEntry -match 'RunHttp2VerbSamples') {
+        throw 'DriverEntry must not route main-driver samples through legacy low-level sample matrices.'
+    }
+    if ($driverEntry -notmatch 'KhSessionCreate' -or $driverEntry -notmatch 'KhSessionClose') {
+        throw 'DriverEntry must create and close a high-level API session around samples.'
+    }
+    if ($driverEntry -notmatch 'KERNEL_HTTP_TEST_DRIVER_SCENARIOS') {
+        throw 'DriverEntry must expose the explicit test-driver scenario matrix build switch.'
+    }
+
+    $highLevelSamplesPath = Join-Path $script:Root 'src\KernelHttp\samples\HighLevelApiSamples.cpp'
+    $highLevelSamples = Get-Content -LiteralPath $highLevelSamplesPath -Raw
+    if ($highLevelSamples -match 'client/HttpsClient\.h' -or
+        $highLevelSamples -match 'client/WebSocketClient\.h' -or
+        $highLevelSamples -match 'tls/TlsConnection\.h') {
+        throw 'HighLevelApiSamples must use KernelHttp::api entrypoints, not direct low-level clients.'
+    }
+}
+
 Invoke-StaticStackCleanupCheck
+Invoke-MainDriverSamplePathCheck
 & $scriptPath @arguments

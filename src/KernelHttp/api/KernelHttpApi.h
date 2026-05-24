@@ -51,7 +51,8 @@ namespace api
         Put = 2,
         Patch = 3,
         Delete = 4,
-        Head = 5
+        Head = 5,
+        Options = 6
     };
 
     enum class KhTlsVersion : ULONG
@@ -328,6 +329,9 @@ namespace api
         const char* BuiltRequest = nullptr;
         SIZE_T BuiltRequestLength = 0;
         KhConnectionPolicy ConnectionPolicy = KhConnectionPolicy::ReuseOrCreate;
+        KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
+        const char* Alpn = nullptr;
+        SIZE_T AlpnLength = 0;
         bool PoolableConnection = false;
         bool ReusedConnection = false;
         ULONG ConnectionId = 0;

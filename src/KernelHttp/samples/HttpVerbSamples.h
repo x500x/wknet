@@ -7,6 +7,8 @@ namespace KernelHttp
 {
 namespace samples
 {
+    // Exhaustive legacy sample matrix for test-driver and regression coverage.
+    // The normal load-time driver path uses HighLevelApiSamples instead.
     struct HttpVerbSampleResult final
     {
         NTSTATUS Status = STATUS_SUCCESS;

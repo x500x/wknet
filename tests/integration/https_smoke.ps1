@@ -7,6 +7,7 @@ param(
 
     [switch]$SkipDriverBuild,
     [switch]$VmSmoke,
+    [switch]$TestDriverScenarios,
     [switch]$KeepService,
 
     [int]$HttpsPort = 8443,
@@ -191,6 +192,7 @@ function Invoke-HostRegression {
             'src\KernelHttp\api\KernelHttpAsync.cpp',
             'src\KernelHttp\api\KernelHttpConnectionPool.cpp',
             'src\KernelHttp\api\KernelHttpWorkspace.cpp',
+            'src\KernelHttp\samples\HighLevelApiSamples.cpp',
             'src\KernelHttp\http\HttpTypes.cpp',
             'src\KernelHttp\http\HttpRequest.cpp',
             'src\KernelHttp\http\HttpResponse.cpp',
@@ -198,6 +200,7 @@ function Invoke-HostRegression {
             'src\KernelHttp\http\HttpParser.cpp',
             'src\KernelHttp\crypto\CngProvider.cpp',
             'src\KernelHttp\crypto\CngProviderCache.cpp',
+            'src\KernelHttp\tls\CertificateStore.cpp',
             'src\KernelHttp\websocket\WebSocketFrame.cpp',
             'third_party\brotli\c\common\constants.c',
             'third_party\brotli\c\common\context.c',
@@ -222,8 +225,15 @@ function Invoke-HostRegression {
             "/p:Platform=$Platform"
         )
 
+        $extraDefines = @()
         if ($VmSmoke) {
-            $driverBuildArguments += '/p:KernelHttpExtraDefines=KERNEL_HTTP_LOCAL_HTTPS_SMOKE_ONLY'
+            $extraDefines += 'KERNEL_HTTP_LOCAL_HTTPS_SMOKE_ONLY'
+        }
+        if ($TestDriverScenarios) {
+            $extraDefines += 'KERNEL_HTTP_TEST_DRIVER_SCENARIOS'
+        }
+        if ($extraDefines.Count -ne 0) {
+            $driverBuildArguments += "/p:KernelHttpExtraDefines=$($extraDefines -join ';')"
         }
 
         Invoke-Checked `

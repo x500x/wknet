@@ -1,7 +1,6 @@
 #include "KernelHttpConfig.h"
 #include "net/WskClient.h"
-#include "samples/HttpVerbSamples.h"
-#include "samples/Http2VerbSamples.h"
+#include "samples/HighLevelApiSamples.h"
 
 extern "C" NTSYSAPI NTSTATUS NTAPI ZwWaitForSingleObject(
     _In_ HANDLE Handle,
@@ -22,9 +21,11 @@ namespace KernelHttp
         void LoadHttpSamplesThread(_In_ PVOID startContext) noexcept;
     }
 
-    NTSTATUS RunHttpSamples(samples::HttpVerbSampleResults* results) noexcept
+    NTSTATUS RunHttpSamples(
+        api::KH_SESSION session,
+        samples::HighLevelApiSampleResults* results) noexcept
     {
-        if (g_wskClient == nullptr || !g_wskClient->IsInitialized()) {
+        if (g_wskClient == nullptr || !g_wskClient->IsInitialized() || session == nullptr) {
             return STATUS_DEVICE_NOT_READY;
         }
 
@@ -34,38 +35,37 @@ namespace KernelHttp
         }
 
         *results = {};
-        return samples::RunLocalHttpsSmokeSample(*g_wskClient, &results->LocalHttpsSmoke);
+        return samples::RunHighLevelLocalHttpsSmokeSample(session, &results->LocalHttpsSmoke);
+#elif defined(KERNEL_HTTP_TEST_DRIVER_SCENARIOS)
+        return samples::RunHighLevelApiTestDriverSamples(session, results);
 #else
-        return samples::RunHttpVerbSamples(*g_wskClient, results);
+        return samples::RunHighLevelApiSamples(session, results);
 #endif
     }
 
     NTSTATUS RunLoadHttpSamples() noexcept
     {
         NTSTATUS finalStatus = STATUS_SUCCESS;
-        samples::HttpVerbSampleResults results = {};
-        const NTSTATUS status = RunHttpSamples(&results);
+
+        api::KH_SESSION session = nullptr;
+        api::KhSessionOptions sessionOptions = {};
+        NTSTATUS status = api::KhSessionCreate(g_wskClient, &sessionOptions, &session);
         if (!NT_SUCCESS(status)) {
-            kprintf("HTTP/HTTPS samples completed with failures: 0x%08X\r\n", static_cast<ULONG>(status));
+            kprintf("High-level API session create failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            return status;
+        }
+
+        samples::HighLevelApiSampleResults results = {};
+        status = RunHttpSamples(session, &results);
+        api::KhSessionClose(session);
+
+        if (!NT_SUCCESS(status)) {
+            kprintf("High-level HTTP/WebSocket samples completed with failures: 0x%08X\r\n", static_cast<ULONG>(status));
             finalStatus = status;
         }
         else {
-            kprintf("HTTP/HTTPS samples completed successfully\r\n");
+            kprintf("High-level HTTP/WebSocket samples completed successfully\r\n");
         }
-
-#if defined(KERNEL_HTTP_ENABLE_HTTP2_SAMPLE)
-        samples::Http2VerbSampleResults http2Results = {};
-        const NTSTATUS http2Status = samples::RunHttp2VerbSamples(*g_wskClient, &http2Results);
-        if (!NT_SUCCESS(http2Status)) {
-            kprintf("HTTP/2 samples completed with failures: 0x%08X\r\n", static_cast<ULONG>(http2Status));
-            if (NT_SUCCESS(finalStatus)) {
-                finalStatus = http2Status;
-            }
-        }
-        else {
-            kprintf("HTTP/2 samples completed successfully\r\n");
-        }
-#endif
 
         return finalStatus;
     }
@@ -120,7 +120,7 @@ DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
         return status;
     }
 
-    kprintf("WSK initialized, running load-time HTTP/HTTPS requests\r\n");
+    kprintf("WSK initialized, running load-time high-level HTTP/WebSocket requests\r\n");
 
     KernelHttp::LoadHttpSamplesThreadContext sampleThreadContext = { STATUS_UNSUCCESSFUL };
     OBJECT_ATTRIBUTES objectAttributes = {};

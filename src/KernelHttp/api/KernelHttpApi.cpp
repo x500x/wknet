@@ -882,6 +882,8 @@ namespace
             return http::HttpMethod::DeleteMethod;
         case KhHttpMethod::Head:
             return http::HttpMethod::Head;
+        case KhHttpMethod::Options:
+            return http::HttpMethod::Options;
         case KhHttpMethod::Get:
         default:
             return http::HttpMethod::Get;
@@ -1633,6 +1635,9 @@ namespace
         testRequest.BuiltRequest = reinterpret_cast<const char*>(workspace.Request.Data);
         testRequest.BuiltRequestLength = builtRequestLength;
         testRequest.ConnectionPolicy = request.ConnectionPolicy;
+        testRequest.CertificatePolicy = request.Tls.CertificatePolicy;
+        testRequest.Alpn = request.Tls.Alpn;
+        testRequest.AlpnLength = request.Tls.AlpnLength;
         testRequest.PoolableConnection = request.ConnectionPolicy != KhConnectionPolicy::NoPool;
         testRequest.ReusedConnection = reusedConnection;
         testRequest.ConnectionId = pooledConnection != nullptr ? pooledConnection->Id : 0;
@@ -2272,6 +2277,7 @@ namespace
         case KhHttpMethod::Patch:
         case KhHttpMethod::Delete:
         case KhHttpMethod::Head:
+        case KhHttpMethod::Options:
             request->Method = method;
             return STATUS_SUCCESS;
         default:
