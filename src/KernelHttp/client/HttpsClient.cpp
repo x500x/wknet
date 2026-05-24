@@ -15,6 +15,12 @@ namespace client
             return len == 2 && alpn != nullptr && alpn[0] == 'h' && alpn[1] == '2';
         }
 
+        bool IsConnectionCloseStatus(NTSTATUS status) noexcept
+        {
+            return status == STATUS_CONNECTION_DISCONNECTED ||
+                status == STATUS_CONNECTION_RESET;
+        }
+
         http::HttpText FindHeaderValue(const http::HttpHeader* headers, SIZE_T headerCount, http::HttpText name) noexcept
         {
             if (headers == nullptr) {
@@ -370,7 +376,7 @@ namespace client
                 buffers.ResponseBufferLength - responseLength,
                 &received);
             if (!NT_SUCCESS(status)) {
-                if (status != STATUS_CONNECTION_DISCONNECTED) {
+                if (!IsConnectionCloseStatus(status)) {
                     kprintf("HttpsClient receive failed: 0x%08X bytes=%Iu\r\n",
                         static_cast<ULONG>(status),
                         responseLength);

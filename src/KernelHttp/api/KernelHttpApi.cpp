@@ -328,6 +328,12 @@ namespace
         return value >= '0' && value <= '9';
     }
 
+    bool IsConnectionCloseStatus(NTSTATUS status) noexcept
+    {
+        return status == STATUS_CONNECTION_DISCONNECTED ||
+            status == STATUS_CONNECTION_RESET;
+    }
+
     bool IsDefaultPort(const char* scheme, SIZE_T schemeLength, USHORT port) noexcept
     {
         return ((TextEqualsLiteralIgnoreCase(scheme, schemeLength, "http") ||
@@ -1702,7 +1708,7 @@ namespace
             }
 
             if (!NT_SUCCESS(status)) {
-                if (status != STATUS_CONNECTION_DISCONNECTED) {
+                if (!IsConnectionCloseStatus(status)) {
                     return status;
                 }
 
@@ -1854,9 +1860,7 @@ namespace
     NTSTATUS EnsureTlsConnected(
         _In_ KH_SESSION session,
         const KhRequest& request,
-        _Inout_ KhPooledConnection& connection,
-        _In_reads_bytes_(earlyDataLength) const UCHAR* earlyData,
-        SIZE_T earlyDataLength) noexcept
+        _Inout_ KhPooledConnection& connection) noexcept
     {
         if (session == nullptr || connection.Socket == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -1895,12 +1899,6 @@ namespace
             alpn.NameLength = request.Tls.AlpnLength;
             tlsOptions.AlpnProtocols = &alpn;
             tlsOptions.AlpnProtocolCount = 1;
-        }
-
-        if (earlyData != nullptr && earlyDataLength != 0) {
-            tlsOptions.EarlyData = earlyData;
-            tlsOptions.EarlyDataLength = earlyDataLength;
-            tlsOptions.EnableEarlyData = true;
         }
 
         NTSTATUS status = tlsConnection->Connect(*connection.Socket, tlsOptions);
@@ -2022,13 +2020,7 @@ namespace
             status = EnsureTlsConnected(
                 session,
                 request,
-                *pooledConnection,
-                TextEqualsLiteral(request.Tls.Alpn, request.Tls.AlpnLength, "h2") ?
-                    nullptr :
-                    reinterpret_cast<const UCHAR*>(workspace.Request.Data),
-                TextEqualsLiteral(request.Tls.Alpn, request.Tls.AlpnLength, "h2") ?
-                    0 :
-                    builtRequestLength);
+                *pooledConnection);
             if (!NT_SUCCESS(status)) {
                 return status;
             }

@@ -74,6 +74,8 @@ namespace net
     private:
         PWSK_SOCKET socket_ = nullptr;
         const WSK_PROVIDER_CONNECTION_DISPATCH* dispatch_ = nullptr;
+        WskBuffer sendBuffer_ = {};
+        WskBuffer receiveBuffer_ = {};
     };
 }
 }

@@ -123,6 +123,12 @@ namespace net
         {
             return KeGetCurrentIrql() == PASSIVE_LEVEL;
         }
+
+        bool IsConnectionTerminalStatus(NTSTATUS status) noexcept
+        {
+            return status == STATUS_CONNECTION_DISCONNECTED ||
+                status == STATUS_CONNECTION_RESET;
+        }
     }
 
     WskSocket::~WskSocket() noexcept
@@ -281,18 +287,17 @@ namespace net
             return STATUS_INVALID_PARAMETER;
         }
 
-        WskBuffer buffer;
-        NTSTATUS status = buffer.Allocate(length);
+        NTSTATUS status = sendBuffer_.EnsureCapacity(length);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        status = buffer.SetData(data, length);
+        status = sendBuffer_.SetData(data, length);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        return Send(buffer, length, bytesSent, flags);
+        return Send(sendBuffer_, length, bytesSent, flags);
     }
 
     NTSTATUS WskSocket::Receive(
@@ -334,10 +339,11 @@ namespace net
         status = dispatch_->WskReceive(socket_, buffer.WskBuf(), flags, irp);
         status = CompleteSyncIrp(status, irp, &event, &information);
 
-        if (NT_SUCCESS(status) && bytesReceived != nullptr) {
+        if (bytesReceived != nullptr) {
             *bytesReceived = information;
         }
-        else if (!NT_SUCCESS(status)) {
+
+        if (!NT_SUCCESS(status)) {
             kprintf("WskReceive failed: 0x%08X information=%Iu requested=%Iu\r\n",
                 static_cast<ULONG>(status),
                 information,
@@ -366,20 +372,32 @@ namespace net
             return STATUS_INVALID_PARAMETER;
         }
 
-        WskBuffer buffer;
-        NTSTATUS status = buffer.Allocate(length);
+        NTSTATUS status = receiveBuffer_.EnsureCapacity(length);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
         SIZE_T received = 0;
-        status = Receive(buffer, length, &received, flags);
+        status = Receive(receiveBuffer_, length, &received, flags);
         if (!NT_SUCCESS(status)) {
+            if (received != 0 && IsConnectionTerminalStatus(status)) {
+                status = receiveBuffer_.CopyTo(data, received);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                if (bytesReceived != nullptr) {
+                    *bytesReceived = received;
+                }
+
+                return STATUS_SUCCESS;
+            }
+
             return status;
         }
 
         if (received > 0) {
-            status = buffer.CopyTo(data, received);
+            status = receiveBuffer_.CopyTo(data, received);
             if (!NT_SUCCESS(status)) {
                 return status;
             }

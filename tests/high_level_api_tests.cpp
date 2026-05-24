@@ -1429,6 +1429,7 @@ namespace
         Expect(results.HttpsTlsOptions.Status == STATUS_SUCCESS, "main samples include HTTPS TLS options");
         Expect(results.Http2Alpn.Status == STATUS_SUCCESS, "main samples include HTTP/2 ALPN option");
         Expect(results.WebSocketEcho.Status == STATUS_SUCCESS, "main samples include WebSocket echo");
+        Expect(results.WebSocketEcho.StatusCode == 101, "main websocket sample reports switching-protocols status");
         Expect(transport.SawGet, "main samples send GET through high-level API");
         Expect(transport.SawPost, "main samples send POST through high-level API");
         Expect(transport.H2AlpnCount == 1, "main samples request h2 ALPN exactly once");
@@ -1477,6 +1478,7 @@ namespace
         Expect(results.HttpsPatchNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS PATCH no-verify");
         Expect(results.HttpsDeleteNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS DELETE no-verify");
         Expect(results.WebSocketEchoNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes WebSocket no-verify");
+        Expect(results.WebSocketEchoNoVerify.StatusCode == 101, "test-driver websocket no-verify reports switching-protocols status");
         Expect(transport.SawGet, "test-driver matrix sends GET");
         Expect(transport.SawPost, "test-driver matrix sends POST");
         Expect(transport.SawPut, "test-driver matrix sends PUT");

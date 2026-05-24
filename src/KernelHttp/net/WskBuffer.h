@@ -84,6 +84,25 @@ namespace net
 #endif
         }
 
+        _Must_inspect_result_
+        NTSTATUS EnsureCapacity(SIZE_T capacity) noexcept
+        {
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+            UNREFERENCED_PARAMETER(capacity);
+            return STATUS_NOT_SUPPORTED;
+#else
+            if (capacity == 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (capacity_ >= capacity) {
+                return STATUS_SUCCESS;
+            }
+
+            return Allocate(capacity);
+#endif
+        }
+
         void Free() noexcept
         {
 #if defined(KERNEL_HTTP_USER_MODE_TEST)

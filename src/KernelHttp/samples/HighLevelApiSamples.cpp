@@ -17,6 +17,7 @@ namespace samples
         constexpr const char* ContentTypeName = "Content-Type";
         constexpr const char* JsonContentType = "application/json";
         constexpr const char* H2Alpn = "h2";
+        constexpr ULONG WebSocketSwitchingProtocolsStatus = 101;
 
         constexpr const char* HttpGetUrl = "http://httpbin.org/get";
         constexpr const char* HttpPostUrl = "http://httpbin.org/post";
@@ -437,6 +438,9 @@ namespace samples
 
             api::KH_WEBSOCKET websocket = nullptr;
             NTSTATUS status = api::KhWebSocketConnectSync(session, &connectOptions, &websocket);
+            if (NT_SUCCESS(status)) {
+                result->StatusCode = WebSocketSwitchingProtocolsStatus;
+            }
 
             const char message[] = "kernel-http high-level websocket echo";
             if (NT_SUCCESS(status)) {
