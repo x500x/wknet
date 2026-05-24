@@ -39,6 +39,7 @@ using KernelHttp::tls::TlsHandshake13;
 using KernelHttp::tls::TlsHandshakeMessageView;
 using KernelHttp::tls::TlsHandshakeState;
 using KernelHttp::tls::TlsHandshakeType;
+using KernelHttp::tls::TlsMaxPlaintextLength;
 using KernelHttp::tls::Tls13ClientHelloOptions;
 using KernelHttp::tls::Tls13CertificateVerifyInputMaxLength;
 using KernelHttp::tls::Tls13EncryptedExtensionsView;
@@ -644,6 +645,124 @@ namespace
         Expect(output.ContentType == TlsContentType::ApplicationData, "TLS 1.3 inner content type recovers");
         Expect(output.FragmentLength == sizeof(body), "TLS 1.3 unprotected length matches");
         Expect(memcmp(output.Fragment, body, sizeof(body)) == 0, "TLS 1.3 unprotected bytes match");
+    }
+
+    void TestTls13AesGcmProtectsMaxPlaintextRecord()
+    {
+        static UCHAR body[TlsMaxPlaintextLength] = {};
+        static UCHAR encoded[TlsRecordHeaderLength + TlsMaxPlaintextLength + 1 + TlsAesGcmTagLength] = {};
+        static UCHAR decoded[TlsMaxPlaintextLength + 1] = {};
+
+        for (SIZE_T index = 0; index < sizeof(body); ++index) {
+            body[index] = static_cast<UCHAR>(index & 0xff);
+        }
+
+        TlsAeadCipherState writeState = {};
+        TlsAeadCipherState readState = {};
+        for (SIZE_T index = 0; index < 16; ++index) {
+            writeState.Key[index] = static_cast<UCHAR>(0x70 + index);
+            readState.Key[index] = static_cast<UCHAR>(0x70 + index);
+        }
+        for (SIZE_T index = 0; index < TlsAesGcmTls13IvLength; ++index) {
+            writeState.FixedIv[index] = static_cast<UCHAR>(0x90 + index);
+            readState.FixedIv[index] = static_cast<UCHAR>(0x90 + index);
+        }
+        writeState.KeyLength = 16;
+        readState.KeyLength = 16;
+        writeState.FixedIvLength = TlsAesGcmTls13IvLength;
+        readState.FixedIvLength = TlsAesGcmTls13IvLength;
+
+        TlsPlaintextRecord plain = {};
+        plain.ContentType = TlsContentType::ApplicationData;
+        plain.Version = { 3, 3 };
+        plain.Fragment = body;
+        plain.FragmentLength = sizeof(body);
+
+        SIZE_T written = 0;
+        NTSTATUS status = TlsRecordLayer::ProtectAesGcm13(
+            plain,
+            writeState,
+            encoded,
+            sizeof(encoded),
+            &written);
+
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM max record protects");
+        Expect(written == sizeof(encoded), "TLS 1.3 AES-GCM max record writes full encoded length");
+        Expect(writeState.SequenceNumber == 1, "TLS 1.3 AES-GCM max record increments write sequence");
+
+        TlsRecordView parsed = {};
+        status = TlsRecordLayer::Parse(encoded, written, parsed);
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM max record parses");
+
+        TlsMutablePlaintextRecord output = {};
+        status = TlsRecordLayer::UnprotectAesGcm13(
+            parsed,
+            readState,
+            decoded,
+            sizeof(decoded),
+            output);
+
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM max record unprotects");
+        Expect(readState.SequenceNumber == 1, "TLS 1.3 AES-GCM max record increments read sequence");
+        Expect(output.ContentType == TlsContentType::ApplicationData, "TLS 1.3 AES-GCM max record content type recovers");
+        Expect(output.FragmentLength == sizeof(body), "TLS 1.3 AES-GCM max record plaintext length matches");
+        Expect(memcmp(output.Fragment, body, sizeof(body)) == 0, "TLS 1.3 AES-GCM max record plaintext bytes match");
+    }
+
+    void TestTls13AesGcmProtectsOverlappingDestination()
+    {
+        UCHAR encoded[128] = {};
+        const UCHAR body[] = { 'o', 'v', 'e', 'r', 'l', 'a', 'p' };
+        RtlCopyMemory(encoded, body, sizeof(body));
+
+        TlsAeadCipherState writeState = {};
+        TlsAeadCipherState readState = {};
+        for (SIZE_T index = 0; index < 16; ++index) {
+            writeState.Key[index] = static_cast<UCHAR>(0xa0 + index);
+            readState.Key[index] = static_cast<UCHAR>(0xa0 + index);
+        }
+        for (SIZE_T index = 0; index < TlsAesGcmTls13IvLength; ++index) {
+            writeState.FixedIv[index] = static_cast<UCHAR>(0xc0 + index);
+            readState.FixedIv[index] = static_cast<UCHAR>(0xc0 + index);
+        }
+        writeState.KeyLength = 16;
+        readState.KeyLength = 16;
+        writeState.FixedIvLength = TlsAesGcmTls13IvLength;
+        readState.FixedIvLength = TlsAesGcmTls13IvLength;
+
+        TlsPlaintextRecord plain = {};
+        plain.ContentType = TlsContentType::ApplicationData;
+        plain.Version = { 3, 3 };
+        plain.Fragment = encoded;
+        plain.FragmentLength = sizeof(body);
+
+        SIZE_T written = 0;
+        NTSTATUS status = TlsRecordLayer::ProtectAesGcm13(
+            plain,
+            writeState,
+            encoded,
+            sizeof(encoded),
+            &written);
+
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM overlapping record protects");
+        Expect(writeState.SequenceNumber == 1, "TLS 1.3 AES-GCM overlapping record increments write sequence");
+
+        TlsRecordView parsed = {};
+        status = TlsRecordLayer::Parse(encoded, written, parsed);
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM overlapping record parses");
+
+        UCHAR decoded[32] = {};
+        TlsMutablePlaintextRecord output = {};
+        status = TlsRecordLayer::UnprotectAesGcm13(
+            parsed,
+            readState,
+            decoded,
+            sizeof(decoded),
+            output);
+
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM overlapping record unprotects");
+        Expect(output.FragmentLength == sizeof(body), "TLS 1.3 AES-GCM overlapping plaintext length matches");
+        Expect(memcmp(output.Fragment, body, sizeof(body)) == 0, "TLS 1.3 AES-GCM overlapping plaintext bytes match");
     }
 
     void TestClientHello()
@@ -1678,6 +1797,8 @@ int main()
     TestHkdfExtractExpand();
     TestTls13EarlySecretUsesZeroPsk();
     TestTls13AesGcmRecordProtection();
+    TestTls13AesGcmProtectsMaxPlaintextRecord();
+    TestTls13AesGcmProtectsOverlappingDestination();
     TestClientHello();
     TestClientHelloAdvertisesSessionTicket();
     TestTls13ClientHelloExtensions();

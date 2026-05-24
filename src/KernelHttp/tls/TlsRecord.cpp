@@ -425,20 +425,8 @@ namespace tls
             return STATUS_BUFFER_TOO_SMALL;
         }
 
-        UCHAR innerPlaintext[TlsMaxPlaintextLength + 1] = {};
-        if (plaintext.FragmentLength != 0) {
-            RtlCopyMemory(innerPlaintext, plaintext.Fragment, plaintext.FragmentLength);
-        }
-        innerPlaintext[plaintext.FragmentLength] = static_cast<UCHAR>(plaintext.ContentType);
-
         UCHAR aad[TlsRecordHeaderLength] = {};
         BuildTls13Aad(encryptedFragmentLength, aad);
-
-        destination[0] = aad[0];
-        destination[1] = aad[1];
-        destination[2] = aad[2];
-        destination[3] = aad[3];
-        destination[4] = aad[4];
 
         UCHAR nonce[TlsAesGcmTls13IvLength] = {};
         BuildTls13Nonce(writeState, nonce);
@@ -452,13 +440,24 @@ namespace tls
         parameters.Aad = { aad, sizeof(aad) };
 
         UCHAR* ciphertext = destination + TlsRecordHeaderLength;
+        if (plaintext.FragmentLength != 0) {
+            RtlMoveMemory(ciphertext, plaintext.Fragment, plaintext.FragmentLength);
+        }
+        ciphertext[plaintext.FragmentLength] = static_cast<UCHAR>(plaintext.ContentType);
+
+        destination[0] = aad[0];
+        destination[1] = aad[1];
+        destination[2] = aad[2];
+        destination[3] = aad[3];
+        destination[4] = aad[4];
+
         UCHAR* tag = ciphertext + innerPlaintextLength;
         SIZE_T encryptedLength = 0;
 
         status = crypto::CngProvider::AesGcmEncrypt(
             key,
             parameters,
-            innerPlaintext,
+            ciphertext,
             innerPlaintextLength,
             ciphertext,
             innerPlaintextLength,
@@ -466,15 +465,16 @@ namespace tls
             TlsAesGcmTagLength,
             &encryptedLength);
 
-        RtlSecureZeroMemory(innerPlaintext, sizeof(innerPlaintext));
         RtlSecureZeroMemory(nonce, sizeof(nonce));
         RtlSecureZeroMemory(aad, sizeof(aad));
 
         if (!NT_SUCCESS(status)) {
+            RtlSecureZeroMemory(ciphertext, innerPlaintextLength);
             return status;
         }
 
         if (encryptedLength != innerPlaintextLength) {
+            RtlSecureZeroMemory(ciphertext, innerPlaintextLength + TlsAesGcmTagLength);
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
