@@ -1568,6 +1568,7 @@ namespace
             "\r\n";
 
         const UCHAR echoData[] = "kernel-http high-level websocket echo";
+        const UCHAR binaryEchoData[] = { 0x00, 0x01, 'K', 'H', 'W', 'S', 0xFE };
         const UCHAR bannerData[] = "Request served by test transport";
 
         WskClient* wskClient = FakeWskClient();
@@ -1579,7 +1580,7 @@ namespace
         KhTestSetHttpTransport(TestHttpTransport, &transport);
 
         WebSocketCapture capture = {};
-        capture.MessageCount = 2;
+        capture.MessageCount = 3;
         capture.Messages[0].Type = KernelHttp::api::KhWebSocketMessageType::Text;
         capture.Messages[0].Data = bannerData;
         capture.Messages[0].DataLength = sizeof(bannerData) - 1;
@@ -1588,6 +1589,10 @@ namespace
         capture.Messages[1].Data = echoData;
         capture.Messages[1].DataLength = sizeof(echoData) - 1;
         capture.Messages[1].FinalFragment = true;
+        capture.Messages[2].Type = KernelHttp::api::KhWebSocketMessageType::Binary;
+        capture.Messages[2].Data = binaryEchoData;
+        capture.Messages[2].DataLength = sizeof(binaryEchoData);
+        capture.Messages[2].FinalFragment = true;
         KhTestSetWebSocketTransport(
             TestWebSocketConnectTransport,
             TestWebSocketSendTransport,
@@ -1600,17 +1605,34 @@ namespace
         Expect(status == STATUS_SUCCESS, "main high-level sample runner succeeds through API test transports");
         Expect(results.HttpGet.Status == STATUS_SUCCESS, "main samples include HTTP GET");
         Expect(results.HttpPost.Status == STATUS_SUCCESS, "main samples include HTTP POST");
+        Expect(results.HttpPut.Status == STATUS_SUCCESS, "main samples include HTTP PUT");
+        Expect(results.HttpPatch.Status == STATUS_SUCCESS, "main samples include HTTP PATCH");
+        Expect(results.HttpDelete.Status == STATUS_SUCCESS, "main samples include HTTP DELETE");
+        Expect(results.HttpHead.Status == STATUS_SUCCESS, "main samples include HTTP HEAD");
+        Expect(results.HttpOptions.Status == STATUS_SUCCESS, "main samples include HTTP OPTIONS");
         Expect(results.HttpsTlsOptions.Status == STATUS_SUCCESS, "main samples include HTTPS TLS options");
+        Expect(results.HttpsPost.Status == STATUS_SUCCESS, "main samples include HTTPS POST");
+        Expect(results.HttpsPut.Status == STATUS_SUCCESS, "main samples include HTTPS PUT");
+        Expect(results.HttpsPatch.Status == STATUS_SUCCESS, "main samples include HTTPS PATCH");
+        Expect(results.HttpsDelete.Status == STATUS_SUCCESS, "main samples include HTTPS DELETE");
+        Expect(results.HttpsHead.Status == STATUS_SUCCESS, "main samples include HTTPS HEAD");
+        Expect(results.HttpsOptions.Status == STATUS_SUCCESS, "main samples include HTTPS OPTIONS");
         Expect(results.Http2Alpn.Status == STATUS_SUCCESS, "main samples include HTTP/2 ALPN option");
         Expect(results.WebSocketEcho.Status == STATUS_SUCCESS, "main samples include WebSocket echo");
         Expect(results.WebSocketEcho.StatusCode == 0, "main websocket sample does not report handshake status as result status");
         Expect(transport.SawGet, "main samples send GET through high-level API");
         Expect(transport.SawPost, "main samples send POST through high-level API");
+        Expect(transport.SawPut, "main samples send PUT through high-level API");
+        Expect(transport.SawPatch, "main samples send PATCH through high-level API");
+        Expect(transport.SawDelete, "main samples send DELETE through high-level API");
+        Expect(transport.SawHead, "main samples send HEAD through high-level API");
+        Expect(transport.SawOptions, "main samples send OPTIONS through high-level API");
         Expect(transport.H2AlpnCount == 1, "main samples request h2 ALPN exactly once");
         Expect(transport.NoVerifyCount == 0, "main samples do not use no-verify TLS");
-        Expect(transport.VerifiedHttpsForceNewCount == 2, "main verified HTTPS samples force fresh TLS connections");
+        Expect(transport.VerifiedHttpsForceNewCount == 8, "main verified HTTPS samples force fresh TLS connections");
         Expect(transport.VerifiedHttpsReuseCount == 0, "main verified HTTPS samples avoid reusing idle TLS connections");
-        Expect(capture.ConnectCount == 1 && capture.SendCount == 1 && capture.ReceiveCount == 2, "main samples skip websocket banner before echo");
+        Expect(capture.ConnectCount == 1 && capture.SendCount == 2 && capture.ReceiveCount == 3, "main samples skip websocket banner before text and binary echoes");
+        Expect(capture.LastSendType == KernelHttp::api::KhWebSocketMessageType::Binary, "main websocket sample sends binary after text");
 
         KhSessionClose(session);
 
@@ -1620,7 +1642,7 @@ namespace
         transport.ResponseLength = strlen(rawResponse);
         KhTestSetHttpTransport(TestHttpTransport, &transport);
         capture = {};
-        capture.MessageCount = 4;
+        capture.MessageCount = 6;
         capture.Messages[0].Type = KernelHttp::api::KhWebSocketMessageType::Text;
         capture.Messages[0].Data = bannerData;
         capture.Messages[0].DataLength = sizeof(bannerData) - 1;
@@ -1629,14 +1651,22 @@ namespace
         capture.Messages[1].Data = echoData;
         capture.Messages[1].DataLength = sizeof(echoData) - 1;
         capture.Messages[1].FinalFragment = true;
-        capture.Messages[2].Type = KernelHttp::api::KhWebSocketMessageType::Text;
-        capture.Messages[2].Data = bannerData;
-        capture.Messages[2].DataLength = sizeof(bannerData) - 1;
+        capture.Messages[2].Type = KernelHttp::api::KhWebSocketMessageType::Binary;
+        capture.Messages[2].Data = binaryEchoData;
+        capture.Messages[2].DataLength = sizeof(binaryEchoData);
         capture.Messages[2].FinalFragment = true;
         capture.Messages[3].Type = KernelHttp::api::KhWebSocketMessageType::Text;
-        capture.Messages[3].Data = echoData;
-        capture.Messages[3].DataLength = sizeof(echoData) - 1;
+        capture.Messages[3].Data = bannerData;
+        capture.Messages[3].DataLength = sizeof(bannerData) - 1;
         capture.Messages[3].FinalFragment = true;
+        capture.Messages[4].Type = KernelHttp::api::KhWebSocketMessageType::Text;
+        capture.Messages[4].Data = echoData;
+        capture.Messages[4].DataLength = sizeof(echoData) - 1;
+        capture.Messages[4].FinalFragment = true;
+        capture.Messages[5].Type = KernelHttp::api::KhWebSocketMessageType::Binary;
+        capture.Messages[5].Data = binaryEchoData;
+        capture.Messages[5].DataLength = sizeof(binaryEchoData);
+        capture.Messages[5].FinalFragment = true;
         KhTestSetWebSocketTransport(
             TestWebSocketConnectTransport,
             TestWebSocketSendTransport,
@@ -1656,6 +1686,8 @@ namespace
         Expect(results.HttpsPut.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS PUT");
         Expect(results.HttpsPatch.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS PATCH");
         Expect(results.HttpsDelete.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS DELETE");
+        Expect(results.HttpsHead.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS HEAD");
+        Expect(results.HttpsOptions.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS OPTIONS");
         Expect(results.HttpsNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS no-verify");
         Expect(results.HttpsPostNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS POST no-verify");
         Expect(results.HttpsPutNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes HTTPS PUT no-verify");
@@ -1672,9 +1704,10 @@ namespace
         Expect(transport.SawOptions, "test-driver matrix sends OPTIONS");
         Expect(transport.NoVerifyCount >= 5, "test-driver matrix exercises explicit no-verify HTTPS scenarios");
         Expect(transport.H2AlpnCount >= 1, "test-driver matrix exercises HTTP/2 ALPN");
-        Expect(transport.VerifiedHttpsForceNewCount == 6, "test-driver verified HTTPS matrix forces fresh TLS connections");
+        Expect(transport.VerifiedHttpsForceNewCount == 8, "test-driver verified HTTPS matrix forces fresh TLS connections");
         Expect(transport.VerifiedHttpsReuseCount == 0, "test-driver verified HTTPS matrix avoids idle TLS reuse");
-        Expect(capture.ConnectCount == 2 && capture.SendCount == 2 && capture.ReceiveCount == 4, "test-driver matrix skips websocket banners before echo");
+        Expect(capture.ConnectCount == 2 && capture.SendCount == 4 && capture.ReceiveCount == 6, "test-driver matrix skips websocket banners before text and binary echoes");
+        Expect(capture.LastSendType == KernelHttp::api::KhWebSocketMessageType::Binary, "test-driver websocket matrix sends binary after text");
 
         KhTestSetHttpTransport(nullptr, nullptr);
         KhTestSetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);

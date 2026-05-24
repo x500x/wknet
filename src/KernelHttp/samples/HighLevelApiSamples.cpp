@@ -30,6 +30,8 @@ namespace samples
         constexpr const char* HttpsPutUrl = "https://nghttp2.org/httpbin/put";
         constexpr const char* HttpsPatchUrl = "https://nghttp2.org/httpbin/patch";
         constexpr const char* HttpsDeleteUrl = "https://nghttp2.org/httpbin/delete";
+        constexpr const char* HttpsHeadUrl = "https://nghttp2.org/httpbin/get";
+        constexpr const char* HttpsOptionsUrl = "https://nghttp2.org/httpbin/";
         constexpr const char* WebSocketEchoUrl = "wss://echo.websocket.org/";
         constexpr const char* LocalHttpsUrl = "https://127.0.0.1:8443/sample_response_body.txt";
         constexpr const char* LocalHttpsHostName = "localhost";
@@ -229,6 +231,125 @@ namespace samples
             return status;
         }
 
+        struct ResponseLogContext final
+        {
+            const char* SampleName = nullptr;
+            SIZE_T HeaderCount = 0;
+            SIZE_T BodyLength = 0;
+            bool BodyLogged = false;
+        };
+
+        bool IsPrintableResponseBodyByte(UCHAR value) noexcept
+        {
+            return value == '\r' ||
+                value == '\n' ||
+                value == '\t' ||
+                (value >= 0x20 && value <= 0x7E);
+        }
+
+        void LogSampleBytes(
+            _In_z_ const char* sampleName,
+            _In_z_ const char* label,
+            _In_reads_bytes_opt_(dataLength) const UCHAR* data,
+            SIZE_T dataLength) noexcept
+        {
+            if (sampleName == nullptr) {
+                sampleName = "unknown";
+            }
+            if (label == nullptr) {
+                label = "bytes";
+            }
+
+            kprintf("[high-level %s] %s length=%Iu\r\n", sampleName, label, dataLength);
+            if (data == nullptr || dataLength == 0) {
+                kprintf("[high-level %s] %s <empty>\r\n", sampleName, label);
+                return;
+            }
+
+            bool printable = true;
+            for (SIZE_T index = 0; index < dataLength; ++index) {
+                if (!IsPrintableResponseBodyByte(data[index])) {
+                    printable = false;
+                    break;
+                }
+            }
+
+            if (printable) {
+                constexpr SIZE_T TextChunkLength = 512;
+                for (SIZE_T offset = 0; offset < dataLength; offset += TextChunkLength) {
+                    const SIZE_T remaining = dataLength - offset;
+                    const SIZE_T chunkLength =
+                        remaining < TextChunkLength ? remaining : TextChunkLength;
+                    UNREFERENCED_PARAMETER(chunkLength);
+                    kprintf(
+                        "%.*s",
+                        static_cast<int>(chunkLength),
+                        reinterpret_cast<const char*>(data + offset));
+                }
+                kprintf("\r\n");
+                return;
+            }
+
+            constexpr SIZE_T HexBytesPerLine = 16;
+            for (SIZE_T offset = 0; offset < dataLength; offset += HexBytesPerLine) {
+                const SIZE_T remaining = dataLength - offset;
+                const SIZE_T lineLength =
+                    remaining < HexBytesPerLine ? remaining : HexBytesPerLine;
+                kprintf("[high-level %s] %s-hex %Iu:", sampleName, label, offset);
+                for (SIZE_T byteIndex = 0; byteIndex < lineLength; ++byteIndex) {
+                    kprintf(" %02X", static_cast<unsigned>(data[offset + byteIndex]));
+                }
+                kprintf("\r\n");
+            }
+        }
+
+        _Must_inspect_result_
+        NTSTATUS LogResponseHeaderCallback(
+            void* context,
+            const char* name,
+            SIZE_T nameLength,
+            const char* value,
+            SIZE_T valueLength) noexcept
+        {
+            auto* logContext = static_cast<ResponseLogContext*>(context);
+            if (logContext != nullptr) {
+                ++logContext->HeaderCount;
+            }
+
+            kprintf(
+                "[high-level %s] response-header %.*s: %.*s\r\n",
+                logContext != nullptr && logContext->SampleName != nullptr ? logContext->SampleName : "unknown",
+                static_cast<int>(nameLength),
+                name != nullptr ? name : "",
+                static_cast<int>(valueLength),
+                value != nullptr ? value : "");
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS LogResponseBodyCallback(
+            void* context,
+            const UCHAR* data,
+            SIZE_T dataLength,
+            bool finalChunk) noexcept
+        {
+            UNREFERENCED_PARAMETER(finalChunk);
+
+            auto* logContext = static_cast<ResponseLogContext*>(context);
+            const char* sampleName =
+                logContext != nullptr && logContext->SampleName != nullptr ?
+                logContext->SampleName :
+                "unknown";
+
+            if (logContext != nullptr) {
+                logContext->BodyLength += dataLength;
+                logContext->BodyLogged = true;
+            }
+
+            LogSampleBytes(sampleName, "response-body", data, dataLength);
+            return STATUS_SUCCESS;
+        }
+
         void LogHttpSampleResult(_In_z_ const char* sampleName, const HighLevelApiSampleResult& result) noexcept
         {
             if (NT_SUCCESS(result.Status)) {
@@ -266,6 +387,91 @@ namespace samples
         }
 
         _Must_inspect_result_
+        NTSTATUS PrepareHttpRequest(
+            _In_ api::KH_SESSION session,
+            _In_z_ const char* sampleName,
+            api::KhHttpMethod method,
+            _In_z_ const char* url,
+            _In_opt_ const api::KhTlsOptions* tlsOptions,
+            api::KhConnectionPolicy connectionPolicy,
+            _Out_ api::KH_REQUEST* request) noexcept
+        {
+            if (session == nullptr || sampleName == nullptr || url == nullptr || request == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            *request = nullptr;
+
+            NTSTATUS status = api::KhHttpRequestCreate(session, request);
+            if (NT_SUCCESS(status)) {
+                status = api::KhHttpRequestSetUrl(*request, url, LiteralLength(url));
+            }
+            if (NT_SUCCESS(status)) {
+                status = api::KhHttpRequestSetMethod(*request, method);
+            }
+            if (NT_SUCCESS(status)) {
+                status = SetCommonHeaders(*request);
+            }
+            if (NT_SUCCESS(status) && tlsOptions != nullptr) {
+                status = api::KhHttpRequestSetTlsOptions(*request, tlsOptions);
+            }
+            if (NT_SUCCESS(status) && connectionPolicy != api::KhConnectionPolicy::ReuseOrCreate) {
+                status = api::KhHttpRequestSetConnectionPolicy(*request, connectionPolicy);
+            }
+
+            if (!NT_SUCCESS(status)) {
+                api::KhHttpRequestRelease(*request);
+                *request = nullptr;
+            }
+            return status;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS SendPreparedHttpRequest(
+            _In_ api::KH_SESSION session,
+            _In_z_ const char* sampleName,
+            _In_ api::KH_REQUEST request,
+            _Out_ HighLevelApiSampleResult* result) noexcept
+        {
+            if (session == nullptr || sampleName == nullptr || request == nullptr || result == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            *result = {};
+            ResponseLogContext logContext = {};
+            logContext.SampleName = sampleName;
+
+            api::KhHttpSendOptions sendOptions = {};
+            sendOptions.HeaderCallback = LogResponseHeaderCallback;
+            sendOptions.BodyCallback = LogResponseBodyCallback;
+            sendOptions.CallbackContext = &logContext;
+            sendOptions.Flags = api::KhHttpSendFlagAggregateWithCallbacks;
+
+            api::KH_RESPONSE response = nullptr;
+            NTSTATUS status = api::KhHttpSendSync(session, request, &sendOptions, &response);
+
+            if (NT_SUCCESS(status)) {
+                api::KhResponseView view = {};
+                status = api::KhResponseGetView(response, &view);
+                if (NT_SUCCESS(status)) {
+                    result->StatusCode = view.StatusCode;
+                    result->BodyLength = view.BodyLength;
+                    kprintf(
+                        "[high-level %s] response-complete status=%u headers=%Iu body=%Iu\r\n",
+                        sampleName,
+                        result->StatusCode,
+                        logContext.HeaderCount,
+                        result->BodyLength);
+                }
+            }
+
+            api::KhResponseRelease(response);
+            result->Status = status;
+            LogHttpSampleResult(sampleName, *result);
+            return status;
+        }
+
+        _Must_inspect_result_
         NTSTATUS RunHttpSample(
             _In_ api::KH_SESSION session,
             _In_z_ const char* sampleName,
@@ -284,47 +490,31 @@ namespace samples
             *result = {};
 
             api::KH_REQUEST request = nullptr;
-            NTSTATUS status = api::KhHttpRequestCreate(session, &request);
-            if (NT_SUCCESS(status)) {
-                status = api::KhHttpRequestSetUrl(request, url, LiteralLength(url));
-            }
-            if (NT_SUCCESS(status)) {
-                status = api::KhHttpRequestSetMethod(request, method);
-            }
-            if (NT_SUCCESS(status)) {
-                status = SetCommonHeaders(request);
-            }
+            NTSTATUS status = PrepareHttpRequest(
+                session,
+                sampleName,
+                method,
+                url,
+                tlsOptions,
+                connectionPolicy,
+                &request);
             if (NT_SUCCESS(status) && bodyLength != 0) {
                 status = SetHeaderLiteral(request, ContentTypeName, JsonContentType);
             }
             if (NT_SUCCESS(status) && (body != nullptr || bodyLength != 0)) {
                 status = api::KhHttpRequestSetBody(request, body, bodyLength);
             }
-            if (NT_SUCCESS(status) && tlsOptions != nullptr) {
-                status = api::KhHttpRequestSetTlsOptions(request, tlsOptions);
-            }
-            if (NT_SUCCESS(status) && connectionPolicy != api::KhConnectionPolicy::ReuseOrCreate) {
-                status = api::KhHttpRequestSetConnectionPolicy(request, connectionPolicy);
-            }
-
-            api::KH_RESPONSE response = nullptr;
+            bool sent = false;
             if (NT_SUCCESS(status)) {
-                status = api::KhHttpSendSync(session, request, nullptr, &response);
+                sent = true;
+                status = SendPreparedHttpRequest(session, sampleName, request, result);
             }
 
-            if (NT_SUCCESS(status)) {
-                api::KhResponseView view = {};
-                status = api::KhResponseGetView(response, &view);
-                if (NT_SUCCESS(status)) {
-                    result->StatusCode = view.StatusCode;
-                    result->BodyLength = view.BodyLength;
-                }
-            }
-
-            api::KhResponseRelease(response);
             api::KhHttpRequestRelease(request);
-            result->Status = status;
-            LogHttpSampleResult(sampleName, *result);
+            if (!sent) {
+                result->Status = status;
+                LogHttpSampleResult(sampleName, *result);
+            }
             return status;
         }
 
@@ -407,6 +597,91 @@ namespace samples
                 result);
         }
 
+        const char* WebSocketMessageTypeName(api::KhWebSocketMessageType type) noexcept
+        {
+            switch (type) {
+            case api::KhWebSocketMessageType::Text:
+                return "text";
+            case api::KhWebSocketMessageType::Binary:
+                return "binary";
+            case api::KhWebSocketMessageType::Close:
+                return "close";
+            default:
+                return "unknown";
+            }
+        }
+
+        void LogWebSocketMessage(
+            _In_z_ const char* sampleName,
+            _In_z_ const char* direction,
+            api::KhWebSocketMessageType type,
+            _In_reads_bytes_opt_(dataLength) const UCHAR* data,
+            SIZE_T dataLength,
+            bool finalFragment) noexcept
+        {
+            kprintf(
+                "[high-level %s] websocket-%s type=%s final=%s\r\n",
+                sampleName,
+                direction,
+                WebSocketMessageTypeName(type),
+                finalFragment ? "true" : "false");
+
+            if (direction != nullptr && direction[0] == 's') {
+                LogSampleBytes(sampleName, "websocket-send-body", data, dataLength);
+            }
+            else {
+                LogSampleBytes(sampleName, "websocket-recv-body", data, dataLength);
+            }
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ReceiveExpectedWebSocketMessage(
+            _In_ api::KH_WEBSOCKET websocket,
+            _In_z_ const char* sampleName,
+            api::KhWebSocketMessageType expectedType,
+            _In_reads_bytes_(expectedDataLength) const UCHAR* expectedData,
+            SIZE_T expectedDataLength,
+            _Out_ SIZE_T* receivedLength) noexcept
+        {
+            if (websocket == nullptr || sampleName == nullptr || receivedLength == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            *receivedLength = 0;
+            constexpr SIZE_T MaxFramesBeforeEcho = 8;
+            for (SIZE_T frameIndex = 0; frameIndex < MaxFramesBeforeEcho; ++frameIndex) {
+                api::KhWebSocketMessage received = {};
+                NTSTATUS status = api::KhWebSocketReceiveSync(websocket, nullptr, &received);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                LogWebSocketMessage(
+                    sampleName,
+                    "recv",
+                    received.Type,
+                    received.Data,
+                    received.DataLength,
+                    received.FinalFragment);
+
+                if (received.Type == api::KhWebSocketMessageType::Close) {
+                    return STATUS_CONNECTION_DISCONNECTED;
+                }
+
+                if (received.Type == expectedType &&
+                    received.DataLength == expectedDataLength &&
+                    (expectedDataLength == 0 ||
+                        (received.Data != nullptr &&
+                            expectedData != nullptr &&
+                            RtlCompareMemory(received.Data, expectedData, expectedDataLength) == expectedDataLength))) {
+                    *receivedLength = received.DataLength;
+                    return STATUS_SUCCESS;
+                }
+            }
+
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
         _Must_inspect_result_
         NTSTATUS RunWebSocketEchoSample(
             _In_ api::KH_SESSION session,
@@ -455,37 +730,54 @@ namespace samples
             api::KH_WEBSOCKET websocket = nullptr;
             NTSTATUS status = api::KhWebSocketConnectSync(session, &connectOptions, &websocket);
 
-            const char message[] = "kernel-http high-level websocket echo";
+            const char textMessage[] = "kernel-http high-level websocket echo";
             if (NT_SUCCESS(status)) {
-                status = api::KhWebSocketSendTextSync(websocket, message, sizeof(message) - 1, nullptr);
+                LogWebSocketMessage(
+                    sampleName,
+                    "send",
+                    api::KhWebSocketMessageType::Text,
+                    reinterpret_cast<const UCHAR*>(textMessage),
+                    sizeof(textMessage) - 1,
+                    true);
+                status = api::KhWebSocketSendTextSync(websocket, textMessage, sizeof(textMessage) - 1, nullptr);
             }
 
-            api::KhWebSocketMessage received = {};
-            bool echoMatched = false;
-            constexpr SIZE_T MaxFramesBeforeEcho = 8;
-            for (SIZE_T frameIndex = 0; NT_SUCCESS(status) && frameIndex < MaxFramesBeforeEcho; ++frameIndex) {
-                received = {};
-                status = api::KhWebSocketReceiveSync(websocket, nullptr, &received);
-                if (!NT_SUCCESS(status)) {
-                    break;
-                }
-
-                if (received.Type == api::KhWebSocketMessageType::Text &&
-                    received.Data != nullptr &&
-                    received.DataLength == sizeof(message) - 1 &&
-                    RtlCompareMemory(received.Data, message, sizeof(message) - 1) == sizeof(message) - 1) {
-                    echoMatched = true;
-                    result->BodyLength = received.DataLength;
-                    break;
-                }
-
-                if (received.Type == api::KhWebSocketMessageType::Close) {
-                    status = STATUS_CONNECTION_DISCONNECTED;
-                    break;
+            SIZE_T receivedLength = 0;
+            if (NT_SUCCESS(status)) {
+                status = ReceiveExpectedWebSocketMessage(
+                    websocket,
+                    sampleName,
+                    api::KhWebSocketMessageType::Text,
+                    reinterpret_cast<const UCHAR*>(textMessage),
+                    sizeof(textMessage) - 1,
+                    &receivedLength);
+                if (NT_SUCCESS(status)) {
+                    result->BodyLength += receivedLength;
                 }
             }
-            if (NT_SUCCESS(status) && !echoMatched) {
-                status = STATUS_INVALID_NETWORK_RESPONSE;
+
+            const UCHAR binaryMessage[] = { 0x00, 0x01, 'K', 'H', 'W', 'S', 0xFE };
+            if (NT_SUCCESS(status)) {
+                LogWebSocketMessage(
+                    sampleName,
+                    "send",
+                    api::KhWebSocketMessageType::Binary,
+                    binaryMessage,
+                    sizeof(binaryMessage),
+                    true);
+                status = api::KhWebSocketSendBinarySync(websocket, binaryMessage, sizeof(binaryMessage), nullptr);
+            }
+            if (NT_SUCCESS(status)) {
+                status = ReceiveExpectedWebSocketMessage(
+                    websocket,
+                    sampleName,
+                    api::KhWebSocketMessageType::Binary,
+                    binaryMessage,
+                    sizeof(binaryMessage),
+                    &receivedLength);
+                if (NT_SUCCESS(status)) {
+                    result->BodyLength += receivedLength;
+                }
             }
 
             const NTSTATUS closeStatus = api::KhWebSocketCloseSync(websocket);
@@ -555,6 +847,14 @@ namespace samples
         *results = {};
 
         const UCHAR postBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"POST\"}";
+        const UCHAR putBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"PUT\"}";
+        const UCHAR patchBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"PATCH\"}";
+        const UCHAR deleteBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"DELETE\"}";
+        const UCHAR httpsPostBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS POST\"}";
+        const UCHAR httpsPutBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS PUT\"}";
+        const UCHAR httpsPatchBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS PATCH\"}";
+        const UCHAR httpsDeleteBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS DELETE\"}";
+
         NTSTATUS status = RunHttpSample(
             session,
             "HTTP GET",
@@ -578,59 +878,6 @@ namespace samples
                 nullptr,
                 api::KhConnectionPolicy::ReuseOrCreate,
                 &results->HttpPost));
-
-        status = MergeSampleStatus(
-            status,
-            RunVerifiedNgHttp2Sample(
-                session,
-                "HTTPS TLS options",
-                api::KhHttpMethod::Get,
-                HttpsGetUrl,
-                nullptr,
-                0,
-                false,
-                &results->HttpsTlsOptions));
-
-        status = MergeSampleStatus(
-            status,
-            RunVerifiedNgHttp2Sample(
-                session,
-                "HTTP/2 ALPN",
-                api::KhHttpMethod::Get,
-                HttpsGetUrl,
-                nullptr,
-                0,
-                true,
-                &results->Http2Alpn));
-
-        status = MergeSampleStatus(
-            status,
-            RunWebSocketEchoSample(
-                session,
-                "WEBSOCKET ECHO",
-                true,
-                &results->WebSocketEcho));
-
-        return status;
-    }
-
-    NTSTATUS RunHighLevelApiTestDriverSamples(
-        api::KH_SESSION session,
-        HighLevelApiSampleResults* results) noexcept
-    {
-        if (session == nullptr || results == nullptr) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        NTSTATUS status = RunHighLevelApiSamples(session, results);
-
-        const UCHAR putBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"PUT\"}";
-        const UCHAR patchBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"PATCH\"}";
-        const UCHAR deleteBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"DELETE\"}";
-        const UCHAR httpsPostBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS POST\"}";
-        const UCHAR httpsPutBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS PUT\"}";
-        const UCHAR httpsPatchBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS PATCH\"}";
-        const UCHAR httpsDeleteBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS DELETE\"}";
 
         status = MergeSampleStatus(
             status,
@@ -701,6 +948,18 @@ namespace samples
             status,
             RunVerifiedNgHttp2Sample(
                 session,
+                "HTTPS GET",
+                api::KhHttpMethod::Get,
+                HttpsGetUrl,
+                nullptr,
+                0,
+                false,
+                &results->HttpsTlsOptions));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
                 "HTTPS POST",
                 api::KhHttpMethod::Post,
                 HttpsPostUrl,
@@ -744,6 +1003,68 @@ namespace samples
                 sizeof(httpsDeleteBody) - 1,
                 false,
                 &results->HttpsDelete));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                "HTTPS HEAD",
+                api::KhHttpMethod::Head,
+                HttpsHeadUrl,
+                nullptr,
+                0,
+                false,
+                &results->HttpsHead));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                "HTTPS OPTIONS",
+                api::KhHttpMethod::Options,
+                HttpsOptionsUrl,
+                nullptr,
+                0,
+                false,
+                &results->HttpsOptions));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                "HTTP/2 ALPN",
+                api::KhHttpMethod::Get,
+                HttpsGetUrl,
+                nullptr,
+                0,
+                true,
+                &results->Http2Alpn));
+
+        status = MergeSampleStatus(
+            status,
+            RunWebSocketEchoSample(
+                session,
+                "WEBSOCKET ECHO",
+                true,
+                &results->WebSocketEcho));
+
+        return status;
+    }
+
+    NTSTATUS RunHighLevelApiTestDriverSamples(
+        api::KH_SESSION session,
+        HighLevelApiSampleResults* results) noexcept
+    {
+        if (session == nullptr || results == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        NTSTATUS status = RunHighLevelApiSamples(session, results);
+
+        const UCHAR httpsPostBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS POST\"}";
+        const UCHAR httpsPutBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS PUT\"}";
+        const UCHAR httpsPatchBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS PATCH\"}";
+        const UCHAR httpsDeleteBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS DELETE\"}";
 
         status = MergeSampleStatus(
             status,

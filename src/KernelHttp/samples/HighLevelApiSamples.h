@@ -22,6 +22,8 @@ namespace samples
         HighLevelApiSampleResult HttpsPut = {};
         HighLevelApiSampleResult HttpsPatch = {};
         HighLevelApiSampleResult HttpsDelete = {};
+        HighLevelApiSampleResult HttpsHead = {};
+        HighLevelApiSampleResult HttpsOptions = {};
         HighLevelApiSampleResult Http2Alpn = {};
         HighLevelApiSampleResult WebSocketEcho = {};
         HighLevelApiSampleResult HttpPut = {};
