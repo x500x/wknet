@@ -397,6 +397,33 @@ namespace tls
         SIZE_T destinationCapacity,
         SIZE_T* bytesWritten) noexcept
     {
+        HeapArray<UCHAR> innerPlaintext(TlsMaxPlaintextLength + 1);
+        if (!innerPlaintext.IsValid()) {
+            if (bytesWritten != nullptr) {
+                *bytesWritten = 0;
+            }
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        return ProtectAesGcm13WithScratch(
+            plaintext,
+            writeState,
+            innerPlaintext.Get(),
+            innerPlaintext.Count(),
+            destination,
+            destinationCapacity,
+            bytesWritten);
+    }
+
+    NTSTATUS TlsRecordLayer::ProtectAesGcm13WithScratch(
+        const TlsPlaintextRecord& plaintext,
+        TlsAeadCipherState& writeState,
+        UCHAR* innerPlaintext,
+        SIZE_T scratchCapacity,
+        UCHAR* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* bytesWritten) noexcept
+    {
         if (bytesWritten != nullptr) {
             *bytesWritten = 0;
         }
@@ -429,6 +456,10 @@ namespace tls
             return STATUS_BUFFER_TOO_SMALL;
         }
 
+        if (innerPlaintext == nullptr || scratchCapacity < innerPlaintextLength) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
         UCHAR* aad = writeState.AadScratch;
         BuildTls13Aad(encryptedFragmentLength, aad);
 
@@ -445,9 +476,9 @@ namespace tls
 
         UCHAR* ciphertext = destination + TlsRecordHeaderLength;
         if (plaintext.FragmentLength != 0) {
-            RtlMoveMemory(ciphertext, plaintext.Fragment, plaintext.FragmentLength);
+            RtlMoveMemory(innerPlaintext, plaintext.Fragment, plaintext.FragmentLength);
         }
-        ciphertext[plaintext.FragmentLength] = static_cast<UCHAR>(plaintext.ContentType);
+        innerPlaintext[plaintext.FragmentLength] = static_cast<UCHAR>(plaintext.ContentType);
 
         destination[0] = aad[0];
         destination[1] = aad[1];
@@ -461,7 +492,7 @@ namespace tls
         status = crypto::CngProvider::AesGcmEncrypt(
             key,
             parameters,
-            ciphertext,
+            innerPlaintext,
             innerPlaintextLength,
             ciphertext,
             innerPlaintextLength,
@@ -469,6 +500,7 @@ namespace tls
             TlsAesGcmTagLength,
             &encryptedLength);
 
+        RtlSecureZeroMemory(innerPlaintext, innerPlaintextLength);
         RtlSecureZeroMemory(nonce, sizeof(writeState.NonceScratch));
         RtlSecureZeroMemory(aad, sizeof(writeState.AadScratch));
 

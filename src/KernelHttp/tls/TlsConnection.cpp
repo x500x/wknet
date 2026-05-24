@@ -375,11 +375,13 @@ namespace tls
         }
         delete[] inputBuffer_;
         delete[] outputBuffer_;
+        delete[] tls13InnerPlaintextBuffer_;
         delete[] plaintextBuffer_;
         delete[] handshakeBuffer_;
         delete[] negotiatedAlpn_;
         inputBuffer_ = nullptr;
         outputBuffer_ = nullptr;
+        tls13InnerPlaintextBuffer_ = nullptr;
         plaintextBuffer_ = nullptr;
         handshakeBuffer_ = nullptr;
         negotiatedAlpn_ = nullptr;
@@ -396,6 +398,9 @@ namespace tls
         }
         if (outputBuffer_ != nullptr) {
             RtlSecureZeroMemory(outputBuffer_, TlsIoBufferLength);
+        }
+        if (tls13InnerPlaintextBuffer_ != nullptr) {
+            RtlSecureZeroMemory(tls13InnerPlaintextBuffer_, TlsMaxPlaintextLength + 1);
         }
         if (plaintextBuffer_ != nullptr) {
             RtlSecureZeroMemory(plaintextBuffer_, TlsApplicationBufferLength);
@@ -440,6 +445,12 @@ namespace tls
         if (outputBuffer_ == nullptr) {
             outputBuffer_ = new UCHAR[TlsIoBufferLength]();
             if (outputBuffer_ == nullptr) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+        }
+        if (tls13InnerPlaintextBuffer_ == nullptr) {
+            tls13InnerPlaintextBuffer_ = new UCHAR[TlsMaxPlaintextLength + 1]();
+            if (tls13InnerPlaintextBuffer_ == nullptr) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
         }
@@ -1780,7 +1791,18 @@ namespace tls
         record.Fragment = fragment;
         record.FragmentLength = fragmentLength;
 
-        NTSTATUS status = TlsRecordLayer::ProtectAesGcm13(record, clientWriteState_, outputBuffer_, TlsIoBufferLength, &written);
+        if (tls13InnerPlaintextBuffer_ == nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        NTSTATUS status = TlsRecordLayer::ProtectAesGcm13WithScratch(
+            record,
+            clientWriteState_,
+            tls13InnerPlaintextBuffer_,
+            TlsMaxPlaintextLength + 1,
+            outputBuffer_,
+            TlsIoBufferLength,
+            &written);
         if (!NT_SUCCESS(status)) {
             return status;
         }

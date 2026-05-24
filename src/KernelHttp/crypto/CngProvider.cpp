@@ -1135,6 +1135,7 @@ namespace crypto
             !IsValidMutableBuffer(tag, tagLength) ||
             !IsValidBuffer(parameters.Nonce.Data, parameters.Nonce.Length) ||
             !IsValidBuffer(parameters.Aad.Data, parameters.Aad.Length) ||
+            plaintext == ciphertext ||
             ciphertextLength < plaintextLength ||
             tagLength != AesGcmTagLength ||
             parameters.Nonce.Length == 0) {
@@ -2590,6 +2591,7 @@ namespace crypto
             parameters.Nonce.Length == 0 ||
             plaintext == nullptr ||
             ciphertext == nullptr ||
+            plaintext == ciphertext ||
             tag == nullptr ||
             ciphertextLength < plaintextLength ||
             tagLength != 16) {

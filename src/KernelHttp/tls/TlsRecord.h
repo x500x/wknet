@@ -140,6 +140,16 @@ namespace tls
             _Out_opt_ SIZE_T* bytesWritten) noexcept;
 
         _Must_inspect_result_
+        static NTSTATUS ProtectAesGcm13WithScratch(
+            _In_ const TlsPlaintextRecord& plaintext,
+            _Inout_ TlsAeadCipherState& writeState,
+            _Out_writes_bytes_(scratchCapacity) UCHAR* innerPlaintext,
+            SIZE_T scratchCapacity,
+            _Out_writes_bytes_(destinationCapacity) UCHAR* destination,
+            SIZE_T destinationCapacity,
+            _Out_opt_ SIZE_T* bytesWritten) noexcept;
+
+        _Must_inspect_result_
         static NTSTATUS UnprotectAesGcm13(
             _In_ const TlsRecordView& encrypted,
             _Inout_ TlsAeadCipherState& readState,

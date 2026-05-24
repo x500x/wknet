@@ -13,6 +13,7 @@
 #include <string.h>
 
 using KernelHttp::crypto::HashAlgorithm;
+using KernelHttp::HeapArray;
 using KernelHttp::tls::CertificateAuthorityBundle;
 using KernelHttp::tls::CertificateChainView;
 using KernelHttp::tls::CertificatePin;
@@ -750,6 +751,69 @@ namespace
         Expect(memcmp(output.Fragment, body, sizeof(body)) == 0, "TLS 1.3 AES-GCM max record plaintext bytes match");
     }
 
+    void TestTls13AesGcmProtectsWithHeapScratch()
+    {
+        HeapArray<UCHAR> scratch(TlsMaxPlaintextLength + 1);
+        Expect(scratch.IsValid(), "TLS 1.3 AES-GCM scratch allocates");
+        if (!scratch.IsValid()) {
+            return;
+        }
+
+        UCHAR encoded[128] = {};
+        const UCHAR body[] = { 'h', 'e', 'a', 'p' };
+
+        TlsAeadCipherState writeState = {};
+        TlsAeadCipherState readState = {};
+        for (SIZE_T index = 0; index < 16; ++index) {
+            writeState.Key[index] = static_cast<UCHAR>(0xd0 + index);
+            readState.Key[index] = static_cast<UCHAR>(0xd0 + index);
+        }
+        for (SIZE_T index = 0; index < TlsAesGcmTls13IvLength; ++index) {
+            writeState.FixedIv[index] = static_cast<UCHAR>(0xe0 + index);
+            readState.FixedIv[index] = static_cast<UCHAR>(0xe0 + index);
+        }
+        writeState.KeyLength = 16;
+        readState.KeyLength = 16;
+        writeState.FixedIvLength = TlsAesGcmTls13IvLength;
+        readState.FixedIvLength = TlsAesGcmTls13IvLength;
+
+        TlsPlaintextRecord plain = {};
+        plain.ContentType = TlsContentType::ApplicationData;
+        plain.Version = { 3, 3 };
+        plain.Fragment = body;
+        plain.FragmentLength = sizeof(body);
+
+        SIZE_T written = 0;
+        NTSTATUS status = TlsRecordLayer::ProtectAesGcm13WithScratch(
+            plain,
+            writeState,
+            scratch.Get(),
+            scratch.Count(),
+            encoded,
+            sizeof(encoded),
+            &written);
+
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM heap scratch protects");
+        Expect(writeState.SequenceNumber == 1, "TLS 1.3 AES-GCM heap scratch increments write sequence");
+
+        TlsRecordView parsed = {};
+        status = TlsRecordLayer::Parse(encoded, written, parsed);
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM heap scratch parses");
+
+        UCHAR decoded[32] = {};
+        TlsMutablePlaintextRecord output = {};
+        status = TlsRecordLayer::UnprotectAesGcm13(
+            parsed,
+            readState,
+            decoded,
+            sizeof(decoded),
+            output);
+
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM heap scratch unprotects");
+        Expect(output.FragmentLength == sizeof(body), "TLS 1.3 AES-GCM heap scratch plaintext length matches");
+        Expect(memcmp(output.Fragment, body, sizeof(body)) == 0, "TLS 1.3 AES-GCM heap scratch plaintext bytes match");
+    }
+
     void TestTls13AesGcmProtectsOverlappingDestination()
     {
         UCHAR encoded[128] = {};
@@ -785,12 +849,12 @@ namespace
             sizeof(encoded),
             &written);
 
-        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM overlapping record protects");
-        Expect(writeState.SequenceNumber == 1, "TLS 1.3 AES-GCM overlapping record increments write sequence");
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM wrapper allocates scratch for overlapping record");
+        Expect(writeState.SequenceNumber == 1, "TLS 1.3 AES-GCM wrapper increments write sequence");
 
         TlsRecordView parsed = {};
         status = TlsRecordLayer::Parse(encoded, written, parsed);
-        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM overlapping record parses");
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM wrapper overlapping record parses");
 
         UCHAR decoded[32] = {};
         TlsMutablePlaintextRecord output = {};
@@ -801,9 +865,9 @@ namespace
             sizeof(decoded),
             output);
 
-        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM overlapping record unprotects");
-        Expect(output.FragmentLength == sizeof(body), "TLS 1.3 AES-GCM overlapping plaintext length matches");
-        Expect(memcmp(output.Fragment, body, sizeof(body)) == 0, "TLS 1.3 AES-GCM overlapping plaintext bytes match");
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 AES-GCM wrapper overlapping record unprotects");
+        Expect(output.FragmentLength == sizeof(body), "TLS 1.3 AES-GCM wrapper overlapping plaintext length matches");
+        Expect(memcmp(output.Fragment, body, sizeof(body)) == 0, "TLS 1.3 AES-GCM wrapper overlapping plaintext bytes match");
     }
 
     void TestClientHello()
@@ -1902,6 +1966,7 @@ int main()
     TestTls13ApplicationMasterSecretUsesZeroIkm();
     TestTls13AesGcmRecordProtection();
     TestTls13AesGcmProtectsMaxPlaintextRecord();
+    TestTls13AesGcmProtectsWithHeapScratch();
     TestTls13AesGcmProtectsOverlappingDestination();
     TestClientHello();
     TestClientHelloAdvertisesSessionTicket();

@@ -231,6 +231,7 @@ namespace tls
         SIZE_T ownedTlsScratchLength_ = 0;
         UCHAR* inputBuffer_ = nullptr;
         UCHAR* outputBuffer_ = nullptr;
+        UCHAR* tls13InnerPlaintextBuffer_ = nullptr;
         SIZE_T inputLength_ = 0;
         UCHAR* plaintextBuffer_ = nullptr;
         SIZE_T plaintextLength_ = 0;
