@@ -190,6 +190,13 @@ namespace client
         UNREFERENCED_PARAMETER(status);
         delete[] maskingKey_;
         maskingKey_ = nullptr;
+        if (bufferedFrame_ != nullptr && bufferedFrameCapacity_ != 0) {
+            RtlSecureZeroMemory(bufferedFrame_, bufferedFrameCapacity_);
+        }
+        delete[] bufferedFrame_;
+        bufferedFrame_ = nullptr;
+        bufferedFrameCapacity_ = 0;
+        bufferedFrameLength_ = 0;
     }
 
     NTSTATUS WebSocketClient::Connect(
@@ -464,13 +471,21 @@ namespace client
             opcode == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
+        if (bufferedFrameLength_ > buffers.FrameBufferLength) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        NTSTATUS status = EnsureBufferedFrameCapacity(buffers.FrameBufferLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
 
         for (;;) {
             SIZE_T frameLength = bufferedFrameLength_;
             websocket::WebSocketFrameHeader header = {};
             for (;;) {
                 bool complete = false;
-                NTSTATUS status = TryDecodeCompleteFrame(buffers.FrameBuffer, frameLength, &header, &complete);
+                status = TryDecodeCompleteFrame(bufferedFrame_, frameLength, &header, &complete);
                 if (!NT_SUCCESS(status)) {
                     return status;
                 }
@@ -484,7 +499,7 @@ namespace client
 
                 SIZE_T received = 0;
                 status = ReceiveRaw(
-                    buffers.FrameBuffer + frameLength,
+                    bufferedFrame_ + frameLength,
                     buffers.FrameBufferLength - frameLength,
                     &received);
                 if (!NT_SUCCESS(status)) {
@@ -506,14 +521,14 @@ namespace client
 
             if (header.Opcode == websocket::WebSocketOpcode::Ping) {
                 SIZE_T pongLength = 0;
-                NTSTATUS status = EnsureMaskingKeyScratch();
+                status = EnsureMaskingKeyScratch();
                 if (!NT_SUCCESS(status)) {
                     return status;
                 }
 
                 status = GenerateAndEncodeControlFrame(
                     websocket::WebSocketOpcode::Pong,
-                    buffers.FrameBuffer + header.HeaderLength,
+                    bufferedFrame_ + header.HeaderLength,
                     payloadLength,
                     maskingKey_,
                     buffers,
@@ -532,15 +547,15 @@ namespace client
                 }
 
                 if (remaining > 0) {
-                    RtlMoveMemory(buffers.FrameBuffer, buffers.FrameBuffer + consumed, remaining);
+                    RtlMoveMemory(bufferedFrame_, bufferedFrame_ + consumed, remaining);
                 }
                 bufferedFrameLength_ = remaining;
                 continue;
             }
 
-            NTSTATUS status = websocket::WebSocketCodec::DecodeFramePayload(
+            status = websocket::WebSocketCodec::DecodeFramePayload(
                 header,
-                buffers.FrameBuffer,
+                bufferedFrame_,
                 frameLength,
                 output,
                 outputCapacity,
@@ -550,7 +565,7 @@ namespace client
             }
 
             if (remaining > 0) {
-                RtlMoveMemory(buffers.FrameBuffer, buffers.FrameBuffer + consumed, remaining);
+                RtlMoveMemory(bufferedFrame_, bufferedFrame_ + consumed, remaining);
             }
             bufferedFrameLength_ = remaining;
             *opcode = header.Opcode;
@@ -578,6 +593,9 @@ namespace client
         }
 
         connected_ = false;
+        if (bufferedFrame_ != nullptr && bufferedFrameLength_ != 0) {
+            RtlSecureZeroMemory(bufferedFrame_, bufferedFrameLength_);
+        }
         bufferedFrameLength_ = 0;
 
         if (tls_ != nullptr) {
@@ -639,6 +657,34 @@ namespace client
 
         maskingKey_ = new UCHAR[websocket::WebSocketMaskingKeyLength]();
         return maskingKey_ != nullptr ? STATUS_SUCCESS : STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    NTSTATUS WebSocketClient::EnsureBufferedFrameCapacity(SIZE_T capacity) noexcept
+    {
+        if (capacity == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (bufferedFrameCapacity_ >= capacity) {
+            return STATUS_SUCCESS;
+        }
+
+        UCHAR* replacement = new UCHAR[capacity]();
+        if (replacement == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        if (bufferedFrame_ != nullptr) {
+            if (bufferedFrameLength_ != 0) {
+                RtlCopyMemory(replacement, bufferedFrame_, bufferedFrameLength_);
+            }
+            RtlSecureZeroMemory(bufferedFrame_, bufferedFrameCapacity_);
+        }
+
+        delete[] bufferedFrame_;
+        bufferedFrame_ = replacement;
+        bufferedFrameCapacity_ = capacity;
+        return STATUS_SUCCESS;
     }
 
     NTSTATUS WebSocketClient::SendRaw(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept
@@ -706,9 +752,15 @@ namespace client
                         return STATUS_BUFFER_TOO_SMALL;
                     }
 
+                    status = EnsureBufferedFrameCapacity(buffers.FrameBufferLength);
+                    if (!NT_SUCCESS(status)) {
+                        response = {};
+                        return status;
+                    }
+
                     // Bytes after the 101 header already belong to the WebSocket stream.
                     RtlMoveMemory(
-                        buffers.FrameBuffer,
+                        bufferedFrame_,
                         buffers.ResponseBuffer + response.BytesConsumed,
                         upgradedBytes);
                     bufferedFrameLength_ = upgradedBytes;
