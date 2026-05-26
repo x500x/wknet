@@ -23,27 +23,28 @@ namespace samples
         HttpVerbSampleResult GzipEncoding = {};
         HttpVerbSampleResult DeflateEncoding = {};
         HttpVerbSampleResult BrotliEncoding = {};
-        HttpVerbSampleResult GetHttpBin = {};
-        HttpVerbSampleResult PostHttpBin = {};
-        HttpVerbSampleResult PutHttpBin = {};
-        HttpVerbSampleResult PatchHttpBin = {};
-        HttpVerbSampleResult DeleteHttpBin = {};
-        HttpVerbSampleResult HttpsGetHttpBin = {};
-        HttpVerbSampleResult HttpsPostHttpBin = {};
-        HttpVerbSampleResult HttpsPutHttpBin = {};
-        HttpVerbSampleResult HttpsPatchHttpBin = {};
-        HttpVerbSampleResult HttpsDeleteHttpBin = {};
-        HttpVerbSampleResult HttpsGetHttpBinNoVerify = {};
-        HttpVerbSampleResult HttpsPostHttpBinNoVerify = {};
-        HttpVerbSampleResult HttpsPutHttpBinNoVerify = {};
-        HttpVerbSampleResult HttpsPatchHttpBinNoVerify = {};
-        HttpVerbSampleResult HttpsDeleteHttpBinNoVerify = {};
+        HttpVerbSampleResult GetNgHttp2HttpBin = {};
+        HttpVerbSampleResult PostNgHttp2HttpBin = {};
+        HttpVerbSampleResult PutNgHttp2HttpBin = {};
+        HttpVerbSampleResult PatchNgHttp2HttpBin = {};
+        HttpVerbSampleResult DeleteNgHttp2HttpBin = {};
+        HttpVerbSampleResult HttpsGetNgHttp2HttpBin = {};
+        HttpVerbSampleResult HttpsPostNgHttp2HttpBin = {};
+        HttpVerbSampleResult HttpsPutNgHttp2HttpBin = {};
+        HttpVerbSampleResult HttpsPatchNgHttp2HttpBin = {};
+        HttpVerbSampleResult HttpsDeleteNgHttp2HttpBin = {};
+        HttpVerbSampleResult HttpsGetNgHttp2HttpBinNoVerify = {};
+        HttpVerbSampleResult HttpsPostNgHttp2HttpBinNoVerify = {};
+        HttpVerbSampleResult HttpsPutNgHttp2HttpBinNoVerify = {};
+        HttpVerbSampleResult HttpsPatchNgHttp2HttpBinNoVerify = {};
+        HttpVerbSampleResult HttpsDeleteNgHttp2HttpBinNoVerify = {};
         HttpVerbSampleResult Tls13HttpsGet = {};
         HttpVerbSampleResult Tls13Http2Get = {};
         HttpVerbSampleResult Tls13HttpsGetNoVerify = {};
-        HttpVerbSampleResult HeadHttpBin = {};
-        HttpVerbSampleResult OptionsHttpBin = {};
-        HttpVerbSampleResult LocalHttpsSmoke = {};
+        HttpVerbSampleResult HeadNgHttp2HttpBin = {};
+        HttpVerbSampleResult OptionsNgHttp2HttpBin = {};
+        HttpVerbSampleResult RemoteHttpsIpv4 = {};
+        HttpVerbSampleResult RemoteHttpsIpv6 = {};
         HttpVerbSampleResult WebSocketEcho = {};
         HttpVerbSampleResult WebSocketEchoNoVerify = {};
     };
@@ -54,9 +55,9 @@ namespace samples
         _Out_ HttpVerbSampleResults* results) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS RunLocalHttpsSmokeSample(
+    NTSTATUS RunRemoteHttpsAddressFamilySamples(
         _Inout_ net::WskClient& wskClient,
-        _Out_ HttpVerbSampleResult* result) noexcept;
+        _Out_ HttpVerbSampleResults* results) noexcept;
 
     _Must_inspect_result_
     NTSTATUS RunWebSocketEchoSample(

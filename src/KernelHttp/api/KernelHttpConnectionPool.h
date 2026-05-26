@@ -26,6 +26,7 @@ namespace api
         char Host[KhPoolMaxHostLength + 1] = {};
         SIZE_T HostLength = 0;
         USHORT Port = 0;
+        net::WskAddressFamily AddressFamily = net::WskAddressFamily::Any;
         KhTlsVersion MinTlsVersion = KhTlsVersion::Tls12;
         KhTlsVersion MaxTlsVersion = KhTlsVersion::Tls13;
         KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;

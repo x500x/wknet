@@ -22,6 +22,7 @@ using KernelHttp::api::KhAsyncGetHttpResponse;
 using KernelHttp::api::KhAsyncGetWebSocket;
 using KernelHttp::api::KhAsyncRelease;
 using KernelHttp::api::KhAsyncWait;
+using KernelHttp::api::KhAddressFamily;
 using KernelHttp::api::KhCertificatePolicy;
 using KernelHttp::api::KhConnectionPool;
 using KernelHttp::api::KhConnectionPoolAcquire;
@@ -51,6 +52,7 @@ using KernelHttp::api::KhHttpRequestSetTextBody;
 using KernelHttp::api::KhHttpRequestSetTlsOptions;
 using KernelHttp::api::KhHttpRequestSetUrl;
 using KernelHttp::api::KhHttpRequestSetUrlEncodedBody;
+using KernelHttp::api::KhHttpRequestSetAddressFamily;
 using KernelHttp::api::KhResponseGetHeader;
 using KernelHttp::api::KhHttpSendAsync;
 using KernelHttp::api::KhHttpSendFlagAggregateWithCallbacks;
@@ -245,8 +247,11 @@ namespace
         bool LastReused = false;
         KhConnectionPolicy LastPolicy = KhConnectionPolicy::ReuseOrCreate;
         KhCertificatePolicy LastCertificatePolicy = KhCertificatePolicy::Verify;
+        KhAddressFamily LastAddressFamily = KhAddressFamily::Any;
         SIZE_T H2AlpnCount = 0;
         SIZE_T NoVerifyCount = 0;
+        SIZE_T Ipv4Count = 0;
+        SIZE_T Ipv6Count = 0;
         SIZE_T VerifiedHttpsForceNewCount = 0;
         SIZE_T VerifiedHttpsReuseCount = 0;
         bool SawGet = false;
@@ -317,8 +322,15 @@ namespace
         transport->LastReused = request->ReusedConnection;
         transport->LastPolicy = request->ConnectionPolicy;
         transport->LastCertificatePolicy = request->CertificatePolicy;
+        transport->LastAddressFamily = request->AddressFamily;
         transport->LastPoolable = request->PoolableConnection;
         transport->LastPort = request->Port;
+        if (request->AddressFamily == KhAddressFamily::Ipv4) {
+            ++transport->Ipv4Count;
+        }
+        if (request->AddressFamily == KhAddressFamily::Ipv6) {
+            ++transport->Ipv6Count;
+        }
         if (request->CertificatePolicy == KhCertificatePolicy::NoVerify) {
             ++transport->NoVerifyCount;
         }
@@ -813,6 +825,10 @@ namespace
         Expect(status == STATUS_INVALID_PARAMETER, "set connection policy rejects unknown policy");
         status = KhHttpRequestSetConnectionPolicy(request, KhConnectionPolicy::ForceNew);
         Expect(status == STATUS_SUCCESS, "set connection policy accepts force-new");
+        status = KhHttpRequestSetAddressFamily(request, static_cast<KhAddressFamily>(99));
+        Expect(status == STATUS_INVALID_PARAMETER, "set address family rejects unknown family");
+        status = KhHttpRequestSetAddressFamily(request, KhAddressFamily::Ipv6);
+        Expect(status == STATUS_SUCCESS, "set address family accepts IPv6");
 
         KhHttpRequestRelease(request);
         KhSessionClose(session);
@@ -914,6 +930,10 @@ namespace
         second = first;
         second.Port = 8443;
         Expect(!KhConnectionPoolKeysEqual(first, second), "pool key includes port");
+
+        second = first;
+        second.AddressFamily = KernelHttp::net::WskAddressFamily::Ipv6;
+        Expect(!KhConnectionPoolKeysEqual(first, second), "pool key includes address family");
 
         second = first;
         second.MinTlsVersion = KhTlsVersion::Tls13;
@@ -1732,6 +1752,8 @@ namespace
         Expect(results.WebSocketEchoNoVerify.Status == STATUS_SUCCESS, "test-driver matrix includes WebSocket no-verify");
         Expect(results.WebSocketEchoAsync.Status == STATUS_SUCCESS, "test-driver matrix includes async WebSocket echo");
         Expect(results.WebSocketEchoNoVerify.StatusCode == 0, "test-driver websocket no-verify does not report handshake status as result status");
+        Expect(results.RemoteHttpsIpv4.Status == STATUS_SUCCESS, "remote nghttp2 address-family samples include IPv4");
+        Expect(results.RemoteHttpsIpv6.Status == STATUS_SUCCESS, "remote nghttp2 address-family samples include IPv6");
         Expect(transport.SawGet, "test-driver matrix sends GET");
         Expect(transport.SawPost, "test-driver matrix sends POST");
         Expect(transport.SawPut, "test-driver matrix sends PUT");
@@ -1740,8 +1762,10 @@ namespace
         Expect(transport.SawHead, "test-driver matrix sends HEAD");
         Expect(transport.SawOptions, "test-driver matrix sends OPTIONS");
         Expect(transport.NoVerifyCount >= 5, "test-driver matrix exercises explicit no-verify HTTPS scenarios");
+        Expect(transport.Ipv4Count == 1, "test-driver matrix sends one forced remote IPv4 HTTPS request");
+        Expect(transport.Ipv6Count == 1, "test-driver matrix sends one forced remote IPv6 HTTPS request");
         Expect(transport.H2AlpnCount >= 1, "test-driver matrix exercises HTTP/2 ALPN");
-        Expect(transport.VerifiedHttpsForceNewCount == 8, "test-driver verified HTTPS matrix forces fresh TLS connections");
+        Expect(transport.VerifiedHttpsForceNewCount == 10, "test-driver verified HTTPS matrix forces fresh TLS connections");
         Expect(transport.VerifiedHttpsReuseCount == 0, "test-driver verified HTTPS matrix avoids idle TLS reuse");
         Expect(capture.ConnectCount == 3 && capture.SendCount == 3 && capture.ReceiveCount == 6, "test-driver matrix skips websocket banners before sync, async, and no-verify text echoes");
         Expect(capture.LastMinTlsVersion == KhTlsVersion::Tls12 && capture.LastMaxTlsVersion == KhTlsVersion::Tls12, "test-driver websocket samples use TLS 1.2 for the live echo endpoint");
@@ -1882,8 +1906,14 @@ namespace
             FileContains("src\\KernelHttp\\net\\WskClient.cpp", "NS_ALL"),
             "WSK address resolution queries all available namespace providers");
         Expect(
-            FileContains("src\\KernelHttp\\net\\WskClient.cpp", "hints.ai_family = AF_UNSPEC"),
-            "WSK address resolution requests both IPv4 and IPv6 candidates");
+            FileContains("src\\KernelHttp\\net\\WskClient.cpp", "case WskAddressFamily::Any"),
+            "WSK address resolution keeps a default dual-stack mode");
+        Expect(
+            FileContains("src\\KernelHttp\\net\\WskClient.cpp", "case WskAddressFamily::Ipv4"),
+            "WSK address resolution can request IPv4 candidates explicitly");
+        Expect(
+            FileContains("src\\KernelHttp\\net\\WskClient.cpp", "case WskAddressFamily::Ipv6"),
+            "WSK address resolution can request IPv6 candidates explicitly");
         Expect(
             FileContains("src\\KernelHttp\\net\\WskClient.cpp", "hints.ai_flags = AI_NUMERICSERV"),
             "WSK address resolution declares numeric port service names");
@@ -1895,7 +1925,7 @@ namespace
             "WSK address resolution does not force the DNS-only namespace provider");
         Expect(
             !FileContains("src\\KernelHttp\\net\\WskClient.cpp", "hints.ai_family = AF_INET;"),
-            "WSK address resolution is not restricted to IPv4-only results");
+            "WSK address resolution default is not restricted to IPv4-only results");
         Expect(
             FileContains("src\\KernelHttp\\DriverEntry.cpp", "samples/HighLevelApiSamples.h"),
             "DriverEntry includes high-level sample runner");
@@ -1936,17 +1966,26 @@ namespace
             !FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "http://httpbin.org"),
             "high-level HTTP samples do not use the IPv4-only httpbin.org endpoint");
         Expect(
-            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "https://127.0.0.1:8443/sample_response_body.txt"),
-            "local HTTPS samples include an explicit IPv4 URL");
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "https://nghttp2.org/httpbin/get"),
+            "remote HTTPS address-family samples use the nghttp2 httpbin endpoint");
         Expect(
-            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "https://[::1]:8443/sample_response_body.txt"),
-            "local HTTPS samples include an explicit IPv6 URL");
+            !FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "https://127.0.0.1:8443/sample_response_body.txt"),
+            "remote HTTPS address-family samples do not use a local IPv4 server");
         Expect(
-            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.h", "LocalHttpsIpv4Smoke"),
-            "local HTTPS sample results expose the IPv4 run");
+            !FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "https://[::1]:8443/sample_response_body.txt"),
+            "remote HTTPS address-family samples do not use a local IPv6 server");
         Expect(
-            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.h", "LocalHttpsIpv6Smoke"),
-            "local HTTPS sample results expose the IPv6 run");
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.h", "RemoteHttpsIpv4"),
+            "remote HTTPS sample results expose the IPv4 run");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.h", "RemoteHttpsIpv6"),
+            "remote HTTPS sample results expose the IPv6 run");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "api::KhAddressFamily::Ipv4"),
+            "remote HTTPS samples force IPv4 resolution");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "api::KhAddressFamily::Ipv6"),
+            "remote HTTPS samples force IPv6 resolution");
         Expect(
             !FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "NgHttp2LeafSpkiSha256"),
             "high-level samples do not pin nghttp2 leaf SPKI");

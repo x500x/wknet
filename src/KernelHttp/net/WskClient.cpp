@@ -110,6 +110,21 @@ namespace net
         }
 
         _Must_inspect_result_
+        int ToSocketAddressFamily(WskAddressFamily addressFamily) noexcept
+        {
+            switch (addressFamily) {
+            case WskAddressFamily::Any:
+                return AF_UNSPEC;
+            case WskAddressFamily::Ipv4:
+                return AF_INET;
+            case WskAddressFamily::Ipv6:
+                return AF_INET6;
+            default:
+                return -1;
+            }
+        }
+
+        _Must_inspect_result_
         bool CopySocketAddress(
             _In_ const ADDRINFOEXW* addressInfo,
             USHORT port,
@@ -227,7 +242,8 @@ namespace net
     NTSTATUS WskClient::Resolve(
         const wchar_t* nodeName,
         const wchar_t* serviceName,
-        SOCKADDR_STORAGE* remoteAddress) noexcept
+        SOCKADDR_STORAGE* remoteAddress,
+        WskAddressFamily addressFamily) noexcept
     {
         if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
             return STATUS_INVALID_DEVICE_STATE;
@@ -258,9 +274,14 @@ namespace net
             return STATUS_INVALID_PARAMETER;
         }
 
+        const int socketAddressFamily = ToSocketAddressFamily(addressFamily);
+        if (socketAddressFamily < 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
         ADDRINFOEXW hints = {};
         hints.ai_flags = AI_NUMERICSERV;
-        hints.ai_family = AF_UNSPEC;
+        hints.ai_family = socketAddressFamily;
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_protocol = IPPROTO_TCP;
 

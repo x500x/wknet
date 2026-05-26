@@ -10,7 +10,6 @@ param(
     [switch]$TestDriverScenarios,
     [switch]$KeepService,
 
-    [int]$HttpsPort = 8443,
     [string]$ServiceName = 'KernelHttp',
     [string]$DriverPath
 )
@@ -23,7 +22,6 @@ $scriptPath = Join-Path $PSScriptRoot 'https_smoke.ps1'
 $arguments = @{
     Configuration = $Configuration
     Platform = $Platform
-    HttpsPort = $HttpsPort
     ServiceName = $ServiceName
 }
 

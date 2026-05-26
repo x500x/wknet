@@ -144,6 +144,26 @@ namespace
         return IsValidTlsOptions(options.Tls);
     }
 
+    bool IsValidAddressFamily(KhAddressFamily addressFamily) noexcept
+    {
+        return addressFamily == KhAddressFamily::Any ||
+            addressFamily == KhAddressFamily::Ipv4 ||
+            addressFamily == KhAddressFamily::Ipv6;
+    }
+
+    net::WskAddressFamily ToWskAddressFamily(KhAddressFamily addressFamily) noexcept
+    {
+        switch (addressFamily) {
+        case KhAddressFamily::Ipv4:
+            return net::WskAddressFamily::Ipv4;
+        case KhAddressFamily::Ipv6:
+            return net::WskAddressFamily::Ipv6;
+        case KhAddressFamily::Any:
+        default:
+            return net::WskAddressFamily::Any;
+        }
+    }
+
     bool IsValidSendOptions(const KhHttpSendOptions& options, const KhSession& session) noexcept;
     void ReleaseResponseStorage(_Inout_ KhResponse& response) noexcept;
 
@@ -467,6 +487,7 @@ namespace
         KhTlsOptions Tls = {};
         bool HasTlsOverride = false;
         KhConnectionPolicy ConnectionPolicy = KhConnectionPolicy::ReuseOrCreate;
+        KhAddressFamily AddressFamily = KhAddressFamily::Any;
     };
 
     struct KhResponse
@@ -1898,6 +1919,7 @@ namespace
         }
 
         key->Port = request.Port;
+        key->AddressFamily = ToWskAddressFamily(request.AddressFamily);
         key->MinTlsVersion = request.Tls.MinVersion;
         key->MaxTlsVersion = request.Tls.MaxVersion;
         key->CertificatePolicy = request.Tls.CertificatePolicy;
@@ -2614,7 +2636,11 @@ namespace
 
         SOCKADDR_STORAGE remoteAddress = {};
         if (NT_SUCCESS(status)) {
-            status = session->WskClient->Resolve(serverName.Get(), serviceName.Get(), &remoteAddress);
+            status = session->WskClient->Resolve(
+                serverName.Get(),
+                serviceName.Get(),
+                &remoteAddress,
+                ToWskAddressFamily(request.AddressFamily));
         }
 
         if (NT_SUCCESS(status)) {
@@ -2731,6 +2757,7 @@ namespace
         testRequest.Host = request.Host;
         testRequest.HostLength = request.HostLength;
         testRequest.Port = request.Port;
+        testRequest.AddressFamily = request.AddressFamily;
         testRequest.BuiltRequest = reinterpret_cast<const char*>(workspace.Request.Data);
         testRequest.BuiltRequestLength = builtRequestLength;
         testRequest.ConnectionPolicy = request.ConnectionPolicy;
@@ -3827,6 +3854,21 @@ namespace
         default:
             return STATUS_INVALID_PARAMETER;
         }
+    }
+
+    NTSTATUS KhHttpRequestSetAddressFamily(KH_REQUEST request, KhAddressFamily addressFamily) noexcept
+    {
+        NTSTATUS status = CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (!IsRequestHandle(request) || !IsValidAddressFamily(addressFamily)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        request->AddressFamily = addressFamily;
+        return STATUS_SUCCESS;
     }
 
     NTSTATUS KhHttpSendSync(

@@ -117,6 +117,7 @@ namespace
         const KhConnectionPoolKey& right) noexcept
     {
         return left.Port == right.Port &&
+            left.AddressFamily == right.AddressFamily &&
             left.MinTlsVersion == right.MinTlsVersion &&
             left.MaxTlsVersion == right.MaxTlsVersion &&
             left.CertificatePolicy == right.CertificatePolicy &&

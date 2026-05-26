@@ -10,7 +10,6 @@ param(
     [switch]$TestDriverScenarios,
     [switch]$KeepService,
 
-    [int]$HttpsPort = 8443,
     [string]$ServiceName = 'KernelHttp',
     [string]$DriverPath
 )
@@ -262,7 +261,7 @@ function Invoke-HostRegression {
 
         $extraDefines = @()
         if ($VmSmoke) {
-            $extraDefines += 'KERNEL_HTTP_LOCAL_HTTPS_SMOKE_ONLY'
+            $extraDefines += 'KERNEL_HTTP_REMOTE_HTTPS_ADDRESS_FAMILY_ONLY'
         }
         if ($TestDriverScenarios) {
             $extraDefines += 'KERNEL_HTTP_TEST_DRIVER_SCENARIOS'
@@ -281,178 +280,6 @@ function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-function Ensure-TestCertificate {
-    New-Item -ItemType Directory -Force $script:HttpsDir | Out-Null
-    $certPath = Join-Path $script:TestDataDir 'localhost.cert.pem'
-    $keyPath = Join-Path $script:TestDataDir 'localhost.key.pem'
-
-    if ((Test-Path -LiteralPath $certPath) -and (Test-Path -LiteralPath $keyPath)) {
-        return @{
-            CertPath = $certPath
-            KeyPath = $keyPath
-        }
-    }
-
-    $openssl = Get-Command openssl.exe -ErrorAction SilentlyContinue
-    if (-not $openssl) {
-        throw 'openssl.exe is required for -VmSmoke HTTPS service certificate generation.'
-    }
-
-    $configPath = Join-Path $script:TestDataDir 'openssl-localhost.cnf'
-    if (-not (Test-Path -LiteralPath $configPath)) {
-        throw "OpenSSL config not found: $configPath"
-    }
-
-    Invoke-Checked `
-        -FilePath $openssl.Source `
-        -ArgumentList @(
-            'req',
-            '-x509',
-            '-newkey', 'rsa:2048',
-            '-sha256',
-            '-days', '7',
-            '-nodes',
-            '-keyout', $keyPath,
-            '-out', $certPath,
-            '-config', $configPath
-        )
-
-    return @{
-        CertPath = $certPath
-        KeyPath = $keyPath
-    }
-}
-
-function Start-LocalHttpsService {
-    $material = Ensure-TestCertificate
-    $wwwRoot = Join-Path $script:HttpsDir 'www'
-    New-Item -ItemType Directory -Force $wwwRoot | Out-Null
-    Copy-Item -LiteralPath (Join-Path $script:TestDataDir 'sample_response_body.txt') -Destination (Join-Path $wwwRoot 'sample_response_body.txt') -Force
-
-    $python = Get-Command python.exe -ErrorAction SilentlyContinue
-    if (-not $python) {
-        throw 'python.exe is required for -VmSmoke HTTPS service.'
-    }
-
-    $serverScript = Join-Path $script:HttpsDir 'serve_https.py'
-    $serverStdoutLog = Join-Path $script:HttpsDir 'server.stdout.log'
-    $serverStderrLog = Join-Path $script:HttpsDir 'server.stderr.log'
-    @"
-import functools
-import http.server
-import socket
-import ssl
-import sys
-
-bind_address = sys.argv[1]
-handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=r'$wwwRoot')
-if ':' in bind_address:
-    class ThreadingHTTPServerV6(http.server.ThreadingHTTPServer):
-        address_family = socket.AF_INET6
-    server = ThreadingHTTPServerV6((bind_address, $HttpsPort), handler)
-else:
-    server = http.server.ThreadingHTTPServer((bind_address, $HttpsPort), handler)
-context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-if hasattr(ssl, 'TLSVersion'):
-    context.minimum_version = ssl.TLSVersion.TLSv1_3
-    context.maximum_version = ssl.TLSVersion.TLSv1_3
-context.load_cert_chain(certfile=r'$($material.CertPath)', keyfile=r'$($material.KeyPath)')
-server.socket = context.wrap_socket(server.socket, server_side=True)
-server.serve_forever()
-"@ | Set-Content -LiteralPath $serverScript -Encoding ASCII
-
-    Write-Step "starting local HTTPS service on https://127.0.0.1:$HttpsPort/ and https://[::1]:$HttpsPort/"
-    $process = Start-Process `
-        -FilePath $python.Source `
-        -ArgumentList @('-S', $serverScript, '127.0.0.1') `
-        -WorkingDirectory $wwwRoot `
-        -RedirectStandardOutput $serverStdoutLog `
-        -RedirectStandardError $serverStderrLog `
-        -WindowStyle Hidden `
-        -PassThru
-    $processIpv6 = Start-Process `
-        -FilePath $python.Source `
-        -ArgumentList @('-S', $serverScript, '::1') `
-        -WorkingDirectory $wwwRoot `
-        -RedirectStandardOutput (Join-Path $script:HttpsDir 'server-ipv6.stdout.log') `
-        -RedirectStandardError (Join-Path $script:HttpsDir 'server-ipv6.stderr.log') `
-        -WindowStyle Hidden `
-        -PassThru
-
-    try {
-        $deadline = (Get-Date).AddSeconds(10)
-        $ipv4Ready = $false
-        $ipv6Ready = $false
-        do {
-            foreach ($serverProcess in @($process, $processIpv6)) {
-                if (-not $serverProcess.HasExited) {
-                    continue
-                }
-
-                $serverOutput = ''
-                if (Test-Path -LiteralPath $serverStdoutLog) {
-                    $serverOutput += Get-Content -LiteralPath $serverStdoutLog -Raw
-                }
-
-                if (Test-Path -LiteralPath $serverStderrLog) {
-                    $serverOutput += Get-Content -LiteralPath $serverStderrLog -Raw
-                }
-
-                throw "HTTPS smoke service exited early with code $($serverProcess.ExitCode). $serverOutput"
-            }
-
-            if (-not $ipv4Ready) {
-                try {
-                    $response = Invoke-WebRequest `
-                        -Uri "https://127.0.0.1:$HttpsPort/sample_response_body.txt" `
-                        -SkipCertificateCheck `
-                        -UseBasicParsing
-                    if ($response.StatusCode -eq 200 -and $response.Content -match 'kernel-http smoke') {
-                        $ipv4Ready = $true
-                    }
-                }
-                catch {
-                    if ((Get-Date) -ge $deadline) {
-                        throw
-                    }
-                }
-            }
-
-            if (-not $ipv6Ready) {
-                try {
-                    $response = Invoke-WebRequest `
-                        -Uri "https://[::1]:$HttpsPort/sample_response_body.txt" `
-                        -SkipCertificateCheck `
-                        -UseBasicParsing
-                    if ($response.StatusCode -eq 200 -and $response.Content -match 'kernel-http smoke') {
-                        $ipv6Ready = $true
-                    }
-                }
-                catch {
-                    if ((Get-Date) -ge $deadline) {
-                        throw
-                    }
-                }
-            }
-
-            if (-not ($ipv4Ready -and $ipv6Ready)) {
-                Start-Sleep -Milliseconds 250
-            }
-        } while ((Get-Date) -lt $deadline)
-
-        if (-not ($ipv4Ready -and $ipv6Ready)) {
-            throw 'HTTPS smoke service did not return expected test body.'
-        }
-    }
-    catch {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        Stop-Process -Id $processIpv6.Id -Force -ErrorAction SilentlyContinue
-        throw
-    }
-
-    return @($process, $processIpv6)
 }
 
 function Invoke-DriverLoadSmoke {
@@ -494,15 +321,8 @@ function Invoke-DriverLoadSmoke {
 Invoke-HostRegression
 
 if ($VmSmoke) {
-    $server = Start-LocalHttpsService
-    try {
-        Invoke-DriverLoadSmoke
-    }
-    finally {
-        foreach ($serverProcess in $server) {
-            Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue
-        }
-    }
+    Write-Step 'running remote nghttp2 HTTPS IPv4/IPv6 driver smoke'
+    Invoke-DriverLoadSmoke
 }
 
 Write-Step 'regression completed'

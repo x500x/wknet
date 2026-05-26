@@ -54,6 +54,13 @@ namespace KernelHttp
 {
 namespace net
 {
+    enum class WskAddressFamily : ULONG
+    {
+        Any = 0,
+        Ipv4 = 4,
+        Ipv6 = 6
+    };
+
     class WskClient final
     {
     public:
@@ -82,7 +89,8 @@ namespace net
         NTSTATUS Resolve(
             _In_z_ const wchar_t* nodeName,
             _In_z_ const wchar_t* serviceName,
-            _Out_ SOCKADDR_STORAGE* remoteAddress) noexcept;
+            _Out_ SOCKADDR_STORAGE* remoteAddress,
+            WskAddressFamily addressFamily = WskAddressFamily::Any) noexcept;
 
     private:
         WSK_CLIENT_NPI clientNpi_ = {};

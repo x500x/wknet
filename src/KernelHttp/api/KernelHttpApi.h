@@ -74,6 +74,13 @@ namespace api
         NoPool = 2
     };
 
+    enum class KhAddressFamily : ULONG
+    {
+        Any = 0,
+        Ipv4 = 4,
+        Ipv6 = 6
+    };
+
     enum class KhRequestBodyPartKind : ULONG
     {
         Field = 0,
@@ -306,6 +313,11 @@ namespace api
         KhConnectionPolicy policy) noexcept;
 
     _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetAddressFamily(
+        _In_ KH_REQUEST request,
+        KhAddressFamily addressFamily) noexcept;
+
+    _Must_inspect_result_
     NTSTATUS KhHttpSendSync(
         _In_ KH_SESSION session,
         _In_ KH_REQUEST request,
@@ -397,6 +409,7 @@ namespace api
         const char* Host = nullptr;
         SIZE_T HostLength = 0;
         USHORT Port = 0;
+        KhAddressFamily AddressFamily = KhAddressFamily::Any;
         const char* BuiltRequest = nullptr;
         SIZE_T BuiltRequestLength = 0;
         KhConnectionPolicy ConnectionPolicy = KhConnectionPolicy::ReuseOrCreate;

@@ -46,13 +46,13 @@ namespace KernelHttp
             return STATUS_DEVICE_NOT_READY;
         }
 
-#if defined(KERNEL_HTTP_LOCAL_HTTPS_SMOKE_ONLY)
+#if defined(KERNEL_HTTP_REMOTE_HTTPS_ADDRESS_FAMILY_ONLY)
         if (results == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
         *results = {};
-        return samples::RunHighLevelLocalHttpsSmokeSample(session, results);
+        return samples::RunHighLevelRemoteHttpsAddressFamilySample(session, results);
 #elif defined(KERNEL_HTTP_TEST_DRIVER_SCENARIOS)
         return samples::RunHighLevelApiTestDriverSamples(session, results);
 #else

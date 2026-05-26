@@ -33,22 +33,12 @@ namespace samples
         constexpr const char* HttpsDeleteUrl = "https://nghttp2.org/httpbin/delete";
         constexpr const char* HttpsHeadUrl = "https://nghttp2.org/httpbin/get";
         constexpr const char* HttpsOptionsUrl = "https://nghttp2.org/httpbin/";
+        constexpr const char* RemoteHttpsAddressFamilyUrl = "https://nghttp2.org/httpbin/get";
         constexpr const char* WebSocketEchoUrl = "wss://ws.postman-echo.com/raw";
-        constexpr const char* LocalHttpsIpv4Url = "https://127.0.0.1:8443/sample_response_body.txt";
-        constexpr const char* LocalHttpsIpv6Url = "https://[::1]:8443/sample_response_body.txt";
-        constexpr const char* LocalHttpsHostName = "localhost";
-        constexpr SIZE_T LocalHttpsHostNameLength = sizeof("localhost") - 1;
         constexpr const char* NgHttp2TlsServerName = "nghttp2.org";
         constexpr SIZE_T NgHttp2TlsServerNameLength = sizeof("nghttp2.org") - 1;
         constexpr const char* WebSocketEchoTlsServerName = "ws.postman-echo.com";
         constexpr SIZE_T WebSocketEchoTlsServerNameLength = sizeof("ws.postman-echo.com") - 1;
-
-        constexpr UCHAR LocalHttpsLeafSpkiSha256[tls::CertificateSha256ThumbprintLength] = {
-            0x81, 0xB9, 0xD8, 0x37, 0x08, 0x5E, 0x67, 0x1D,
-            0x85, 0xA5, 0x16, 0xBC, 0xDE, 0x17, 0x07, 0xCA,
-            0x65, 0x5C, 0x2D, 0xDB, 0x01, 0xAC, 0xC1, 0x67,
-            0xE9, 0xE6, 0xAC, 0xF4, 0xC8, 0x96, 0xB5, 0x71
-        };
 
         _Must_inspect_result_
         SIZE_T LiteralLength(_In_z_ const char* value) noexcept
@@ -71,28 +61,10 @@ namespace samples
             return NT_SUCCESS(current) ? next : current;
         }
 
-        struct PinnedCertificateStoreBundle final
-        {
-            tls::CertificateTrustAnchor Anchor = {};
-            tls::CertificatePin Pin = {};
-            tls::CertificateStore Store = {};
-        };
-
         struct ExternalTrustStoreBundle final
         {
             ExternalTrustStore TrustStore = {};
         };
-
-        _Ret_maybenull_
-        PinnedCertificateStoreBundle* AllocatePinnedCertificateStoreBundle() noexcept
-        {
-            return new PinnedCertificateStoreBundle();
-        }
-
-        void ReleasePinnedCertificateStoreBundle(_In_opt_ PinnedCertificateStoreBundle* bundle) noexcept
-        {
-            delete bundle;
-        }
 
         _Ret_maybenull_
         ExternalTrustStoreBundle* AllocateExternalTrustStoreBundle() noexcept
@@ -106,63 +78,6 @@ namespace samples
                 ResetExternalTrustStore(bundle->TrustStore);
             }
             delete bundle;
-        }
-
-        _Must_inspect_result_
-        NTSTATUS InitializePinnedCertificateStore(
-            _In_reads_bytes_(anchorSpkiSha256Length) const UCHAR* anchorSpkiSha256,
-            SIZE_T anchorSpkiSha256Length,
-            _In_reads_bytes_(leafSpkiSha256Length) const UCHAR* leafSpkiSha256,
-            SIZE_T leafSpkiSha256Length,
-            _In_reads_(hostNameLength) const char* hostName,
-            SIZE_T hostNameLength,
-            _Out_ tls::CertificateStore& certificateStore,
-            _Out_ tls::CertificateTrustAnchor& anchor,
-            _Out_ tls::CertificatePin& pin) noexcept
-        {
-            if (anchorSpkiSha256 == nullptr ||
-                anchorSpkiSha256Length != tls::CertificateSha256ThumbprintLength ||
-                leafSpkiSha256 == nullptr ||
-                leafSpkiSha256Length != tls::CertificateSha256ThumbprintLength ||
-                hostName == nullptr ||
-                hostNameLength == 0) {
-                return STATUS_INVALID_PARAMETER;
-            }
-
-            anchor = {};
-            RtlCopyMemory(anchor.SubjectPublicKeySha256, anchorSpkiSha256, anchorSpkiSha256Length);
-            anchor.MatchSubjectPublicKey = true;
-
-            pin = {};
-            pin.HostName = hostName;
-            pin.HostNameLength = hostNameLength;
-            RtlCopyMemory(pin.LeafSubjectPublicKeySha256, leafSpkiSha256, leafSpkiSha256Length);
-
-            tls::CertificateStoreOptions storeOptions = {};
-            storeOptions.TrustAnchors = &anchor;
-            storeOptions.TrustAnchorCount = 1;
-            storeOptions.Pins = &pin;
-            storeOptions.PinCount = 1;
-
-            return certificateStore.Initialize(storeOptions);
-        }
-
-        _Must_inspect_result_
-        NTSTATUS InitializeLocalHttpsCertificateStore(
-            _Out_ tls::CertificateStore& certificateStore,
-            _Out_ tls::CertificateTrustAnchor& anchor,
-            _Out_ tls::CertificatePin& pin) noexcept
-        {
-            return InitializePinnedCertificateStore(
-                LocalHttpsLeafSpkiSha256,
-                sizeof(LocalHttpsLeafSpkiSha256),
-                LocalHttpsLeafSpkiSha256,
-                sizeof(LocalHttpsLeafSpkiSha256),
-                LocalHttpsHostName,
-                LocalHttpsHostNameLength,
-                certificateStore,
-                anchor,
-                pin);
         }
 
         _Must_inspect_result_
@@ -279,6 +194,12 @@ namespace samples
             const char* value,
             SIZE_T valueLength) noexcept
         {
+#if !defined(DBG) && !defined(KERNEL_HTTP_USER_MODE_TEST)
+            UNREFERENCED_PARAMETER(name);
+            UNREFERENCED_PARAMETER(nameLength);
+            UNREFERENCED_PARAMETER(value);
+            UNREFERENCED_PARAMETER(valueLength);
+#endif
             auto* logContext = static_cast<ResponseLogContext*>(context);
             if (logContext != nullptr) {
                 ++logContext->HeaderCount;
@@ -336,6 +257,9 @@ namespace samples
 
         void LogHttpSampleResult(_In_z_ const char* sampleName, const HighLevelApiSampleResult& result) noexcept
         {
+#if !defined(DBG) && !defined(KERNEL_HTTP_USER_MODE_TEST)
+            UNREFERENCED_PARAMETER(sampleName);
+#endif
             if (NT_SUCCESS(result.Status)) {
                 kprintf(
                     "[high-level %s] status=%u bodyLength=%Iu\r\n",
@@ -355,6 +279,9 @@ namespace samples
 
         void LogWebSocketSampleResult(_In_z_ const char* sampleName, const HighLevelApiSampleResult& result) noexcept
         {
+#if !defined(DBG) && !defined(KERNEL_HTTP_USER_MODE_TEST)
+            UNREFERENCED_PARAMETER(sampleName);
+#endif
             if (NT_SUCCESS(result.Status)) {
                 kprintf(
                     "[high-level %s] echoLength=%Iu\r\n",
@@ -568,6 +495,49 @@ namespace samples
         }
 
         _Must_inspect_result_
+        NTSTATUS RunHttpAddressFamilySample(
+            _In_ api::KH_SESSION session,
+            _In_z_ const char* sampleName,
+            api::KhHttpMethod method,
+            _In_z_ const char* url,
+            _In_opt_ const api::KhTlsOptions* tlsOptions,
+            api::KhAddressFamily addressFamily,
+            _Out_ HighLevelApiSampleResult* result) noexcept
+        {
+            if (session == nullptr || sampleName == nullptr || url == nullptr || result == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            *result = {};
+
+            api::KH_REQUEST request = nullptr;
+            NTSTATUS status = PrepareHttpRequest(
+                session,
+                sampleName,
+                method,
+                url,
+                tlsOptions,
+                api::KhConnectionPolicy::ForceNew,
+                &request);
+            if (NT_SUCCESS(status)) {
+                status = api::KhHttpRequestSetAddressFamily(request, addressFamily);
+            }
+
+            bool sent = false;
+            if (NT_SUCCESS(status)) {
+                sent = true;
+                status = SendPreparedHttpRequest(session, sampleName, request, result);
+            }
+
+            api::KhHttpRequestRelease(request);
+            if (!sent) {
+                result->Status = status;
+                LogHttpSampleResult(sampleName, *result);
+            }
+            return status;
+        }
+
+        _Must_inspect_result_
         NTSTATUS RunHttpAsyncSample(
             _In_ api::KH_SESSION session,
             _In_z_ const char* sampleName,
@@ -712,6 +682,10 @@ namespace samples
             SIZE_T dataLength,
             bool finalFragment) noexcept
         {
+#if !defined(DBG) && !defined(KERNEL_HTTP_USER_MODE_TEST)
+            UNREFERENCED_PARAMETER(type);
+            UNREFERENCED_PARAMETER(finalFragment);
+#endif
             kprintf(
                 "[high-level %s] websocket-%s type=%s final=%s\r\n",
                 sampleName,
@@ -899,14 +873,14 @@ namespace samples
         }
 
         _Must_inspect_result_
-        NTSTATUS RunHighLevelLocalHttpsSmokeAddressSample(
+        NTSTATUS RunHighLevelRemoteHttpsAddressFamilySample(
             api::KH_SESSION session,
             _In_z_ const char* sampleName,
-            _In_z_ const char* url,
+            api::KhAddressFamily addressFamily,
             HighLevelApiSampleResult* result) noexcept
         {
-            PinnedCertificateStoreBundle* certificateBundle = AllocatePinnedCertificateStoreBundle();
-            if (certificateBundle == nullptr) {
+            ExternalTrustStoreBundle* trustBundle = AllocateExternalTrustStoreBundle();
+            if (trustBundle == nullptr) {
                 if (result != nullptr) {
                     *result = {};
                     result->Status = STATUS_INSUFFICIENT_RESOURCES;
@@ -914,41 +888,34 @@ namespace samples
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
-            NTSTATUS status = InitializeLocalHttpsCertificateStore(
-                certificateBundle->Store,
-                certificateBundle->Anchor,
-                certificateBundle->Pin);
+            NTSTATUS status = InitializeExternalTrustStore(trustBundle->TrustStore);
             if (!NT_SUCCESS(status)) {
                 if (result != nullptr) {
                     *result = {};
                     result->Status = status;
                 }
-                ReleasePinnedCertificateStoreBundle(certificateBundle);
+                ReleaseExternalTrustStoreBundle(trustBundle);
                 return status;
             }
 
             api::KhTlsOptions tlsOptions = {};
-            tlsOptions.CertificateStore = &certificateBundle->Store;
+            tlsOptions.CertificateStore = &trustBundle->TrustStore.Store;
             tlsOptions.CertificatePolicy = api::KhCertificatePolicy::Verify;
-            tlsOptions.ServerName = LocalHttpsHostName;
-            tlsOptions.ServerNameLength = LocalHttpsHostNameLength;
 
-            status = RunHttpSample(
+            status = RunHttpAddressFamilySample(
                 session,
                 sampleName,
                 api::KhHttpMethod::Get,
-                url,
-                nullptr,
-                0,
+                RemoteHttpsAddressFamilyUrl,
                 &tlsOptions,
-                api::KhConnectionPolicy::NoPool,
+                addressFamily,
                 result);
-            ReleasePinnedCertificateStoreBundle(certificateBundle);
+            ReleaseExternalTrustStoreBundle(trustBundle);
             return status;
         }
 
         _Must_inspect_result_
-        NTSTATUS RunHighLevelLocalHttpsSmokeSamples(
+        NTSTATUS RunHighLevelRemoteHttpsAddressFamilySamples(
             api::KH_SESSION session,
             HighLevelApiSampleResults* results) noexcept
         {
@@ -958,29 +925,29 @@ namespace samples
 
             *results = {};
 
-            NTSTATUS status = RunHighLevelLocalHttpsSmokeAddressSample(
+            NTSTATUS status = RunHighLevelRemoteHttpsAddressFamilySample(
                 session,
-                "LOCAL HTTPS IPv4",
-                LocalHttpsIpv4Url,
-                &results->LocalHttpsIpv4Smoke);
+                "REMOTE HTTPS IPv4",
+                api::KhAddressFamily::Ipv4,
+                &results->RemoteHttpsIpv4);
 
             status = MergeSampleStatus(
                 status,
-                RunHighLevelLocalHttpsSmokeAddressSample(
+                RunHighLevelRemoteHttpsAddressFamilySample(
                     session,
-                    "LOCAL HTTPS IPv6",
-                    LocalHttpsIpv6Url,
-                    &results->LocalHttpsIpv6Smoke));
+                    "REMOTE HTTPS IPv6",
+                    api::KhAddressFamily::Ipv6,
+                    &results->RemoteHttpsIpv6));
 
             return status;
         }
     }
 
-    NTSTATUS RunHighLevelLocalHttpsSmokeSample(
+    NTSTATUS RunHighLevelRemoteHttpsAddressFamilySample(
         api::KH_SESSION session,
         HighLevelApiSampleResults* results) noexcept
     {
-        return RunHighLevelLocalHttpsSmokeSamples(session, results);
+        return RunHighLevelRemoteHttpsAddressFamilySamples(session, results);
     }
 
     NTSTATUS RunHighLevelApiSamples(
@@ -1300,11 +1267,22 @@ namespace samples
                 false,
                 &results->WebSocketEchoNoVerify));
 
-#if defined(KERNEL_HTTP_ENABLE_LOCAL_HTTPS_SAMPLE) || defined(KERNEL_HTTP_LOCAL_HTTPS_SMOKE_ONLY)
-        HighLevelApiSampleResults localHttpsSmokeResults = {};
-        status = MergeSampleStatus(status, RunHighLevelLocalHttpsSmokeSample(session, &localHttpsSmokeResults));
-        results->LocalHttpsIpv4Smoke = localHttpsSmokeResults.LocalHttpsIpv4Smoke;
-        results->LocalHttpsIpv6Smoke = localHttpsSmokeResults.LocalHttpsIpv6Smoke;
+        HighLevelApiSampleResults remoteHttpsAddressFamilyResults = {};
+        status = MergeSampleStatus(
+            status,
+            RunHighLevelRemoteHttpsAddressFamilySample(session, &remoteHttpsAddressFamilyResults));
+        results->RemoteHttpsIpv4 = remoteHttpsAddressFamilyResults.RemoteHttpsIpv4;
+        results->RemoteHttpsIpv6 = remoteHttpsAddressFamilyResults.RemoteHttpsIpv6;
+
+#if defined(KERNEL_HTTP_ENABLE_REMOTE_HTTPS_ADDRESS_FAMILY_SAMPLE) || defined(KERNEL_HTTP_REMOTE_HTTPS_ADDRESS_FAMILY_ONLY)
+#if !defined(KERNEL_HTTP_TEST_DRIVER_SCENARIOS)
+        HighLevelApiSampleResults remoteHttpsAddressFamilyResults = {};
+        status = MergeSampleStatus(
+            status,
+            RunHighLevelRemoteHttpsAddressFamilySample(session, &remoteHttpsAddressFamilyResults));
+        results->RemoteHttpsIpv4 = remoteHttpsAddressFamilyResults.RemoteHttpsIpv4;
+        results->RemoteHttpsIpv6 = remoteHttpsAddressFamilyResults.RemoteHttpsIpv6;
+#endif
 #endif
 
         return status;

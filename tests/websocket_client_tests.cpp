@@ -493,7 +493,11 @@ namespace net
         return nullptr;
     }
 
-    NTSTATUS WskClient::Resolve(const wchar_t*, const wchar_t*, SOCKADDR_STORAGE* remoteAddress) noexcept
+    NTSTATUS WskClient::Resolve(
+        const wchar_t*,
+        const wchar_t*,
+        SOCKADDR_STORAGE* remoteAddress,
+        WskAddressFamily) noexcept
     {
         if (remoteAddress == nullptr) {
             return STATUS_INVALID_PARAMETER;
