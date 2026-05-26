@@ -421,6 +421,45 @@ namespace
         UNREFERENCED_PARAMETER(closeStatus);
         g_server = nullptr;
     }
+
+    void TestTlsVersionRangeValidation()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.ServiceName = L"443";
+        options.TlsServerName = "example.test";
+        options.TlsServerNameLength = strlen(options.TlsServerName);
+        options.UseTls = true;
+        options.VerifyCertificate = false;
+        options.MinimumTlsProtocol = KernelHttp::tls::TlsProtocol::Tls13;
+        options.MaximumTlsProtocol = KernelHttp::tls::TlsProtocol::Tls12;
+
+        const NTSTATUS status = client.Connect(wskClient, options, buffers);
+        Expect(status == STATUS_INVALID_PARAMETER, "websocket TLS rejects reversed protocol range");
+        Expect(!server.Connected, "websocket TLS validation fails before socket connect");
+        g_server = nullptr;
+    }
 }
 
 namespace KernelHttp
@@ -537,6 +576,7 @@ int main()
 {
     TestHandshakeBufferedFrameSurvivesSendScratchReuse();
     TestAutoPongDoesNotCorruptBufferedEcho();
+    TestTlsVersionRangeValidation();
 
     if (g_failed) {
         printf("WEBSOCKET CLIENT TESTS FAILED\n");

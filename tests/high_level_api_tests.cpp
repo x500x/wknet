@@ -221,6 +221,9 @@ namespace
         char LastSubprotocol[32] = {};
         USHORT LastPort = 0;
         SIZE_T LastMaxMessageBytes = 0;
+        KhCertificatePolicy LastCertificatePolicy = KhCertificatePolicy::Verify;
+        KhTlsVersion LastMinTlsVersion = KhTlsVersion::Tls12;
+        KhTlsVersion LastMaxTlsVersion = KhTlsVersion::Tls13;
         bool LastAutoReplyPing = false;
         KernelHttp::api::KhWebSocketMessageType LastSendType = KernelHttp::api::KhWebSocketMessageType::Binary;
         UCHAR LastSendData[128] = {};
@@ -387,6 +390,9 @@ namespace
         ++capture->ConnectCount;
         capture->LastPort = request->Port;
         capture->LastMaxMessageBytes = request->MaxMessageBytes;
+        capture->LastCertificatePolicy = request->CertificatePolicy;
+        capture->LastMinTlsVersion = request->MinTlsVersion;
+        capture->LastMaxTlsVersion = request->MaxTlsVersion;
         capture->LastAutoReplyPing = request->AutoReplyPing;
 
         const SIZE_T schemeLength = request->SchemeLength < sizeof(capture->LastScheme) - 1 ?
@@ -1224,6 +1230,7 @@ namespace
         const ULONG firstConnectionId = transport.LastConnectionId;
         Expect(firstConnectionId != 0, "first request obtains connection id");
         Expect(!transport.LastReused, "first request is not reused");
+        Expect(strstr(transport.LastRequest, "Connection: keep-alive\r\n") != nullptr, "pooled request asks for keep-alive");
         KhResponseRelease(response);
 
         response = nullptr;
@@ -1240,6 +1247,7 @@ namespace
         Expect(status == STATUS_SUCCESS, "force-new request succeeds");
         Expect(transport.LastConnectionId != firstConnectionId, "force-new request gets different connection id");
         Expect(!transport.LastReused, "force-new request does not reuse");
+        Expect(strstr(transport.LastRequest, "Connection: close\r\n") != nullptr, "force-new request asks server to close");
         KhResponseRelease(response);
 
         status = KhHttpRequestSetConnectionPolicy(request, KhConnectionPolicy::NoPool);
@@ -1248,6 +1256,7 @@ namespace
         status = KhHttpSendSync(session, request, nullptr, &response);
         Expect(status == STATUS_SUCCESS, "no-pool request succeeds");
         Expect(!transport.LastPoolable, "no-pool request tells transport it is not poolable");
+        Expect(strstr(transport.LastRequest, "Connection: close\r\n") != nullptr, "no-pool request asks server to close");
         KhResponseRelease(response);
 
         KhTestSetHttpTransport(nullptr, nullptr);
@@ -1475,6 +1484,9 @@ namespace
         connectOptions.UrlLength = strlen(url);
         connectOptions.Subprotocol = subprotocol;
         connectOptions.SubprotocolLength = strlen(subprotocol);
+        connectOptions.Tls.CertificatePolicy = KhCertificatePolicy::NoVerify;
+        connectOptions.Tls.MinVersion = KhTlsVersion::Tls12;
+        connectOptions.Tls.MaxVersion = KhTlsVersion::Tls12;
         connectOptions.MaxMessageBytes = 16;
         connectOptions.AutoReplyPing = false;
 
@@ -1489,6 +1501,9 @@ namespace
         Expect(strcmp(capture.LastSubprotocol, "chat") == 0, "websocket connect passes subprotocol");
         Expect(capture.LastPort == 9443, "websocket parser captures explicit port");
         Expect(capture.LastMaxMessageBytes == 16, "websocket connect passes max message bytes");
+        Expect(capture.LastCertificatePolicy == KhCertificatePolicy::NoVerify, "websocket connect passes certificate policy");
+        Expect(capture.LastMinTlsVersion == KhTlsVersion::Tls12, "websocket connect passes minimum TLS version");
+        Expect(capture.LastMaxTlsVersion == KhTlsVersion::Tls12, "websocket connect passes maximum TLS version");
         Expect(!capture.LastAutoReplyPing, "websocket connect passes ping option");
 
         const char text[] = "ping";
@@ -1660,6 +1675,7 @@ namespace
         Expect(transport.VerifiedHttpsForceNewCount == 8, "main verified HTTPS samples force fresh TLS connections");
         Expect(transport.VerifiedHttpsReuseCount == 0, "main verified HTTPS samples avoid reusing idle TLS connections");
         Expect(capture.ConnectCount == 2 && capture.SendCount == 4 && capture.ReceiveCount == 6, "main samples skip websocket banners before sync and async echoes");
+        Expect(capture.LastMinTlsVersion == KhTlsVersion::Tls12 && capture.LastMaxTlsVersion == KhTlsVersion::Tls12, "main websocket samples use TLS 1.2 for the live echo endpoint");
         Expect(capture.LastSendType == KernelHttp::api::KhWebSocketMessageType::Binary, "main websocket sample sends binary after text");
 
         KhSessionClose(session);
@@ -1726,6 +1742,7 @@ namespace
         Expect(transport.VerifiedHttpsForceNewCount == 8, "test-driver verified HTTPS matrix forces fresh TLS connections");
         Expect(transport.VerifiedHttpsReuseCount == 0, "test-driver verified HTTPS matrix avoids idle TLS reuse");
         Expect(capture.ConnectCount == 3 && capture.SendCount == 6 && capture.ReceiveCount == 9, "test-driver matrix skips websocket banners before sync, async, and no-verify echoes");
+        Expect(capture.LastMinTlsVersion == KhTlsVersion::Tls12 && capture.LastMaxTlsVersion == KhTlsVersion::Tls12, "test-driver websocket samples use TLS 1.2 for the live echo endpoint");
         Expect(capture.LastSendType == KernelHttp::api::KhWebSocketMessageType::Binary, "test-driver websocket matrix sends binary after text");
 
         KhTestSetHttpTransport(nullptr, nullptr);

@@ -117,6 +117,14 @@ function Invoke-MainDriverSamplePathCheck {
         $highLevelSamples -notmatch 'InitializeExternalTrustStore') {
         throw 'Verified high-level HTTPS/WebSocket samples must initialize external trust data.'
     }
+    if ($highLevelSamples -match 'echo\.websocket\.org' -or
+        $highLevelSamples -notmatch 'wss://ws\.postman-echo\.com/raw') {
+        throw 'HighLevelApiSamples must use the live Postman WebSocket echo endpoint instead of deprecated echo.websocket.org.'
+    }
+    if ($highLevelSamples -notmatch 'tlsOptions\.MinVersion\s*=\s*api::KhTlsVersion::Tls12' -or
+        $highLevelSamples -notmatch 'tlsOptions\.MaxVersion\s*=\s*api::KhTlsVersion::Tls12') {
+        throw 'HighLevelApiSamples must pin the live WebSocket echo sample to TLS 1.2 until the TLS 1.3 WebSocket path is validated.'
+    }
     if ($highLevelSamples -match 'NgHttp2LeafSpkiSha256' -or
         $highLevelSamples -match 'NgHttp2LetsEncrypt' -or
         $highLevelSamples -match 'WebSocketEchoLeafSpkiSha256' -or

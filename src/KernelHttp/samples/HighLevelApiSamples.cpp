@@ -33,14 +33,14 @@ namespace samples
         constexpr const char* HttpsDeleteUrl = "https://nghttp2.org/httpbin/delete";
         constexpr const char* HttpsHeadUrl = "https://nghttp2.org/httpbin/get";
         constexpr const char* HttpsOptionsUrl = "https://nghttp2.org/httpbin/";
-        constexpr const char* WebSocketEchoUrl = "wss://echo.websocket.org/";
+        constexpr const char* WebSocketEchoUrl = "wss://ws.postman-echo.com/raw";
         constexpr const char* LocalHttpsUrl = "https://127.0.0.1:8443/sample_response_body.txt";
         constexpr const char* LocalHttpsHostName = "localhost";
         constexpr SIZE_T LocalHttpsHostNameLength = sizeof("localhost") - 1;
         constexpr const char* NgHttp2TlsServerName = "nghttp2.org";
         constexpr SIZE_T NgHttp2TlsServerNameLength = sizeof("nghttp2.org") - 1;
-        constexpr const char* WebSocketEchoTlsServerName = "echo.websocket.org";
-        constexpr SIZE_T WebSocketEchoTlsServerNameLength = sizeof("echo.websocket.org") - 1;
+        constexpr const char* WebSocketEchoTlsServerName = "ws.postman-echo.com";
+        constexpr SIZE_T WebSocketEchoTlsServerNameLength = sizeof("ws.postman-echo.com") - 1;
 
         constexpr UCHAR LocalHttpsLeafSpkiSha256[tls::CertificateSha256ThumbprintLength] = {
             0x81, 0xB9, 0xD8, 0x37, 0x08, 0x5E, 0x67, 0x1D,
@@ -844,10 +844,12 @@ namespace samples
             else {
                 tlsOptions.CertificatePolicy = api::KhCertificatePolicy::NoVerify;
             }
+            tlsOptions.MinVersion = api::KhTlsVersion::Tls12;
+            tlsOptions.MaxVersion = api::KhTlsVersion::Tls12;
 
             api::KhWebSocketConnectOptions connectOptions = {};
             connectOptions.Url = WebSocketEchoUrl;
-            connectOptions.UrlLength = sizeof("wss://echo.websocket.org/") - 1;
+            connectOptions.UrlLength = LiteralLength(WebSocketEchoUrl);
             connectOptions.Tls = tlsOptions;
             connectOptions.MaxMessageBytes = 4096;
             connectOptions.AutoReplyPing = true;

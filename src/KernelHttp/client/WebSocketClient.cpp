@@ -232,7 +232,8 @@ namespace client
         if (options.UseTls &&
             (options.TlsServerName == nullptr ||
                 options.TlsServerNameLength == 0 ||
-                (options.VerifyCertificate && options.CertificateStore == nullptr))) {
+                (options.VerifyCertificate && options.CertificateStore == nullptr) ||
+                static_cast<UCHAR>(options.MinimumTlsProtocol) > static_cast<UCHAR>(options.MaximumTlsProtocol))) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -293,6 +294,8 @@ namespace client
             tlsOptions.Workspace = options.Workspace;
             tlsOptions.ProviderCache = options.ProviderCache;
             tlsOptions.VerifyCertificate = options.VerifyCertificate;
+            tlsOptions.MinimumProtocol = options.MinimumTlsProtocol;
+            tlsOptions.MaximumProtocol = options.MaximumTlsProtocol;
 
             tls::TlsAlpnProtocol alpn = {};
             alpn.Name = WebSocketHttp11Alpn;

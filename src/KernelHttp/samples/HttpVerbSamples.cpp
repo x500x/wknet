@@ -27,23 +27,23 @@ namespace samples
         constexpr SIZE_T NgHttp2TlsServerNameLength = sizeof("nghttp2.org") - 1;
         constexpr const char* NgHttp2HostName = "nghttp2.org";
         constexpr SIZE_T NgHttp2HostNameLength = sizeof("nghttp2.org") - 1;
-        constexpr const wchar_t* WebSocketEchoServerName = L"echo.websocket.org";
+        constexpr const wchar_t* WebSocketEchoServerName = L"ws.postman-echo.com";
         constexpr const wchar_t* WebSocketEchoServiceName = L"443";
-        constexpr const char* WebSocketEchoTlsServerName = "echo.websocket.org";
-        constexpr SIZE_T WebSocketEchoTlsServerNameLength = sizeof("echo.websocket.org") - 1;
-        constexpr const char* WebSocketEchoHostName = "echo.websocket.org";
-        constexpr SIZE_T WebSocketEchoHostNameLength = sizeof("echo.websocket.org") - 1;
+        constexpr const char* WebSocketEchoTlsServerName = "ws.postman-echo.com";
+        constexpr SIZE_T WebSocketEchoTlsServerNameLength = sizeof("ws.postman-echo.com") - 1;
+        constexpr const char* WebSocketEchoHostName = "ws.postman-echo.com";
+        constexpr SIZE_T WebSocketEchoHostNameLength = sizeof("ws.postman-echo.com") - 1;
         constexpr UCHAR WebSocketEchoLeafSpkiSha256[tls::CertificateSha256ThumbprintLength] = {
-            0x63, 0x87, 0xC0, 0xAC, 0xD8, 0x7F, 0x2A, 0xAF,
-            0xA8, 0x1A, 0x1A, 0x08, 0xF4, 0xBC, 0x44, 0xDB,
-            0x43, 0x84, 0x59, 0xC6, 0xFC, 0x0D, 0x11, 0x8E,
-            0x59, 0xE9, 0x58, 0xF8, 0x02, 0xF4, 0x0C, 0xBE
+            0xE2, 0x65, 0x15, 0x6D, 0x50, 0x18, 0x34, 0xDD,
+            0x6F, 0xF4, 0x19, 0xE7, 0x13, 0x85, 0x26, 0x34,
+            0xB5, 0x9F, 0xA2, 0x55, 0x0F, 0xC2, 0x3E, 0x31,
+            0xF3, 0xB3, 0xEB, 0x77, 0x2E, 0x63, 0x67, 0x24
         };
-        constexpr UCHAR WebSocketEchoLetsEncryptE8SpkiSha256[tls::CertificateSha256ThumbprintLength] = {
-            0x88, 0x5B, 0xF0, 0x57, 0x22, 0x52, 0xC6, 0x74,
-            0x1D, 0xC9, 0xA5, 0x2F, 0x50, 0x44, 0x48, 0x7F,
-            0xEF, 0x2A, 0x93, 0xB8, 0x11, 0xCD, 0xED, 0xFA,
-            0xD7, 0x62, 0x4C, 0xC2, 0x83, 0xB7, 0xCD, 0xD5
+        constexpr UCHAR WebSocketEchoAmazonRsaM04SpkiSha256[tls::CertificateSha256ThumbprintLength] = {
+            0x1B, 0xD2, 0xCD, 0x34, 0x0A, 0xA5, 0xF3, 0xDE,
+            0xDE, 0x81, 0x8B, 0x1A, 0x6D, 0xAB, 0x21, 0x93,
+            0x35, 0x02, 0x4C, 0x42, 0x64, 0x58, 0x1C, 0xE0,
+            0xA0, 0x4B, 0x64, 0xF1, 0x7F, 0xFA, 0xEF, 0xC7
         };
         constexpr UCHAR HttpBinLeafSpkiSha256[tls::CertificateSha256ThumbprintLength] = {
             0xE4, 0x15, 0x98, 0x36, 0xD3, 0xF1, 0xBE, 0x3B,
@@ -508,8 +508,8 @@ namespace samples
             _Out_ tls::CertificatePin& pin) noexcept
         {
             return InitializePinnedCertificateStore(
-                WebSocketEchoLetsEncryptE8SpkiSha256,
-                sizeof(WebSocketEchoLetsEncryptE8SpkiSha256),
+                WebSocketEchoAmazonRsaM04SpkiSha256,
+                sizeof(WebSocketEchoAmazonRsaM04SpkiSha256),
                 WebSocketEchoLeafSpkiSha256,
                 sizeof(WebSocketEchoLeafSpkiSha256),
                 WebSocketEchoTlsServerName,
@@ -558,9 +558,11 @@ namespace samples
         options.TlsServerNameLength = WebSocketEchoTlsServerNameLength;
         options.Host = WebSocketEchoHostName;
         options.HostLength = WebSocketEchoHostNameLength;
-        options.Path = "/";
-        options.PathLength = 1;
+        options.Path = "/raw";
+        options.PathLength = sizeof("/raw") - 1;
         options.CertificateStore = certificateStore;
+        options.MinimumTlsProtocol = tls::TlsProtocol::Tls12;
+        options.MaximumTlsProtocol = tls::TlsProtocol::Tls12;
         options.UseTls = true;
         options.VerifyCertificate = verifyCertificate;
 

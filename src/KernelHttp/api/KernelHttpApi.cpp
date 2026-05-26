@@ -334,7 +334,8 @@ namespace
     bool IsConnectionCloseStatus(NTSTATUS status) noexcept
     {
         return status == STATUS_CONNECTION_DISCONNECTED ||
-            status == STATUS_CONNECTION_RESET;
+            status == STATUS_CONNECTION_RESET ||
+            status == STATUS_CONNECTION_ABORTED;
     }
 
     bool IsDefaultPort(const char* scheme, SIZE_T schemeLength, USHORT port) noexcept
@@ -1776,9 +1777,9 @@ namespace
         options->Method = ToHttpMethod(request.Method);
         options->Path = { request.Path, request.PathLength };
         options->Host = { host, hostLength };
-        options->Connection = request.ConnectionPolicy == KhConnectionPolicy::NoPool ?
-            http::HttpConnectionDirective::Close :
-            http::HttpConnectionDirective::KeepAlive;
+        options->Connection = request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate ?
+            http::HttpConnectionDirective::KeepAlive :
+            http::HttpConnectionDirective::Close;
         options->ExtraHeaders = headers;
         options->ExtraHeaderCount = extraHeaderCount;
         options->Body = reinterpret_cast<const char*>(request.Body);
@@ -2993,6 +2994,9 @@ namespace
         testRequest.Port = newWebSocket->Port;
         testRequest.Subprotocol = newWebSocket->Subprotocol;
         testRequest.SubprotocolLength = newWebSocket->SubprotocolLength;
+        testRequest.CertificatePolicy = options.Tls.CertificatePolicy;
+        testRequest.MinTlsVersion = options.Tls.MinVersion;
+        testRequest.MaxTlsVersion = options.Tls.MaxVersion;
         testRequest.AutoReplyPing = newWebSocket->AutoReplyPing;
         testRequest.MaxMessageBytes = newWebSocket->MaxMessageBytes;
 
@@ -3061,6 +3065,8 @@ namespace
         connectOptions.CertificateStore = options.Tls.CertificateStore;
         connectOptions.Workspace = session->Workspace;
         connectOptions.ProviderCache = session->ProviderCache;
+        connectOptions.MinimumTlsProtocol = ToTlsProtocol(options.Tls.MinVersion);
+        connectOptions.MaximumTlsProtocol = ToTlsProtocol(options.Tls.MaxVersion);
         connectOptions.UseTls = TextEqualsLiteralIgnoreCase(newWebSocket->Scheme, newWebSocket->SchemeLength, "wss");
         connectOptions.VerifyCertificate = options.Tls.CertificatePolicy == KhCertificatePolicy::Verify;
 

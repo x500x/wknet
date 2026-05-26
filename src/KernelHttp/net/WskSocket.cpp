@@ -127,7 +127,8 @@ namespace net
         bool IsConnectionTerminalStatus(NTSTATUS status) noexcept
         {
             return status == STATUS_CONNECTION_DISCONNECTED ||
-                status == STATUS_CONNECTION_RESET;
+                status == STATUS_CONNECTION_RESET ||
+                status == STATUS_CONNECTION_ABORTED;
         }
     }
 

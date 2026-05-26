@@ -18,7 +18,8 @@ namespace client
         bool IsConnectionCloseStatus(NTSTATUS status) noexcept
         {
             return status == STATUS_CONNECTION_DISCONNECTED ||
-                status == STATUS_CONNECTION_RESET;
+                status == STATUS_CONNECTION_RESET ||
+                status == STATUS_CONNECTION_ABORTED;
         }
 
         http::HttpText FindHeaderValue(const http::HttpHeader* headers, SIZE_T headerCount, http::HttpText name) noexcept

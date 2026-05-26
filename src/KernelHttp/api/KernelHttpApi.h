@@ -431,6 +431,9 @@ namespace api
         USHORT Port = 0;
         const char* Subprotocol = nullptr;
         SIZE_T SubprotocolLength = 0;
+        KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
+        KhTlsVersion MinTlsVersion = KhTlsVersion::Tls12;
+        KhTlsVersion MaxTlsVersion = KhTlsVersion::Tls13;
         bool AutoReplyPing = true;
         SIZE_T MaxMessageBytes = 0;
     };

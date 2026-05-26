@@ -35,6 +35,8 @@ namespace client
         const tls::CertificateStore* CertificateStore = nullptr;
         api::KhWorkspace* Workspace = nullptr;
         const crypto::CngProviderCache* ProviderCache = nullptr;
+        tls::TlsProtocol MinimumTlsProtocol = tls::TlsProtocol::Tls12;
+        tls::TlsProtocol MaximumTlsProtocol = tls::TlsProtocol::Tls13;
         bool UseTls = false;
         bool VerifyCertificate = true;
     };
