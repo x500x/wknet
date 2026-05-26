@@ -1860,6 +1860,12 @@ namespace
     void TestMainDriverUsesHighLevelSamples()
     {
         Expect(
+            FileContains("src\\KernelHttp\\net\\WskClient.cpp", "NS_ALL"),
+            "WSK address resolution queries all available namespace providers");
+        Expect(
+            !FileContains("src\\KernelHttp\\net\\WskClient.cpp", "NS_DNS"),
+            "WSK address resolution does not force the DNS-only namespace provider");
+        Expect(
             FileContains("src\\KernelHttp\\DriverEntry.cpp", "samples/HighLevelApiSamples.h"),
             "DriverEntry includes high-level sample runner");
         Expect(

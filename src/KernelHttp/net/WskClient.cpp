@@ -274,7 +274,7 @@ namespace net
             providerClient,
             &node,
             nullptr,
-            NS_DNS,
+            NS_ALL,
             nullptr,
             &hints,
             &result,
