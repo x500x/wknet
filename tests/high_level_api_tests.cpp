@@ -1863,8 +1863,17 @@ namespace
             FileContains("src\\KernelHttp\\net\\WskClient.cpp", "NS_ALL"),
             "WSK address resolution queries all available namespace providers");
         Expect(
+            FileContains("src\\KernelHttp\\net\\WskClient.cpp", "hints.ai_family = AF_UNSPEC"),
+            "WSK address resolution requests both IPv4 and IPv6 candidates");
+        Expect(
+            FileContains("src\\KernelHttp\\net\\WskClient.cpp", "RtlInitUnicodeString(&service, serviceName)"),
+            "WSK address resolution passes the validated service name into the query");
+        Expect(
             !FileContains("src\\KernelHttp\\net\\WskClient.cpp", "NS_DNS"),
             "WSK address resolution does not force the DNS-only namespace provider");
+        Expect(
+            !FileContains("src\\KernelHttp\\net\\WskClient.cpp", "hints.ai_family = AF_INET;"),
+            "WSK address resolution is not restricted to IPv4-only results");
         Expect(
             FileContains("src\\KernelHttp\\DriverEntry.cpp", "samples/HighLevelApiSamples.h"),
             "DriverEntry includes high-level sample runner");

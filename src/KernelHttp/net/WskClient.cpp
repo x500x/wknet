@@ -250,6 +250,8 @@ namespace net
 
         UNICODE_STRING node = {};
         RtlInitUnicodeString(&node, nodeName);
+        UNICODE_STRING service = {};
+        RtlInitUnicodeString(&service, serviceName);
 
         USHORT port = 0;
         if (!ParseTcpPort(serviceName, &port)) {
@@ -257,7 +259,7 @@ namespace net
         }
 
         ADDRINFOEXW hints = {};
-        hints.ai_family = AF_INET;
+        hints.ai_family = AF_UNSPEC;
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_protocol = IPPROTO_TCP;
 
@@ -273,7 +275,7 @@ namespace net
         status = providerDispatch->WskGetAddressInfo(
             providerClient,
             &node,
-            nullptr,
+            &service,
             NS_ALL,
             nullptr,
             &hints,
