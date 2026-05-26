@@ -52,7 +52,7 @@ namespace KernelHttp
         }
 
         *results = {};
-        return samples::RunHighLevelLocalHttpsSmokeSample(session, &results->LocalHttpsSmoke);
+        return samples::RunHighLevelLocalHttpsSmokeSample(session, results);
 #elif defined(KERNEL_HTTP_TEST_DRIVER_SCENARIOS)
         return samples::RunHighLevelApiTestDriverSamples(session, results);
 #else

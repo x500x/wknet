@@ -342,10 +342,18 @@ function Start-LocalHttpsService {
     @"
 import functools
 import http.server
+import socket
 import ssl
+import sys
 
+bind_address = sys.argv[1]
 handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=r'$wwwRoot')
-server = http.server.ThreadingHTTPServer(('127.0.0.1', $HttpsPort), handler)
+if ':' in bind_address:
+    class ThreadingHTTPServerV6(http.server.ThreadingHTTPServer):
+        address_family = socket.AF_INET6
+    server = ThreadingHTTPServerV6((bind_address, $HttpsPort), handler)
+else:
+    server = http.server.ThreadingHTTPServer((bind_address, $HttpsPort), handler)
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 if hasattr(ssl, 'TLSVersion'):
     context.minimum_version = ssl.TLSVersion.TLSv1_3
@@ -355,21 +363,34 @@ server.socket = context.wrap_socket(server.socket, server_side=True)
 server.serve_forever()
 "@ | Set-Content -LiteralPath $serverScript -Encoding ASCII
 
-    Write-Step "starting local HTTPS service on https://127.0.0.1:$HttpsPort/"
+    Write-Step "starting local HTTPS service on https://127.0.0.1:$HttpsPort/ and https://[::1]:$HttpsPort/"
     $process = Start-Process `
         -FilePath $python.Source `
-        -ArgumentList @('-S', $serverScript) `
+        -ArgumentList @('-S', $serverScript, '127.0.0.1') `
         -WorkingDirectory $wwwRoot `
         -RedirectStandardOutput $serverStdoutLog `
         -RedirectStandardError $serverStderrLog `
         -WindowStyle Hidden `
         -PassThru
+    $processIpv6 = Start-Process `
+        -FilePath $python.Source `
+        -ArgumentList @('-S', $serverScript, '::1') `
+        -WorkingDirectory $wwwRoot `
+        -RedirectStandardOutput (Join-Path $script:HttpsDir 'server-ipv6.stdout.log') `
+        -RedirectStandardError (Join-Path $script:HttpsDir 'server-ipv6.stderr.log') `
+        -WindowStyle Hidden `
+        -PassThru
 
     try {
         $deadline = (Get-Date).AddSeconds(10)
-        $ready = $false
+        $ipv4Ready = $false
+        $ipv6Ready = $false
         do {
-            if ($process.HasExited) {
+            foreach ($serverProcess in @($process, $processIpv6)) {
+                if (-not $serverProcess.HasExited) {
+                    continue
+                }
+
                 $serverOutput = ''
                 if (Test-Path -LiteralPath $serverStdoutLog) {
                     $serverOutput += Get-Content -LiteralPath $serverStdoutLog -Raw
@@ -379,38 +400,59 @@ server.serve_forever()
                     $serverOutput += Get-Content -LiteralPath $serverStderrLog -Raw
                 }
 
-                throw "HTTPS smoke service exited early with code $($process.ExitCode). $serverOutput"
+                throw "HTTPS smoke service exited early with code $($serverProcess.ExitCode). $serverOutput"
             }
 
-            try {
-                $response = Invoke-WebRequest `
-                    -Uri "https://127.0.0.1:$HttpsPort/sample_response_body.txt" `
-                    -SkipCertificateCheck `
-                    -UseBasicParsing
-                if ($response.StatusCode -eq 200 -and $response.Content -match 'kernel-http smoke') {
-                    $ready = $true
-                    break
+            if (-not $ipv4Ready) {
+                try {
+                    $response = Invoke-WebRequest `
+                        -Uri "https://127.0.0.1:$HttpsPort/sample_response_body.txt" `
+                        -SkipCertificateCheck `
+                        -UseBasicParsing
+                    if ($response.StatusCode -eq 200 -and $response.Content -match 'kernel-http smoke') {
+                        $ipv4Ready = $true
+                    }
+                }
+                catch {
+                    if ((Get-Date) -ge $deadline) {
+                        throw
+                    }
                 }
             }
-            catch {
-                if ((Get-Date) -ge $deadline) {
-                    throw
-                }
 
+            if (-not $ipv6Ready) {
+                try {
+                    $response = Invoke-WebRequest `
+                        -Uri "https://[::1]:$HttpsPort/sample_response_body.txt" `
+                        -SkipCertificateCheck `
+                        -UseBasicParsing
+                    if ($response.StatusCode -eq 200 -and $response.Content -match 'kernel-http smoke') {
+                        $ipv6Ready = $true
+                    }
+                }
+                catch {
+                    if ((Get-Date) -ge $deadline) {
+                        throw
+                    }
+                }
+            }
+
+            if (-not ($ipv4Ready -and $ipv6Ready)) {
                 Start-Sleep -Milliseconds 250
             }
         } while ((Get-Date) -lt $deadline)
 
-        if (-not $ready) {
+        if (-not ($ipv4Ready -and $ipv6Ready)) {
             throw 'HTTPS smoke service did not return expected test body.'
         }
     }
     catch {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        Stop-Process -Id $processIpv6.Id -Force -ErrorAction SilentlyContinue
         throw
     }
 
-    return $process
+    return @($process, $processIpv6)
 }
 
 function Invoke-DriverLoadSmoke {
@@ -457,7 +499,9 @@ if ($VmSmoke) {
         Invoke-DriverLoadSmoke
     }
     finally {
-        Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+        foreach ($serverProcess in $server) {
+            Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 

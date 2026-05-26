@@ -46,6 +46,7 @@ namespace
     constexpr SIZE_T KhMaxHeaderValueLength = 512;
     constexpr SIZE_T KhMaxSchemeLength = 5;
     constexpr SIZE_T KhMaxHostLength = KhPoolMaxHostLength;
+    constexpr SIZE_T KhMaxHostHeaderLength = KhMaxHostLength + 9;
     constexpr SIZE_T KhMaxPathLength = 2048;
     constexpr SIZE_T KhMaxServiceNameLength = 5;
     constexpr SIZE_T KhInitialOwnedBodyCapacity = 256;
@@ -329,6 +330,21 @@ namespace
     bool IsDigit(char value) noexcept
     {
         return value >= '0' && value <= '9';
+    }
+
+    bool TextContainsChar(const char* text, SIZE_T textLength, char needle) noexcept
+    {
+        if (text == nullptr) {
+            return false;
+        }
+
+        for (SIZE_T index = 0; index < textLength; ++index) {
+            if (text[index] == needle) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     bool IsConnectionCloseStatus(NTSTATUS status) noexcept
@@ -1410,14 +1426,40 @@ namespace
         SIZE_T portStart = 0;
         SIZE_T portLength = 0;
 
-        for (SIZE_T index = authorityStart; index < authorityEnd; ++index) {
-            if (url[index] == ':') {
-                if (portStart != 0) {
-                    return STATUS_NOT_SUPPORTED;
+        if (url[authorityStart] == '[') {
+            SIZE_T bracketEnd = authorityStart + 1;
+            while (bracketEnd < authorityEnd && url[bracketEnd] != ']') {
+                ++bracketEnd;
+            }
+
+            if (bracketEnd == authorityEnd || bracketEnd == authorityStart + 1) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            hostStart = authorityStart + 1;
+            hostLength = bracketEnd - hostStart;
+            if (!TextContainsChar(url + hostStart, hostLength, ':')) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (bracketEnd + 1 < authorityEnd) {
+                if (url[bracketEnd + 1] != ':') {
+                    return STATUS_INVALID_PARAMETER;
                 }
 
-                portStart = index + 1;
-                hostLength = index - authorityStart;
+                portStart = bracketEnd + 2;
+            }
+        }
+        else {
+            for (SIZE_T index = authorityStart; index < authorityEnd; ++index) {
+                if (url[index] == ':') {
+                    if (portStart != 0) {
+                        return STATUS_NOT_SUPPORTED;
+                    }
+
+                    portStart = index + 1;
+                    hostLength = index - authorityStart;
+                }
             }
         }
 
@@ -1478,7 +1520,6 @@ namespace
             return status;
         }
 
-        hostStart = authorityStart;
         status = CopyLowerText(
             url + hostStart,
             hostLength,
@@ -1566,16 +1607,44 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
+        SIZE_T parsedHostStart = authorityStart;
         SIZE_T parsedHostLength = authorityEnd - authorityStart;
         SIZE_T portStart = 0;
-        for (SIZE_T index = authorityStart; index < authorityEnd; ++index) {
-            if (url[index] == ':') {
-                if (portStart != 0) {
-                    return STATUS_NOT_SUPPORTED;
+
+        if (url[authorityStart] == '[') {
+            SIZE_T bracketEnd = authorityStart + 1;
+            while (bracketEnd < authorityEnd && url[bracketEnd] != ']') {
+                ++bracketEnd;
+            }
+
+            if (bracketEnd == authorityEnd || bracketEnd == authorityStart + 1) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            parsedHostStart = authorityStart + 1;
+            parsedHostLength = bracketEnd - parsedHostStart;
+            if (!TextContainsChar(url + parsedHostStart, parsedHostLength, ':')) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (bracketEnd + 1 < authorityEnd) {
+                if (url[bracketEnd + 1] != ':') {
+                    return STATUS_INVALID_PARAMETER;
                 }
 
-                portStart = index + 1;
-                parsedHostLength = index - authorityStart;
+                portStart = bracketEnd + 2;
+            }
+        }
+        else {
+            for (SIZE_T index = authorityStart; index < authorityEnd; ++index) {
+                if (url[index] == ':') {
+                    if (portStart != 0) {
+                        return STATUS_NOT_SUPPORTED;
+                    }
+
+                    portStart = index + 1;
+                    parsedHostLength = index - authorityStart;
+                }
             }
         }
 
@@ -1632,7 +1701,7 @@ namespace
         }
 
         status = CopyLowerText(
-            url + authorityStart,
+            url + parsedHostStart,
             parsedHostLength,
             host,
             hostCapacity,
@@ -1684,12 +1753,21 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (request.HostLength >= destinationCapacity) {
+        const bool ipv6Literal = TextContainsChar(request.Host, request.HostLength, ':');
+        const SIZE_T bracketBytes = ipv6Literal ? 2 : 0;
+        if (request.HostLength + bracketBytes >= destinationCapacity) {
             return STATUS_BUFFER_TOO_SMALL;
         }
 
-        RtlCopyMemory(destination, request.Host, request.HostLength);
-        SIZE_T length = request.HostLength;
+        SIZE_T length = 0;
+        if (ipv6Literal) {
+            destination[length++] = '[';
+        }
+        RtlCopyMemory(destination + length, request.Host, request.HostLength);
+        length += request.HostLength;
+        if (ipv6Literal) {
+            destination[length++] = ']';
+        }
 
         if (!IsDefaultPort(request.Scheme, request.SchemeLength, request.Port)) {
             if (length + 1 >= destinationCapacity) {
@@ -2232,7 +2310,7 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        HeapArray<char> hostHeader(KhMaxHostLength + 8);
+        HeapArray<char> hostHeader(KhMaxHostHeaderLength);
         if (!hostHeader.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -2271,7 +2349,7 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        HeapArray<char> hostHeader(KhMaxHostLength + 8);
+        HeapArray<char> hostHeader(KhMaxHostHeaderLength);
         if (!hostHeader.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }

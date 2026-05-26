@@ -39,7 +39,8 @@ namespace samples
         HighLevelApiSampleResult HttpsPatchNoVerify = {};
         HighLevelApiSampleResult HttpsDeleteNoVerify = {};
         HighLevelApiSampleResult WebSocketEchoNoVerify = {};
-        HighLevelApiSampleResult LocalHttpsSmoke = {};
+        HighLevelApiSampleResult LocalHttpsIpv4Smoke = {};
+        HighLevelApiSampleResult LocalHttpsIpv6Smoke = {};
     };
 
     _Must_inspect_result_
@@ -55,6 +56,6 @@ namespace samples
     _Must_inspect_result_
     NTSTATUS RunHighLevelLocalHttpsSmokeSample(
         _In_ api::KH_SESSION session,
-        _Out_ HighLevelApiSampleResult* result) noexcept;
+        _Out_ HighLevelApiSampleResults* results) noexcept;
 }
 }

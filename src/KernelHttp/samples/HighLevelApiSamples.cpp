@@ -34,7 +34,8 @@ namespace samples
         constexpr const char* HttpsHeadUrl = "https://nghttp2.org/httpbin/get";
         constexpr const char* HttpsOptionsUrl = "https://nghttp2.org/httpbin/";
         constexpr const char* WebSocketEchoUrl = "wss://ws.postman-echo.com/raw";
-        constexpr const char* LocalHttpsUrl = "https://127.0.0.1:8443/sample_response_body.txt";
+        constexpr const char* LocalHttpsIpv4Url = "https://127.0.0.1:8443/sample_response_body.txt";
+        constexpr const char* LocalHttpsIpv6Url = "https://[::1]:8443/sample_response_body.txt";
         constexpr const char* LocalHttpsHostName = "localhost";
         constexpr SIZE_T LocalHttpsHostNameLength = sizeof("localhost") - 1;
         constexpr const char* NgHttp2TlsServerName = "nghttp2.org";
@@ -897,8 +898,11 @@ namespace samples
             return status;
         }
 
-        NTSTATUS RunHighLevelLocalHttpsSmokeSample(
+        _Must_inspect_result_
+        NTSTATUS RunHighLevelLocalHttpsSmokeAddressSample(
             api::KH_SESSION session,
+            _In_z_ const char* sampleName,
+            _In_z_ const char* url,
             HighLevelApiSampleResult* result) noexcept
         {
             PinnedCertificateStoreBundle* certificateBundle = AllocatePinnedCertificateStoreBundle();
@@ -931,9 +935,9 @@ namespace samples
 
             status = RunHttpSample(
                 session,
-                "LOCAL HTTPS",
+                sampleName,
                 api::KhHttpMethod::Get,
-                LocalHttpsUrl,
+                url,
                 nullptr,
                 0,
                 &tlsOptions,
@@ -942,6 +946,41 @@ namespace samples
             ReleasePinnedCertificateStoreBundle(certificateBundle);
             return status;
         }
+
+        _Must_inspect_result_
+        NTSTATUS RunHighLevelLocalHttpsSmokeSamples(
+            api::KH_SESSION session,
+            HighLevelApiSampleResults* results) noexcept
+        {
+            if (session == nullptr || results == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            *results = {};
+
+            NTSTATUS status = RunHighLevelLocalHttpsSmokeAddressSample(
+                session,
+                "LOCAL HTTPS IPv4",
+                LocalHttpsIpv4Url,
+                &results->LocalHttpsIpv4Smoke);
+
+            status = MergeSampleStatus(
+                status,
+                RunHighLevelLocalHttpsSmokeAddressSample(
+                    session,
+                    "LOCAL HTTPS IPv6",
+                    LocalHttpsIpv6Url,
+                    &results->LocalHttpsIpv6Smoke));
+
+            return status;
+        }
+    }
+
+    NTSTATUS RunHighLevelLocalHttpsSmokeSample(
+        api::KH_SESSION session,
+        HighLevelApiSampleResults* results) noexcept
+    {
+        return RunHighLevelLocalHttpsSmokeSamples(session, results);
     }
 
     NTSTATUS RunHighLevelApiSamples(
@@ -1262,9 +1301,10 @@ namespace samples
                 &results->WebSocketEchoNoVerify));
 
 #if defined(KERNEL_HTTP_ENABLE_LOCAL_HTTPS_SAMPLE) || defined(KERNEL_HTTP_LOCAL_HTTPS_SMOKE_ONLY)
-        status = MergeSampleStatus(
-            status,
-            RunHighLevelLocalHttpsSmokeSample(session, &results->LocalHttpsSmoke));
+        HighLevelApiSampleResults localHttpsSmokeResults = {};
+        status = MergeSampleStatus(status, RunHighLevelLocalHttpsSmokeSample(session, &localHttpsSmokeResults));
+        results->LocalHttpsIpv4Smoke = localHttpsSmokeResults.LocalHttpsIpv4Smoke;
+        results->LocalHttpsIpv6Smoke = localHttpsSmokeResults.LocalHttpsIpv6Smoke;
 #endif
 
         return status;

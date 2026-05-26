@@ -1373,6 +1373,17 @@ namespace
         Expect(strstr(transport.LastRequest, "Host: example.com:8080\r\n") != nullptr, "host header includes non-default port");
         KhResponseRelease(response);
 
+        const char ipv6Url[] = "https://[::1]:8443/sample_response_body.txt";
+        status = KhHttpRequestSetUrl(request, ipv6Url, strlen(ipv6Url));
+        Expect(status == STATUS_SUCCESS, "set URL accepts bracketed IPv6 literal with explicit port");
+        response = nullptr;
+        status = KhHttpSendSync(session, request, nullptr, &response);
+        Expect(status == STATUS_SUCCESS, "IPv6 literal URL send succeeds");
+        Expect(strcmp(transport.LastHost, "::1") == 0, "transport receives IPv6 literal without URL brackets");
+        Expect(transport.LastPort == 8443, "URL parser captures IPv6 literal explicit port");
+        Expect(strstr(transport.LastRequest, "Host: [::1]:8443\r\n") != nullptr, "host header brackets IPv6 literal with non-default port");
+        KhResponseRelease(response);
+
         const char unsupportedUrl[] = "ftp://example.com/";
         status = KhHttpRequestSetUrl(request, unsupportedUrl, strlen(unsupportedUrl));
         Expect(status == STATUS_NOT_SUPPORTED, "set URL rejects unsupported scheme");
@@ -1924,6 +1935,18 @@ namespace
         Expect(
             !FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "http://httpbin.org"),
             "high-level HTTP samples do not use the IPv4-only httpbin.org endpoint");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "https://127.0.0.1:8443/sample_response_body.txt"),
+            "local HTTPS samples include an explicit IPv4 URL");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "https://[::1]:8443/sample_response_body.txt"),
+            "local HTTPS samples include an explicit IPv6 URL");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.h", "LocalHttpsIpv4Smoke"),
+            "local HTTPS sample results expose the IPv4 run");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.h", "LocalHttpsIpv6Smoke"),
+            "local HTTPS sample results expose the IPv6 run");
         Expect(
             !FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "NgHttp2LeafSpkiSha256"),
             "high-level samples do not pin nghttp2 leaf SPKI");
