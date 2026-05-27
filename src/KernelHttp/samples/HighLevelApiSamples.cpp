@@ -49,29 +49,55 @@ namespace samples
         constexpr const char* Http11Ipv4GetSampleName = "HTTP/1.1 IPv4 GET";
         constexpr const char* Http11Ipv4GetAsyncSampleName = "HTTP/1.1 IPv4 GET async";
         constexpr const char* Http11Ipv4PostSampleName = "HTTP/1.1 IPv4 POST";
+        constexpr const char* Http11Ipv4PostAsyncSampleName = "HTTP/1.1 IPv4 POST async";
         constexpr const char* Http11Ipv4PutSampleName = "HTTP/1.1 IPv4 PUT";
+        constexpr const char* Http11Ipv4PutAsyncSampleName = "HTTP/1.1 IPv4 PUT async";
         constexpr const char* Http11Ipv4PatchSampleName = "HTTP/1.1 IPv4 PATCH";
+        constexpr const char* Http11Ipv4PatchAsyncSampleName = "HTTP/1.1 IPv4 PATCH async";
         constexpr const char* Http11Ipv4DeleteSampleName = "HTTP/1.1 IPv4 DELETE";
+        constexpr const char* Http11Ipv4DeleteAsyncSampleName = "HTTP/1.1 IPv4 DELETE async";
         constexpr const char* Http11Ipv4HeadSampleName = "HTTP/1.1 IPv4 HEAD";
+        constexpr const char* Http11Ipv4HeadAsyncSampleName = "HTTP/1.1 IPv4 HEAD async";
         constexpr const char* Http11Ipv4OptionsSampleName = "HTTP/1.1 IPv4 OPTIONS";
+        constexpr const char* Http11Ipv4OptionsAsyncSampleName = "HTTP/1.1 IPv4 OPTIONS async";
         constexpr const char* HttpsVerifyGetSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 GET";
+        constexpr const char* HttpsVerifyGetAsyncSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 GET async";
         constexpr const char* HttpsVerifyPostSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 POST";
+        constexpr const char* HttpsVerifyPostAsyncSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 POST async";
         constexpr const char* HttpsVerifyPutSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 PUT";
+        constexpr const char* HttpsVerifyPutAsyncSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 PUT async";
         constexpr const char* HttpsVerifyPatchSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 PATCH";
+        constexpr const char* HttpsVerifyPatchAsyncSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 PATCH async";
         constexpr const char* HttpsVerifyDeleteSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 DELETE";
+        constexpr const char* HttpsVerifyDeleteAsyncSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 DELETE async";
         constexpr const char* HttpsVerifyHeadSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 HEAD";
+        constexpr const char* HttpsVerifyHeadAsyncSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 HEAD async";
         constexpr const char* HttpsVerifyOptionsSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 OPTIONS";
+        constexpr const char* HttpsVerifyOptionsAsyncSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 OPTIONS async";
         constexpr const char* HttpsNoVerifyGetSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 GET";
+        constexpr const char* HttpsNoVerifyGetAsyncSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 GET async";
         constexpr const char* HttpsNoVerifyPostSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 POST";
+        constexpr const char* HttpsNoVerifyPostAsyncSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 POST async";
         constexpr const char* HttpsNoVerifyPutSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 PUT";
+        constexpr const char* HttpsNoVerifyPutAsyncSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 PUT async";
         constexpr const char* HttpsNoVerifyPatchSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 PATCH";
+        constexpr const char* HttpsNoVerifyPatchAsyncSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 PATCH async";
         constexpr const char* HttpsNoVerifyDeleteSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 DELETE";
+        constexpr const char* HttpsNoVerifyDeleteAsyncSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 DELETE async";
+        constexpr const char* HttpsNoVerifyHeadSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 HEAD";
+        constexpr const char* HttpsNoVerifyHeadAsyncSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 HEAD async";
+        constexpr const char* HttpsNoVerifyOptionsSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 OPTIONS";
+        constexpr const char* HttpsNoVerifyOptionsAsyncSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 OPTIONS async";
         constexpr const char* Http2AlpnSampleName = "HTTP/2 ALPN GET";
+        constexpr const char* Http2AlpnAsyncSampleName = "HTTP/2 ALPN GET async";
         constexpr const char* WebSocketVerifyEchoSampleName = "WebSocket \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 Echo";
         constexpr const char* WebSocketVerifyEchoAsyncSampleName = "WebSocket \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 Echo async";
         constexpr const char* WebSocketNoVerifyEchoSampleName = "WebSocket \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 Echo";
+        constexpr const char* WebSocketNoVerifyEchoAsyncSampleName = "WebSocket \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 Echo async";
         constexpr const char* RemoteHttpsIpv4SampleName = "IPv4 HTTPS GET";
+        constexpr const char* RemoteHttpsIpv4AsyncSampleName = "IPv4 HTTPS GET async";
         constexpr const char* RemoteHttpsIpv6SampleName = "IPv6 HTTPS GET";
+        constexpr const char* RemoteHttpsIpv6AsyncSampleName = "IPv6 HTTPS GET async";
 
         _Must_inspect_result_
         SIZE_T LiteralLength(_In_z_ const char* value) noexcept
@@ -656,6 +682,7 @@ namespace samples
             _In_opt_ const api::KhTlsOptions* tlsOptions,
             api::KhConnectionPolicy connectionPolicy,
             api::KhAddressFamily addressFamily,
+            bool logSampleStart,
             _Out_ HighLevelApiSampleResult* result) noexcept
         {
             if (session == nullptr || sampleName == nullptr || url == nullptr || result == nullptr) {
@@ -664,7 +691,9 @@ namespace samples
 
             *result = {};
 
-            LogSampleStart(sampleName);
+            if (logSampleStart) {
+                LogSampleStart(sampleName);
+            }
 
             // Async request sample: build the same KH_REQUEST shape as sync HTTP,
             // submit it through KhHttpSendAsync, then wait and read the response.
@@ -723,6 +752,7 @@ namespace samples
             SIZE_T bodyLength,
             bool forceHttp2Alpn,
             api::KhAddressFamily addressFamily,
+            bool sendAsync,
             _Out_ HighLevelApiSampleResult* result) noexcept
         {
             if (sampleName != nullptr) {
@@ -756,18 +786,34 @@ namespace samples
                 tlsOptions.AlpnLength = sizeof("h2") - 1;
             }
 
-            status = RunHttpSample(
-                session,
-                sampleName,
-                method,
-                url,
-                body,
-                bodyLength,
-                &tlsOptions,
-                api::KhConnectionPolicy::ForceNew,
-                addressFamily,
-                false,
-                result);
+            if (sendAsync) {
+                status = RunHttpAsyncSample(
+                    session,
+                    sampleName,
+                    method,
+                    url,
+                    body,
+                    bodyLength,
+                    &tlsOptions,
+                    api::KhConnectionPolicy::ForceNew,
+                    addressFamily,
+                    false,
+                    result);
+            }
+            else {
+                status = RunHttpSample(
+                    session,
+                    sampleName,
+                    method,
+                    url,
+                    body,
+                    bodyLength,
+                    &tlsOptions,
+                    api::KhConnectionPolicy::ForceNew,
+                    addressFamily,
+                    false,
+                    result);
+            }
             ReleaseExternalTrustStoreBundle(trustBundle);
             return status;
         }
@@ -780,6 +826,7 @@ namespace samples
             _In_z_ const char* url,
             _In_reads_bytes_opt_(bodyLength) const UCHAR* body,
             SIZE_T bodyLength,
+            bool sendAsync,
             _Out_ HighLevelApiSampleResult* result) noexcept
         {
             if (sampleName != nullptr) {
@@ -788,18 +835,33 @@ namespace samples
 
             api::KhTlsOptions tlsOptions = {};
             tlsOptions.CertificatePolicy = api::KhCertificatePolicy::NoVerify;
+            if (sendAsync) {
+                return RunHttpAsyncSample(
+                    session,
+                    sampleName,
+                    method,
+                    url,
+                    body,
+                    bodyLength,
+                    &tlsOptions,
+                    api::KhConnectionPolicy::ForceNew,
+                    api::KhAddressFamily::Ipv4,
+                    false,
+                    result);
+            }
+
             return RunHttpSample(
-                session,
-                sampleName,
-                method,
-                url,
-                body,
-                bodyLength,
-                &tlsOptions,
-                api::KhConnectionPolicy::ForceNew,
-                api::KhAddressFamily::Ipv4,
-                false,
-                result);
+                    session,
+                    sampleName,
+                    method,
+                    url,
+                    body,
+                    bodyLength,
+                    &tlsOptions,
+                    api::KhConnectionPolicy::ForceNew,
+                    api::KhAddressFamily::Ipv4,
+                    false,
+                    result);
         }
 
         const char* WebSocketMessageTypeName(api::KhWebSocketMessageType type) noexcept
@@ -1024,6 +1086,7 @@ namespace samples
             api::KH_SESSION session,
             _In_z_ const char* sampleName,
             api::KhAddressFamily addressFamily,
+            bool sendAsync,
             HighLevelApiSampleResult* result) noexcept
         {
             if (sampleName != nullptr) {
@@ -1053,15 +1116,31 @@ namespace samples
             tlsOptions.CertificateStore = &trustBundle->TrustStore.Store;
             tlsOptions.CertificatePolicy = api::KhCertificatePolicy::Verify;
 
-            status = RunHttpAddressFamilySample(
-                session,
-                sampleName,
-                api::KhHttpMethod::Get,
-                RemoteHttpsAddressFamilyUrl,
-                &tlsOptions,
-                addressFamily,
-                false,
-                result);
+            if (sendAsync) {
+                status = RunHttpAsyncSample(
+                    session,
+                    sampleName,
+                    api::KhHttpMethod::Get,
+                    RemoteHttpsAddressFamilyUrl,
+                    nullptr,
+                    0,
+                    &tlsOptions,
+                    api::KhConnectionPolicy::ForceNew,
+                    addressFamily,
+                    false,
+                    result);
+            }
+            else {
+                status = RunHttpAddressFamilySample(
+                    session,
+                    sampleName,
+                    api::KhHttpMethod::Get,
+                    RemoteHttpsAddressFamilyUrl,
+                    &tlsOptions,
+                    addressFamily,
+                    false,
+                    result);
+            }
             ReleaseExternalTrustStoreBundle(trustBundle);
             return status;
         }
@@ -1081,7 +1160,17 @@ namespace samples
                 session,
                 RemoteHttpsIpv4SampleName,
                 api::KhAddressFamily::Ipv4,
+                false,
                 &results->RemoteHttpsIpv4);
+
+            status = MergeSampleStatus(
+                status,
+                RunHighLevelRemoteHttpsAddressFamilySample(
+                    session,
+                    RemoteHttpsIpv4AsyncSampleName,
+                    api::KhAddressFamily::Ipv4,
+                    true,
+                    &results->RemoteHttpsIpv4Async));
 
             status = MergeSampleStatus(
                 status,
@@ -1089,7 +1178,17 @@ namespace samples
                     session,
                     RemoteHttpsIpv6SampleName,
                     api::KhAddressFamily::Ipv6,
+                    false,
                     &results->RemoteHttpsIpv6));
+
+            status = MergeSampleStatus(
+                status,
+                RunHighLevelRemoteHttpsAddressFamilySample(
+                    session,
+                    RemoteHttpsIpv6AsyncSampleName,
+                    api::KhAddressFamily::Ipv6,
+                    true,
+                    &results->RemoteHttpsIpv6Async));
 
             return status;
         }
@@ -1150,6 +1249,7 @@ namespace samples
                 nullptr,
                 api::KhConnectionPolicy::ReuseOrCreate,
                 DefaultSampleAddressFamily,
+                true,
                 &results->HttpGetAsync));
 
         status = MergeSampleStatus(
@@ -1169,6 +1269,21 @@ namespace samples
 
         status = MergeSampleStatus(
             status,
+            RunHttpAsyncSample(
+                session,
+                Http11Ipv4PostAsyncSampleName,
+                api::KhHttpMethod::Post,
+                HttpPostUrl,
+                postBody,
+                sizeof(postBody) - 1,
+                nullptr,
+                api::KhConnectionPolicy::ReuseOrCreate,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpPostAsync));
+
+        status = MergeSampleStatus(
+            status,
             RunHttpSample(
                 session,
                 Http11Ipv4PutSampleName,
@@ -1181,6 +1296,21 @@ namespace samples
                 DefaultSampleAddressFamily,
                 true,
                 &results->HttpPut));
+
+        status = MergeSampleStatus(
+            status,
+            RunHttpAsyncSample(
+                session,
+                Http11Ipv4PutAsyncSampleName,
+                api::KhHttpMethod::Put,
+                HttpPutUrl,
+                putBody,
+                sizeof(putBody) - 1,
+                nullptr,
+                api::KhConnectionPolicy::ForceNew,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpPutAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1199,6 +1329,21 @@ namespace samples
 
         status = MergeSampleStatus(
             status,
+            RunHttpAsyncSample(
+                session,
+                Http11Ipv4PatchAsyncSampleName,
+                api::KhHttpMethod::Patch,
+                HttpPatchUrl,
+                patchBody,
+                sizeof(patchBody) - 1,
+                nullptr,
+                api::KhConnectionPolicy::ForceNew,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpPatchAsync));
+
+        status = MergeSampleStatus(
+            status,
             RunHttpSample(
                 session,
                 Http11Ipv4DeleteSampleName,
@@ -1211,6 +1356,21 @@ namespace samples
                 DefaultSampleAddressFamily,
                 true,
                 &results->HttpDelete));
+
+        status = MergeSampleStatus(
+            status,
+            RunHttpAsyncSample(
+                session,
+                Http11Ipv4DeleteAsyncSampleName,
+                api::KhHttpMethod::Delete,
+                HttpDeleteUrl,
+                nullptr,
+                0,
+                nullptr,
+                api::KhConnectionPolicy::ForceNew,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpDeleteAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1229,6 +1389,21 @@ namespace samples
 
         status = MergeSampleStatus(
             status,
+            RunHttpAsyncSample(
+                session,
+                Http11Ipv4HeadAsyncSampleName,
+                api::KhHttpMethod::Head,
+                HttpHeadUrl,
+                nullptr,
+                0,
+                nullptr,
+                api::KhConnectionPolicy::ForceNew,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpHeadAsync));
+
+        status = MergeSampleStatus(
+            status,
             RunHttpSample(
                 session,
                 Http11Ipv4OptionsSampleName,
@@ -1241,6 +1416,21 @@ namespace samples
                 DefaultSampleAddressFamily,
                 true,
                 &results->HttpOptions));
+
+        status = MergeSampleStatus(
+            status,
+            RunHttpAsyncSample(
+                session,
+                Http11Ipv4OptionsAsyncSampleName,
+                api::KhHttpMethod::Options,
+                HttpOptionsUrl,
+                nullptr,
+                0,
+                nullptr,
+                api::KhConnectionPolicy::ForceNew,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpOptionsAsync));
 
         // HTTPS certificate-verification samples: initialize the external CA bundle
         // and pass explicit verify TLS options into each request.
@@ -1255,7 +1445,22 @@ namespace samples
                 0,
                 false,
                 DefaultSampleAddressFamily,
+                false,
                 &results->HttpsTlsOptions));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                HttpsVerifyGetAsyncSampleName,
+                api::KhHttpMethod::Get,
+                HttpsGetUrl,
+                nullptr,
+                0,
+                false,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpsTlsOptionsAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1268,7 +1473,22 @@ namespace samples
                 sizeof(httpsPostBody) - 1,
                 false,
                 DefaultSampleAddressFamily,
+                false,
                 &results->HttpsPost));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                HttpsVerifyPostAsyncSampleName,
+                api::KhHttpMethod::Post,
+                HttpsPostUrl,
+                httpsPostBody,
+                sizeof(httpsPostBody) - 1,
+                false,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpsPostAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1281,7 +1501,22 @@ namespace samples
                 sizeof(httpsPutBody) - 1,
                 false,
                 DefaultSampleAddressFamily,
+                false,
                 &results->HttpsPut));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                HttpsVerifyPutAsyncSampleName,
+                api::KhHttpMethod::Put,
+                HttpsPutUrl,
+                httpsPutBody,
+                sizeof(httpsPutBody) - 1,
+                false,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpsPutAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1294,7 +1529,22 @@ namespace samples
                 sizeof(httpsPatchBody) - 1,
                 false,
                 DefaultSampleAddressFamily,
+                false,
                 &results->HttpsPatch));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                HttpsVerifyPatchAsyncSampleName,
+                api::KhHttpMethod::Patch,
+                HttpsPatchUrl,
+                httpsPatchBody,
+                sizeof(httpsPatchBody) - 1,
+                false,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpsPatchAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1307,7 +1557,22 @@ namespace samples
                 0,
                 false,
                 DefaultSampleAddressFamily,
+                false,
                 &results->HttpsDelete));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                HttpsVerifyDeleteAsyncSampleName,
+                api::KhHttpMethod::Delete,
+                HttpsDeleteUrl,
+                nullptr,
+                0,
+                false,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpsDeleteAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1320,7 +1585,22 @@ namespace samples
                 0,
                 false,
                 DefaultSampleAddressFamily,
+                false,
                 &results->HttpsHead));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                HttpsVerifyHeadAsyncSampleName,
+                api::KhHttpMethod::Head,
+                HttpsHeadUrl,
+                nullptr,
+                0,
+                false,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpsHeadAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1333,7 +1613,22 @@ namespace samples
                 0,
                 false,
                 DefaultSampleAddressFamily,
+                false,
                 &results->HttpsOptions));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                HttpsVerifyOptionsAsyncSampleName,
+                api::KhHttpMethod::Options,
+                HttpsOptionsUrl,
+                nullptr,
+                0,
+                false,
+                DefaultSampleAddressFamily,
+                true,
+                &results->HttpsOptionsAsync));
 
         // HTTP/2 sample: set ALPN to h2 so HTTPS negotiation selects the HTTP/2
         // client path instead of HTTP/1.1 over TLS.
@@ -1348,7 +1643,22 @@ namespace samples
                 0,
                 true,
                 DefaultSampleAddressFamily,
+                false,
                 &results->Http2Alpn));
+
+        status = MergeSampleStatus(
+            status,
+            RunVerifiedNgHttp2Sample(
+                session,
+                Http2AlpnAsyncSampleName,
+                api::KhHttpMethod::Get,
+                HttpsGetUrl,
+                nullptr,
+                0,
+                true,
+                DefaultSampleAddressFamily,
+                true,
+                &results->Http2AlpnAsync));
 
         // WebSocket samples: connect to a TLS echo endpoint, send one text message,
         // skip any server banner frames, and require the echoed payload.
@@ -1377,7 +1687,9 @@ namespace samples
             status,
             RunHighLevelRemoteHttpsAddressFamilySample(session, &remoteHttpsAddressFamilyResults));
         results->RemoteHttpsIpv4 = remoteHttpsAddressFamilyResults.RemoteHttpsIpv4;
+        results->RemoteHttpsIpv4Async = remoteHttpsAddressFamilyResults.RemoteHttpsIpv4Async;
         results->RemoteHttpsIpv6 = remoteHttpsAddressFamilyResults.RemoteHttpsIpv6;
+        results->RemoteHttpsIpv6Async = remoteHttpsAddressFamilyResults.RemoteHttpsIpv6Async;
 
         return status;
     }
@@ -1407,7 +1719,20 @@ namespace samples
                 HttpsGetUrl,
                 nullptr,
                 0,
+                false,
                 &results->HttpsNoVerify));
+
+        status = MergeSampleStatus(
+            status,
+            RunNoVerifyHttpsSample(
+                session,
+                HttpsNoVerifyGetAsyncSampleName,
+                api::KhHttpMethod::Get,
+                HttpsGetUrl,
+                nullptr,
+                0,
+                true,
+                &results->HttpsNoVerifyAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1418,7 +1743,20 @@ namespace samples
                 HttpsPostUrl,
                 httpsPostBody,
                 sizeof(httpsPostBody) - 1,
+                false,
                 &results->HttpsPostNoVerify));
+
+        status = MergeSampleStatus(
+            status,
+            RunNoVerifyHttpsSample(
+                session,
+                HttpsNoVerifyPostAsyncSampleName,
+                api::KhHttpMethod::Post,
+                HttpsPostUrl,
+                httpsPostBody,
+                sizeof(httpsPostBody) - 1,
+                true,
+                &results->HttpsPostNoVerifyAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1429,7 +1767,20 @@ namespace samples
                 HttpsPutUrl,
                 httpsPutBody,
                 sizeof(httpsPutBody) - 1,
+                false,
                 &results->HttpsPutNoVerify));
+
+        status = MergeSampleStatus(
+            status,
+            RunNoVerifyHttpsSample(
+                session,
+                HttpsNoVerifyPutAsyncSampleName,
+                api::KhHttpMethod::Put,
+                HttpsPutUrl,
+                httpsPutBody,
+                sizeof(httpsPutBody) - 1,
+                true,
+                &results->HttpsPutNoVerifyAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1440,7 +1791,20 @@ namespace samples
                 HttpsPatchUrl,
                 httpsPatchBody,
                 sizeof(httpsPatchBody) - 1,
+                false,
                 &results->HttpsPatchNoVerify));
+
+        status = MergeSampleStatus(
+            status,
+            RunNoVerifyHttpsSample(
+                session,
+                HttpsNoVerifyPatchAsyncSampleName,
+                api::KhHttpMethod::Patch,
+                HttpsPatchUrl,
+                httpsPatchBody,
+                sizeof(httpsPatchBody) - 1,
+                true,
+                &results->HttpsPatchNoVerifyAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1451,7 +1815,68 @@ namespace samples
                 HttpsDeleteUrl,
                 nullptr,
                 0,
+                false,
                 &results->HttpsDeleteNoVerify));
+
+        status = MergeSampleStatus(
+            status,
+            RunNoVerifyHttpsSample(
+                session,
+                HttpsNoVerifyDeleteAsyncSampleName,
+                api::KhHttpMethod::Delete,
+                HttpsDeleteUrl,
+                nullptr,
+                0,
+                true,
+                &results->HttpsDeleteNoVerifyAsync));
+
+        status = MergeSampleStatus(
+            status,
+            RunNoVerifyHttpsSample(
+                session,
+                HttpsNoVerifyHeadSampleName,
+                api::KhHttpMethod::Head,
+                HttpsHeadUrl,
+                nullptr,
+                0,
+                false,
+                &results->HttpsHeadNoVerify));
+
+        status = MergeSampleStatus(
+            status,
+            RunNoVerifyHttpsSample(
+                session,
+                HttpsNoVerifyHeadAsyncSampleName,
+                api::KhHttpMethod::Head,
+                HttpsHeadUrl,
+                nullptr,
+                0,
+                true,
+                &results->HttpsHeadNoVerifyAsync));
+
+        status = MergeSampleStatus(
+            status,
+            RunNoVerifyHttpsSample(
+                session,
+                HttpsNoVerifyOptionsSampleName,
+                api::KhHttpMethod::Options,
+                HttpsOptionsUrl,
+                nullptr,
+                0,
+                false,
+                &results->HttpsOptionsNoVerify));
+
+        status = MergeSampleStatus(
+            status,
+            RunNoVerifyHttpsSample(
+                session,
+                HttpsNoVerifyOptionsAsyncSampleName,
+                api::KhHttpMethod::Options,
+                HttpsOptionsUrl,
+                nullptr,
+                0,
+                true,
+                &results->HttpsOptionsNoVerifyAsync));
 
         status = MergeSampleStatus(
             status,
@@ -1461,6 +1886,15 @@ namespace samples
                 false,
                 false,
                 &results->WebSocketEchoNoVerify));
+
+        status = MergeSampleStatus(
+            status,
+            RunWebSocketEchoSample(
+                session,
+                WebSocketNoVerifyEchoAsyncSampleName,
+                false,
+                true,
+                &results->WebSocketEchoNoVerifyAsync));
 
         return status;
     }
