@@ -18,6 +18,9 @@ namespace samples
         constexpr const char* ContentTypeName = "Content-Type";
         constexpr const char* JsonContentType = "application/json";
         constexpr const char* H2Alpn = "h2";
+        // DbgPrintEx narrow strings are consumed as the local ANSI code page.
+        constexpr const char* SampleStartPrefix = "\xD5\xE2\xCA\xC7 ";
+        constexpr const char* SampleStartSuffix = " \xCA\xBE\xC0\xFD";
 
         constexpr const char* HttpGetUrl = "http://nghttp2.org/httpbin/get";
         constexpr const char* HttpPostUrl = "http://nghttp2.org/httpbin/post";
@@ -41,6 +44,34 @@ namespace samples
         constexpr SIZE_T WebSocketEchoTlsServerNameLength = sizeof("ws.postman-echo.com") - 1;
         constexpr api::KhAddressFamily DefaultSampleAddressFamily = api::KhAddressFamily::Ipv4;
         constexpr SIZE_T HttpSampleTransientRetryCount = 2;
+
+        constexpr const char* RequestSessionSampleName = "Request & Session";
+        constexpr const char* Http11Ipv4GetSampleName = "HTTP/1.1 IPv4 GET";
+        constexpr const char* Http11Ipv4GetAsyncSampleName = "HTTP/1.1 IPv4 GET async";
+        constexpr const char* Http11Ipv4PostSampleName = "HTTP/1.1 IPv4 POST";
+        constexpr const char* Http11Ipv4PutSampleName = "HTTP/1.1 IPv4 PUT";
+        constexpr const char* Http11Ipv4PatchSampleName = "HTTP/1.1 IPv4 PATCH";
+        constexpr const char* Http11Ipv4DeleteSampleName = "HTTP/1.1 IPv4 DELETE";
+        constexpr const char* Http11Ipv4HeadSampleName = "HTTP/1.1 IPv4 HEAD";
+        constexpr const char* Http11Ipv4OptionsSampleName = "HTTP/1.1 IPv4 OPTIONS";
+        constexpr const char* HttpsVerifyGetSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 GET";
+        constexpr const char* HttpsVerifyPostSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 POST";
+        constexpr const char* HttpsVerifyPutSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 PUT";
+        constexpr const char* HttpsVerifyPatchSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 PATCH";
+        constexpr const char* HttpsVerifyDeleteSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 DELETE";
+        constexpr const char* HttpsVerifyHeadSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 HEAD";
+        constexpr const char* HttpsVerifyOptionsSampleName = "HTTPS \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 OPTIONS";
+        constexpr const char* HttpsNoVerifyGetSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 GET";
+        constexpr const char* HttpsNoVerifyPostSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 POST";
+        constexpr const char* HttpsNoVerifyPutSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 PUT";
+        constexpr const char* HttpsNoVerifyPatchSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 PATCH";
+        constexpr const char* HttpsNoVerifyDeleteSampleName = "HTTPS \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 DELETE";
+        constexpr const char* Http2AlpnSampleName = "HTTP/2 ALPN GET";
+        constexpr const char* WebSocketVerifyEchoSampleName = "WebSocket \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 Echo";
+        constexpr const char* WebSocketVerifyEchoAsyncSampleName = "WebSocket \xD6\xA4\xCA\xE9\xD1\xE9\xD6\xA4 Echo async";
+        constexpr const char* WebSocketNoVerifyEchoSampleName = "WebSocket \xB2\xBB\xD1\xE9\xD6\xA4\xD6\xA4\xCA\xE9 Echo";
+        constexpr const char* RemoteHttpsIpv4SampleName = "IPv4 HTTPS GET";
+        constexpr const char* RemoteHttpsIpv6SampleName = "IPv6 HTTPS GET";
 
         _Must_inspect_result_
         SIZE_T LiteralLength(_In_z_ const char* value) noexcept
@@ -70,6 +101,18 @@ namespace samples
                 status == STATUS_CONNECTION_DISCONNECTED ||
                 status == STATUS_CONNECTION_RESET ||
                 status == STATUS_CONNECTION_ABORTED;
+        }
+
+        void LogSampleStart(_In_z_ const char* sampleName) noexcept
+        {
+#if !defined(DBG) && !defined(KERNEL_HTTP_USER_MODE_TEST)
+            UNREFERENCED_PARAMETER(sampleName);
+#endif
+            kprintf(
+                "[high-level sample] %s%s%s\r\n",
+                SampleStartPrefix,
+                sampleName != nullptr ? sampleName : "unknown",
+                SampleStartSuffix);
         }
 
         struct ExternalTrustStoreBundle final
@@ -479,6 +522,7 @@ namespace samples
             _In_opt_ const api::KhTlsOptions* tlsOptions,
             api::KhConnectionPolicy connectionPolicy,
             api::KhAddressFamily addressFamily,
+            bool logSampleStart,
             _Out_ HighLevelApiSampleResult* result) noexcept
         {
             if (session == nullptr || sampleName == nullptr || url == nullptr || result == nullptr) {
@@ -487,6 +531,12 @@ namespace samples
 
             *result = {};
 
+            if (logSampleStart) {
+                LogSampleStart(sampleName);
+            }
+
+            // Request sample: create a KH_REQUEST, set URL/method/common headers,
+            // then apply optional TLS, connection policy, address family and body.
             api::KH_REQUEST request = nullptr;
             NTSTATUS status = PrepareHttpRequest(
                 session,
@@ -540,6 +590,7 @@ namespace samples
             _In_z_ const char* url,
             _In_opt_ const api::KhTlsOptions* tlsOptions,
             api::KhAddressFamily addressFamily,
+            bool logSampleStart,
             _Out_ HighLevelApiSampleResult* result) noexcept
         {
             if (session == nullptr || sampleName == nullptr || url == nullptr || result == nullptr) {
@@ -548,6 +599,12 @@ namespace samples
 
             *result = {};
 
+            if (logSampleStart) {
+                LogSampleStart(sampleName);
+            }
+
+            // IPv4/IPv6 sample: force address-family resolution on a fresh request
+            // so the transport path cannot silently reuse an existing connection.
             api::KH_REQUEST request = nullptr;
             NTSTATUS status = PrepareHttpRequest(
                 session,
@@ -607,6 +664,10 @@ namespace samples
 
             *result = {};
 
+            LogSampleStart(sampleName);
+
+            // Async request sample: build the same KH_REQUEST shape as sync HTTP,
+            // submit it through KhHttpSendAsync, then wait and read the response.
             api::KH_REQUEST request = nullptr;
             NTSTATUS status = PrepareHttpRequest(
                 session,
@@ -664,6 +725,10 @@ namespace samples
             api::KhAddressFamily addressFamily,
             _Out_ HighLevelApiSampleResult* result) noexcept
         {
+            if (sampleName != nullptr) {
+                LogSampleStart(sampleName);
+            }
+
             ExternalTrustStoreBundle* trustBundle = AllocateExternalTrustStoreBundle();
             if (trustBundle == nullptr) {
                 if (result != nullptr) {
@@ -701,6 +766,7 @@ namespace samples
                 &tlsOptions,
                 api::KhConnectionPolicy::ForceNew,
                 addressFamily,
+                false,
                 result);
             ReleaseExternalTrustStoreBundle(trustBundle);
             return status;
@@ -716,6 +782,10 @@ namespace samples
             SIZE_T bodyLength,
             _Out_ HighLevelApiSampleResult* result) noexcept
         {
+            if (sampleName != nullptr) {
+                LogSampleStart(sampleName);
+            }
+
             api::KhTlsOptions tlsOptions = {};
             tlsOptions.CertificatePolicy = api::KhCertificatePolicy::NoVerify;
             return RunHttpSample(
@@ -728,6 +798,7 @@ namespace samples
                 &tlsOptions,
                 api::KhConnectionPolicy::ForceNew,
                 api::KhAddressFamily::Ipv4,
+                false,
                 result);
         }
 
@@ -869,6 +940,10 @@ namespace samples
 
             *result = {};
 
+            LogSampleStart(sampleName);
+
+            // WebSocket sample: connect through the high-level API, send one text
+            // message, skip any server banner frames, and require the echoed text.
             ExternalTrustStoreBundle* trustBundle = nullptr;
             api::KhTlsOptions tlsOptions = {};
             if (verifyCertificate) {
@@ -951,6 +1026,10 @@ namespace samples
             api::KhAddressFamily addressFamily,
             HighLevelApiSampleResult* result) noexcept
         {
+            if (sampleName != nullptr) {
+                LogSampleStart(sampleName);
+            }
+
             ExternalTrustStoreBundle* trustBundle = AllocateExternalTrustStoreBundle();
             if (trustBundle == nullptr) {
                 if (result != nullptr) {
@@ -981,6 +1060,7 @@ namespace samples
                 RemoteHttpsAddressFamilyUrl,
                 &tlsOptions,
                 addressFamily,
+                false,
                 result);
             ReleaseExternalTrustStoreBundle(trustBundle);
             return status;
@@ -999,7 +1079,7 @@ namespace samples
 
             NTSTATUS status = RunHighLevelRemoteHttpsAddressFamilySample(
                 session,
-                "REMOTE HTTPS IPv4",
+                RemoteHttpsIpv4SampleName,
                 api::KhAddressFamily::Ipv4,
                 &results->RemoteHttpsIpv4);
 
@@ -1007,7 +1087,7 @@ namespace samples
                 status,
                 RunHighLevelRemoteHttpsAddressFamilySample(
                     session,
-                    "REMOTE HTTPS IPv6",
+                    RemoteHttpsIpv6SampleName,
                     api::KhAddressFamily::Ipv6,
                     &results->RemoteHttpsIpv6));
 
@@ -1039,9 +1119,15 @@ namespace samples
         const UCHAR httpsPutBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS PUT\"}";
         const UCHAR httpsPatchBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS PATCH\"}";
 
+        // Session sample: DriverEntry creates KH_SESSION once, then this runner
+        // reuses it across HTTP, HTTPS, HTTP/2, IPv4/IPv6 and WebSocket examples.
+        LogSampleStart(RequestSessionSampleName);
+
+        // HTTP/1.1 IPv4 samples: plain http:// requests through the high-level API.
+        // GET/POST demonstrate pooled reuse; mutating verbs force fresh sends.
         NTSTATUS status = RunHttpSample(
             session,
-            "HTTP GET",
+            Http11Ipv4GetSampleName,
             api::KhHttpMethod::Get,
             HttpGetUrl,
             nullptr,
@@ -1049,13 +1135,14 @@ namespace samples
             nullptr,
             api::KhConnectionPolicy::ReuseOrCreate,
             DefaultSampleAddressFamily,
+            true,
             &results->HttpGet);
 
         status = MergeSampleStatus(
             status,
             RunHttpAsyncSample(
                 session,
-                "HTTP GET async",
+                Http11Ipv4GetAsyncSampleName,
                 api::KhHttpMethod::Get,
                 HttpGetUrl,
                 nullptr,
@@ -1069,7 +1156,7 @@ namespace samples
             status,
             RunHttpSample(
                 session,
-                "HTTP POST",
+                Http11Ipv4PostSampleName,
                 api::KhHttpMethod::Post,
                 HttpPostUrl,
                 postBody,
@@ -1077,13 +1164,14 @@ namespace samples
                 nullptr,
                 api::KhConnectionPolicy::ReuseOrCreate,
                 DefaultSampleAddressFamily,
+                true,
                 &results->HttpPost));
 
         status = MergeSampleStatus(
             status,
             RunHttpSample(
                 session,
-                "HTTP PUT",
+                Http11Ipv4PutSampleName,
                 api::KhHttpMethod::Put,
                 HttpPutUrl,
                 putBody,
@@ -1091,13 +1179,14 @@ namespace samples
                 nullptr,
                 api::KhConnectionPolicy::ForceNew,
                 DefaultSampleAddressFamily,
+                true,
                 &results->HttpPut));
 
         status = MergeSampleStatus(
             status,
             RunHttpSample(
                 session,
-                "HTTP PATCH",
+                Http11Ipv4PatchSampleName,
                 api::KhHttpMethod::Patch,
                 HttpPatchUrl,
                 patchBody,
@@ -1105,13 +1194,14 @@ namespace samples
                 nullptr,
                 api::KhConnectionPolicy::ForceNew,
                 DefaultSampleAddressFamily,
+                true,
                 &results->HttpPatch));
 
         status = MergeSampleStatus(
             status,
             RunHttpSample(
                 session,
-                "HTTP DELETE",
+                Http11Ipv4DeleteSampleName,
                 api::KhHttpMethod::Delete,
                 HttpDeleteUrl,
                 nullptr,
@@ -1119,13 +1209,14 @@ namespace samples
                 nullptr,
                 api::KhConnectionPolicy::ForceNew,
                 DefaultSampleAddressFamily,
+                true,
                 &results->HttpDelete));
 
         status = MergeSampleStatus(
             status,
             RunHttpSample(
                 session,
-                "HTTP HEAD",
+                Http11Ipv4HeadSampleName,
                 api::KhHttpMethod::Head,
                 HttpHeadUrl,
                 nullptr,
@@ -1133,13 +1224,14 @@ namespace samples
                 nullptr,
                 api::KhConnectionPolicy::ForceNew,
                 DefaultSampleAddressFamily,
+                true,
                 &results->HttpHead));
 
         status = MergeSampleStatus(
             status,
             RunHttpSample(
                 session,
-                "HTTP OPTIONS",
+                Http11Ipv4OptionsSampleName,
                 api::KhHttpMethod::Options,
                 HttpOptionsUrl,
                 nullptr,
@@ -1147,13 +1239,16 @@ namespace samples
                 nullptr,
                 api::KhConnectionPolicy::ForceNew,
                 DefaultSampleAddressFamily,
+                true,
                 &results->HttpOptions));
 
+        // HTTPS certificate-verification samples: initialize the external CA bundle
+        // and pass explicit verify TLS options into each request.
         status = MergeSampleStatus(
             status,
             RunVerifiedNgHttp2Sample(
                 session,
-                "HTTPS GET",
+                HttpsVerifyGetSampleName,
                 api::KhHttpMethod::Get,
                 HttpsGetUrl,
                 nullptr,
@@ -1166,7 +1261,7 @@ namespace samples
             status,
             RunVerifiedNgHttp2Sample(
                 session,
-                "HTTPS POST",
+                HttpsVerifyPostSampleName,
                 api::KhHttpMethod::Post,
                 HttpsPostUrl,
                 httpsPostBody,
@@ -1179,7 +1274,7 @@ namespace samples
             status,
             RunVerifiedNgHttp2Sample(
                 session,
-                "HTTPS PUT",
+                HttpsVerifyPutSampleName,
                 api::KhHttpMethod::Put,
                 HttpsPutUrl,
                 httpsPutBody,
@@ -1192,7 +1287,7 @@ namespace samples
             status,
             RunVerifiedNgHttp2Sample(
                 session,
-                "HTTPS PATCH",
+                HttpsVerifyPatchSampleName,
                 api::KhHttpMethod::Patch,
                 HttpsPatchUrl,
                 httpsPatchBody,
@@ -1205,7 +1300,7 @@ namespace samples
             status,
             RunVerifiedNgHttp2Sample(
                 session,
-                "HTTPS DELETE",
+                HttpsVerifyDeleteSampleName,
                 api::KhHttpMethod::Delete,
                 HttpsDeleteUrl,
                 nullptr,
@@ -1218,7 +1313,7 @@ namespace samples
             status,
             RunVerifiedNgHttp2Sample(
                 session,
-                "HTTPS HEAD",
+                HttpsVerifyHeadSampleName,
                 api::KhHttpMethod::Head,
                 HttpsHeadUrl,
                 nullptr,
@@ -1231,7 +1326,7 @@ namespace samples
             status,
             RunVerifiedNgHttp2Sample(
                 session,
-                "HTTPS OPTIONS",
+                HttpsVerifyOptionsSampleName,
                 api::KhHttpMethod::Options,
                 HttpsOptionsUrl,
                 nullptr,
@@ -1240,11 +1335,13 @@ namespace samples
                 DefaultSampleAddressFamily,
                 &results->HttpsOptions));
 
+        // HTTP/2 sample: set ALPN to h2 so HTTPS negotiation selects the HTTP/2
+        // client path instead of HTTP/1.1 over TLS.
         status = MergeSampleStatus(
             status,
             RunVerifiedNgHttp2Sample(
                 session,
-                "HTTP/2 ALPN",
+                Http2AlpnSampleName,
                 api::KhHttpMethod::Get,
                 HttpsGetUrl,
                 nullptr,
@@ -1253,11 +1350,13 @@ namespace samples
                 DefaultSampleAddressFamily,
                 &results->Http2Alpn));
 
+        // WebSocket samples: connect to a TLS echo endpoint, send one text message,
+        // skip any server banner frames, and require the echoed payload.
         status = MergeSampleStatus(
             status,
             RunWebSocketEchoSample(
                 session,
-                "WEBSOCKET ECHO",
+                WebSocketVerifyEchoSampleName,
                 true,
                 false,
                 &results->WebSocketEcho));
@@ -1266,11 +1365,13 @@ namespace samples
             status,
             RunWebSocketEchoSample(
                 session,
-                "WEBSOCKET ECHO async",
+                WebSocketVerifyEchoAsyncSampleName,
                 true,
                 true,
                 &results->WebSocketEchoAsync));
 
+        // IPv4/IPv6 samples: force each address family against the same verified
+        // HTTPS endpoint so resolution and connect behavior are both covered.
         HighLevelApiSampleResults remoteHttpsAddressFamilyResults = {};
         status = MergeSampleStatus(
             status,
@@ -1295,11 +1396,13 @@ namespace samples
         const UCHAR httpsPutBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS PUT\"}";
         const UCHAR httpsPatchBody[] = "{\"source\":\"kernel-http\",\"api\":\"high-level\",\"method\":\"HTTPS PATCH\"}";
 
+        // HTTPS no-verify samples: explicit test-driver-only coverage for callers
+        // that choose KhCertificatePolicy::NoVerify. This is not an implicit retry.
         status = MergeSampleStatus(
             status,
             RunNoVerifyHttpsSample(
                 session,
-                "HTTPS no-verify",
+                HttpsNoVerifyGetSampleName,
                 api::KhHttpMethod::Get,
                 HttpsGetUrl,
                 nullptr,
@@ -1310,7 +1413,7 @@ namespace samples
             status,
             RunNoVerifyHttpsSample(
                 session,
-                "HTTPS POST no-verify",
+                HttpsNoVerifyPostSampleName,
                 api::KhHttpMethod::Post,
                 HttpsPostUrl,
                 httpsPostBody,
@@ -1321,7 +1424,7 @@ namespace samples
             status,
             RunNoVerifyHttpsSample(
                 session,
-                "HTTPS PUT no-verify",
+                HttpsNoVerifyPutSampleName,
                 api::KhHttpMethod::Put,
                 HttpsPutUrl,
                 httpsPutBody,
@@ -1332,7 +1435,7 @@ namespace samples
             status,
             RunNoVerifyHttpsSample(
                 session,
-                "HTTPS PATCH no-verify",
+                HttpsNoVerifyPatchSampleName,
                 api::KhHttpMethod::Patch,
                 HttpsPatchUrl,
                 httpsPatchBody,
@@ -1343,7 +1446,7 @@ namespace samples
             status,
             RunNoVerifyHttpsSample(
                 session,
-                "HTTPS DELETE no-verify",
+                HttpsNoVerifyDeleteSampleName,
                 api::KhHttpMethod::Delete,
                 HttpsDeleteUrl,
                 nullptr,
@@ -1354,7 +1457,7 @@ namespace samples
             status,
             RunWebSocketEchoSample(
                 session,
-                "WEBSOCKET ECHO no-verify",
+                WebSocketNoVerifyEchoSampleName,
                 false,
                 false,
                 &results->WebSocketEchoNoVerify));

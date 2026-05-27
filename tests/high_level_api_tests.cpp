@@ -2008,6 +2008,57 @@ namespace
             FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "InitializeExternalTrustStore"),
             "high-level verified samples initialize external trust data");
         Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "SampleStartPrefix"),
+            "high-level samples have a shared Chinese sample-start prefix");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "SampleStartSuffix"),
+            "high-level samples have a shared Chinese sample-start suffix");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "local ANSI code page"),
+            "high-level sample Chinese logs use the debugger's narrow-string code page");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "LogSampleStart"),
+            "high-level samples log a clear start line before each example");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "Request & Session"),
+            "high-level samples include a request/session example name");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "HTTP/1.1 IPv4 GET"),
+            "high-level samples name the HTTP/1.1 IPv4 example clearly");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "HTTPS \\xD6\\xA4\\xCA\\xE9\\xD1\\xE9\\xD6\\xA4 GET"),
+            "high-level samples name the HTTPS certificate-verification example clearly");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "HTTPS \\xB2\\xBB\\xD1\\xE9\\xD6\\xA4\\xD6\\xA4\\xCA\\xE9 GET"),
+            "high-level samples name the HTTPS no-verify example clearly");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "HTTP/2 ALPN GET"),
+            "high-level samples name the HTTP/2 example clearly");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "WebSocket \\xD6\\xA4\\xCA\\xE9\\xD1\\xE9\\xD6\\xA4 Echo"),
+            "high-level samples name the WebSocket verification example clearly");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "WebSocket \\xB2\\xBB\\xD1\\xE9\\xD6\\xA4\\xD6\\xA4\\xCA\\xE9 Echo"),
+            "high-level samples name the WebSocket no-verify example clearly");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "IPv4 HTTPS GET"),
+            "high-level samples name the IPv4 example clearly");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "IPv6 HTTPS GET"),
+            "high-level samples name the IPv6 example clearly");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "HTTP/1.1 IPv4 samples"),
+            "high-level samples explain the HTTP/1.1 block in code");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "HTTPS certificate-verification samples"),
+            "high-level samples explain the HTTPS verification block in code");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "HTTPS no-verify samples"),
+            "high-level samples explain the HTTPS no-verify block in code");
+        Expect(
+            FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "IPv4/IPv6 samples"),
+            "high-level samples explain the IPv4/IPv6 block in code");
+        Expect(
             FileContains("src\\KernelHttp\\samples\\HighLevelApiSamples.cpp", "http://nghttp2.org/httpbin/get"),
             "high-level HTTP samples use the dual-stack nghttp2 httpbin endpoint");
         Expect(
