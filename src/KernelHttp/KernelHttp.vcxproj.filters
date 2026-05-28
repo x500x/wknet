@@ -67,6 +67,12 @@
     <Filter Include="Header Files\api">
       <UniqueIdentifier>{A1A92D02-F456-4D36-963F-3B1C11323D37}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\khttp">
+      <UniqueIdentifier>{C8A1D720-C92E-4E2F-91A4-3F4B9C73C0FA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\khttp">
+      <UniqueIdentifier>{D9B2E831-DA3F-4F30-A2B5-405C0D84D1FB}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="api\KernelHttpApi.cpp">
@@ -101,6 +107,9 @@
     </ClCompile>
     <ClCompile Include="DriverEntry.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Khttp.cpp">
+      <Filter>Source Files\khttp</Filter>
     </ClCompile>
     <ClCompile Include="http\HttpParser.cpp">
       <Filter>Source Files\http</Filter>
@@ -145,6 +154,9 @@
       <Filter>Source Files\samples</Filter>
     </ClCompile>
     <ClCompile Include="samples\Http2VerbSamples.cpp">
+      <Filter>Source Files\samples</Filter>
+    </ClCompile>
+    <ClCompile Include="samples\KhttpSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
     <ClCompile Include="tls\TlsContext.cpp">
@@ -259,6 +271,36 @@
     </ClInclude>
     <ClInclude Include="samples\Http2VerbSamples.h">
       <Filter>Header Files\samples</Filter>
+    </ClInclude>
+    <ClInclude Include="samples\KhttpSamples.h">
+      <Filter>Header Files\samples</Filter>
+    </ClInclude>
+    <ClInclude Include="khttp\AsyncOp.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="khttp\Detail.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="khttp\Http.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="khttp\HttpAsync.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="khttp\Request.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="khttp\Response.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="khttp\Session.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="khttp\Types.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="khttp\WebSocket.h">
+      <Filter>Header Files\khttp</Filter>
     </ClInclude>
     <ClInclude Include="tls\TlsContext.h">
       <Filter>Header Files\tls</Filter>

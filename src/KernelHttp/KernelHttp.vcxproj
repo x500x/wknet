@@ -30,6 +30,7 @@
     <ClCompile Include="crypto\CngProvider.cpp" />
     <ClCompile Include="crypto\CngProviderCache.cpp" />
     <ClCompile Include="DriverEntry.cpp" />
+    <ClCompile Include="khttp\Khttp.cpp" />
     <ClCompile Include="http\HttpContentEncoding.cpp" />
     <ClCompile Include="http\HttpParser.cpp" />
     <ClCompile Include="http\HttpRequest.cpp" />
@@ -45,6 +46,7 @@
     <ClCompile Include="samples\Http2VerbSamples.cpp" />
     <ClCompile Include="samples\HighLevelApiSamples.cpp" />
     <ClCompile Include="samples\HttpVerbSamples.cpp" />
+    <ClCompile Include="samples\KhttpSamples.cpp" />
     <ClCompile Include="tls\TlsContext.cpp" />
     <ClCompile Include="tls\CertificateStore.cpp" />
     <ClCompile Include="tls\CertificateValidator.cpp" />
@@ -132,6 +134,16 @@
     <ClInclude Include="samples\Http2VerbSamples.h" />
     <ClInclude Include="samples\HighLevelApiSamples.h" />
     <ClInclude Include="samples\HttpVerbSamples.h" />
+    <ClInclude Include="samples\KhttpSamples.h" />
+    <ClInclude Include="khttp\AsyncOp.h" />
+    <ClInclude Include="khttp\Detail.h" />
+    <ClInclude Include="khttp\Http.h" />
+    <ClInclude Include="khttp\HttpAsync.h" />
+    <ClInclude Include="khttp\Request.h" />
+    <ClInclude Include="khttp\Response.h" />
+    <ClInclude Include="khttp\Session.h" />
+    <ClInclude Include="khttp\Types.h" />
+    <ClInclude Include="khttp\WebSocket.h" />
     <ClInclude Include="tls\TlsContext.h" />
     <ClInclude Include="tls\CertificateStore.h" />
     <ClInclude Include="tls\CertificateValidator.h" />
