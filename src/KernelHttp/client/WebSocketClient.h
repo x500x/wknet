@@ -130,6 +130,17 @@ namespace client
         NTSTATUS EnsureBufferedFrameCapacity(SIZE_T capacity) noexcept;
 
         _Must_inspect_result_
+        NTSTATUS ConnectAddress(
+            _Inout_ net::WskClient& wskClient,
+            _In_ const SOCKADDR* remoteAddress,
+            _In_ const WebSocketConnectOptions& options,
+            _In_ const WebSocketIoBuffers& buffers,
+            _In_reads_bytes_(clientKeyLength) const char* clientKey,
+            SIZE_T clientKeyLength,
+            SIZE_T requestLength,
+            _Out_opt_ USHORT* statusCode) noexcept;
+
+        _Must_inspect_result_
         NTSTATUS ReadHandshakeResponse(
             _In_reads_bytes_(clientKeyLength) const char* clientKey,
             SIZE_T clientKeyLength,

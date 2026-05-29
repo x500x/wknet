@@ -245,13 +245,37 @@ namespace net
         SOCKADDR_STORAGE* remoteAddress,
         WskAddressFamily addressFamily) noexcept
     {
+        SIZE_T addressCount = 0;
+        return ResolveAll(
+            nodeName,
+            serviceName,
+            remoteAddress,
+            1,
+            &addressCount,
+            addressFamily);
+    }
+
+    NTSTATUS WskClient::ResolveAll(
+        const wchar_t* nodeName,
+        const wchar_t* serviceName,
+        SOCKADDR_STORAGE* remoteAddresses,
+        SIZE_T addressCapacity,
+        SIZE_T* addressCount,
+        WskAddressFamily addressFamily) noexcept
+    {
         if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
+        if (addressCount != nullptr) {
+            *addressCount = 0;
+        }
+
         if (nodeName == nullptr || nodeName[0] == L'\0' ||
             serviceName == nullptr || serviceName[0] == L'\0' ||
-            remoteAddress == nullptr) {
+            remoteAddresses == nullptr ||
+            addressCapacity == 0 ||
+            addressCount == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -319,11 +343,14 @@ namespace net
             return STATUS_NO_MATCH;
         }
 
-        status = STATUS_OBJECT_NAME_NOT_FOUND;
+        status = STATUS_NOT_FOUND;
         for (const ADDRINFOEXW* current = result; current != nullptr; current = current->ai_next) {
-            if (CopySocketAddress(current, port, remoteAddress)) {
+            if (CopySocketAddress(current, port, &remoteAddresses[*addressCount])) {
                 status = STATUS_SUCCESS;
-                break;
+                ++(*addressCount);
+                if (*addressCount >= addressCapacity) {
+                    break;
+                }
             }
         }
 

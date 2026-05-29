@@ -272,18 +272,60 @@ namespace client
             return status;
         }
 
-        SOCKADDR_STORAGE remoteAddress = {};
-        status = wskClient.Resolve(
+        SOCKADDR_STORAGE remoteAddresses[net::WskMaxResolvedAddresses] = {};
+        SIZE_T remoteAddressCount = 0;
+        status = wskClient.ResolveAll(
             options.ServerName,
             options.ServiceName,
-            &remoteAddress,
+            remoteAddresses,
+            net::WskMaxResolvedAddresses,
+            &remoteAddressCount,
             options.AddressFamily);
         if (!NT_SUCCESS(status)) {
             kprintf("WebSocketClient resolve failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
-        status = socket_.Connect(wskClient, reinterpret_cast<const SOCKADDR*>(&remoteAddress));
+        NTSTATUS lastStatus = STATUS_NOT_FOUND;
+        for (SIZE_T addressIndex = 0; addressIndex < remoteAddressCount; ++addressIndex) {
+            status = ConnectAddress(
+                wskClient,
+                reinterpret_cast<const SOCKADDR*>(&remoteAddresses[addressIndex]),
+                options,
+                buffers,
+                clientKey.Get(),
+                clientKeyLength,
+                requestLength,
+                statusCode);
+            if (NT_SUCCESS(status)) {
+                return STATUS_SUCCESS;
+            }
+
+            lastStatus = status;
+            kprintf("WebSocketClient address attempt failed: 0x%08X index=%Iu family=%u\r\n",
+                static_cast<ULONG>(status),
+                addressIndex,
+                static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
+        }
+
+        return lastStatus;
+    }
+
+    NTSTATUS WebSocketClient::ConnectAddress(
+        net::WskClient& wskClient,
+        const SOCKADDR* remoteAddress,
+        const WebSocketConnectOptions& options,
+        const WebSocketIoBuffers& buffers,
+        const char* clientKey,
+        SIZE_T clientKeyLength,
+        SIZE_T requestLength,
+        USHORT* statusCode) noexcept
+    {
+        if (remoteAddress == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        NTSTATUS status = socket_.Connect(wskClient, remoteAddress);
         if (!NT_SUCCESS(status)) {
             kprintf("WebSocketClient connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -358,7 +400,7 @@ namespace client
         }
 
         http::HttpResponse response = {};
-        status = ReadHandshakeResponse(clientKey.Get(), clientKeyLength, buffers, response);
+        status = ReadHandshakeResponse(clientKey, clientKeyLength, buffers, response);
         if (statusCode != nullptr) {
             *statusCode = response.StatusCode;
         }

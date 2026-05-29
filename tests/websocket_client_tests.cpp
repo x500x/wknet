@@ -113,6 +113,8 @@ namespace
         unsigned char LastClientPayload[256] = {};
         size_t LastClientPayloadLength = 0;
         size_t PongCount = 0;
+        size_t ConnectAttempts = 0;
+        size_t FailConnectAttempts = 0;
         bool EchoAfterPing = false;
         bool Connected = false;
         NTSTATUS CloseStatus = STATUS_SUCCESS;
@@ -129,6 +131,11 @@ namespace
 
         NTSTATUS Connect()
         {
+            ++ConnectAttempts;
+            if (ConnectAttempts <= FailConnectAttempts) {
+                return STATUS_CONNECTION_DISCONNECTED;
+            }
+
             Connected = true;
             return STATUS_SUCCESS;
         }
@@ -371,6 +378,43 @@ namespace
         Expect(opcode == WebSocketOpcode::Text, "echo opcode is text");
         Expect(bytesReceived == sizeof(text) - 1, "echo length matches");
         Expect(memcmp(payload, text, sizeof(text) - 1) == 0, "echo payload matches");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestConnectRetriesResolvedAddresses()
+    {
+        FakeWebSocketServer server;
+        server.FailConnectAttempts = 1;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.AddressFamily = KernelHttp::net::WskAddressFamily::Any;
+
+        const NTSTATUS status = client.Connect(wskClient, options, buffers);
+        Expect(NT_SUCCESS(status), "websocket connect retries later resolved addresses");
+        Expect(server.ConnectAttempts == 2, "websocket connect attempts the next resolved address");
 
         const NTSTATUS closeStatus = client.Close(buffers);
         UNREFERENCED_PARAMETER(closeStatus);
@@ -621,6 +665,29 @@ namespace net
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS WskClient::ResolveAll(
+        const wchar_t*,
+        const wchar_t*,
+        SOCKADDR_STORAGE* remoteAddresses,
+        SIZE_T addressCapacity,
+        SIZE_T* addressCount,
+        WskAddressFamily) noexcept
+    {
+        if (addressCount != nullptr) {
+            *addressCount = 0;
+        }
+        if (remoteAddresses == nullptr || addressCapacity == 0 || addressCount == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const SIZE_T count = addressCapacity < 2 ? addressCapacity : 2;
+        for (SIZE_T index = 0; index < count; ++index) {
+            remoteAddresses[index].ss_family = 2;
+        }
+        *addressCount = count;
+        return STATUS_SUCCESS;
+    }
+
     WskSocket::~WskSocket() noexcept = default;
 
     NTSTATUS WskSocket::Connect(WskClient&, const SOCKADDR*, const SOCKADDR*) noexcept
@@ -693,6 +760,7 @@ namespace net
 int main()
 {
     TestHandshakeBufferedFrameSurvivesSendScratchReuse();
+    TestConnectRetriesResolvedAddresses();
     TestAutoPongDoesNotCorruptBufferedEcho();
     TestReceiveHonorsOutputCapacity();
     TestCloseTreatsConnectionResetAsClosed();

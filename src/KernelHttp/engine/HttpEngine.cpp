@@ -877,15 +877,9 @@ namespace engine
             connection.Socket = nullptr;
         }
 
-        auto* socket = new net::WskSocket();
-        if (socket == nullptr) {
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
-
         HeapArray<wchar_t> serverName(KhMaxHostLength + 1);
         HeapArray<wchar_t> serviceName(KhMaxServiceNameLength + 1);
         if (!serverName.IsValid() || !serviceName.IsValid()) {
-            delete socket;
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
@@ -894,26 +888,49 @@ namespace engine
             status = FormatServiceName(request.Port, serviceName.Get(), serviceName.Count());
         }
 
-        SOCKADDR_STORAGE remoteAddress = {};
+        SOCKADDR_STORAGE remoteAddresses[net::WskMaxResolvedAddresses] = {};
+        SIZE_T remoteAddressCount = 0;
         if (NT_SUCCESS(status)) {
-            status = session->WskClient->Resolve(
+            status = session->WskClient->ResolveAll(
                 serverName.Get(),
                 serviceName.Get(),
-                &remoteAddress,
+                remoteAddresses,
+                net::WskMaxResolvedAddresses,
+                &remoteAddressCount,
                 ToWskAddressFamily(request.AddressFamily));
         }
 
+        NTSTATUS lastStatus = status;
         if (NT_SUCCESS(status)) {
-            status = socket->Connect(*session->WskClient, reinterpret_cast<const SOCKADDR*>(&remoteAddress));
+            lastStatus = STATUS_NOT_FOUND;
+            for (SIZE_T addressIndex = 0; addressIndex < remoteAddressCount; ++addressIndex) {
+                auto* socket = new net::WskSocket();
+                if (socket == nullptr) {
+                    return STATUS_INSUFFICIENT_RESOURCES;
+                }
+
+                status = socket->Connect(
+                    *session->WskClient,
+                    reinterpret_cast<const SOCKADDR*>(&remoteAddresses[addressIndex]));
+                if (NT_SUCCESS(status)) {
+                    connection.Socket = socket;
+                    return STATUS_SUCCESS;
+                }
+
+                lastStatus = status;
+                kprintf("HttpEngine socket connect attempt failed: 0x%08X index=%Iu family=%u\r\n",
+                    static_cast<ULONG>(status),
+                    addressIndex,
+                    static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
+                delete socket;
+            }
         }
 
-        if (!NT_SUCCESS(status)) {
-            delete socket;
-            return status;
+        if (!NT_SUCCESS(lastStatus)) {
+            return lastStatus;
         }
 
-        connection.Socket = socket;
-        return STATUS_SUCCESS;
+        return STATUS_NOT_FOUND;
     }
 
     _Must_inspect_result_

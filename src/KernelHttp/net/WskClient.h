@@ -57,6 +57,8 @@ namespace KernelHttp
 {
 namespace net
 {
+    constexpr SIZE_T WskMaxResolvedAddresses = 8;
+
     enum class WskAddressFamily : ULONG
     {
         Any = 0,
@@ -93,6 +95,15 @@ namespace net
             _In_z_ const wchar_t* nodeName,
             _In_z_ const wchar_t* serviceName,
             _Out_ SOCKADDR_STORAGE* remoteAddress,
+            WskAddressFamily addressFamily = WskAddressFamily::Any) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS ResolveAll(
+            _In_z_ const wchar_t* nodeName,
+            _In_z_ const wchar_t* serviceName,
+            _Out_writes_(addressCapacity) SOCKADDR_STORAGE* remoteAddresses,
+            SIZE_T addressCapacity,
+            _Out_ SIZE_T* addressCount,
             WskAddressFamily addressFamily = WskAddressFamily::Any) noexcept;
 
     private:
