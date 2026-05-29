@@ -261,6 +261,7 @@ namespace engine
         testRequest.Subprotocol = newWebSocket->Subprotocol;
         testRequest.SubprotocolLength = newWebSocket->SubprotocolLength;
         testRequest.CertificatePolicy = options.Tls.CertificatePolicy;
+        testRequest.CertificateStore = options.Tls.CertificateStore;
         testRequest.MinTlsVersion = options.Tls.MinVersion;
         testRequest.MaxTlsVersion = options.Tls.MaxVersion;
         testRequest.HandshakeReceiveTimeoutMilliseconds = options.Tls.HandshakeReceiveTimeoutMilliseconds;
@@ -569,6 +570,7 @@ namespace engine
         }
 
         KhWebSocketReceiveOptions effectiveOptions = {};
+        effectiveOptions.AutoAllocate = true;
         if (options != nullptr) {
             effectiveOptions = *options;
         }
@@ -638,9 +640,10 @@ namespace engine
 
         const SIZE_T maxMessageBytes =
             effectiveOptions.MaxMessageBytes != 0 ? effectiveOptions.MaxMessageBytes : websocket->MaxMessageBytes;
-        if (maxMessageBytes > websocket->Session->Workspace->DecodedBody.Length) {
-            return STATUS_BUFFER_TOO_SMALL;
-        }
+        const SIZE_T outputCapacity =
+            maxMessageBytes < websocket->Session->Workspace->DecodedBody.Length ?
+            maxMessageBytes :
+            websocket->Session->Workspace->DecodedBody.Length;
 
         client::WebSocketIoBuffers buffers = {};
         buffers.FrameBuffer = websocket->Session->Workspace->WebSocketFrameScratch.Data;
@@ -651,7 +654,7 @@ namespace engine
             buffers,
             &opcode,
             websocket->Session->Workspace->DecodedBody.Data,
-            maxMessageBytes,
+            outputCapacity,
             &bytesReceived);
         if (!NT_SUCCESS(status)) {
             return status;

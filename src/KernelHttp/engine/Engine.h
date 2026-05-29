@@ -416,6 +416,7 @@ namespace engine
         SIZE_T BuiltRequestLength = 0;
         KhConnectionPolicy ConnectionPolicy = KhConnectionPolicy::ReuseOrCreate;
         KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
+        const tls::CertificateStore* CertificateStore = nullptr;
         const char* Alpn = nullptr;
         SIZE_T AlpnLength = 0;
         bool PoolableConnection = false;
@@ -447,6 +448,7 @@ namespace engine
         const char* Subprotocol = nullptr;
         SIZE_T SubprotocolLength = 0;
         KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
+        const tls::CertificateStore* CertificateStore = nullptr;
         KhTlsVersion MinTlsVersion = KhTlsVersion::Tls12;
         KhTlsVersion MaxTlsVersion = KhTlsVersion::Tls13;
         KhAddressFamily AddressFamily = KhAddressFamily::Any;

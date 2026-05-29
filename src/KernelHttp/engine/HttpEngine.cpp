@@ -1023,6 +1023,7 @@ namespace engine
         testRequest.BuiltRequestLength = builtRequestLength;
         testRequest.ConnectionPolicy = request.ConnectionPolicy;
         testRequest.CertificatePolicy = request.Tls.CertificatePolicy;
+        testRequest.CertificateStore = request.Tls.CertificateStore;
         testRequest.Alpn = request.Tls.Alpn;
         testRequest.AlpnLength = request.Tls.AlpnLength;
         testRequest.PoolableConnection = request.ConnectionPolicy != KhConnectionPolicy::NoPool;

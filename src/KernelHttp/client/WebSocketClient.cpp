@@ -181,6 +181,14 @@ namespace client
 
             return RtlCompareMemory(actual, expected, expectedLength) == expectedLength;
         }
+
+        _Must_inspect_result_
+        bool IsConnectionTerminalStatus(NTSTATUS status) noexcept
+        {
+            return status == STATUS_CONNECTION_DISCONNECTED ||
+                status == STATUS_CONNECTION_RESET ||
+                status == STATUS_CONNECTION_ABORTED;
+        }
     }
 
     WebSocketClient::~WebSocketClient() noexcept
@@ -613,7 +621,8 @@ namespace client
         }
 
         useTls_ = false;
-        return socket_.Close();
+        const NTSTATUS closeStatus = socket_.Close();
+        return IsConnectionTerminalStatus(closeStatus) ? STATUS_SUCCESS : closeStatus;
     }
 
     NTSTATUS WebSocketClient::SendTextAndReceiveEcho(

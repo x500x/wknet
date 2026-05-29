@@ -115,6 +115,7 @@ namespace
         size_t PongCount = 0;
         bool EchoAfterPing = false;
         bool Connected = false;
+        NTSTATUS CloseStatus = STATUS_SUCCESS;
 
         void Reset()
         {
@@ -269,7 +270,7 @@ namespace
         NTSTATUS Close()
         {
             Connected = false;
-            return STATUS_SUCCESS;
+            return CloseStatus;
         }
     };
 
@@ -419,6 +420,119 @@ namespace
 
         const NTSTATUS closeStatus = client.Close(buffers);
         UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestReceiveHonorsOutputCapacity()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        const unsigned char banner[] = "capacity-check";
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Text,
+            banner,
+            sizeof(banner) - 1);
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[4] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for capacity test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "websocket receive rejects undersized output buffer");
+        Expect(bytesReceived == sizeof(banner) - 1, "undersized receive reports required payload length");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestCloseTreatsConnectionResetAsClosed()
+    {
+        FakeWebSocketServer server;
+        server.CloseStatus = STATUS_CONNECTION_RESET;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for reset close test succeeds");
+
+        status = client.Close(buffers);
+        Expect(NT_SUCCESS(status), "websocket close treats connection reset as already closed");
+        g_server = nullptr;
+    }
+
+    void TestClosePropagatesNonTerminalErrors()
+    {
+        FakeWebSocketServer server;
+        server.CloseStatus = STATUS_INVALID_DEVICE_STATE;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for close error test succeeds");
+
+        status = client.Close(buffers);
+        Expect(status == STATUS_INVALID_DEVICE_STATE, "websocket close propagates non-terminal errors");
         g_server = nullptr;
     }
 
@@ -580,6 +694,9 @@ int main()
 {
     TestHandshakeBufferedFrameSurvivesSendScratchReuse();
     TestAutoPongDoesNotCorruptBufferedEcho();
+    TestReceiveHonorsOutputCapacity();
+    TestCloseTreatsConnectionResetAsClosed();
+    TestClosePropagatesNonTerminalErrors();
     TestTlsVersionRangeValidation();
 
     if (g_failed) {

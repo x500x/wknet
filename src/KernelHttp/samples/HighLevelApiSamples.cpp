@@ -7,6 +7,7 @@
 #include "khttp/Response.h"
 #include "khttp/Session.h"
 #include "khttp/WebSocket.h"
+#include "samples/ExternalTrustStore.h"
 
 namespace KernelHttp
 {
@@ -29,6 +30,7 @@ namespace
 
     constexpr const char* JsonBody = "{\"hello\":\"world\"}";
     constexpr const char* WsHelloMessage = "hello-from-khttp";
+    constexpr khttp::AddressFamily DefaultSampleAddressFamily = khttp::AddressFamily::Ipv4;
 
     SIZE_T LiteralLength(const char* value) noexcept
     {
@@ -54,47 +56,66 @@ namespace
         result.BodyLength = khttp::ResponseBodyLength(response);
     }
 
+    NTSTATUS CreateSampleRequest(
+        khttp::Session* session,
+        khttp::Method method,
+        const char* url,
+        const UCHAR* body,
+        SIZE_T bodyLength,
+        const khttp::TlsConfig* tlsConfig,
+        khttp::Request** request) noexcept
+    {
+        if (session == nullptr || url == nullptr || request == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *request = nullptr;
+        khttp::Request* newRequest = nullptr;
+        NTSTATUS status = khttp::RequestCreate(session, &newRequest);
+        if (NT_SUCCESS(status)) {
+            status = khttp::RequestSetUrl(newRequest, url, LiteralLength(url));
+        }
+        if (NT_SUCCESS(status)) {
+            status = khttp::RequestSetMethod(newRequest, method);
+        }
+        if (NT_SUCCESS(status)) {
+            status = khttp::RequestSetAddressFamily(newRequest, DefaultSampleAddressFamily);
+        }
+        if (NT_SUCCESS(status) && tlsConfig != nullptr) {
+            status = khttp::RequestSetTls(newRequest, tlsConfig);
+        }
+        if (NT_SUCCESS(status) && bodyLength != 0) {
+            status = khttp::RequestSetBody(newRequest, body, bodyLength);
+        }
+
+        if (!NT_SUCCESS(status)) {
+            khttp::RequestRelease(newRequest);
+            return status;
+        }
+
+        *request = newRequest;
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS RunSimpleSync(
         khttp::Session* session,
         khttp::Method method,
         const char* url,
         const UCHAR* body,
         SIZE_T bodyLength,
-        HighLevelApiSampleResult& result) noexcept
+        HighLevelApiSampleResult& result,
+        const khttp::TlsConfig* tlsConfig = nullptr) noexcept
     {
+        khttp::Request* request = nullptr;
         khttp::Response* response = nullptr;
-        NTSTATUS status = STATUS_SUCCESS;
-        const SIZE_T urlLength = LiteralLength(url);
-
-        switch (method) {
-        case khttp::Method::Get:
-            status = khttp::Get(session, url, urlLength, &response);
-            break;
-        case khttp::Method::Post:
-            status = khttp::Post(session, url, urlLength, body, bodyLength, &response);
-            break;
-        case khttp::Method::Put:
-            status = khttp::Put(session, url, urlLength, body, bodyLength, &response);
-            break;
-        case khttp::Method::Patch:
-            status = khttp::Patch(session, url, urlLength, body, bodyLength, &response);
-            break;
-        case khttp::Method::Delete:
-            status = khttp::Delete(session, url, urlLength, &response);
-            break;
-        case khttp::Method::Head:
-            status = khttp::Head(session, url, urlLength, &response);
-            break;
-        case khttp::Method::Options:
-            status = khttp::Options(session, url, urlLength, &response);
-            break;
-        default:
-            status = STATUS_INVALID_PARAMETER;
-            break;
+        NTSTATUS status = CreateSampleRequest(session, method, url, body, bodyLength, tlsConfig, &request);
+        if (NT_SUCCESS(status)) {
+            status = khttp::Send(session, request, &response);
         }
 
         CaptureResponse(result, status, response);
         khttp::ResponseRelease(response);
+        khttp::RequestRelease(request);
         return status;
     }
 
@@ -103,10 +124,22 @@ namespace
         const char* url,
         HighLevelApiSampleResult& result) noexcept
     {
+        khttp::Request* request = nullptr;
         khttp::AsyncOp* op = nullptr;
-        NTSTATUS status = khttp::GetAsync(session, url, LiteralLength(url), &op);
+        NTSTATUS status = CreateSampleRequest(
+            session,
+            khttp::Method::Get,
+            url,
+            nullptr,
+            0,
+            nullptr,
+            &request);
+        if (NT_SUCCESS(status)) {
+            status = khttp::SendAsync(session, request, &op);
+        }
         if (!NT_SUCCESS(status)) {
             result.Status = status;
+            khttp::RequestRelease(request);
             return status;
         }
 
@@ -118,12 +151,14 @@ namespace
         CaptureResponse(result, status, response);
         khttp::ResponseRelease(response);
         khttp::AsyncRelease(op);
+        khttp::RequestRelease(request);
         return status;
     }
 
     NTSTATUS RunHttpsRequestBuilder(
         khttp::Session* session,
-        HighLevelApiSampleResult& result) noexcept
+        HighLevelApiSampleResult& result,
+        const khttp::TlsConfig& tlsConfig) noexcept
     {
         khttp::Request* request = nullptr;
         NTSTATUS status = khttp::RequestCreate(session, &request);
@@ -136,6 +171,12 @@ namespace
         status = khttp::RequestSetUrl(request, HttpsBuilderUrl, urlLength);
         if (NT_SUCCESS(status)) {
             status = khttp::RequestSetMethod(request, khttp::Method::Post);
+        }
+        if (NT_SUCCESS(status)) {
+            status = khttp::RequestSetAddressFamily(request, DefaultSampleAddressFamily);
+        }
+        if (NT_SUCCESS(status)) {
+            status = khttp::RequestSetTls(request, &tlsConfig);
         }
         if (NT_SUCCESS(status)) {
             const char* userAgent = "KernelHttp/0.1";
@@ -162,14 +203,17 @@ namespace
 
     NTSTATUS RunWebSocketEcho(
         khttp::Session* session,
-        HighLevelApiSampleResult& result) noexcept
+        HighLevelApiSampleResult& result,
+        const khttp::TlsConfig& tlsConfig) noexcept
     {
         khttp::WebSocket* websocket = nullptr;
-        NTSTATUS status = khttp::WsConnect(
-            session,
-            WebSocketEchoUrl,
-            LiteralLength(WebSocketEchoUrl),
-            &websocket);
+        khttp::WsConnectConfig config = khttp::DefaultWsConnectConfig();
+        config.Url = WebSocketEchoUrl;
+        config.UrlLength = LiteralLength(WebSocketEchoUrl);
+        config.Tls = tlsConfig;
+        config.Family = DefaultSampleAddressFamily;
+
+        NTSTATUS status = khttp::WsConnect(session, &config, &websocket);
         if (!NT_SUCCESS(status)) {
             result.Status = status;
             return status;
@@ -208,6 +252,19 @@ NTSTATUS RunHighLevelApiSamples(khttp::Session* session, HighLevelApiSampleResul
     const UCHAR* jsonBytes = reinterpret_cast<const UCHAR*>(JsonBody);
     const SIZE_T jsonLen = LiteralLength(JsonBody);
 
+    ExternalTrustStore trustStore = {};
+    status = InitializeExternalTrustStore(trustStore);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    khttp::TlsConfig ngHttp2Tls = khttp::DefaultTlsConfig();
+    ngHttp2Tls.Store = &trustStore.Store;
+
+    khttp::TlsConfig webSocketTls = khttp::DefaultTlsConfig();
+    webSocketTls.Store = &trustStore.Store;
+    webSocketTls.MaxVersion = khttp::TlsVersion::Tls12;
+
     status = RunSimpleSync(session, khttp::Method::Get, HttpGetUrl, nullptr, 0, results->HttpGet);
     if (!NT_SUCCESS(status) && NT_SUCCESS(aggregate)) aggregate = status;
 
@@ -219,7 +276,18 @@ NTSTATUS RunHighLevelApiSamples(khttp::Session* session, HighLevelApiSampleResul
 
     {
         khttp::AsyncOp* op = nullptr;
-        status = khttp::PostAsync(session, HttpPostUrl, LiteralLength(HttpPostUrl), jsonBytes, jsonLen, &op);
+        khttp::Request* request = nullptr;
+        status = CreateSampleRequest(
+            session,
+            khttp::Method::Post,
+            HttpPostUrl,
+            jsonBytes,
+            jsonLen,
+            nullptr,
+            &request);
+        if (NT_SUCCESS(status)) {
+            status = khttp::SendAsync(session, request, &op);
+        }
         if (NT_SUCCESS(status)) {
             status = khttp::AsyncWait(op, AsyncWaitTimeoutMs);
             khttp::Response* response = nullptr;
@@ -233,6 +301,7 @@ NTSTATUS RunHighLevelApiSamples(khttp::Session* session, HighLevelApiSampleResul
         else {
             results->HttpPostAsync.Status = status;
         }
+        khttp::RequestRelease(request);
         if (!NT_SUCCESS(status) && NT_SUCCESS(aggregate)) aggregate = status;
     }
 
@@ -251,7 +320,14 @@ NTSTATUS RunHighLevelApiSamples(khttp::Session* session, HighLevelApiSampleResul
     status = RunSimpleSync(session, khttp::Method::Options, HttpOptionsUrl, nullptr, 0, results->HttpOptions);
     if (!NT_SUCCESS(status) && NT_SUCCESS(aggregate)) aggregate = status;
 
-    status = RunSimpleSync(session, khttp::Method::Get, HttpsGetUrl, nullptr, 0, results->HttpsVerifyGet);
+    status = RunSimpleSync(
+        session,
+        khttp::Method::Get,
+        HttpsGetUrl,
+        nullptr,
+        0,
+        results->HttpsVerifyGet,
+        &ngHttp2Tls);
     if (!NT_SUCCESS(status) && NT_SUCCESS(aggregate)) aggregate = status;
 
     {
@@ -259,6 +335,9 @@ NTSTATUS RunHighLevelApiSamples(khttp::Session* session, HighLevelApiSampleResul
         status = khttp::RequestCreate(session, &request);
         if (NT_SUCCESS(status)) {
             status = khttp::RequestSetUrl(request, HttpsGetUrl, LiteralLength(HttpsGetUrl));
+            if (NT_SUCCESS(status)) {
+                status = khttp::RequestSetAddressFamily(request, DefaultSampleAddressFamily);
+            }
             if (NT_SUCCESS(status)) {
                 khttp::TlsConfig tls = {};
                 tls.Certificate = khttp::CertPolicy::NoVerify;
@@ -278,12 +357,13 @@ NTSTATUS RunHighLevelApiSamples(khttp::Session* session, HighLevelApiSampleResul
         if (!NT_SUCCESS(status) && NT_SUCCESS(aggregate)) aggregate = status;
     }
 
-    status = RunHttpsRequestBuilder(session, results->HttpsRequestBuilder);
+    status = RunHttpsRequestBuilder(session, results->HttpsRequestBuilder, ngHttp2Tls);
     if (!NT_SUCCESS(status) && NT_SUCCESS(aggregate)) aggregate = status;
 
-    status = RunWebSocketEcho(session, results->WebSocketEcho);
+    status = RunWebSocketEcho(session, results->WebSocketEcho, webSocketTls);
     if (!NT_SUCCESS(status) && NT_SUCCESS(aggregate)) aggregate = status;
 
+    ResetExternalTrustStore(trustStore);
     return aggregate;
 }
 }

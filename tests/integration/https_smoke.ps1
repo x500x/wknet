@@ -244,6 +244,8 @@ function Invoke-HostRegression {
             'src\KernelHttp\engine\Async.cpp',
             'src\KernelHttp\engine\ConnectionPool.cpp',
             'src\KernelHttp\engine\Workspace.cpp',
+            'src\KernelHttp\samples\ExternalTrustStore.cpp',
+            'src\KernelHttp\samples\HighLevelApiSamples.cpp',
             'src\KernelHttp\http\HttpTypes.cpp',
             'src\KernelHttp\http\HttpRequest.cpp',
             'src\KernelHttp\http\HttpResponse.cpp',
