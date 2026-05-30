@@ -68,124 +68,124 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\KernelHttp\client\HttpClient.cpp">
+    <ClCompile Include="client\HttpClient.cpp">
       <Filter>Source Files\client</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\client\Http2Client.cpp">
+    <ClCompile Include="client\Http2Client.cpp">
       <Filter>Source Files\client</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\client\HttpsClient.cpp">
+    <ClCompile Include="client\HttpsClient.cpp">
       <Filter>Source Files\client</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\client\WebSocketClient.cpp">
+    <ClCompile Include="client\WebSocketClient.cpp">
       <Filter>Source Files\client</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\crypto\CngProvider.cpp">
+    <ClCompile Include="crypto\CngProvider.cpp">
       <Filter>Source Files\crypto</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\crypto\CngProviderCache.cpp">
+    <ClCompile Include="crypto\CngProviderCache.cpp">
       <Filter>Source Files\crypto</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\engine\Engine.cpp">
+    <ClCompile Include="engine\Engine.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\engine\HttpEngine.cpp">
+    <ClCompile Include="engine\HttpEngine.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\engine\UrlParser.cpp">
+    <ClCompile Include="engine\UrlParser.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\engine\WsEngine.cpp">
+    <ClCompile Include="engine\WsEngine.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\engine\Async.cpp">
+    <ClCompile Include="engine\Async.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\engine\ConnectionPool.cpp">
+    <ClCompile Include="engine\ConnectionPool.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\engine\Workspace.cpp">
+    <ClCompile Include="engine\Workspace.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\http\HttpContentEncoding.cpp">
+    <ClCompile Include="http\HttpContentEncoding.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\http\HttpParser.cpp">
+    <ClCompile Include="http\HttpParser.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\http\HttpRequest.cpp">
+    <ClCompile Include="http\HttpRequest.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\http\HttpResponse.cpp">
+    <ClCompile Include="http\HttpResponse.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\http\HttpTypes.cpp">
+    <ClCompile Include="http\HttpTypes.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\http2\Hpack.cpp">
+    <ClCompile Include="http2\Hpack.cpp">
       <Filter>Source Files\http2</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\http2\Http2Connection.cpp">
+    <ClCompile Include="http2\Http2Connection.cpp">
       <Filter>Source Files\http2</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\http2\Http2Frame.cpp">
+    <ClCompile Include="http2\Http2Frame.cpp">
       <Filter>Source Files\http2</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\http2\Http2Stream.cpp">
+    <ClCompile Include="http2\Http2Stream.cpp">
       <Filter>Source Files\http2</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\khttp\AsyncOp.cpp">
+    <ClCompile Include="khttp\AsyncOp.cpp">
       <Filter>Source Files\khttp</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\khttp\Http.cpp">
+    <ClCompile Include="khttp\Http.cpp">
       <Filter>Source Files\khttp</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\khttp\HttpAsync.cpp">
+    <ClCompile Include="khttp\HttpAsync.cpp">
       <Filter>Source Files\khttp</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\khttp\Khttp.cpp">
+    <ClCompile Include="khttp\Khttp.cpp">
       <Filter>Source Files\khttp</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\khttp\Request.cpp">
+    <ClCompile Include="khttp\Request.cpp">
       <Filter>Source Files\khttp</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\khttp\Response.cpp">
+    <ClCompile Include="khttp\Response.cpp">
       <Filter>Source Files\khttp</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\khttp\Session.cpp">
+    <ClCompile Include="khttp\Session.cpp">
       <Filter>Source Files\khttp</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\khttp\WebSocket.cpp">
+    <ClCompile Include="khttp\WebSocket.cpp">
       <Filter>Source Files\khttp</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\net\WskClient.cpp">
+    <ClCompile Include="net\WskClient.cpp">
       <Filter>Source Files\net</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\net\WskSocket.cpp">
+    <ClCompile Include="net\WskSocket.cpp">
       <Filter>Source Files\net</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\tls\TlsContext.cpp">
+    <ClCompile Include="tls\TlsContext.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\tls\CertificateStore.cpp">
+    <ClCompile Include="tls\CertificateStore.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\tls\CertificateValidator.cpp">
+    <ClCompile Include="tls\CertificateValidator.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\tls\TlsConnection.cpp">
+    <ClCompile Include="tls\TlsConnection.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\tls\TlsHandshake12.cpp">
+    <ClCompile Include="tls\TlsHandshake12.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\tls\TlsHandshake13.cpp">
+    <ClCompile Include="tls\TlsHandshake13.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\tls\TlsRecord.cpp">
+    <ClCompile Include="tls\TlsRecord.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\websocket\WebSocketFrame.cpp">
+    <ClCompile Include="websocket\WebSocketFrame.cpp">
       <Filter>Source Files\websocket</Filter>
     </ClCompile>
     <ClCompile Include="..\..\third_party\brotli\c\common\constants.c">

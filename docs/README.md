@@ -219,7 +219,7 @@ A: 使用 `CertificateStore` 进行证书锁定，或设置 `CertificatePolicy::
 ## 相关资源
 
 - **公开头文件**：`include/KernelHttp/` 目录，推荐从 `include/KernelHttp/KernelHttp.h` 总头开始
-- **核心实现**：`src/KernelHttp/` 目录
+- **核心实现**：`src/KernelHttpLib/` 目录
 - **示例代码**：`src/KernelHttpExample/samples/` 目录
 - **测试代码**：`tests/` 目录
 - **构建工具**：`tools/` 目录
