@@ -981,7 +981,9 @@ namespace engine
 
         NTSTATUS status = tlsConnection->Connect(*connection.Socket, tlsOptions);
         if (!NT_SUCCESS(status) &&
-            status == STATUS_INVALID_NETWORK_RESPONSE &&
+            (status == STATUS_INVALID_NETWORK_RESPONSE ||
+             status == STATUS_CONNECTION_RESET ||
+             status == STATUS_CONNECTION_ABORTED) &&
             tlsOptions.MinimumProtocol <= tls::TlsProtocol::Tls12 &&
             tlsOptions.MaximumProtocol >= tls::TlsProtocol::Tls13) {
             delete tlsConnection;
