@@ -5,6 +5,7 @@
 #include "../src/KernelHttp/khttp/Test.h"
 #include "../src/KernelHttp/samples/HighLevelApiSamples.h"
 
+#include <string.h>
 #include <stdio.h>
 
 namespace
@@ -35,6 +36,8 @@ namespace
 
     struct SampleCapture final
     {
+        static constexpr SIZE_T MaxWebSocketPayload = 64;
+
         SIZE_T HttpCalls = 0;
         SIZE_T HttpIpv4Calls = 0;
         SIZE_T HttpIpv6Calls = 0;
@@ -64,10 +67,14 @@ namespace
         SIZE_T WebSocketNonFinalSendCalls = 0;
         SIZE_T WebSocketReceiveCalls = 0;
         SIZE_T WebSocketCloseCalls = 0;
+        bool FailHttpByAddressFamily = false;
+        KernelHttp::engine::KhAddressFamily HttpFailureAddressFamily = KernelHttp::engine::KhAddressFamily::Any;
+        NTSTATUS HttpFailureStatus = STATUS_UNSUCCESSFUL;
         UCHAR WebSocketEcho[32] = {};
         SIZE_T WebSocketEchoLength = 0;
         KernelHttp::engine::KhWebSocketMessageType LastWebSocketSendType = KernelHttp::engine::KhWebSocketMessageType::Text;
-        UCHAR LastWebSocketSendData[64] = {};
+        UCHAR LastWebSocketSendData[MaxWebSocketPayload] = {};
+        UCHAR LastWebSocketReceiveData[MaxWebSocketPayload] = {};
         SIZE_T LastWebSocketSendLength = 0;
         bool HasLastWebSocketSend = false;
     };
@@ -92,6 +99,12 @@ namespace
         if (request->AddressFamily == KernelHttp::engine::KhAddressFamily::Any) {
             ++capture->HttpAnyCalls;
         }
+
+        if (capture->FailHttpByAddressFamily &&
+            request->AddressFamily == capture->HttpFailureAddressFamily) {
+            return capture->HttpFailureStatus;
+        }
+
         if (request->ConnectionPolicy == KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate) {
             ++capture->HttpReuseCalls;
         }
@@ -231,8 +244,19 @@ namespace
             return STATUS_INVALID_DEVICE_STATE;
         }
 
+        if (capture->LastWebSocketSendLength > SampleCapture::MaxWebSocketPayload) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        if (capture->LastWebSocketSendLength != 0) {
+            memcpy(
+                capture->LastWebSocketReceiveData,
+                capture->LastWebSocketSendData,
+                capture->LastWebSocketSendLength);
+        }
+
         message->Type = capture->LastWebSocketSendType;
-        message->Data = capture->LastWebSocketSendData;
+        message->Data = capture->LastWebSocketReceiveData;
         message->DataLength = capture->LastWebSocketSendLength;
         message->FinalFragment = true;
         capture->HasLastWebSocketSend = false;
@@ -309,9 +333,46 @@ namespace
         Expect(capture.WebSocketCloseCalls == 10, "each websocket connect path closes its handle");
         Expect(results.WebSocketEcho.BodyLength == capture.WebSocketEchoLength, "websocket echo sample receives body");
         Expect(results.WebSocketBinary.BodyLength == 4, "websocket binary sample receives binary echo body");
+        Expect(NT_SUCCESS(results.WebSocketBinary.Status), "websocket binary sample validates binary echo body");
         Expect(results.WebSocketBinaryEx.BodyLength == 4, "websocket binary Ex sample receives binary echo body");
+        Expect(NT_SUCCESS(results.WebSocketBinaryEx.Status), "websocket binary Ex sample validates binary echo body");
         Expect(results.WebSocketReceiveEx.BodyLength == capture.WebSocketEchoLength, "websocket receive callback records body");
         Expect(results.HttpAsyncCancel.StatusCode == 1, "async cancel sample marks operation canceled");
+
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
+
+    void TestLoadTimeSamplesReportIpv6Failure() noexcept
+    {
+        SampleCapture capture = {};
+        static const char echo[] = "hello-from-khttp";
+        capture.WebSocketEchoLength = sizeof(echo) - 1;
+        for (SIZE_T index = 0; index < capture.WebSocketEchoLength; ++index) {
+            capture.WebSocketEcho[index] = static_cast<UCHAR>(echo[index]);
+        }
+
+        capture.FailHttpByAddressFamily = true;
+        capture.HttpFailureAddressFamily = KernelHttp::engine::KhAddressFamily::Ipv6;
+        capture.HttpFailureStatus = STATUS_UNSUCCESSFUL;
+
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(HttpTransport, &capture);
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WebSocketConnect,
+            WebSocketSend,
+            WebSocketReceive,
+            WebSocketClose,
+            &capture);
+
+        KernelHttp::samples::HighLevelApiSampleResults results = {};
+        NTSTATUS status = KernelHttp::samples::RunHighLevelApiSamples(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &results);
+
+        Expect(!NT_SUCCESS(status), "load-time high-level samples report IPv6 HTTP sample failure");
+        Expect(results.HttpGetIpv6.Status == STATUS_UNSUCCESSFUL, "IPv6 HTTP sample stores failure status");
+        Expect(NT_SUCCESS(results.HttpGetAny.Status), "Any address-family HTTP sample still runs after IPv6 failure");
 
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
@@ -322,6 +383,7 @@ int main() noexcept
 {
     KernelHttp::khttp::test::ResetCurrentIrql();
     TestLoadTimeSamplesCoverHighLevelSurface();
+    TestLoadTimeSamplesReportIpv6Failure();
 
     if (g_failed) {
         printf("high-level API tests FAILED\n");

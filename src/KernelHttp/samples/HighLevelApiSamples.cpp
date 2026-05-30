@@ -1108,11 +1108,18 @@ namespace
             CaptureStatus(result, status, 0, 0);
         }
 
-        KHTTP_SAMPLE_LOG(
-            "[HTTP异步] 示例=%s 完成回调次数=%Iu 完成回调状态=0x%08X\r\n",
-            sampleName,
-            stats.CompletionCount,
-            static_cast<ULONG>(stats.CompletionStatus));
+        if (variant == AsyncSendVariant::SendAsync) {
+            KHTTP_SAMPLE_LOG(
+                "[HTTP异步] 示例=%s 完成回调=未配置\r\n",
+                sampleName);
+        }
+        else {
+            KHTTP_SAMPLE_LOG(
+                "[HTTP异步] 示例=%s 完成回调次数=%Iu 完成回调状态=0x%08X\r\n",
+                sampleName,
+                stats.CompletionCount,
+                static_cast<ULONG>(stats.CompletionStatus));
+        }
 
         khttp::RequestRelease(request);
         return status;
@@ -1398,6 +1405,23 @@ namespace
             (receiveWithCallback ? callbackStats.WsMessageBytes : message.DataLength) :
             WebSocketSendLength(sendVariant);
 
+        khttp::WsMessage logMessage = message;
+        HeapArray<UCHAR> logMessageData;
+        if (message.DataLength != 0 && message.Data != nullptr) {
+            const NTSTATUS copyStatus = logMessageData.Allocate(message.DataLength);
+            if (NT_SUCCESS(copyStatus)) {
+                RtlCopyMemory(logMessageData.Get(), message.Data, message.DataLength);
+                logMessage.Data = logMessageData.Get();
+            }
+            else {
+                KHTTP_SAMPLE_LOG(
+                    "[WebSocket响应] 示例=%s 响应体日志复制失败 NTSTATUS=0x%08X\r\n",
+                    sampleName,
+                    static_cast<ULONG>(copyStatus));
+                logMessage.Data = nullptr;
+            }
+        }
+
         NTSTATUS closeStatus = STATUS_SUCCESS;
         if (websocket != nullptr) {
             closeStatus = khttp::WsClose(websocket);
@@ -1407,7 +1431,7 @@ namespace
             }
         }
 
-        LogWebSocketResponse(sampleName, status, &message, closeStatus);
+        LogWebSocketResponse(sampleName, status, &logMessage, closeStatus);
         return status;
     }
 
@@ -1586,6 +1610,7 @@ namespace
         status = RunSimpleSync(session, "HTTP GET IPv4 地址族", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGetIpv4, nullptr, khttp::ConnPolicy::ReuseOrCreate, khttp::AddressFamily::Ipv4);
         MergeSampleStatus(aggregate, status);
         status = RunSimpleSync(session, "HTTP GET IPv6 地址族", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGetIpv6, nullptr, khttp::ConnPolicy::ReuseOrCreate, khttp::AddressFamily::Ipv6);
+        MergeSampleStatus(aggregate, status);
         status = RunSimpleSync(session, "HTTP GET Any 地址族", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGetAny, nullptr, khttp::ConnPolicy::ReuseOrCreate, khttp::AddressFamily::Any);
         MergeSampleStatus(aggregate, status);
 
