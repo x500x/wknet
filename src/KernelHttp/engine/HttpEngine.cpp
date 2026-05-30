@@ -1436,6 +1436,44 @@ namespace engine
             &rawResponseLength,
             &connectionReusable);
 
+        if (!NT_SUCCESS(status) && !reusedConnection &&
+            request->ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate) {
+            KhConnectionPoolClose(pooledConnection);
+
+            KhPooledConnection* retryConnection = nullptr;
+            bool retryReused = false;
+            NTSTATUS retryStatus = KhConnectionPoolAcquire(
+                &session->ConnectionPool,
+                poolKey,
+                request->ConnectionPolicy,
+                &retryConnection,
+                &retryReused);
+            if (NT_SUCCESS(retryStatus) && !retryReused) {
+                KhWorkspaceReset(session->Workspace);
+                status = SendViaTransport(
+                    session,
+                    *request,
+                    *session->Workspace,
+                    retryConnection,
+                    retryReused,
+                    builtRequestLength,
+                    requestHeaders.Get(),
+                    requestHeaderCount,
+                    &parsed,
+                    responseHeaders.Get(),
+                    KhMaxHeadersPerResponse,
+                    &rawResponseLength,
+                    &connectionReusable);
+
+                if (!NT_SUCCESS(status)) {
+                    KhConnectionPoolRelease(&session->ConnectionPool, retryConnection, false);
+                }
+                else {
+                    pooledConnection = retryConnection;
+                }
+            }
+        }
+
         if (NT_SUCCESS(status)) {
             status = InvokeResponseCallbacks(effectiveOptions, parsed);
         }

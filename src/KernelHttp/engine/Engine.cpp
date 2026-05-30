@@ -307,7 +307,8 @@ namespace engine
     {
         return status == STATUS_CONNECTION_DISCONNECTED ||
             status == STATUS_CONNECTION_RESET ||
-            status == STATUS_CONNECTION_ABORTED;
+            status == STATUS_CONNECTION_ABORTED ||
+            status == STATUS_DEVICE_NOT_CONNECTED;
     }
 
     bool IsDefaultPort(const char* scheme, SIZE_T schemeLength, USHORT port) noexcept

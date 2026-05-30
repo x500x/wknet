@@ -128,7 +128,8 @@ namespace net
         {
             return status == STATUS_CONNECTION_DISCONNECTED ||
                 status == STATUS_CONNECTION_RESET ||
-                status == STATUS_CONNECTION_ABORTED;
+                status == STATUS_CONNECTION_ABORTED ||
+                status == STATUS_DEVICE_NOT_CONNECTED;
         }
     }
 
