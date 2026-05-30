@@ -2,47 +2,37 @@
 
 欢迎阅读 KernelHttp 文档！本文档包含面向开发者的 API 指南和参考。
 
-## 文档结构
+[English Version](#english-version) | 简体中文
 
-### 1. [API 概述](api-overview.md)
-KernelHttp 的两层 API 结构概述，包括：
-- 高层 API 和底层 API 的对比
-- 如何选择适合的 API
-- 代码示例对比
-- 性能考虑和最佳实践
+---
 
-### 2. [高层 API 文档](high-level-api.md)
-面向使用 KernelHttp 高层接口编写驱动代码的开发者。高层 API 位于 `KernelHttp::khttp` 命名空间，提供：
-- 简洁的接口设计
-- 自动资源管理
-- 完整的 HTTP 和 WebSocket 功能
-- 异步操作支持
+## 📚 文档结构
 
-**适用场景**：大多数应用场景，快速开发，初学者
+### 核心文档
 
-### 3. [底层 API 文档](low-level-api.md)
-面向需要更精细控制 KernelHttp 内部机制的开发者。底层 API 位于 `KernelHttp::engine` 命名空间，提供：
-- 精细的连接池、TLS 配置控制
-- 直接访问内部组件和缓冲区
-- 完整的测试钩子支持
-- 性能优化机会
+| 文档 | 说明 | 适用场景 |
+|------|------|----------|
+| [项目说明](../README.md) | 项目概述、构建说明和使用指南 | 所有开发者 |
+| [API 概述](api-overview.md) | 两层 API 对比和选择指南 | 所有开发者 |
+| [高层 API 文档](high-level-api.md) | 面向大多数场景的简洁 API | 大多数场景、快速开发、初学者 |
+| [底层 API 文档](low-level-api.md) | 面向精细控制的 API | 性能关键、特殊定制、测试调试 |
 
-**适用场景**：性能关键应用，特殊定制需求，测试和调试
+### 参考文档
 
-### 4. [项目说明](../README.md)
-项目概述、构建说明和使用指南。
+| 文档 | 说明 |
+|------|------|
+| [HTTP 状态码参考](http-status-codes.md) | HTTP 状态码含义说明 |
+| [NTSTATUS 错误码参考](ntstatus-codes.md) | 内核错误码说明 |
+| [工程约束](../AGENTS.md) | 开发规范、工程约束和编码标准 |
 
-### 5. [工程约束](../AGENTS.md)
-开发规范、工程约束和编码标准。
+---
 
-## 快速开始
+## 🚀 快速开始
 
 ### 高层 API 快速示例
 
 ```cpp
-#include <KernelHttp/khttp/Http.h>
-#include <KernelHttp/khttp/Session.h>
-#include <KernelHttp/khttp/Response.h>
+#include <KernelHttp/KernelHttp.h>
 
 NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
     khttp::Session* session = nullptr;
@@ -70,7 +60,7 @@ NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
 ### 底层 API 快速示例
 
 ```cpp
-#include <KernelHttp/engine/Engine.h>
+#include <KernelHttp/KernelHttp.h>
 
 NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
     KH_SESSION session = nullptr;
@@ -106,7 +96,9 @@ NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
 }
 ```
 
-## API 选择指南
+---
+
+## 🎯 API 选择指南
 
 | 场景 | 推荐 API | 原因 |
 |------|---------|------|
@@ -119,7 +111,9 @@ NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
 | 自定义连接池 | 底层 API | 可配置连接池参数 |
 | 自定义 TLS 配置 | 底层 API | 细粒度 TLS 控制 |
 
-## 示例代码
+---
+
+## 📖 示例代码
 
 ### 高层 API 示例
 - 会话创建和配置
@@ -135,9 +129,12 @@ NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
 - WebSocket 连接和消息传递
 - 连接池管理和优化
 
-## 开发规范
+---
+
+## ⚠️ 开发规范
 
 ### 错误处理
+
 ```cpp
 NTSTATUS status = SomeApiCall();
 if (!NT_SUCCESS(status)) {
@@ -159,7 +156,12 @@ if (!NT_SUCCESS(status)) {
 }
 ```
 
+详细错误码说明请参考：
+- [HTTP 状态码参考](http-status-codes.md)
+- [NTSTATUS 错误码参考](ntstatus-codes.md)
+
 ### 资源管理
+
 ```cpp
 // 创建资源
 Resource* resource = nullptr;
@@ -176,6 +178,7 @@ ReleaseResource(resource);
 ```
 
 ### 异步操作
+
 ```cpp
 AsyncOp* op = nullptr;
 NTSTATUS status = StartAsyncOperation(&op);
@@ -199,7 +202,9 @@ if (NT_SUCCESS(status)) {
 ReleaseAsyncOp(op);
 ```
 
-## 常见问题
+---
+
+## ❓ 常见问题
 
 ### Q: 如何选择高层 API 和底层 API？
 A: 大多数情况下使用高层 API。如果需要精细控制、性能优化或特殊定制，使用底层 API。
@@ -216,7 +221,9 @@ A: 底层 API 提供了更多优化机会，但需要开发者手动管理。对
 ### Q: 如何处理 TLS 证书问题？
 A: 使用 `CertificateStore` 进行证书锁定，或设置 `CertificatePolicy::NoVerify` 跳过证书验证（仅用于测试）。
 
-## 相关资源
+---
+
+## 🔗 相关资源
 
 - **公开头文件**：`include/KernelHttp/` 目录，推荐从 `include/KernelHttp/KernelHttp.h` 总头开始
 - **核心实现**：`src/KernelHttpLib/` 目录
@@ -224,13 +231,17 @@ A: 使用 `CertificateStore` 进行证书锁定，或设置 `CertificatePolicy::
 - **测试代码**：`tests/` 目录
 - **构建工具**：`tools/` 目录
 
-## 版本信息
+---
+
+## 📋 版本信息
 
 - **当前版本**：1.0
 - **最后更新**：2026年5月30日
 - **兼容性**：Windows 内核驱动
 
-## 联系方式
+---
+
+## 📞 联系方式
 
 如有问题或建议，请通过以下方式联系：
 - 提交 Issue 到项目仓库
@@ -239,4 +250,121 @@ A: 使用 `CertificateStore` 进行证书锁定，或设置 `CertificatePolicy::
 
 ---
 
-**注意**：本文档基于 KernelHttp 项目代码生成，所有 API 说明和示例都基于实际代码实现。如有疑问，请参考源代码中的注释和示例。
+## English Version
+
+# KernelHttp Documentation
+
+Welcome to the KernelHttp documentation! This documentation contains API guides and references for developers.
+
+## Documentation Structure
+
+### Core Documents
+
+| Document | Description | Use Case |
+|----------|-------------|----------|
+| [Project README](../README.md) | Project overview, build instructions, and usage guide | All developers |
+| [API Overview](api-overview.md) | Two-layer API comparison and selection guide | All developers |
+| [High-Level API](high-level-api.md) | Simplified API for most scenarios | Most scenarios, rapid development, beginners |
+| [Low-Level API](low-level-api.md) | Fine-grained control API | Performance-critical, special customization, testing |
+
+### Reference Documents
+
+| Document | Description |
+|----------|-------------|
+| [HTTP Status Codes](http-status-codes.md) | HTTP status code reference |
+| [NTSTATUS Codes](ntstatus-codes.md) | Kernel error code reference |
+| [Engineering Constraints](../AGENTS.md) | Development guidelines and coding standards |
+
+## Quick Start
+
+### High-Level API Example
+
+```cpp
+#include <KernelHttp/KernelHttp.h>
+
+NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
+    khttp::Session* session = nullptr;
+    NTSTATUS status = khttp::SessionCreate(&wskClient, nullptr, &session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    khttp::Response* response = nullptr;
+    status = khttp::Get(session, "http://example.com", 18, &response);
+    
+    if (NT_SUCCESS(status)) {
+        ULONG statusCode = khttp::ResponseStatusCode(response);
+        const UCHAR* body = khttp::ResponseBody(response);
+        SIZE_T bodyLength = khttp::ResponseBodyLength(response);
+        // Process response...
+        khttp::ResponseRelease(response);
+    }
+
+    khttp::SessionClose(session);
+    return status;
+}
+```
+
+### Low-Level API Example
+
+```cpp
+#include <KernelHttp/KernelHttp.h>
+
+NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
+    KH_SESSION session = nullptr;
+    NTSTATUS status = KhSessionCreate(&wskClient, nullptr, &session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    KH_REQUEST request = nullptr;
+    status = KhHttpRequestCreate(session, &request);
+    if (!NT_SUCCESS(status)) {
+        KhSessionClose(session);
+        return status;
+    }
+
+    const char* url = "http://example.com";
+    KhHttpRequestSetUrl(request, url, strlen(url));
+    KhHttpRequestSetMethod(request, KhHttpMethod::Get);
+
+    KH_RESPONSE response = nullptr;
+    status = KhHttpSendSync(session, request, nullptr, &response);
+    
+    if (NT_SUCCESS(status)) {
+        KhResponseView view = {};
+        KhResponseGetView(response, &view);
+        // Process response...
+        KhResponseRelease(response);
+    }
+
+    KhHttpRequestRelease(request);
+    KhSessionClose(session);
+    return status;
+}
+```
+
+## API Selection Guide
+
+| Scenario | Recommended API | Reason |
+|----------|----------------|--------|
+| Rapid development | High-Level API | Simple interface, less boilerplate |
+| Beginners | High-Level API | Easy to learn and use |
+| Standard HTTP features | High-Level API | Covers common use cases |
+| Performance-critical | Low-Level API | Fine-grained control, optimization opportunities |
+| Special customization | Low-Level API | Direct access to internal components |
+| Testing and debugging | Low-Level API | Complete test hook support |
+| Custom connection pool | Low-Level API | Configurable pool parameters |
+| Custom TLS configuration | Low-Level API | Fine-grained TLS control |
+
+## Related Resources
+
+- **Public Headers**: `include/KernelHttp/` directory, start from `include/KernelHttp/KernelHttp.h`
+- **Core Implementation**: `src/KernelHttpLib/` directory
+- **Example Code**: `src/KernelHttpExample/samples/` directory
+- **Test Code**: `tests/` directory
+- **Build Tools**: `tools/` directory
+
+---
+
+**Note**: This documentation is based on the KernelHttp project code. All API descriptions and examples are based on actual code implementation. If you have questions, please refer to the source code comments and examples.

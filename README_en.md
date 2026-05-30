@@ -1,0 +1,577 @@
+<div align="center">
+
+# KernelHttp
+
+**A Pure Kernel-Mode HTTP/HTTPS Client Library for Windows Kernel Drivers**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows%20Kernel-0078d4.svg)](https://docs.microsoft.com/en-us/windows-hardware/drivers/)
+[![WDK: 10+](https://img.shields.io/badge/WDK-10%2B-green.svg)](https://docs.microsoft.com/en-us/windows-hardware/drivers/develop/)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
+
+English | [简体中文](README.md)
+
+</div>
+
+---
+
+## 📖 Introduction
+
+KernelHttp is a pure kernel-mode HTTP/HTTPS client library designed specifically for Windows kernel driver development. Built from the ground up, it implements complete HTTP/1.1, HTTP/2, WebSocket protocol support, along with TLS 1.2/1.3 handshake and encrypted communication.
+
+### ✨ Key Features
+
+- **🔒 Pure Kernel-Mode Implementation**: No dependency on WinHTTP, WinINet, SChannel, or other user-mode components
+- **🌐 WSK Network Transport**: Uses Windows Sockets Kernel (WSK) for network communication
+- **🔐 CNG/BCrypt Cryptography**: Uses kernel-mode CNG (Cryptography Next Generation) for cryptographic operations
+- **📡 Complete Protocol Stack**: Supports HTTP/1.1, HTTP/2, WebSocket, TLS 1.2/1.3
+- **🔄 Connection Pool Management**: Built-in connection pool with connection reuse and automatic management
+- **⚡ Asynchronous Operations**: Supports async requests to avoid blocking kernel threads
+- **🎯 Two-Layer API**: Provides both high-level simplified API and low-level fine-grained control API
+
+---
+
+## 🚀 Quick Start
+
+### 📋 Prerequisites
+
+| Component | Version Requirement |
+|-----------|-------------------|
+| Operating System | Windows 10/11 or Windows Server 2016+ |
+| Visual Studio | 2022 or later |
+| Windows SDK | 10.0.19041.0 or later |
+| Windows Driver Kit (WDK) | Matching SDK version |
+
+### 📦 Installation & Build
+
+#### Option 1: Integrate as Static Library
+
+1. **Clone Repository**
+   ```bash
+   git clone https://github.com/x500x/win_kernel_http.git
+   cd kernel_http
+   ```
+
+2. **Build with Visual Studio**
+   
+   Open `KernelHttp.sln`, select configuration and platform:
+   
+   | Configuration | Description |
+   |---------------|-------------|
+   | Debug | Debug version with debug symbols |
+   | Release | Release version with optimizations |
+   
+   | Platform | Description |
+   |----------|-------------|
+   | x64 | 64-bit Intel/AMD processors |
+   | ARM64 | ARM 64-bit processors |
+   
+   Then press `Ctrl+Shift+B` to build the solution.
+
+3. **Build via Command Line**
+   ```powershell
+   # Debug version
+   msbuild KernelHttp.sln /p:Configuration=Debug /p:Platform=x64
+   
+   # Release version
+   msbuild KernelHttp.sln /p:Configuration=Release /p:Platform=x64
+   ```
+
+4. **Get Library Files**
+   
+   After building, library files are located at:
+   ```
+   src/KernelHttpLib/x64/Debug/KernelHttpLib.lib      # Debug x64
+   src/KernelHttpLib/x64/Release/KernelHttpLib.lib    # Release x64
+   ```
+
+#### Option 2: Integrate into Your Project
+
+1. **Include Headers**
+   ```cpp
+   // Main header entry point (recommended)
+   #include <KernelHttp/KernelHttp.h>
+   ```
+
+2. **Link Library**
+   Add to project properties:
+   - Additional Include Directories: `$(SolutionDir)include`
+   - Additional Library Directories: `$(SolutionDir)src\KernelHttpLib\$(Platform)\$(Configuration)\`
+   - Additional Dependencies: `KernelHttpLib.lib`
+
+3. **Configure Project Dependencies**
+   - Add `KernelHttpLib` project to your solution
+   - Set project dependency to ensure `KernelHttpLib` builds first
+
+---
+
+## 📚 API Overview
+
+KernelHttp provides two-layer APIs:
+
+| API Layer | Namespace | Use Case |
+|-----------|-----------|----------|
+| **High-Level API** | `KernelHttp::khttp` | Most application scenarios, rapid development |
+| **Low-Level API** | `KernelHttp::engine` | Performance-critical, special customization, testing |
+
+For detailed comparison, see [API Overview](docs/api-overview.md).
+
+### 🔥 High-Level API Example
+
+```cpp
+#include <KernelHttp/KernelHttp.h>
+
+// Simple HTTP GET request
+NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
+    // Create session
+    khttp::Session* session = nullptr;
+    NTSTATUS status = khttp::SessionCreate(&wskClient, nullptr, &session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    // Send GET request
+    khttp::Response* response = nullptr;
+    status = khttp::Get(session, "http://example.com/api", 22, &response);
+    
+    if (NT_SUCCESS(status)) {
+        // Get status code
+        ULONG statusCode = khttp::ResponseStatusCode(response);
+        
+        // Get response body
+        const UCHAR* body = khttp::ResponseBody(response);
+        SIZE_T bodyLength = khttp::ResponseBodyLength(response);
+        
+        // Process response...
+        
+        // Release response
+        khttp::ResponseRelease(response);
+    }
+
+    // Close session
+    khttp::SessionClose(session);
+    return status;
+}
+```
+
+### 🔧 Low-Level API Example
+
+```cpp
+#include <KernelHttp/KernelHttp.h>
+
+// Fine-grained HTTPS request
+NTSTATUS AdvancedHttpsRequest(net::WskClient& wskClient) {
+    // Create session with TLS configuration
+    KH_SESSION session = nullptr;
+    KhSessionOptions sessionOptions = {};
+    sessionOptions.Tls.CertificatePolicy = KhCertificatePolicy::Verify;
+    sessionOptions.Tls.MinVersion = KhTlsVersion::Tls13;
+    
+    NTSTATUS status = KhSessionCreate(&wskClient, &sessionOptions, &session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    // Create request
+    KH_REQUEST request = nullptr;
+    status = KhHttpRequestCreate(session, &request);
+    if (!NT_SUCCESS(status)) {
+        KhSessionClose(session);
+        return status;
+    }
+
+    // Configure request
+    const char* url = "https://api.example.com/data";
+    KhHttpRequestSetUrl(request, url, strlen(url));
+    KhHttpRequestSetMethod(request, KhHttpMethod::Get);
+    KhHttpRequestSetHeader(request, "User-Agent", 10, "KernelHttp/1.0", 14);
+
+    // Send request
+    KH_RESPONSE response = nullptr;
+    status = KhHttpSendSync(session, request, nullptr, &response);
+    
+    if (NT_SUCCESS(status)) {
+        // Get response view
+        KhResponseView view = {};
+        KhResponseGetView(response, &view);
+        
+        // Process response...
+        
+        KhResponseRelease(response);
+    }
+
+    // Cleanup resources
+    KhHttpRequestRelease(request);
+    KhSessionClose(session);
+    return status;
+}
+```
+
+---
+
+## 🏗️ Project Structure
+
+```
+KernelHttp/
+├── include/                          # Public header files
+│   └── KernelHttp/
+│       ├── KernelHttp.h             # Main header entry point
+│       ├── KernelHttpConfig.h       # Configuration options
+│       ├── khttp/                   # High-level API headers
+│       ├── engine/                  # Low-level API headers
+│       ├── http/                    # HTTP protocol
+│       ├── http2/                   # HTTP/2 protocol
+│       ├── tls/                     # TLS protocol
+│       ├── websocket/               # WebSocket protocol
+│       ├── net/                     # Network transport layer
+│       └── crypto/                  # Cryptography
+├── src/                              # Source code
+│   ├── KernelHttp/                  # Core library implementation
+│   │   ├── client/                  # Client implementation
+│   │   ├── crypto/                  # Cryptography implementation
+│   │   ├── engine/                  # Low-level engine
+│   │   ├── http/                    # HTTP protocol implementation
+│   │   ├── http2/                   # HTTP/2 protocol implementation
+│   │   ├── khttp/                   # High-level API implementation
+│   │   ├── net/                     # Network transport (WSK)
+│   │   ├── tls/                     # TLS protocol implementation
+│   │   └── websocket/               # WebSocket implementation
+│   ├── KernelHttpLib/               # Static library project
+│   └── KernelHttpExample/           # Example driver project
+│       └── samples/                 # Example code
+├── tests/                            # Test code
+├── docs/                             # Documentation
+├── certs/                            # Certificate related
+└── tools/                            # Tool scripts
+```
+
+---
+
+## 📖 Documentation Index
+
+| Document | Description |
+|----------|-------------|
+| [API Overview](docs/api-overview.md) | Two-layer API comparison and selection guide |
+| [High-Level API](docs/high-level-api.md) | Simplified API for most scenarios |
+| [Low-Level API](docs/low-level-api.md) | Fine-grained control API |
+| [HTTP Status Codes](docs/http-status-codes.md) | HTTP status code reference |
+| [NTSTATUS Codes](docs/ntstatus-codes.md) | Kernel error code reference |
+| [Documentation Index](docs/README.md) | Complete documentation structure |
+
+---
+
+## 🔧 Configuration Options
+
+### Session Configuration
+
+```cpp
+khttp::SessionConfig config = khttp::DefaultSessionConfig();
+
+// Response buffer size (default 1 MiB)
+config.MaxResponseBytes = 2 * 1024 * 1024;  // 2 MiB
+
+// Connection pool capacity (default 8)
+config.PoolCapacity = 16;
+
+// Max connections per host (default 2)
+config.MaxConnsPerHost = 4;
+
+// Idle timeout (default 30 seconds)
+config.IdleTimeoutMs = 60000;  // 60 seconds
+
+// TLS configuration
+config.Tls.MinVersion = khttp::TlsVersion::Tls13;
+config.Tls.Certificate = khttp::CertPolicy::Verify;
+```
+
+### Connection Policy
+
+```cpp
+khttp::Request* request = nullptr;
+khttp::RequestCreate(session, &request);
+
+// Connection policy
+khttp::RequestSetConnPolicy(request, khttp::ConnPolicy::ReuseOrCreate);  // Reuse or create (default)
+khttp::RequestSetConnPolicy(request, khttp::ConnPolicy::ForceNew);       // Force new connection
+khttp::RequestSetConnPolicy(request, khttp::ConnPolicy::NoPool);         // Don't use pool
+
+// Address family
+khttp::RequestSetAddressFamily(request, khttp::AddressFamily::Any);      // System default
+khttp::RequestSetAddressFamily(request, khttp::AddressFamily::Ipv4);     // IPv4 only
+khttp::RequestSetAddressFamily(request, khttp::AddressFamily::Ipv6);     // IPv6 only
+```
+
+---
+
+## 🧪 Testing
+
+### Run Tests
+
+```powershell
+# Run host regression tests
+pwsh -NoLogo -NoProfile -File .\tests\integration\https_smoke.ps1 -Configuration Debug -Platform x64 -SkipDriverBuild
+
+# Build library and example driver
+msbuild KernelHttp.sln /m /restore /p:Configuration=Debug /p:Platform=x64
+```
+
+### Test Files
+
+| Test File | Test Content |
+|-----------|--------------|
+| `http_parser_tests.cpp` | HTTP parser |
+| `hpack_tests.cpp` | HTTP/2 HPACK encoding/decoding |
+| `http2_frame_tests.cpp` | HTTP/2 frame processing |
+| `tls_record_tests.cpp` | TLS record protocol |
+| `websocket_frame_tests.cpp` | WebSocket frame processing |
+| `khttp_tests.cpp` | High-level API tests |
+| `high_level_api_tests.cpp` | High-level API integration tests |
+| `websocket_client_tests.cpp` | WebSocket client tests |
+
+---
+
+## ⚠️ Error Handling
+
+The project uses Windows NTSTATUS error codes. For detailed information, see [NTSTATUS Code Reference](docs/ntstatus-codes.md).
+
+### Common Error Codes
+
+| NTSTATUS | Description | Suggestion |
+|----------|-------------|------------|
+| `STATUS_SUCCESS` | Operation succeeded | - |
+| `STATUS_INVALID_PARAMETER` | Invalid parameter | Check input parameters |
+| `STATUS_INSUFFICIENT_RESOURCES` | Insufficient resources | Reduce concurrent requests or add resources |
+| `STATUS_IO_TIMEOUT` | Operation timed out | Increase timeout or check network |
+| `STATUS_CONNECTION_DISCONNECTED` | Connection disconnected | Retry request |
+| `STATUS_TRUST_FAILURE` | Certificate trust failure | Check certificate configuration |
+
+### Error Handling Example
+
+```cpp
+NTSTATUS status = khttp::Get(session, url, urlLength, &response);
+if (!NT_SUCCESS(status)) {
+    switch (status) {
+    case STATUS_IO_TIMEOUT:
+        // Timeout handling: retry or report error
+        DbgPrint("Request timed out\n");
+        break;
+    case STATUS_TRUST_FAILURE:
+        // Certificate error: check certificate configuration
+        DbgPrint("Certificate verification failed\n");
+        break;
+    case STATUS_CONNECTION_DISCONNECTED:
+        // Connection lost: reconnect
+        DbgPrint("Connection lost, retrying...\n");
+        break;
+    default:
+        // Other errors: log
+        DbgPrint("Request failed: 0x%08X\n", status);
+        break;
+    }
+}
+```
+
+---
+
+## 🎯 Best Practices
+
+### 1. Resource Management
+
+```cpp
+// ✅ Correct: Ensure resources are released on all paths
+NTSTATUS DoRequest(khttp::Session* session) {
+    khttp::Response* response = nullptr;
+    NTSTATUS status = khttp::Get(session, url, urlLen, &response);
+    
+    // Release response even on failure
+    if (NT_SUCCESS(status)) {
+        // Process response...
+    }
+    
+    khttp::ResponseRelease(response);  // Accepts nullptr, safe to call unconditionally
+    return status;
+}
+
+// ❌ Wrong: Response not released on failure
+NTSTATUS DoRequestWrong(khttp::Session* session) {
+    khttp::Response* response = nullptr;
+    NTSTATUS status = khttp::Get(session, url, urlLen, &response);
+    if (!NT_SUCCESS(status)) {
+        return status;  // Leak! response might be non-null
+    }
+    // ...
+    khttp::ResponseRelease(response);
+    return status;
+}
+```
+
+### 2. Connection Reuse
+
+```cpp
+// ✅ Correct: Use connection pool for reuse
+khttp::SessionConfig config = khttp::DefaultSessionConfig();
+config.PoolCapacity = 16;        // Increase pool capacity
+config.MaxConnsPerHost = 4;      // Increase per-host connections
+config.IdleTimeoutMs = 120000;   // Extend idle timeout
+
+// ❌ Avoid: Frequently creating new connections
+khttp::RequestSetConnPolicy(request, khttp::ConnPolicy::ForceNew);
+```
+
+### 3. Asynchronous Operations
+
+```cpp
+// ✅ Correct: Use async to avoid blocking
+khttp::AsyncOp* op = nullptr;
+khttp::GetAsync(session, url, urlLen, &op);
+khttp::AsyncWait(op, 30000);  // Wait 30 seconds
+
+// Process response...
+khttp::AsyncRelease(op);
+
+// ❌ Avoid: Long synchronous waits in kernel thread
+khttp::Get(session, url, urlLen, &response);  // May block for a long time
+```
+
+---
+
+## 📊 Performance Optimization
+
+### Connection Pool Configuration
+
+```cpp
+// Adjust connection pool parameters based on application needs
+config.PoolCapacity = 32;           // Increase pool capacity
+config.MaxConnsPerHost = 8;         // Increase per-host connections
+config.IdleTimeoutMs = 120000;      // Extend idle timeout
+```
+
+### Buffer Management
+
+```cpp
+// Response buffer
+config.MaxResponseBytes = 4 * 1024 * 1024;  // 4 MiB
+
+// Request buffer
+khttp::SendOptions options = khttp::DefaultSendOptions();
+options.MaxResponseBytes = 2 * 1024 * 1024;  // 2 MiB
+```
+
+---
+
+## 🔐 Security Considerations
+
+### TLS Configuration
+
+```cpp
+// Recommended: Use TLS 1.3
+config.Tls.MinVersion = khttp::TlsVersion::Tls13;
+config.Tls.MaxVersion = khttp::TlsVersion::Tls13;
+
+// Certificate verification
+config.Tls.Certificate = khttp::CertPolicy::Verify;
+
+// Custom certificate store
+tls::CertificateStore store = {};
+// Add trust anchors...
+config.Tls.Store = &store;
+```
+
+### Certificate Pinning
+
+```cpp
+// Use certificate pinning for enhanced security
+tls::CertificateTrustAnchor anchor = {};
+// Set root certificate...
+
+tls::CertificatePin pin = {};
+// Set SPKI hash...
+
+// Create certificate store
+tls::CertificateStore store = {};
+store.AddTrustAnchor(&anchor);
+store.AddPin(&pin);
+```
+
+---
+
+## 🛠️ Development Guidelines
+
+### Code Style
+
+- Use C++17 features, but follow kernel constraints
+- **No exceptions**, **No RTTI**, **Explicit `new/delete`**
+- Use `namespace`, classes, RAII, lightweight templates
+- All functions marked `noexcept`
+- Use SAL annotations (`_In_`, `_Out_`, `_Must_inspect_result_`, etc.)
+
+### Commit Convention
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+```
+feat: Add new feature
+fix: Fix bug
+docs: Documentation update
+style: Code style adjustment
+refactor: Code refactoring
+test: Test related
+chore: Build/tool related
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please follow these steps:
+
+1. **Fork** the project
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit changes (`git commit -m 'feat: Add some AmazingFeature'`)
+4. Push to branch (`git push origin feature/AmazingFeature`)
+5. Create a **Pull Request**
+
+### Contribution Requirements
+
+- Follow project code style
+- Add necessary tests
+- Update related documentation
+- Ensure all tests pass
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) file for details.
+
+---
+
+## 🔗 Related Resources
+
+- [Windows Driver Kit (WDK)](https://docs.microsoft.com/en-us/windows-hardware/drivers/)
+- [Windows Sockets Kernel (WSK)](https://docs.microsoft.com/en-us/windows-hardware/drivers/network/windows-sockets-kernel)
+- [Cryptography Next Generation (CNG)](https://docs.microsoft.com/en-us/windows/win32/seccng/cng-features)
+
+---
+
+## 📞 Contact
+
+For questions or suggestions, please contact us through:
+
+- Submit an [Issue](https://github.com/x500x/win_kernel_http/issues) to the project repository
+- View project documentation and example code
+- Reference related technical documentation
+
+---
+
+## 🙏 Acknowledgments
+
+Thanks to all developers who have contributed to the project!
+
+---
+
+<div align="center">
+
+**[⬆ Back to Top](#kernelhttp)**
+
+</div>
