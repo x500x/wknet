@@ -23,7 +23,6 @@ namespace samples
 namespace
 {
     constexpr ULONG AsyncWaitTimeoutMs = 60000;
-    constexpr SIZE_T MaxLogPayloadBytes = 512;
 
     constexpr const char* HttpGetUrl = "http://nghttp2.org/httpbin/get";
     constexpr const char* HttpPostUrl = "http://nghttp2.org/httpbin/post";
@@ -117,13 +116,27 @@ namespace
         return left < right ? left : right;
     }
 
+    bool IsTextPayload(const UCHAR* data, SIZE_T dataLength) noexcept
+    {
+        for (SIZE_T i = 0; i < dataLength; ++i) {
+            const UCHAR byte = data[i];
+            if (byte >= 0x20 && byte <= 0x7E) {
+                continue;
+            }
+            if (byte == '\r' || byte == '\n' || byte == '\t') {
+                continue;
+            }
+            return false;
+        }
+        return true;
+    }
+
     void LogBytePayload(
         const char* prefix,
         const char* sampleName,
         const UCHAR* data,
         SIZE_T dataLength) noexcept
     {
-        const SIZE_T printLength = MinSize(dataLength, MaxLogPayloadBytes);
         if (data == nullptr || dataLength == 0) {
             KHTTP_SAMPLE_LOG(
                 "%s 示例=%s 内容=<空>\r\n",
@@ -132,18 +145,24 @@ namespace
             return;
         }
 
+        if (IsTextPayload(data, dataLength)) {
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s 内容长度=%Iu 内容=%.*s\r\n",
+                prefix,
+                sampleName,
+                dataLength,
+                PrintLength(dataLength),
+                reinterpret_cast<const char*>(data));
+            return;
+        }
+
         KHTTP_SAMPLE_LOG(
-            "%s 示例=%s 内容长度=%Iu 打印长度=%Iu%s 内容=%.*s\r\n",
+            "%s 示例=%s 内容长度=%Iu HEX:\r\n",
             prefix,
             sampleName,
-            dataLength,
-            printLength,
-            printLength < dataLength ? " 已截断" : "",
-            PrintLength(printLength),
-            reinterpret_cast<const char*>(data));
-
-        for (SIZE_T offset = 0; offset < printLength; offset += 16) {
-            const SIZE_T chunkLength = MinSize(printLength - offset, 16);
+            dataLength);
+        for (SIZE_T offset = 0; offset < dataLength; offset += 16) {
+            const SIZE_T chunkLength = MinSize(dataLength - offset, 16);
             KHTTP_SAMPLE_LOG(
                 "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
                 prefix,
