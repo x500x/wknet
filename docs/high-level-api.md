@@ -1,6 +1,6 @@
 # 高层 API 开发文档（`KernelHttp::khttp`）
 
-本文档面向使用 KernelHttp 高层接口编写驱动代码的开发者。所有接口都位于命名空间 `KernelHttp::khttp`（顶层别名 `::khttp`），头文件位于 `src/KernelHttp/khttp/`。所有接口都是 `noexcept`，绝大多数标注了 `_Must_inspect_result_`，必须按 NTSTATUS 返回值分支处理。
+本文档面向使用 KernelHttp 高层接口编写驱动代码的开发者。所有接口都位于命名空间 `KernelHttp::khttp`（顶层别名 `::khttp`），头文件位于 `include/KernelHttp/khttp/`。所有接口都是 `noexcept`，绝大多数标注了 `_Must_inspect_result_`，必须按 NTSTATUS 返回值分支处理。
 
 > 工程约束（来自 `AGENTS.md`）：内核驱动；传输层使用 WSK，密码学使用 CNG/BCrypt；C++ 受 `/kernel` 限制：无异常、无 RTTI、显式 `new/delete`。本 API 全部满足这些约束。
 
@@ -302,9 +302,9 @@ constexpr ULONG  DefaultTlsHandshakeTimeoutMs   = TlsHandshakeReceiveTimeoutMill
 
 ## 14. 完整可运行示例索引
 
-`src/KernelHttp/samples/HighLevelApiSamples.cpp` 中按场景列出了：会话创建、HTTP 同步快捷函数、Request 构造、各类请求体、Send 选项与回调、响应头读取、各种异步入口、`AsyncCancel`、HTTPS（含 ALPN 切换）、WebSocket 同步与异步连接、文本 / 二进制 / Ex / 回调接收等。可以直接对照阅读，每个样例都打印请求与响应详情，便于调试。
+`src/KernelHttpExample/samples/HighLevelApiSamples.cpp` 中按场景列出了：会话创建、HTTP 同步快捷函数、Request 构造、各类请求体、Send 选项与回调、响应头读取、各种异步入口、`AsyncCancel`、HTTPS（含 ALPN 切换）、WebSocket 同步与异步连接、文本 / 二进制 / Ex / 回调接收等。可以直接对照阅读，每个样例都打印请求与响应详情，便于调试。
 
-`src/KernelHttp/samples/ExternalTrustStore.{h,cpp}` 给出了如何构造会话级证书 `Store`（`tls::CertificateTrustAnchor` + `tls::CertificatePin`）的完整模板，并被 `RunHighLevelApiSamples` 在创建 Session 时使用。
+`src/KernelHttpExample/samples/ExternalTrustStore.{h,cpp}` 给出了如何构造会话级证书 `Store`（`tls::CertificateTrustAnchor` + `tls::CertificatePin`）的完整模板，并被 `RunHighLevelApiSamples` 在创建 Session 时使用。
 
 ## 15. 相关文档
 

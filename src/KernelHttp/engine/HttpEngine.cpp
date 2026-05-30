@@ -1,11 +1,11 @@
-#include "engine/HttpEngine.h"
-#include "engine/EngineInternal.h"
-#include "http/HttpContentEncoding.h"
-#include "http/HttpParser.h"
-#include "http/HttpRequest.h"
-#include "http2/Http2Connection.h"
-#include "net/WskSocket.h"
-#include "tls/TlsConnection.h"
+#include <KernelHttp/engine/HttpEngine.h>
+#include <KernelHttp/engine/EngineInternal.h>
+#include <KernelHttp/http/HttpContentEncoding.h>
+#include <KernelHttp/http/HttpParser.h>
+#include <KernelHttp/http/HttpRequest.h>
+#include <KernelHttp/http2/Http2Connection.h>
+#include <KernelHttp/net/WskSocket.h>
+#include <KernelHttp/tls/TlsConnection.h>
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <ws2ipdef.h>

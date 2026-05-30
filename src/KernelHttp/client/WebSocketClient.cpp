@@ -1,6 +1,6 @@
-#include "client/WebSocketClient.h"
+#include <KernelHttp/client/WebSocketClient.h>
 
-#include "http/HttpRequest.h"
+#include <KernelHttp/http/HttpRequest.h>
 
 namespace KernelHttp
 {

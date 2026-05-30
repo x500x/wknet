@@ -2,7 +2,7 @@
 #define KERNEL_HTTP_USER_MODE_TEST 1
 #endif
 
-#include "../src/KernelHttp/client/Http2Client.h"
+#include <KernelHttp/client/Http2Client.h>
 
 #include <stdio.h>
 #include <string.h>

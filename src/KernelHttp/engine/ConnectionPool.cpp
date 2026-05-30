@@ -1,6 +1,6 @@
-#include "engine/ConnectionPool.h"
-#include "net/WskSocket.h"
-#include "tls/TlsConnection.h"
+#include <KernelHttp/engine/ConnectionPool.h>
+#include <KernelHttp/net/WskSocket.h>
+#include <KernelHttp/tls/TlsConnection.h>
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <stdlib.h>

@@ -1,4 +1,4 @@
-#include "http/HttpTypes.h"
+#include <KernelHttp/http/HttpTypes.h>
 
 namespace KernelHttp
 {

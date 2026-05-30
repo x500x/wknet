@@ -1,5 +1,5 @@
-#include "crypto/CngProvider.h"
-#include "crypto/CngProviderCache.h"
+#include <KernelHttp/crypto/CngProvider.h>
+#include <KernelHttp/crypto/CngProviderCache.h>
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
 

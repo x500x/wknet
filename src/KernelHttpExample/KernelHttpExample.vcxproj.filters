@@ -21,42 +21,42 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\KernelHttp\DriverEntry.cpp">
+    <ClCompile Include="DriverEntry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\samples\ExternalTrustStore.cpp">
+    <ClCompile Include="samples\ExternalTrustStore.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\samples\HighLevelApiSamples.cpp">
+    <ClCompile Include="samples\HighLevelApiSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\samples\Http2VerbSamples.cpp">
+    <ClCompile Include="samples\Http2VerbSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\samples\HttpVerbSamples.cpp">
+    <ClCompile Include="samples\HttpVerbSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
-    <ClCompile Include="..\KernelHttp\samples\KhttpSamples.cpp">
+    <ClCompile Include="samples\KhttpSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\KernelHttp\KernelHttpConfig.h">
+    <ClInclude Include="..\..\include\KernelHttp\KernelHttp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\samples\ExternalTrustStore.h">
+    <ClInclude Include="samples\ExternalTrustStore.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\samples\HighLevelApiSamples.h">
+    <ClInclude Include="samples\HighLevelApiSamples.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\samples\Http2VerbSamples.h">
+    <ClInclude Include="samples\Http2VerbSamples.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\samples\HttpVerbSamples.h">
+    <ClInclude Include="samples\HttpVerbSamples.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\samples\KhttpSamples.h">
+    <ClInclude Include="samples\KhttpSamples.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
   </ItemGroup>

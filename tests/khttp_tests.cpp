@@ -2,15 +2,8 @@
 #define KERNEL_HTTP_USER_MODE_TEST 1
 #endif
 
-#include "../src/KernelHttp/engine/Engine.h"
-#include "../src/KernelHttp/khttp/AsyncOp.h"
-#include "../src/KernelHttp/khttp/Http.h"
-#include "../src/KernelHttp/khttp/HttpAsync.h"
-#include "../src/KernelHttp/khttp/Request.h"
-#include "../src/KernelHttp/khttp/Response.h"
-#include "../src/KernelHttp/khttp/Session.h"
-#include "../src/KernelHttp/khttp/Test.h"
-#include "../src/KernelHttp/khttp/WebSocket.h"
+#include <KernelHttp/KernelHttp.h>
+#include <KernelHttp/khttp/Test.h>
 
 #include <stdio.h>
 #include <string.h>

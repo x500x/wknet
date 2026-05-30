@@ -226,145 +226,148 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\KernelHttp\KernelHttpConfig.h">
+    <ClInclude Include="..\..\include\KernelHttp\KernelHttp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\client\HttpClient.h">
+    <ClInclude Include="..\..\include\KernelHttp\KernelHttpConfig.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\client\HttpClient.h">
       <Filter>Header Files\client</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\client\Http2Client.h">
+    <ClInclude Include="..\..\include\KernelHttp\client\Http2Client.h">
       <Filter>Header Files\client</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\client\HttpsClient.h">
+    <ClInclude Include="..\..\include\KernelHttp\client\HttpsClient.h">
       <Filter>Header Files\client</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\client\WebSocketClient.h">
+    <ClInclude Include="..\..\include\KernelHttp\client\WebSocketClient.h">
       <Filter>Header Files\client</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\crypto\CngProvider.h">
+    <ClInclude Include="..\..\include\KernelHttp\crypto\CngProvider.h">
       <Filter>Header Files\crypto</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\crypto\CngProviderCache.h">
+    <ClInclude Include="..\..\include\KernelHttp\crypto\CngProviderCache.h">
       <Filter>Header Files\crypto</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\engine\Engine.h">
+    <ClInclude Include="..\..\include\KernelHttp\engine\Engine.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\engine\EngineInternal.h">
+    <ClInclude Include="..\..\include\KernelHttp\engine\EngineInternal.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\engine\HttpEngine.h">
+    <ClInclude Include="..\..\include\KernelHttp\engine\HttpEngine.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\engine\UrlParser.h">
+    <ClInclude Include="..\..\include\KernelHttp\engine\UrlParser.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\engine\WsEngine.h">
+    <ClInclude Include="..\..\include\KernelHttp\engine\WsEngine.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\engine\Async.h">
+    <ClInclude Include="..\..\include\KernelHttp\engine\Async.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\engine\ConnectionPool.h">
+    <ClInclude Include="..\..\include\KernelHttp\engine\ConnectionPool.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\engine\Workspace.h">
+    <ClInclude Include="..\..\include\KernelHttp\engine\Workspace.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http\HttpContentEncoding.h">
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpContentEncoding.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http\HttpParser.h">
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpParser.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http\HttpRequest.h">
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpRequest.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http\HttpResponse.h">
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpResponse.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http\HttpTypes.h">
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpTypes.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http2\Hpack.h">
+    <ClInclude Include="..\..\include\KernelHttp\http2\Hpack.h">
       <Filter>Header Files\http2</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http2\HpackHuffman.h">
+    <ClInclude Include="..\..\include\KernelHttp\http2\HpackHuffman.h">
       <Filter>Header Files\http2</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http2\HpackStaticTable.h">
+    <ClInclude Include="..\..\include\KernelHttp\http2\HpackStaticTable.h">
       <Filter>Header Files\http2</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http2\Http2Connection.h">
+    <ClInclude Include="..\..\include\KernelHttp\http2\Http2Connection.h">
       <Filter>Header Files\http2</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http2\Http2Frame.h">
+    <ClInclude Include="..\..\include\KernelHttp\http2\Http2Frame.h">
       <Filter>Header Files\http2</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\http2\Http2Stream.h">
+    <ClInclude Include="..\..\include\KernelHttp\http2\Http2Stream.h">
       <Filter>Header Files\http2</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\khttp\AsyncOp.h">
+    <ClInclude Include="..\..\include\KernelHttp\khttp\AsyncOp.h">
       <Filter>Header Files\khttp</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\khttp\Detail.h">
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Detail.h">
       <Filter>Header Files\khttp</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\khttp\Http.h">
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Http.h">
       <Filter>Header Files\khttp</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\khttp\HttpAsync.h">
+    <ClInclude Include="..\..\include\KernelHttp\khttp\HttpAsync.h">
       <Filter>Header Files\khttp</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\khttp\Request.h">
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Request.h">
       <Filter>Header Files\khttp</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\khttp\Response.h">
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Response.h">
       <Filter>Header Files\khttp</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\khttp\Session.h">
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Session.h">
       <Filter>Header Files\khttp</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\khttp\Test.h">
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Test.h">
       <Filter>Header Files\khttp</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\khttp\Types.h">
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Types.h">
       <Filter>Header Files\khttp</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\khttp\WebSocket.h">
+    <ClInclude Include="..\..\include\KernelHttp\khttp\WebSocket.h">
       <Filter>Header Files\khttp</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\net\WskBuffer.h">
+    <ClInclude Include="..\..\include\KernelHttp\net\WskBuffer.h">
       <Filter>Header Files\net</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\net\WskClient.h">
+    <ClInclude Include="..\..\include\KernelHttp\net\WskClient.h">
       <Filter>Header Files\net</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\net\WskSocket.h">
+    <ClInclude Include="..\..\include\KernelHttp\net\WskSocket.h">
       <Filter>Header Files\net</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\tls\TlsContext.h">
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsContext.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\tls\CertificateStore.h">
+    <ClInclude Include="..\..\include\KernelHttp\tls\CertificateStore.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\tls\CertificateValidator.h">
+    <ClInclude Include="..\..\include\KernelHttp\tls\CertificateValidator.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\tls\TlsConnection.h">
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsConnection.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\tls\TlsHandshake12.h">
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsHandshake12.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\tls\TlsHandshake13.h">
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsHandshake13.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\tls\TlsRecord.h">
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsRecord.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
-    <ClInclude Include="..\KernelHttp\websocket\WebSocketFrame.h">
+    <ClInclude Include="..\..\include\KernelHttp\websocket\WebSocketFrame.h">
       <Filter>Header Files\websocket</Filter>
     </ClInclude>
   </ItemGroup>

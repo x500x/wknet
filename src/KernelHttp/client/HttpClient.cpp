@@ -1,4 +1,4 @@
-#include "client/HttpClient.h"
+#include <KernelHttp/client/HttpClient.h>
 
 namespace KernelHttp
 {

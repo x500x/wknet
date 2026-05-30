@@ -1,4 +1,4 @@
-#include "engine/Workspace.h"
+#include <KernelHttp/engine/Workspace.h>
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <stdlib.h>

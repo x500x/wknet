@@ -2,12 +2,12 @@
 #define KERNEL_HTTP_USER_MODE_TEST 1
 #endif
 
-#include "../src/KernelHttp/tls/TlsContext.h"
-#include "../src/KernelHttp/tls/CertificateStore.h"
-#include "../src/KernelHttp/tls/CertificateValidator.h"
-#include "../src/KernelHttp/tls/TlsHandshake12.h"
-#include "../src/KernelHttp/tls/TlsHandshake13.h"
-#include "../src/KernelHttp/tls/TlsRecord.h"
+#include <KernelHttp/tls/TlsContext.h>
+#include <KernelHttp/tls/CertificateStore.h>
+#include <KernelHttp/tls/CertificateValidator.h>
+#include <KernelHttp/tls/TlsHandshake12.h>
+#include <KernelHttp/tls/TlsHandshake13.h>
+#include <KernelHttp/tls/TlsRecord.h>
 
 #include <stdio.h>
 #include <string.h>

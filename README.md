@@ -48,8 +48,11 @@ KernelHttp 是一个纯内核态的 HTTP/HTTPS 客户端库，专为 Windows 内
 
 ```
 KernelHttp/
+├── include/                      # 公开头文件
+│   └── KernelHttp/
+│       └── KernelHttp.h          # 总头文件入口
 ├── src/                          # 源代码
-│   ├── KernelHttp/              # 核心库源代码
+│   ├── KernelHttp/              # 核心库实现源码
 │   │   ├── client/              # 高层客户端 API
 │   │   ├── crypto/              # 密码学实现
 │   │   ├── engine/              # 底层引擎 API
@@ -59,8 +62,9 @@ KernelHttp/
 │   │   ├── net/                 # 网络传输层 (WSK)
 │   │   ├── tls/                 # TLS 协议实现
 │   │   └── websocket/           # WebSocket 协议实现
-│   ├── KernelHttpLib/           # 内核库项目
-│   └── KernelHttpExample/       # 示例驱动项目
+│   ├── KernelHttpLib/           # 静态库项目，生成 KernelHttpLib.lib
+│   └── KernelHttpExample/       # 示例驱动项目，链接 KernelHttpLib.lib
+│       └── samples/             # 示例驱动代码
 ├── tests/                       # 测试代码
 ├── docs/                        # 文档
 ├── certs/                       # 证书相关
@@ -104,9 +108,7 @@ KernelHttp/
 #### 高层 API 示例
 
 ```cpp
-#include "khttp/Http.h"
-#include "khttp/Session.h"
-#include "khttp/Response.h"
+#include <KernelHttp/KernelHttp.h>
 
 NTSTATUS SimpleHttpRequest(net::WskClient& wskClient) {
     // 创建会话
@@ -140,7 +142,7 @@ NTSTATUS SimpleHttpRequest(net::WskClient& wskClient) {
 #### 底层 API 示例
 
 ```cpp
-#include "engine/Engine.h"
+#include <KernelHttp/KernelHttp.h>
 
 NTSTATUS AdvancedHttpRequest(net::WskClient& wskClient) {
     // 创建会话
@@ -213,14 +215,14 @@ NTSTATUS AdvancedHttpRequest(net::WskClient& wskClient) {
 
 ### 运行测试
 
-测试项目使用 Google Test 框架，可以通过 Visual Studio 或命令行运行：
+可以通过集成脚本运行宿主回归测试；默认不会加载驱动，只有显式传入 `-VmSmoke` 才会执行驱动加载烟测：
 
 ```powershell
-# 构建测试项目
-msbuild tests/KernelHttpTests.vcxproj /p:Configuration=Debug /p:Platform=x64
+# 运行宿主回归测试
+pwsh -NoLogo -NoProfile -File .\tests\integration\https_smoke.ps1 -Configuration Debug -Platform x64 -SkipDriverBuild
 
-# 运行测试
-.\tests\out\Debug\x64\KernelHttpTests.exe
+# 构建库和示例驱动
+msbuild KernelHttp.sln /m /restore /p:Configuration=Debug /p:Platform=x64
 ```
 
 ## 配置选项

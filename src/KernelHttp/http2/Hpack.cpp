@@ -1,5 +1,5 @@
-#include "http2/Hpack.h"
-#include "http2/HpackHuffman.h"
+#include <KernelHttp/http2/Hpack.h>
+#include <KernelHttp/http2/HpackHuffman.h>
 
 namespace KernelHttp
 {

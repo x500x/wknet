@@ -1,7 +1,7 @@
-#include "khttp/AsyncOp.h"
-#include "khttp/Detail.h"
-#include "engine/Async.h"
-#include "engine/Engine.h"
+#include <KernelHttp/khttp/AsyncOp.h>
+#include <KernelHttp/khttp/Detail.h>
+#include <KernelHttp/engine/Async.h>
+#include <KernelHttp/engine/Engine.h>
 
 namespace KernelHttp
 {

@@ -1,7 +1,7 @@
-#include "Test.h"
-#include "Detail.h"
-#include "../engine/Engine.h"
-#include "../http/HttpTypes.h"
+#include <KernelHttp/khttp/Test.h>
+#include <KernelHttp/khttp/Detail.h>
+#include <KernelHttp/engine/Engine.h>
+#include <KernelHttp/http/HttpTypes.h>
 
 namespace KernelHttp
 {

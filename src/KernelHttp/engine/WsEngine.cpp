@@ -1,8 +1,8 @@
-#include "engine/WsEngine.h"
-#include "engine/EngineInternal.h"
-#include "engine/UrlParser.h"
-#include "http/HttpRequest.h"
-#include "websocket/WebSocketFrame.h"
+#include <KernelHttp/engine/WsEngine.h>
+#include <KernelHttp/engine/EngineInternal.h>
+#include <KernelHttp/engine/UrlParser.h>
+#include <KernelHttp/http/HttpRequest.h>
+#include <KernelHttp/websocket/WebSocketFrame.h>
 
 namespace KernelHttp
 {

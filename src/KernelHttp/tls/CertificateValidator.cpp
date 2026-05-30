@@ -1,12 +1,12 @@
-#include "tls/CertificateValidator.h"
-#include "engine/Workspace.h"
-#include "crypto/CngProviderCache.h"
+#include <KernelHttp/tls/CertificateValidator.h>
+#include <KernelHttp/engine/Workspace.h>
+#include <KernelHttp/crypto/CngProviderCache.h>
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <time.h>
 #define kprintf(...)
 #else
-#include "KernelHttpConfig.h"
+#include <KernelHttp/KernelHttpConfig.h>
 #endif
 
 namespace KernelHttp

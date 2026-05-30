@@ -40,9 +40,9 @@ KernelHttp 的两层 API 结构概述，包括：
 ### 高层 API 快速示例
 
 ```cpp
-#include "khttp/Http.h"
-#include "khttp/Session.h"
-#include "khttp/Response.h"
+#include <KernelHttp/khttp/Http.h>
+#include <KernelHttp/khttp/Session.h>
+#include <KernelHttp/khttp/Response.h>
 
 NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
     khttp::Session* session = nullptr;
@@ -70,7 +70,7 @@ NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
 ### 底层 API 快速示例
 
 ```cpp
-#include "engine/Engine.h"
+#include <KernelHttp/engine/Engine.h>
 
 NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
     KH_SESSION session = nullptr;
@@ -218,8 +218,9 @@ A: 使用 `CertificateStore` 进行证书锁定，或设置 `CertificatePolicy::
 
 ## 相关资源
 
-- **源代码**：`src/KernelHttp/` 目录
-- **示例代码**：`src/KernelHttp/samples/` 目录
+- **公开头文件**：`include/KernelHttp/` 目录，推荐从 `include/KernelHttp/KernelHttp.h` 总头开始
+- **核心实现**：`src/KernelHttp/` 目录
+- **示例代码**：`src/KernelHttpExample/samples/` 目录
 - **测试代码**：`tests/` 目录
 - **构建工具**：`tools/` 目录
 

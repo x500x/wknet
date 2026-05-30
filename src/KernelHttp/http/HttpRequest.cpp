@@ -1,4 +1,4 @@
-#include "http/HttpRequest.h"
+#include <KernelHttp/http/HttpRequest.h>
 
 namespace KernelHttp
 {

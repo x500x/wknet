@@ -1,6 +1,6 @@
-#include "khttp/Http.h"
-#include "khttp/Detail.h"
-#include "engine/Engine.h"
+#include <KernelHttp/khttp/Http.h>
+#include <KernelHttp/khttp/Detail.h>
+#include <KernelHttp/engine/Engine.h>
 
 namespace KernelHttp
 {

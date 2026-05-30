@@ -22,7 +22,7 @@ KernelHttp 提供了两层 API 供开发者使用：**高层 API** 和 **底层 
 | 特性 | 高层 API (`khttp`) | 底层 API (`engine`) |
 |------|-------------------|---------------------|
 | **命名空间** | `KernelHttp::khttp` | `KernelHttp::engine` |
-| **头文件位置** | `src/KernelHttp/khttp/` | `src/KernelHttp/engine/` |
+| **头文件位置** | `include/KernelHttp/khttp/` 或总头 `include/KernelHttp/KernelHttp.h` | `include/KernelHttp/engine/` 或总头 `include/KernelHttp/KernelHttp.h` |
 | **接口风格** | 简洁、面向对象 | C 风格、函数式 |
 | **资源管理** | 自动（通过 RAII 包装） | 手动（调用方负责） |
 | **学习曲线** | 低 | 中 |
@@ -116,9 +116,9 @@ KernelHttp 提供了两层 API 供开发者使用：**高层 API** 和 **底层 
 
 #### 高层 API
 ```cpp
-#include "khttp/Http.h"
-#include "khttp/Session.h"
-#include "khttp/Response.h"
+#include <KernelHttp/khttp/Http.h>
+#include <KernelHttp/khttp/Session.h>
+#include <KernelHttp/khttp/Response.h>
 
 NTSTATUS PerformHttpGet(net::WskClient& wskClient) {
     khttp::Session* session = nullptr;
@@ -145,7 +145,7 @@ NTSTATUS PerformHttpGet(net::WskClient& wskClient) {
 
 #### 底层 API
 ```cpp
-#include "engine/Engine.h"
+#include <KernelHttp/engine/Engine.h>
 
 NTSTATUS PerformHttpGet(net::WskClient& wskClient) {
     KH_SESSION session = nullptr;
@@ -186,9 +186,9 @@ NTSTATUS PerformHttpGet(net::WskClient& wskClient) {
 
 #### 高层 API
 ```cpp
-#include "khttp/Http.h"
-#include "khttp/Session.h"
-#include "khttp/Response.h"
+#include <KernelHttp/khttp/Http.h>
+#include <KernelHttp/khttp/Session.h>
+#include <KernelHttp/khttp/Response.h>
 
 NTSTATUS PerformHttpsRequest(net::WskClient& wskClient) {
     khttp::Session* session = nullptr;
@@ -215,7 +215,7 @@ NTSTATUS PerformHttpsRequest(net::WskClient& wskClient) {
 
 #### 底层 API
 ```cpp
-#include "engine/Engine.h"
+#include <KernelHttp/engine/Engine.h>
 
 NTSTATUS PerformHttpsRequest(net::WskClient& wskClient) {
     KH_SESSION session = nullptr;
@@ -258,9 +258,9 @@ NTSTATUS PerformHttpsRequest(net::WskClient& wskClient) {
 
 #### 高层 API
 ```cpp
-#include "khttp/HttpAsync.h"
-#include "khttp/AsyncOp.h"
-#include "khttp/Response.h"
+#include <KernelHttp/khttp/HttpAsync.h>
+#include <KernelHttp/khttp/AsyncOp.h>
+#include <KernelHttp/khttp/Response.h>
 
 NTSTATUS PerformAsyncRequest(net::WskClient& wskClient) {
     khttp::Session* session = nullptr;
@@ -292,7 +292,7 @@ NTSTATUS PerformAsyncRequest(net::WskClient& wskClient) {
 
 #### 底层 API
 ```cpp
-#include "engine/Engine.h"
+#include <KernelHttp/engine/Engine.h>
 
 NTSTATUS PerformAsyncRequest(net::WskClient& wskClient) {
     KH_SESSION session = nullptr;
@@ -344,8 +344,8 @@ NTSTATUS PerformAsyncRequest(net::WskClient& wskClient) {
 2. **底层 API 用于特殊需求**：使用底层 API 进行性能优化或特殊定制。
 
 ```cpp
-#include "khttp/Http.h"
-#include "engine/Engine.h"
+#include <KernelHttp/khttp/Http.h>
+#include <KernelHttp/engine/Engine.h>
 
 NTSTATUS MixedUsage(net::WskClient& wskClient) {
     // 使用高层 API 创建会话
@@ -397,7 +397,7 @@ NTSTATUS MixedUsage(net::WskClient& wskClient) {
 
 ### 高层 API 调试
 
-- 使用示例代码作为参考（`src/KernelHttp/samples/HighLevelApiSamples.cpp`）。
+- 使用示例代码作为参考（`src/KernelHttpExample/samples/HighLevelApiSamples.cpp`）。
 - 检查 `NTSTATUS` 返回值。
 - 使用日志记录请求和响应。
 

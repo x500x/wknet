@@ -2,8 +2,9 @@
 #define KERNEL_HTTP_USER_MODE_TEST 1
 #endif
 
-#include "../src/KernelHttp/khttp/Test.h"
-#include "../src/KernelHttp/samples/HighLevelApiSamples.h"
+#include <KernelHttp/khttp/Test.h>
+
+#include "samples/HighLevelApiSamples.h"
 
 #include <string.h>
 #include <stdio.h>

@@ -1,4 +1,4 @@
-#include "http2/Http2Stream.h"
+#include <KernelHttp/http2/Http2Stream.h>
 
 namespace KernelHttp
 {

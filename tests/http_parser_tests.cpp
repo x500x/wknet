@@ -2,8 +2,8 @@
 #define KERNEL_HTTP_USER_MODE_TEST 1
 #endif
 
-#include "../src/KernelHttp/http/HttpParser.h"
-#include "../src/KernelHttp/http/HttpRequest.h"
+#include <KernelHttp/http/HttpParser.h>
+#include <KernelHttp/http/HttpRequest.h>
 
 #include <stdio.h>
 #include <string.h>

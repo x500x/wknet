@@ -1,4 +1,4 @@
-#include "http/HttpContentEncoding.h"
+#include <KernelHttp/http/HttpContentEncoding.h>
 
 #include <brotli/decode.h>
 

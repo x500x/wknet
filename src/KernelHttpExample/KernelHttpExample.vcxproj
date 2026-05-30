@@ -19,20 +19,20 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\KernelHttp\DriverEntry.cpp" />
-    <ClCompile Include="..\KernelHttp\samples\ExternalTrustStore.cpp" />
-    <ClCompile Include="..\KernelHttp\samples\HighLevelApiSamples.cpp" />
-    <ClCompile Include="..\KernelHttp\samples\Http2VerbSamples.cpp" />
-    <ClCompile Include="..\KernelHttp\samples\HttpVerbSamples.cpp" />
-    <ClCompile Include="..\KernelHttp\samples\KhttpSamples.cpp" />
+    <ClCompile Include="DriverEntry.cpp" />
+    <ClCompile Include="samples\ExternalTrustStore.cpp" />
+    <ClCompile Include="samples\HighLevelApiSamples.cpp" />
+    <ClCompile Include="samples\Http2VerbSamples.cpp" />
+    <ClCompile Include="samples\HttpVerbSamples.cpp" />
+    <ClCompile Include="samples\KhttpSamples.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\KernelHttp\KernelHttpConfig.h" />
-    <ClInclude Include="..\KernelHttp\samples\ExternalTrustStore.h" />
-    <ClInclude Include="..\KernelHttp\samples\HighLevelApiSamples.h" />
-    <ClInclude Include="..\KernelHttp\samples\Http2VerbSamples.h" />
-    <ClInclude Include="..\KernelHttp\samples\HttpVerbSamples.h" />
-    <ClInclude Include="..\KernelHttp\samples\KhttpSamples.h" />
+    <ClInclude Include="..\..\include\KernelHttp\KernelHttp.h" />
+    <ClInclude Include="samples\ExternalTrustStore.h" />
+    <ClInclude Include="samples\HighLevelApiSamples.h" />
+    <ClInclude Include="samples\Http2VerbSamples.h" />
+    <ClInclude Include="samples\HttpVerbSamples.h" />
+    <ClInclude Include="samples\KhttpSamples.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="KernelHttpExample.inf" />
@@ -122,7 +122,7 @@
       <CompileAs>CompileAsCpp</CompileAs>
       <ConformanceMode>true</ConformanceMode>
       <PreprocessorDefinitions>POOL_NX_OPTIN=1;KERNEL_HTTP_NO_CRT_ALLOC=1;$(KernelHttpExtraDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\KernelHttp;$(ProjectDir)..\..\third_party\brotli\c\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)include;$(ProjectDir)..\..\third_party\brotli\c\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/source-charset:utf-8 /execution-charset:.936 /Zc:externConstexpr /Zc:inline %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>

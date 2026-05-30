@@ -1,6 +1,6 @@
-#include "http/HttpParser.h"
+#include <KernelHttp/http/HttpParser.h>
 
-#include "http/HttpContentEncoding.h"
+#include <KernelHttp/http/HttpContentEncoding.h>
 
 namespace KernelHttp
 {

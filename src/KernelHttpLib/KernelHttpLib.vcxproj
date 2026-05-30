@@ -109,53 +109,54 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\KernelHttp\engine\Engine.h" />
-    <ClInclude Include="..\KernelHttp\engine\EngineInternal.h" />
-    <ClInclude Include="..\KernelHttp\engine\HttpEngine.h" />
-    <ClInclude Include="..\KernelHttp\engine\UrlParser.h" />
-    <ClInclude Include="..\KernelHttp\engine\WsEngine.h" />
-    <ClInclude Include="..\KernelHttp\engine\Async.h" />
-    <ClInclude Include="..\KernelHttp\engine\ConnectionPool.h" />
-    <ClInclude Include="..\KernelHttp\engine\Workspace.h" />
-    <ClInclude Include="..\KernelHttp\client\HttpClient.h" />
-    <ClInclude Include="..\KernelHttp\client\Http2Client.h" />
-    <ClInclude Include="..\KernelHttp\client\HttpsClient.h" />
-    <ClInclude Include="..\KernelHttp\client\WebSocketClient.h" />
-    <ClInclude Include="..\KernelHttp\crypto\CngProvider.h" />
-    <ClInclude Include="..\KernelHttp\crypto\CngProviderCache.h" />
-    <ClInclude Include="..\KernelHttp\http\HttpContentEncoding.h" />
-    <ClInclude Include="..\KernelHttp\http\HttpParser.h" />
-    <ClInclude Include="..\KernelHttp\http\HttpRequest.h" />
-    <ClInclude Include="..\KernelHttp\http\HttpResponse.h" />
-    <ClInclude Include="..\KernelHttp\http\HttpTypes.h" />
-    <ClInclude Include="..\KernelHttp\http2\Hpack.h" />
-    <ClInclude Include="..\KernelHttp\http2\HpackHuffman.h" />
-    <ClInclude Include="..\KernelHttp\http2\HpackStaticTable.h" />
-    <ClInclude Include="..\KernelHttp\http2\Http2Connection.h" />
-    <ClInclude Include="..\KernelHttp\http2\Http2Frame.h" />
-    <ClInclude Include="..\KernelHttp\http2\Http2Stream.h" />
-    <ClInclude Include="..\KernelHttp\KernelHttpConfig.h" />
-    <ClInclude Include="..\KernelHttp\net\WskBuffer.h" />
-    <ClInclude Include="..\KernelHttp\net\WskClient.h" />
-    <ClInclude Include="..\KernelHttp\net\WskSocket.h" />
-    <ClInclude Include="..\KernelHttp\khttp\AsyncOp.h" />
-    <ClInclude Include="..\KernelHttp\khttp\Detail.h" />
-    <ClInclude Include="..\KernelHttp\khttp\Http.h" />
-    <ClInclude Include="..\KernelHttp\khttp\HttpAsync.h" />
-    <ClInclude Include="..\KernelHttp\khttp\Request.h" />
-    <ClInclude Include="..\KernelHttp\khttp\Response.h" />
-    <ClInclude Include="..\KernelHttp\khttp\Session.h" />
-    <ClInclude Include="..\KernelHttp\khttp\Test.h" />
-    <ClInclude Include="..\KernelHttp\khttp\Types.h" />
-    <ClInclude Include="..\KernelHttp\khttp\WebSocket.h" />
-    <ClInclude Include="..\KernelHttp\tls\TlsContext.h" />
-    <ClInclude Include="..\KernelHttp\tls\CertificateStore.h" />
-    <ClInclude Include="..\KernelHttp\tls\CertificateValidator.h" />
-    <ClInclude Include="..\KernelHttp\tls\TlsConnection.h" />
-    <ClInclude Include="..\KernelHttp\tls\TlsHandshake12.h" />
-    <ClInclude Include="..\KernelHttp\tls\TlsHandshake13.h" />
-    <ClInclude Include="..\KernelHttp\tls\TlsRecord.h" />
-    <ClInclude Include="..\KernelHttp\websocket\WebSocketFrame.h" />
+    <ClInclude Include="..\..\include\KernelHttp\KernelHttp.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\Engine.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\EngineInternal.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\HttpEngine.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\UrlParser.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\WsEngine.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\Async.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\ConnectionPool.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\Workspace.h" />
+    <ClInclude Include="..\..\include\KernelHttp\client\HttpClient.h" />
+    <ClInclude Include="..\..\include\KernelHttp\client\Http2Client.h" />
+    <ClInclude Include="..\..\include\KernelHttp\client\HttpsClient.h" />
+    <ClInclude Include="..\..\include\KernelHttp\client\WebSocketClient.h" />
+    <ClInclude Include="..\..\include\KernelHttp\crypto\CngProvider.h" />
+    <ClInclude Include="..\..\include\KernelHttp\crypto\CngProviderCache.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpContentEncoding.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpParser.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpRequest.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpResponse.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpTypes.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http2\Hpack.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http2\HpackHuffman.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http2\HpackStaticTable.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http2\Http2Connection.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http2\Http2Frame.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http2\Http2Stream.h" />
+    <ClInclude Include="..\..\include\KernelHttp\KernelHttpConfig.h" />
+    <ClInclude Include="..\..\include\KernelHttp\net\WskBuffer.h" />
+    <ClInclude Include="..\..\include\KernelHttp\net\WskClient.h" />
+    <ClInclude Include="..\..\include\KernelHttp\net\WskSocket.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\AsyncOp.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Detail.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Http.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\HttpAsync.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Request.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Response.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Session.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Test.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Types.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\WebSocket.h" />
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsContext.h" />
+    <ClInclude Include="..\..\include\KernelHttp\tls\CertificateStore.h" />
+    <ClInclude Include="..\..\include\KernelHttp\tls\CertificateValidator.h" />
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsConnection.h" />
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsHandshake12.h" />
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsHandshake13.h" />
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsRecord.h" />
+    <ClInclude Include="..\..\include\KernelHttp\websocket\WebSocketFrame.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{2F05C2F0-8C5F-4B05-B0D9-F72F40E1D5D6}</ProjectGuid>
@@ -222,7 +223,7 @@
       <CompileAs>CompileAsCpp</CompileAs>
       <ConformanceMode>true</ConformanceMode>
       <PreprocessorDefinitions>POOL_NX_OPTIN=1;KERNEL_HTTP_NO_CRT_ALLOC=1;$(KernelHttpExtraDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\KernelHttp;$(ProjectDir)..\..\third_party\brotli\c\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(ProjectDir)..\..\third_party\brotli\c\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/source-charset:utf-8 /execution-charset:.936 /Zc:externConstexpr /Zc:inline %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>

@@ -1,5 +1,5 @@
-#include "engine/UrlParser.h"
-#include "http/HttpTypes.h"
+#include <KernelHttp/engine/UrlParser.h>
+#include <KernelHttp/http/HttpTypes.h>
 
 namespace KernelHttp
 {

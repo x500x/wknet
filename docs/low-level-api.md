@@ -1,6 +1,6 @@
 # 底层 API 开发文档（`KernelHttp::engine`）
 
-本文档面向需要更精细控制 KernelHttp 内部机制的开发者。所有接口都位于命名空间 `KernelHttp::engine`，头文件位于 `src/KernelHttp/engine/Engine.h`。底层 API 提供了对会话管理、连接池、TLS 配置、异步操作等底层组件的直接访问。
+本文档面向需要更精细控制 KernelHttp 内部机制的开发者。所有接口都位于命名空间 `KernelHttp::engine`，头文件位于 `include/KernelHttp/engine/Engine.h`。底层 API 提供了对会话管理、连接池、TLS 配置、异步操作等底层组件的直接访问。
 
 > 工程约束（来自 `AGENTS.md`）：内核驱动；传输层使用 WSK，密码学使用 CNG/BCrypt；C++ 受 `/kernel` 限制：无异常、无 RTTI、显式 `new/delete`。本 API 全部满足这些约束。
 
@@ -807,7 +807,7 @@ if (!NT_SUCCESS(status)) {
 ### 15.1 完整的 HTTP GET 请求
 
 ```cpp
-#include "engine/Engine.h"
+#include <KernelHttp/engine/Engine.h>
 
 NTSTATUS PerformHttpGet(net::WskClient& wskClient) {
     // 创建会话

@@ -2,8 +2,8 @@
 #define KERNEL_HTTP_USER_MODE_TEST 1
 #endif
 
-#include "../src/KernelHttp/http2/Http2Frame.h"
-#include "../src/KernelHttp/http2/Http2Stream.h"
+#include <KernelHttp/http2/Http2Frame.h>
+#include <KernelHttp/http2/Http2Stream.h>
 
 #include <stdio.h>
 #include <string.h>

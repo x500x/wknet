@@ -2,7 +2,7 @@
 #define KERNEL_HTTP_USER_MODE_TEST 1
 #endif
 
-#include "../src/KernelHttp/websocket/WebSocketFrame.h"
+#include <KernelHttp/websocket/WebSocketFrame.h>
 
 #include <stdio.h>
 #include <string.h>

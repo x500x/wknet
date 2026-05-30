@@ -1,8 +1,8 @@
-#include "client/HttpsClient.h"
-#include "engine/Workspace.h"
-#include "client/Http2Client.h"
-#include "http/HttpContentEncoding.h"
-#include "http2/Http2Connection.h"
+#include <KernelHttp/client/HttpsClient.h>
+#include <KernelHttp/engine/Workspace.h>
+#include <KernelHttp/client/Http2Client.h>
+#include <KernelHttp/http/HttpContentEncoding.h>
+#include <KernelHttp/http2/Http2Connection.h>
 
 namespace KernelHttp
 {

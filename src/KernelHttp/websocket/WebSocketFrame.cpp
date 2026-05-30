@@ -1,4 +1,4 @@
-#include "websocket/WebSocketFrame.h"
+#include <KernelHttp/websocket/WebSocketFrame.h>
 
 namespace KernelHttp
 {
