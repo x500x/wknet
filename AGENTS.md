@@ -13,6 +13,8 @@
 - 禁止把“兜底设计”当作正式架构手段。
 - 禁止用“临时兜底后面再删”“先这样跑起来”作为引入回退方案的理由。
 - 禁止test烟测
+- new/delete不要用，除非在lib中重载new/delete
+- lib禁止使用栈，请使用堆内存，如果堆内存频繁的被使用，请考虑常驻。
 
 ## 本项目方向
 - 这是一个面向 Windows kernel driver 的 HTTP/HTTPS 实现项目。
@@ -20,5 +22,5 @@
 - 密码学基础优先使用内核态 CNG/BCrypt。
 - HTTP/HTTPS、TLS record/handshake、证书校验都按内核自实现路线推进。
 - 不把 WinHTTP、WinINet、SChannel 作为内核主路径。
-- C++ 可以用来组织代码，例如 `namespace`、类、RAII、轻量模板，但必须符合 `/kernel` 的限制：无异常、无 RTTI、显式 `new/delete`，不要依赖内核不可用的标准库能力。
+- C++ 可以用来组织代码，例如 `namespace`、类、RAII、轻量模板，但必须符合 `/kernel` 的限制：无异常、无 RTTI，不要依赖内核不可用的标准库能力。
 
