@@ -1,5 +1,6 @@
 #include <KernelHttp/client/WebSocketClient.h>
-
+#include <KernelHttp/core/WorkspaceScratchAllocator.h>
+#include <KernelHttp/core/WskTransport.h>
 #include <KernelHttp/http/HttpRequest.h>
 
 namespace KernelHttp
@@ -335,11 +336,43 @@ namespace client
             return status;
         }
 
+        rawTransport_ = new core::WskTransport(socket_);
+        if (rawTransport_ == nullptr) {
+            const NTSTATUS closeStatus = socket_.Close();
+            UNREFERENCED_PARAMETER(closeStatus);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
         useTls_ = options.UseTls;
         bufferedFrameLength_ = 0;
         if (useTls_) {
+            core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
+            core::WorkspaceScratchAllocator* certificateScratch = nullptr;
+            if (options.Workspace != nullptr) {
+                handshakeScratch = new core::WorkspaceScratchAllocator(
+                    *options.Workspace,
+                    core::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
+                certificateScratch = new core::WorkspaceScratchAllocator(
+                    *options.Workspace,
+                    core::WorkspaceScratchAllocator::BufferKind::Certificate);
+                if (handshakeScratch == nullptr || certificateScratch == nullptr) {
+                    delete certificateScratch;
+                    delete handshakeScratch;
+                    delete rawTransport_;
+                    rawTransport_ = nullptr;
+                    const NTSTATUS closeStatus = socket_.Close();
+                    UNREFERENCED_PARAMETER(closeStatus);
+                    useTls_ = false;
+                    return STATUS_INSUFFICIENT_RESOURCES;
+                }
+            }
+
             tls_ = new tls::TlsConnection();
             if (tls_ == nullptr) {
+                delete certificateScratch;
+                delete handshakeScratch;
+                delete rawTransport_;
+                rawTransport_ = nullptr;
                 const NTSTATUS closeStatus = socket_.Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 useTls_ = false;
@@ -350,7 +383,8 @@ namespace client
             tlsOptions.ServerName = options.TlsServerName;
             tlsOptions.ServerNameLength = options.TlsServerNameLength;
             tlsOptions.CertificateStore = options.CertificateStore;
-            tlsOptions.Workspace = options.Workspace;
+            tlsOptions.HandshakeScratchAllocator = handshakeScratch;
+            tlsOptions.CertificateScratchAllocator = certificateScratch;
             tlsOptions.ProviderCache = options.ProviderCache;
             tlsOptions.VerifyCertificate = options.VerifyCertificate;
             tlsOptions.MinimumProtocol = options.MinimumTlsProtocol;
@@ -363,7 +397,7 @@ namespace client
             tlsOptions.AlpnProtocols = &alpn;
             tlsOptions.AlpnProtocolCount = 1;
 
-            status = tls_->Connect(socket_, tlsOptions);
+            status = tls_->Connect(*rawTransport_, tlsOptions);
             if (!NT_SUCCESS(status) &&
                 (status == STATUS_INVALID_NETWORK_RESPONSE ||
                  status == STATUS_CONNECTION_RESET ||
@@ -372,13 +406,29 @@ namespace client
                 tlsOptions.MaximumProtocol >= tls::TlsProtocol::Tls13) {
                 delete tls_;
                 tls_ = nullptr;
+                delete rawTransport_;
+                rawTransport_ = nullptr;
                 const NTSTATUS reconnectClose = socket_.Close();
                 UNREFERENCED_PARAMETER(reconnectClose);
 
                 status = socket_.Connect(wskClient, remoteAddress);
                 if (NT_SUCCESS(status)) {
+                    rawTransport_ = new core::WskTransport(socket_);
+                    if (rawTransport_ == nullptr) {
+                        delete certificateScratch;
+                        delete handshakeScratch;
+                        useTls_ = false;
+                        const NTSTATUS retryClose = socket_.Close();
+                        UNREFERENCED_PARAMETER(retryClose);
+                        return STATUS_INSUFFICIENT_RESOURCES;
+                    }
+
                     tls_ = new tls::TlsConnection();
                     if (tls_ == nullptr) {
+                        delete certificateScratch;
+                        delete handshakeScratch;
+                        delete rawTransport_;
+                        rawTransport_ = nullptr;
                         useTls_ = false;
                         const NTSTATUS retryClose = socket_.Close();
                         UNREFERENCED_PARAMETER(retryClose);
@@ -386,15 +436,19 @@ namespace client
                     }
 
                     tlsOptions.MaximumProtocol = tls::TlsProtocol::Tls12;
-                    status = tls_->Connect(socket_, tlsOptions);
+                    status = tls_->Connect(*rawTransport_, tlsOptions);
                 }
             }
+            delete certificateScratch;
+            delete handshakeScratch;
 
             if (!NT_SUCCESS(status)) {
                 kprintf("WebSocketClient TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 delete tls_;
                 tls_ = nullptr;
                 useTls_ = false;
+                delete rawTransport_;
+                rawTransport_ = nullptr;
                 const NTSTATUS closeStatus = socket_.Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -410,6 +464,8 @@ namespace client
                 delete tls_;
                 tls_ = nullptr;
                 useTls_ = false;
+                delete rawTransport_;
+                rawTransport_ = nullptr;
                 const NTSTATUS closeStatus = socket_.Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return STATUS_NOT_SUPPORTED;
@@ -692,6 +748,9 @@ namespace client
             tls_ = nullptr;
         }
 
+        delete rawTransport_;
+        rawTransport_ = nullptr;
+
         useTls_ = false;
         const NTSTATUS closeStatus = socket_.Close();
         return IsConnectionTerminalStatus(closeStatus) ? STATUS_SUCCESS : closeStatus;
@@ -780,10 +839,10 @@ namespace client
     NTSTATUS WebSocketClient::SendRaw(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept
     {
         if (useTls_) {
-            if (tls_ == nullptr) {
+            if (tls_ == nullptr || rawTransport_ == nullptr) {
                 return STATUS_INVALID_DEVICE_STATE;
             }
-            return tls_->Send(socket_, data, length, bytesSent);
+            return tls_->Send(*rawTransport_, data, length, bytesSent);
         }
 
         return socket_.Send(data, length, bytesSent);
@@ -792,10 +851,10 @@ namespace client
     NTSTATUS WebSocketClient::ReceiveRaw(void* data, SIZE_T length, SIZE_T* bytesReceived) noexcept
     {
         if (useTls_) {
-            if (tls_ == nullptr) {
+            if (tls_ == nullptr || rawTransport_ == nullptr) {
                 return STATUS_INVALID_DEVICE_STATE;
             }
-            return tls_->Receive(socket_, data, length, bytesReceived);
+            return tls_->Receive(*rawTransport_, data, length, bytesReceived);
         }
 
         return socket_.Receive(data, length, bytesReceived);

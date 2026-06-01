@@ -31,6 +31,7 @@
     <ClCompile Include="client\Http2Client.cpp" />
     <ClCompile Include="client\HttpsClient.cpp" />
     <ClCompile Include="client\WebSocketClient.cpp" />
+    <ClCompile Include="core\TlsTransport.cpp" />
     <ClCompile Include="crypto\CngProvider.cpp" />
     <ClCompile Include="crypto\CngProviderCache.cpp" />
     <ClCompile Include="khttp\AsyncOp.cpp" />
@@ -112,7 +113,11 @@
   <ItemGroup>
     <ClInclude Include="..\..\include\KernelHttp\KernelHttp.h" />
     <ClInclude Include="..\..\include\KernelHttp\engine\Engine.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\EngineImpl.h" />
     <ClInclude Include="..\..\include\KernelHttp\engine\EngineInternal.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\EngineUtils.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\HandleAlloc.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\HandleTypes.h" />
     <ClInclude Include="..\..\include\KernelHttp\engine\HttpEngine.h" />
     <ClInclude Include="..\..\include\KernelHttp\engine\UrlParser.h" />
     <ClInclude Include="..\..\include\KernelHttp\engine\WsEngine.h" />
@@ -123,6 +128,11 @@
     <ClInclude Include="..\..\include\KernelHttp\client\Http2Client.h" />
     <ClInclude Include="..\..\include\KernelHttp\client\HttpsClient.h" />
     <ClInclude Include="..\..\include\KernelHttp\client\WebSocketClient.h" />
+    <ClInclude Include="..\..\include\KernelHttp\core\IScratchAllocator.h" />
+    <ClInclude Include="..\..\include\KernelHttp\core\ITransport.h" />
+    <ClInclude Include="..\..\include\KernelHttp\core\TlsTransport.h" />
+    <ClInclude Include="..\..\include\KernelHttp\core\WorkspaceScratchAllocator.h" />
+    <ClInclude Include="..\..\include\KernelHttp\core\WskTransport.h" />
     <ClInclude Include="..\..\include\KernelHttp\crypto\CngProvider.h" />
     <ClInclude Include="..\..\include\KernelHttp\crypto\CngProviderCache.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpContentEncoding.h" />

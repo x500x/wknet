@@ -1,5 +1,6 @@
 #include <KernelHttp/engine/WsEngine.h>
-#include <KernelHttp/engine/EngineInternal.h>
+#include <KernelHttp/engine/EngineImpl.h>
+#include <KernelHttp/engine/HandleAlloc.h>
 #include <KernelHttp/engine/UrlParser.h>
 #include <KernelHttp/http/HttpRequest.h>
 #include <KernelHttp/websocket/WebSocketFrame.h>

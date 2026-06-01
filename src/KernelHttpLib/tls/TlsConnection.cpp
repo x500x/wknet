@@ -1,6 +1,5 @@
 #include <KernelHttp/tls/TlsConnection.h>
 
-#include <KernelHttp/engine/Workspace.h>
 #include <KernelHttp/crypto/CngProviderCache.h>
 #include <KernelHttp/tls/TlsHandshake13.h>
 
@@ -314,7 +313,7 @@ namespace tls
         }
 
         _Must_inspect_result_
-        NTSTATUS SendAll(net::WskSocket& socket, const UCHAR* data, SIZE_T length) noexcept
+        NTSTATUS SendAll(core::ITransport& transport, const UCHAR* data, SIZE_T length) noexcept
         {
             if (!IsValidBuffer(data, length)) {
                 return STATUS_INVALID_PARAMETER;
@@ -323,7 +322,7 @@ namespace tls
             SIZE_T sentTotal = 0;
             while (sentTotal < length) {
                 SIZE_T sent = 0;
-                NTSTATUS status = socket.Send(data + sentTotal, length - sentTotal, &sent);
+                NTSTATUS status = transport.Send(data + sentTotal, length - sentTotal, &sent);
                 if (!NT_SUCCESS(status)) {
                     return status;
                 }
@@ -340,7 +339,7 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS ReadExact(
-            net::WskSocket& socket,
+            core::ITransport& transport,
             UCHAR* data,
             SIZE_T length,
             ULONG receiveTimeoutMilliseconds = WskOperationTimeoutMilliseconds) noexcept
@@ -352,11 +351,10 @@ namespace tls
             SIZE_T receivedTotal = 0;
             while (receivedTotal < length) {
                 SIZE_T received = 0;
-                NTSTATUS status = socket.Receive(
+                NTSTATUS status = transport.ReceiveWithTimeout(
                     data + receivedTotal,
                     length - receivedTotal,
                     &received,
-                    0,
                     receiveTimeoutMilliseconds);
                 if (!NT_SUCCESS(status)) {
                     return status;
@@ -376,12 +374,6 @@ namespace tls
     TlsConnection::~TlsConnection() noexcept
     {
         Reset();
-        if (ownedTlsScratch_ != nullptr) {
-            RtlSecureZeroMemory(ownedTlsScratch_, ownedTlsScratchLength_);
-            delete[] ownedTlsScratch_;
-            ownedTlsScratch_ = nullptr;
-            ownedTlsScratchLength_ = 0;
-        }
         delete[] inputBuffer_;
         delete[] outputBuffer_;
         delete[] tls13InnerPlaintextBuffer_;
@@ -416,17 +408,8 @@ namespace tls
         if (handshakeBuffer_ != nullptr) {
             RtlSecureZeroMemory(handshakeBuffer_, TlsScratchHandshakeBufferLength);
         }
-        if (workspace_ != nullptr &&
-            workspace_->TlsHandshakeScratch.Data != nullptr &&
-            workspace_->TlsHandshakeScratch.Length != 0) {
-            RtlSecureZeroMemory(
-                workspace_->TlsHandshakeScratch.Data,
-                workspace_->TlsHandshakeScratch.Length);
-        }
-        if (ownedTlsScratch_ != nullptr && ownedTlsScratchLength_ != 0) {
-            RtlSecureZeroMemory(ownedTlsScratch_, ownedTlsScratchLength_);
-        }
-        workspace_ = nullptr;
+        ReleaseHandshakeScratch();
+        certificateScratchAllocator_ = nullptr;
         providerCache_ = nullptr;
         inputLength_ = 0;
         plaintextLength_ = 0;
@@ -492,16 +475,24 @@ namespace tls
 
     NTSTATUS TlsConnection::PrepareScratch(const TlsClientConnectionOptions& options) noexcept
     {
-        workspace_ = options.Workspace;
+        ReleaseHandshakeScratch();
+
+        handshakeScratchAllocator_ = options.HandshakeScratchAllocator;
+        certificateScratchAllocator_ = options.CertificateScratchAllocator;
         providerCache_ = options.ProviderCache;
 
-        if (workspace_ != nullptr) {
-            if (workspace_->TlsHandshakeScratch.Data == nullptr ||
-                workspace_->TlsHandshakeScratch.Length < TlsScratchRequiredLength) {
-                return STATUS_BUFFER_TOO_SMALL;
+        if (handshakeScratchAllocator_ != nullptr) {
+            void* buffer = nullptr;
+            const NTSTATUS status = handshakeScratchAllocator_->Acquire(
+                TlsScratchRequiredLength,
+                &buffer);
+            if (!NT_SUCCESS(status)) {
+                return status;
             }
 
-            RtlSecureZeroMemory(workspace_->TlsHandshakeScratch.Data, workspace_->TlsHandshakeScratch.Length);
+            handshakeScratch_ = static_cast<UCHAR*>(buffer);
+            handshakeScratchLength_ = TlsScratchRequiredLength;
+            RtlSecureZeroMemory(handshakeScratch_, handshakeScratchLength_);
             return STATUS_SUCCESS;
         }
 
@@ -522,6 +513,8 @@ namespace tls
         }
 
         RtlSecureZeroMemory(ownedTlsScratch_, ownedTlsScratchLength_);
+        handshakeScratch_ = ownedTlsScratch_;
+        handshakeScratchLength_ = ownedTlsScratchLength_;
         return STATUS_SUCCESS;
     }
 
@@ -538,16 +531,8 @@ namespace tls
             return STATUS_INVALID_PARAMETER;
         }
 
-        UCHAR* base = nullptr;
-        SIZE_T capacity = 0;
-        if (workspace_ != nullptr) {
-            base = workspace_->TlsHandshakeScratch.Data;
-            capacity = workspace_->TlsHandshakeScratch.Length;
-        }
-        else {
-            base = ownedTlsScratch_;
-            capacity = ownedTlsScratchLength_;
-        }
+        UCHAR* base = handshakeScratch_;
+        SIZE_T capacity = handshakeScratchLength_;
 
         if (base == nullptr || offset > capacity || length > capacity - offset) {
             return STATUS_BUFFER_TOO_SMALL;
@@ -557,12 +542,34 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
+    void TlsConnection::ReleaseHandshakeScratch() noexcept
+    {
+        if (handshakeScratch_ != nullptr && handshakeScratchLength_ != 0) {
+            RtlSecureZeroMemory(handshakeScratch_, handshakeScratchLength_);
+        }
+
+        if (handshakeScratchAllocator_ != nullptr && handshakeScratch_ != nullptr) {
+            handshakeScratchAllocator_->Release(handshakeScratch_);
+        }
+
+        if (ownedTlsScratch_ != nullptr) {
+            RtlSecureZeroMemory(ownedTlsScratch_, ownedTlsScratchLength_);
+            delete[] ownedTlsScratch_;
+            ownedTlsScratch_ = nullptr;
+            ownedTlsScratchLength_ = 0;
+        }
+
+        handshakeScratchAllocator_ = nullptr;
+        handshakeScratch_ = nullptr;
+        handshakeScratchLength_ = 0;
+        handshakeBuffer_ = nullptr;
+    }
+
     NTSTATUS TlsConnection::Connect(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         const TlsClientConnectionOptions& options) noexcept
     {
-        if (!socket.IsConnected() ||
-            options.ServerName == nullptr ||
+        if (options.ServerName == nullptr ||
             options.ServerNameLength == 0 ||
             options.HandshakeReceiveTimeoutMilliseconds == 0 ||
             (options.VerifyCertificate && options.CertificateStore == nullptr) ||
@@ -578,22 +585,28 @@ namespace tls
             status = EnsureBuffers();
         }
         if (!NT_SUCCESS(status)) {
+            ReleaseHandshakeScratch();
+            certificateScratchAllocator_ = nullptr;
             return status;
         }
 
         if (ProtocolAllowed(options, TlsProtocol::Tls13)) {
-            return ConnectTls13(socket, options);
+            status = ConnectTls13(transport, options);
+        }
+        else if (ProtocolAllowed(options, TlsProtocol::Tls12)) {
+            status = ConnectTls12(transport, options);
+        }
+        else {
+            status = STATUS_NOT_SUPPORTED;
         }
 
-        if (ProtocolAllowed(options, TlsProtocol::Tls12)) {
-            return ConnectTls12(socket, options);
-        }
-
-        return STATUS_NOT_SUPPORTED;
+        ReleaseHandshakeScratch();
+        certificateScratchAllocator_ = nullptr;
+        return status;
     }
 
     NTSTATUS TlsConnection::ConnectTls12(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         const TlsClientConnectionOptions& options) noexcept
     {
         tls13RecordProtection_ = false;
@@ -655,7 +668,7 @@ namespace tls
 
         status = AppendTranscript(message, messageLength);
         if (NT_SUCCESS(status)) {
-            status = SendPlainRecord(socket, TlsContentType::Handshake, message, messageLength);
+            status = SendPlainRecord(transport, TlsContentType::Handshake, message, messageLength);
         }
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection send ClientHello failed: 0x%08X\r\n", static_cast<ULONG>(status));
@@ -663,7 +676,7 @@ namespace tls
         }
 
         TlsHandshakeMessageView handshake = {};
-        status = ReadHandshakeMessage(socket, handshake, true);
+        status = ReadHandshakeMessage(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection read ServerHello failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -719,7 +732,7 @@ namespace tls
             return status;
         }
 
-        status = ReadHandshakeMessage(socket, handshake, true);
+        status = ReadHandshakeMessage(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection read Certificate failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -742,7 +755,7 @@ namespace tls
         validation.HostName = options.ServerName;
         validation.HostNameLength = options.ServerNameLength;
         validation.Store = options.CertificateStore;
-        validation.Workspace = options.Workspace;
+        validation.ScratchAllocator = certificateScratchAllocator_;
         validation.ProviderCache = options.ProviderCache;
         validation.VerifyCertificate = options.VerifyCertificate;
 
@@ -771,7 +784,7 @@ namespace tls
             return status;
         }
 
-        status = ReadHandshakeMessage(socket, handshake, true);
+        status = ReadHandshakeMessage(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection read ServerKeyExchange failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -812,7 +825,7 @@ namespace tls
             return status;
         }
 
-        status = ReadHandshakeMessage(socket, handshake, true);
+        status = ReadHandshakeMessage(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection read ServerHelloDone failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -836,13 +849,13 @@ namespace tls
 
             status = AppendTranscript(message, messageLength);
             if (NT_SUCCESS(status)) {
-                status = SendPlainRecord(socket, TlsContentType::Handshake, message, messageLength);
+                status = SendPlainRecord(transport, TlsContentType::Handshake, message, messageLength);
             }
             if (!NT_SUCCESS(status)) {
                 return status;
             }
 
-            status = ReadHandshakeMessage(socket, handshake, true);
+            status = ReadHandshakeMessage(transport, handshake, true);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -870,7 +883,7 @@ namespace tls
 
         status = AppendTranscript(message, messageLength);
         if (NT_SUCCESS(status)) {
-            status = SendPlainRecord(socket, TlsContentType::Handshake, message, messageLength);
+            status = SendPlainRecord(transport, TlsContentType::Handshake, message, messageLength);
         }
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection send ClientKeyExchange failed: 0x%08X\r\n", static_cast<ULONG>(status));
@@ -878,7 +891,7 @@ namespace tls
         }
 
         static const UCHAR changeCipherSpec[] = { 1 };
-        status = SendPlainRecord(socket, TlsContentType::ChangeCipherSpec, changeCipherSpec, sizeof(changeCipherSpec));
+        status = SendPlainRecord(transport, TlsContentType::ChangeCipherSpec, changeCipherSpec, sizeof(changeCipherSpec));
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection send ChangeCipherSpec failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -912,14 +925,14 @@ namespace tls
 
         status = AppendTranscript(message, messageLength);
         if (NT_SUCCESS(status)) {
-            status = SendProtectedRecord(socket, TlsContentType::Handshake, message, messageLength);
+            status = SendProtectedRecord(transport, TlsContentType::Handshake, message, messageLength);
         }
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection send client Finished failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
-        status = ReadServerChangeCipherSpec(socket, serverMaySendNewSessionTicket);
+        status = ReadServerChangeCipherSpec(transport, serverMaySendNewSessionTicket);
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection read server ChangeCipherSpec failed: 0x%08X allowTicket=%u\r\n",
                 static_cast<ULONG>(status),
@@ -929,7 +942,7 @@ namespace tls
 
         encrypted_ = true;
 
-        status = ReadHandshakeMessage(socket, handshake, false);
+        status = ReadHandshakeMessage(transport, handshake, false);
         if (!NT_SUCCESS(status)) {
             kprintf("TlsConnection read server Finished failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -974,7 +987,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::ConnectTls13(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         const TlsClientConnectionOptions& options) noexcept
     {
         tls13RecordProtection_ = false;
@@ -1189,7 +1202,7 @@ namespace tls
 
         status = AppendTranscript(message, messageLength);
         if (NT_SUCCESS(status)) {
-            status = SendPlainRecordWithVersion(socket, { 3, 3 }, TlsContentType::Handshake, message, messageLength);
+            status = SendPlainRecordWithVersion(transport, { 3, 3 }, TlsContentType::Handshake, message, messageLength);
         }
         if (!NT_SUCCESS(status)) {
             return status;
@@ -1223,7 +1236,7 @@ namespace tls
                     TlsMaxPlaintextLength :
                     (options.EarlyDataLength - sent);
                 status = SendProtectedRecord13(
-                    socket,
+                    transport,
                     TlsContentType::ApplicationData,
                     options.EarlyData + sent,
                     chunk);
@@ -1238,7 +1251,7 @@ namespace tls
         }
 
         TlsHandshakeMessageView handshake = {};
-        status = ReadHandshakeMessage13(socket, handshake, true);
+        status = ReadHandshakeMessage13(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1317,13 +1330,13 @@ namespace tls
 
             status = AppendTranscript(message, messageLength);
             if (NT_SUCCESS(status)) {
-                status = SendPlainRecordWithVersion(socket, { 3, 3 }, TlsContentType::Handshake, message, messageLength);
+                status = SendPlainRecordWithVersion(transport, { 3, 3 }, TlsContentType::Handshake, message, messageLength);
             }
             if (!NT_SUCCESS(status)) {
                 return status;
             }
 
-            status = ReadHandshakeMessage13(socket, handshake, true);
+            status = ReadHandshakeMessage13(transport, handshake, true);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -1460,12 +1473,12 @@ namespace tls
         encrypted_ = true;
         tls13RecordProtection_ = true;
 
-        status = ReadOptionalCompatibilityChangeCipherSpec(socket);
+        status = ReadOptionalCompatibilityChangeCipherSpec(transport);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        status = ReadHandshakeMessage13(socket, handshake, true);
+        status = ReadHandshakeMessage13(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1493,7 +1506,7 @@ namespace tls
             return STATUS_NOT_SUPPORTED;
         }
 
-        status = ReadHandshakeMessage13(socket, handshake, true);
+        status = ReadHandshakeMessage13(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1528,7 +1541,7 @@ namespace tls
             return status;
         }
 
-        status = ReadHandshakeMessage13(socket, handshake, false);
+        status = ReadHandshakeMessage13(transport, handshake, false);
         if (!NT_SUCCESS(status)) {
             RtlSecureZeroMemory(transcriptHash.Get(), transcriptHash.Count());
             return status;
@@ -1558,7 +1571,7 @@ namespace tls
             return status;
         }
 
-        status = ReadHandshakeMessage13(socket, handshake, false);
+        status = ReadHandshakeMessage13(transport, handshake, false);
         if (!NT_SUCCESS(status)) {
             RtlSecureZeroMemory(transcriptHash.Get(), transcriptHash.Count());
             return status;
@@ -1607,7 +1620,7 @@ namespace tls
 
         status = AppendTranscript(message, messageLength);
         if (NT_SUCCESS(status)) {
-            status = SendProtectedRecord13(socket, TlsContentType::Handshake, message, messageLength);
+            status = SendProtectedRecord13(transport, TlsContentType::Handshake, message, messageLength);
         }
         if (!NT_SUCCESS(status)) {
             return status;
@@ -1623,7 +1636,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::Send(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         const void* data,
         SIZE_T length,
         SIZE_T* bytesSent) noexcept
@@ -1641,8 +1654,8 @@ namespace tls
         while (sent < length) {
             const SIZE_T chunk = (length - sent) > TlsMaxPlaintextLength ? TlsMaxPlaintextLength : (length - sent);
             NTSTATUS status = tls13RecordProtection_ ?
-                SendProtectedRecord13(socket, TlsContentType::ApplicationData, bytes + sent, chunk) :
-                SendProtectedRecord(socket, TlsContentType::ApplicationData, bytes + sent, chunk);
+                SendProtectedRecord13(transport, TlsContentType::ApplicationData, bytes + sent, chunk) :
+                SendProtectedRecord(transport, TlsContentType::ApplicationData, bytes + sent, chunk);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -1658,7 +1671,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::Receive(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         void* data,
         SIZE_T length,
         SIZE_T* bytesReceived) noexcept
@@ -1689,7 +1702,7 @@ namespace tls
 
         for (;;) {
             TlsMutablePlaintextRecord record = {};
-            NTSTATUS status = ReadRecord(socket, record);
+            NTSTATUS status = ReadRecord(transport, record);
             if (!NT_SUCCESS(status)) {
                 kprintf("TlsConnection read record failed before HTTP: 0x%08X\r\n", static_cast<ULONG>(status));
                 return status;
@@ -1756,16 +1769,16 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::SendPlainRecord(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         TlsContentType contentType,
         const UCHAR* fragment,
         SIZE_T fragmentLength) noexcept
     {
-        return SendPlainRecordWithVersion(socket, context_.Version(), contentType, fragment, fragmentLength);
+        return SendPlainRecordWithVersion(transport, context_.Version(), contentType, fragment, fragmentLength);
     }
 
     NTSTATUS TlsConnection::SendPlainRecordWithVersion(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         TlsProtocolVersion version,
         TlsContentType contentType,
         const UCHAR* fragment,
@@ -1784,13 +1797,13 @@ namespace tls
             return status;
         }
 
-        status = SendAll(socket, outputBuffer_, written);
+        status = SendAll(transport, outputBuffer_, written);
         RtlSecureZeroMemory(outputBuffer_, TlsIoBufferLength);
         return status;
     }
 
     NTSTATUS TlsConnection::SendProtectedRecord(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         TlsContentType contentType,
         const UCHAR* fragment,
         SIZE_T fragmentLength) noexcept
@@ -1808,13 +1821,13 @@ namespace tls
             return status;
         }
 
-        status = SendAll(socket, outputBuffer_, written);
+        status = SendAll(transport, outputBuffer_, written);
         RtlSecureZeroMemory(outputBuffer_, TlsIoBufferLength);
         return status;
     }
 
     NTSTATUS TlsConnection::SendProtectedRecord13(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         TlsContentType contentType,
         const UCHAR* fragment,
         SIZE_T fragmentLength) noexcept
@@ -1843,13 +1856,13 @@ namespace tls
             return status;
         }
 
-        status = SendAll(socket, outputBuffer_, written);
+        status = SendAll(transport, outputBuffer_, written);
         RtlSecureZeroMemory(outputBuffer_, TlsIoBufferLength);
         return status;
     }
 
     NTSTATUS TlsConnection::ReadRecord(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         TlsMutablePlaintextRecord& record,
         ULONG receiveTimeoutMilliseconds) noexcept
     {
@@ -1861,7 +1874,7 @@ namespace tls
             if (status == STATUS_MORE_PROCESSING_REQUIRED) {
                 if (inputLength_ < TlsRecordHeaderLength) {
                     status = ReadExact(
-                        socket,
+                        transport,
                         inputBuffer_ + inputLength_,
                         TlsRecordHeaderLength - inputLength_,
                         receiveTimeoutMilliseconds);
@@ -1885,7 +1898,7 @@ namespace tls
                 }
 
                 status = ReadExact(
-                    socket,
+                    transport,
                     inputBuffer_ + inputLength_,
                     recordLength - inputLength_,
                     receiveTimeoutMilliseconds);
@@ -1951,12 +1964,12 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::ReadServerChangeCipherSpec(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         bool allowNewSessionTicket) noexcept
     {
         for (;;) {
             TlsMutablePlaintextRecord record = {};
-            NTSTATUS status = ReadRecord(socket, record, handshakeReceiveTimeoutMilliseconds_);
+            NTSTATUS status = ReadRecord(transport, record, handshakeReceiveTimeoutMilliseconds_);
             if (!NT_SUCCESS(status)) {
                 kprintf("TlsConnection ReadServerChangeCipherSpec ReadRecord failed: 0x%08X\r\n",
                     static_cast<ULONG>(status));
@@ -2007,14 +2020,14 @@ namespace tls
         }
     }
 
-    NTSTATUS TlsConnection::ReadOptionalCompatibilityChangeCipherSpec(net::WskSocket& socket) noexcept
+    NTSTATUS TlsConnection::ReadOptionalCompatibilityChangeCipherSpec(core::ITransport& transport) noexcept
     {
         TlsRecordView view = {};
         NTSTATUS status = TlsRecordLayer::Parse(inputBuffer_, inputLength_, view);
         if (status == STATUS_MORE_PROCESSING_REQUIRED) {
             if (inputLength_ < TlsRecordHeaderLength) {
                 status = ReadExact(
-                    socket,
+                    transport,
                     inputBuffer_ + inputLength_,
                     TlsRecordHeaderLength - inputLength_,
                     handshakeReceiveTimeoutMilliseconds_);
@@ -2031,7 +2044,7 @@ namespace tls
                 return STATUS_BUFFER_TOO_SMALL;
             }
             status = ReadExact(
-                socket,
+                transport,
                 inputBuffer_ + inputLength_,
                 recordLength - inputLength_,
                 handshakeReceiveTimeoutMilliseconds_);
@@ -2062,11 +2075,11 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::ReadHandshakeMessage13(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         TlsHandshakeMessageView& message,
         bool updateTranscript) noexcept
     {
-        return ReadHandshakeMessage(socket, message, updateTranscript);
+        return ReadHandshakeMessage(transport, message, updateTranscript);
     }
 
     NTSTATUS TlsConnection::ValidateTls13Certificate(
@@ -2101,7 +2114,7 @@ namespace tls
         validation.HostName = options.ServerName;
         validation.HostNameLength = options.ServerNameLength;
         validation.Store = options.CertificateStore;
-        validation.Workspace = options.Workspace;
+        validation.ScratchAllocator = certificateScratchAllocator_;
         validation.ProviderCache = options.ProviderCache;
         validation.VerifyCertificate = options.VerifyCertificate;
 
@@ -2371,7 +2384,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::ReadHandshakeMessage(
-        net::WskSocket& socket,
+        core::ITransport& transport,
         TlsHandshakeMessageView& message,
         bool updateTranscript) noexcept
     {
@@ -2399,7 +2412,7 @@ namespace tls
                 }
 
                 TlsMutablePlaintextRecord record = {};
-                status = ReadRecord(socket, record, handshakeReceiveTimeoutMilliseconds_);
+                status = ReadRecord(transport, record, handshakeReceiveTimeoutMilliseconds_);
                 if (!NT_SUCCESS(status)) {
                     return status;
                 }

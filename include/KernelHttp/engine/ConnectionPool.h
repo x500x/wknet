@@ -9,6 +9,12 @@ namespace net
     class WskSocket;
 }
 
+namespace core
+{
+    class ITransport;
+    class WskTransport;
+}
+
 namespace tls
 {
     class TlsConnection;
@@ -42,6 +48,8 @@ namespace engine
         KhConnectionPoolKey Key = {};
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         net::WskSocket* Socket = nullptr;
+        core::WskTransport* RawTransport = nullptr;
+        core::ITransport* Transport = nullptr;
         tls::TlsConnection* Tls = nullptr;
 #endif
     };

@@ -1,10 +1,9 @@
 #pragma once
 
+#include <KernelHttp/core/ITransport.h>
 #include <KernelHttp/http2/Http2Frame.h>
 #include <KernelHttp/http2/Hpack.h>
 #include <KernelHttp/http2/Http2Stream.h>
-#include <KernelHttp/net/WskSocket.h>
-#include <KernelHttp/tls/TlsConnection.h>
 
 namespace KernelHttp
 {
@@ -27,45 +26,45 @@ namespace http2
             _Out_opt_ SIZE_T* bytesReceived) noexcept = 0;
     };
 
-    class Http2TlsTransport final : public Http2Transport
+    class Http2ITransportAdapter final : public Http2Transport
     {
     public:
-        Http2TlsTransport(_Inout_ net::WskSocket& socket, _Inout_ tls::TlsConnection& tls) noexcept;
+        explicit Http2ITransportAdapter(_Inout_ core::ITransport& transport) noexcept
+            : transport_(transport)
+        {
+        }
 
         _Must_inspect_result_
         NTSTATUS Send(
             _In_reads_bytes_(length) const UCHAR* data,
-            SIZE_T length) noexcept override;
+            SIZE_T length) noexcept override
+        {
+            SIZE_T totalSent = 0;
+            while (totalSent < length) {
+                SIZE_T sent = 0;
+                NTSTATUS status = transport_.Send(data + totalSent, length - totalSent, &sent);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                if (sent == 0) {
+                    return STATUS_CONNECTION_DISCONNECTED;
+                }
+                totalSent += sent;
+            }
+            return STATUS_SUCCESS;
+        }
 
         _Must_inspect_result_
         NTSTATUS Receive(
             _Out_writes_bytes_(length) UCHAR* data,
             SIZE_T length,
-            _Out_opt_ SIZE_T* bytesReceived) noexcept override;
+            _Out_opt_ SIZE_T* bytesReceived) noexcept override
+        {
+            return transport_.Receive(data, length, bytesReceived);
+        }
 
     private:
-        net::WskSocket& socket_;
-        tls::TlsConnection& tls_;
-    };
-
-    class Http2PlainTransport final : public Http2Transport
-    {
-    public:
-        explicit Http2PlainTransport(_Inout_ net::WskSocket& socket) noexcept;
-
-        _Must_inspect_result_
-        NTSTATUS Send(
-            _In_reads_bytes_(length) const UCHAR* data,
-            SIZE_T length) noexcept override;
-
-        _Must_inspect_result_
-        NTSTATUS Receive(
-            _Out_writes_bytes_(length) UCHAR* data,
-            SIZE_T length,
-            _Out_opt_ SIZE_T* bytesReceived) noexcept override;
-
-    private:
-        net::WskSocket& socket_;
+        core::ITransport& transport_;
     };
 
     class Http2Connection final
@@ -79,12 +78,7 @@ namespace http2
 
         NTSTATUS Initialize(_Inout_ Http2Transport& transport) noexcept;
 
-        // Establish HTTP/2 connection:
-        // Send connection preface + initial SETTINGS, receive peer SETTINGS and ACK
-        _Must_inspect_result_
-        NTSTATUS Initialize(
-            _Inout_ net::WskSocket& socket,
-            _Inout_ tls::TlsConnection& tls) noexcept;
+        NTSTATUS Initialize(_Inout_ core::ITransport& transport) noexcept;
 
         NTSTATUS SendRequest(
             _Inout_ Http2Transport& transport,
@@ -102,11 +96,8 @@ namespace http2
             _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,
             SIZE_T nameValueCapacity) noexcept;
 
-        // Send a single request and read the response (synchronous, single stream)
-        _Must_inspect_result_
         NTSTATUS SendRequest(
-            _Inout_ net::WskSocket& socket,
-            _Inout_ tls::TlsConnection& tls,
+            _Inout_ core::ITransport& transport,
             _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
             SIZE_T requestHeaderCount,
             _In_reads_bytes_opt_(bodyLength) const UCHAR* body,
@@ -123,10 +114,7 @@ namespace http2
 
         NTSTATUS Shutdown(_Inout_ Http2Transport& transport) noexcept;
 
-        // Graceful shutdown (send GOAWAY)
-        NTSTATUS Shutdown(
-            _Inout_ net::WskSocket& socket,
-            _Inout_ tls::TlsConnection& tls) noexcept;
+        NTSTATUS Shutdown(_Inout_ core::ITransport& transport) noexcept;
 
     private:
         // Send raw bytes through transport

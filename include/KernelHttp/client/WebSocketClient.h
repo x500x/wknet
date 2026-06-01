@@ -2,12 +2,18 @@
 
 #include <KernelHttp/http/HttpParser.h>
 #include <KernelHttp/net/WskClient.h>
+#include <KernelHttp/net/WskSocket.h>
 #include <KernelHttp/tls/CertificateStore.h>
 #include <KernelHttp/tls/TlsConnection.h>
 #include <KernelHttp/websocket/WebSocketFrame.h>
 
 namespace KernelHttp
 {
+namespace core
+{
+    class WskTransport;
+}
+
 namespace engine
 {
     struct KhWorkspace;
@@ -148,6 +154,7 @@ namespace client
             _Out_ http::HttpResponse& response) noexcept;
 
         net::WskSocket socket_ = {};
+        core::WskTransport* rawTransport_ = nullptr;
         tls::TlsConnection* tls_ = nullptr;
         UCHAR* maskingKey_ = nullptr;
         UCHAR* bufferedFrame_ = nullptr;

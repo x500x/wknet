@@ -1,6 +1,6 @@
 #pragma once
 
-#include <KernelHttp/engine/EngineInternal.h>
+#include <KernelHttp/engine/HandleTypes.h>
 
 namespace KernelHttp
 {

@@ -1,15 +1,11 @@
 #pragma once
 
+#include <KernelHttp/core/IScratchAllocator.h>
 #include <KernelHttp/tls/CertificateStore.h>
 #include <KernelHttp/tls/TlsHandshake12.h>
 
 namespace KernelHttp
 {
-namespace engine
-{
-    struct KhWorkspace;
-}
-
 namespace crypto
 {
     class CngProviderCache;
@@ -84,7 +80,7 @@ namespace tls
         const char* HostName = nullptr;
         SIZE_T HostNameLength = 0;
         const CertificateStore* Store = nullptr;
-        engine::KhWorkspace* Workspace = nullptr;
+        core::IScratchAllocator* ScratchAllocator = nullptr;
         const crypto::CngProviderCache* ProviderCache = nullptr;
         bool VerifyCertificate = true;
         bool RequireServerAuthEku = true;

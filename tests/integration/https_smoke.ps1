@@ -172,6 +172,7 @@ function Invoke-HostRegression {
         -ProjectSources @(
             'src\KernelHttpLib\http\HttpTypes.cpp',
             'src\KernelHttpLib\client\Http2Client.cpp',
+            'src\KernelHttpLib\core\TlsTransport.cpp',
             'src\KernelHttpLib\http2\Http2Connection.cpp',
             'src\KernelHttpLib\http2\Http2Frame.cpp',
             'src\KernelHttpLib\http2\Http2Stream.cpp',

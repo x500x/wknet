@@ -3,6 +3,8 @@
 #endif
 
 #include <KernelHttp/client/Http2Client.h>
+#include <KernelHttp/net/WskSocket.h>
+#include <KernelHttp/tls/TlsConnection.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -74,17 +76,17 @@ namespace tls
 {
     TlsConnection::~TlsConnection() noexcept = default;
 
-    NTSTATUS TlsConnection::Connect(net::WskSocket&, const TlsClientConnectionOptions&) noexcept
+    NTSTATUS TlsConnection::Connect(core::ITransport&, const TlsClientConnectionOptions&) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS TlsConnection::Send(net::WskSocket&, const void*, SIZE_T, SIZE_T*) noexcept
+    NTSTATUS TlsConnection::Send(core::ITransport&, const void*, SIZE_T, SIZE_T*) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS TlsConnection::Receive(net::WskSocket&, void*, SIZE_T, SIZE_T*) noexcept
+    NTSTATUS TlsConnection::Receive(core::ITransport&, void*, SIZE_T, SIZE_T*) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }

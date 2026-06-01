@@ -40,44 +40,6 @@ namespace http2
         }
     }
 
-    Http2TlsTransport::Http2TlsTransport(net::WskSocket& socket, tls::TlsConnection& tls) noexcept
-        : socket_(socket), tls_(tls)
-    {
-    }
-
-    NTSTATUS Http2TlsTransport::Send(const UCHAR* data, SIZE_T length) noexcept
-    {
-        SIZE_T sent = 0;
-        NTSTATUS status = tls_.Send(socket_, data, length, &sent);
-        if (!NT_SUCCESS(status)) return status;
-        if (sent != length) return STATUS_CONNECTION_DISCONNECTED;
-        return STATUS_SUCCESS;
-    }
-
-    NTSTATUS Http2TlsTransport::Receive(UCHAR* data, SIZE_T length, SIZE_T* bytesReceived) noexcept
-    {
-        return tls_.Receive(socket_, data, length, bytesReceived);
-    }
-
-    Http2PlainTransport::Http2PlainTransport(net::WskSocket& socket) noexcept
-        : socket_(socket)
-    {
-    }
-
-    NTSTATUS Http2PlainTransport::Send(const UCHAR* data, SIZE_T length) noexcept
-    {
-        SIZE_T sent = 0;
-        NTSTATUS status = socket_.Send(data, length, &sent);
-        if (!NT_SUCCESS(status)) return status;
-        if (sent != length) return STATUS_CONNECTION_DISCONNECTED;
-        return STATUS_SUCCESS;
-    }
-
-    NTSTATUS Http2PlainTransport::Receive(UCHAR* data, SIZE_T length, SIZE_T* bytesReceived) noexcept
-    {
-        return socket_.Receive(data, length, bytesReceived);
-    }
-
     Http2Connection::~Http2Connection() noexcept
     {
         delete[] sendBuffer_;
@@ -179,18 +141,10 @@ namespace http2
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS Http2Connection::Initialize(
-        net::WskSocket& socket,
-        tls::TlsConnection& tls) noexcept
+    NTSTATUS Http2Connection::Initialize(core::ITransport& transport) noexcept
     {
-        auto* transport = new Http2TlsTransport(socket, tls);
-        if (transport == nullptr) {
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
-
-        NTSTATUS status = Initialize(*transport);
-        delete transport;
-        return status;
+        Http2ITransportAdapter adapter(transport);
+        return Initialize(adapter);
     }
 
     NTSTATUS Http2Connection::SendRequest(
@@ -524,8 +478,7 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::SendRequest(
-        net::WskSocket& socket,
-        tls::TlsConnection& tls,
+        core::ITransport& transport,
         const http::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
         const UCHAR* body,
@@ -540,13 +493,9 @@ namespace http2
         char* nameValueBuffer,
         SIZE_T nameValueCapacity) noexcept
     {
-        auto* transport = new Http2TlsTransport(socket, tls);
-        if (transport == nullptr) {
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
-
-        NTSTATUS status = SendRequest(
-            *transport,
+        Http2ITransportAdapter adapter(transport);
+        return SendRequest(
+            adapter,
             requestHeaders,
             requestHeaderCount,
             body,
@@ -560,8 +509,6 @@ namespace http2
             statusCode,
             nameValueBuffer,
             nameValueCapacity);
-        delete transport;
-        return status;
     }
 
     NTSTATUS Http2Connection::Shutdown(Http2Transport& transport) noexcept
@@ -582,18 +529,10 @@ namespace http2
         return SendRaw(transport, buf, written);
     }
 
-    NTSTATUS Http2Connection::Shutdown(
-        net::WskSocket& socket,
-        tls::TlsConnection& tls) noexcept
+    NTSTATUS Http2Connection::Shutdown(core::ITransport& transport) noexcept
     {
-        auto* transport = new Http2TlsTransport(socket, tls);
-        if (transport == nullptr) {
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
-
-        NTSTATUS status = Shutdown(*transport);
-        delete transport;
-        return status;
+        Http2ITransportAdapter adapter(transport);
+        return Shutdown(adapter);
     }
 
     NTSTATUS Http2Connection::SendRaw(

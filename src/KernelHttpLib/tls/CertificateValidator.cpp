@@ -1,5 +1,4 @@
 #include <KernelHttp/tls/CertificateValidator.h>
-#include <KernelHttp/engine/Workspace.h>
 #include <KernelHttp/crypto/CngProviderCache.h>
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -70,6 +69,7 @@ namespace tls
             UCHAR* Data = nullptr;
             SIZE_T Length = 0;
             bool Owned = false;
+            core::IScratchAllocator* Allocator = nullptr;
             ParsedCertificate* Parsed = nullptr;
             UCHAR* Authority = nullptr;
             SIZE_T AuthorityLength = 0;
@@ -82,14 +82,18 @@ namespace tls
         {
             scratch = {};
 
-            if (options.Workspace != nullptr) {
-                if (options.Workspace->CertificateScratch.Data == nullptr ||
-                    options.Workspace->CertificateScratch.Length < CertificateScratchRequiredBytes) {
-                    return STATUS_BUFFER_TOO_SMALL;
+            if (options.ScratchAllocator != nullptr) {
+                void* buffer = nullptr;
+                const NTSTATUS status = options.ScratchAllocator->Acquire(
+                    CertificateScratchRequiredBytes,
+                    &buffer);
+                if (!NT_SUCCESS(status)) {
+                    return status;
                 }
 
-                scratch.Data = options.Workspace->CertificateScratch.Data;
-                scratch.Length = options.Workspace->CertificateScratch.Length;
+                scratch.Data = static_cast<UCHAR*>(buffer);
+                scratch.Length = CertificateScratchRequiredBytes;
+                scratch.Allocator = options.ScratchAllocator;
             }
             else {
                 scratch.Data = new UCHAR[CertificateScratchRequiredBytes];
@@ -116,6 +120,9 @@ namespace tls
 
             if (scratch.Owned) {
                 delete[] scratch.Data;
+            }
+            else if (scratch.Allocator != nullptr) {
+                scratch.Allocator->Release(scratch.Data);
             }
 
             scratch = {};

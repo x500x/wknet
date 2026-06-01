@@ -1,7 +1,9 @@
 #pragma once
 
+#include <KernelHttp/core/ITransport.h>
 #include <KernelHttp/http/HttpParser.h>
 #include <KernelHttp/http/HttpRequest.h>
+#include <KernelHttp/net/WskClient.h>
 #include <KernelHttp/tls/TlsConnection.h>
 
 namespace KernelHttp
@@ -70,8 +72,7 @@ namespace client
     private:
         _Must_inspect_result_
         NTSTATUS ReadHttpResponse(
-            _Inout_ net::WskSocket& socket,
-            _Inout_ tls::TlsConnection& tls,
+            _Inout_ core::ITransport& transport,
             bool responseBodyForbidden,
             _In_ const HttpsResponseBuffers& buffers,
             _Out_ http::HttpResponse& response) noexcept;

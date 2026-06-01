@@ -1,5 +1,10 @@
 #include <KernelHttp/engine/HttpEngine.h>
-#include <KernelHttp/engine/EngineInternal.h>
+#include <KernelHttp/core/TlsTransport.h>
+#include <KernelHttp/core/WorkspaceScratchAllocator.h>
+#include <KernelHttp/core/WskTransport.h>
+#include <KernelHttp/client/Http2Client.h>
+#include <KernelHttp/engine/EngineImpl.h>
+#include <KernelHttp/engine/HandleAlloc.h>
 #include <KernelHttp/http/HttpContentEncoding.h>
 #include <KernelHttp/http/HttpParser.h>
 #include <KernelHttp/http/HttpRequest.h>
@@ -554,8 +559,7 @@ namespace engine
     NTSTATUS SendHttp2ViaTransport(
         const KhRequest& request,
         KhWorkspace& workspace,
-        _Inout_ net::WskSocket& socket,
-        _Inout_ tls::TlsConnection& tlsConnection,
+        _Inout_ core::ITransport& transport,
         _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
         _Out_ http::HttpResponse* parsed,
@@ -614,22 +618,15 @@ namespace engine
             return status;
         }
 
-        auto* transport = new http2::Http2TlsTransport(socket, tlsConnection);
-        if (transport == nullptr) {
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
-
         auto* h2Connection = new http2::Http2Connection();
         if (h2Connection == nullptr) {
-            delete transport;
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        status = h2Connection->Initialize(*transport);
+        status = h2Connection->Initialize(transport);
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
             delete h2Connection;
-            delete transport;
             return status;
         }
 
@@ -637,7 +634,7 @@ namespace engine
         SIZE_T responseBodyLength = 0;
         USHORT statusCode = 0;
         status = h2Connection->SendRequest(
-            *transport,
+            transport,
             h2Scratch.Headers,
             h2HeaderCount,
             request.Body,
@@ -654,10 +651,9 @@ namespace engine
 
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            const NTSTATUS shutdownStatus = h2Connection->Shutdown(*transport);
+            const NTSTATUS shutdownStatus = h2Connection->Shutdown(transport);
             UNREFERENCED_PARAMETER(shutdownStatus);
             delete h2Connection;
-            delete transport;
             return status;
         }
 
@@ -677,10 +673,9 @@ namespace engine
             decoded);
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            const NTSTATUS shutdownStatus = h2Connection->Shutdown(*transport);
+            const NTSTATUS shutdownStatus = h2Connection->Shutdown(transport);
             UNREFERENCED_PARAMETER(shutdownStatus);
             delete h2Connection;
-            delete transport;
             return status;
         }
 
@@ -696,10 +691,9 @@ namespace engine
         workspace.ResponseLength = responseBodyLength;
         *rawResponseLength = responseBodyLength;
 
-        const NTSTATUS shutdownStatus = h2Connection->Shutdown(*transport);
+        const NTSTATUS shutdownStatus = h2Connection->Shutdown(transport);
         UNREFERENCED_PARAMETER(shutdownStatus);
         delete h2Connection;
-        delete transport;
         return STATUS_SUCCESS;
     }
 #endif
@@ -752,8 +746,7 @@ namespace engine
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
     _Must_inspect_result_
     NTSTATUS ReadHttpResponseFromSocket(
-        _Inout_ net::WskSocket& socket,
-        _Inout_opt_ tls::TlsConnection* tls,
+        _Inout_ core::ITransport& transport,
         _Inout_ KhWorkspace& workspace,
         bool responseBodyForbidden,
         _Out_ http::HttpResponse* parsed,
@@ -806,19 +799,10 @@ namespace engine
             }
 
             SIZE_T received = 0;
-            if (tls != nullptr) {
-                status = tls->Receive(
-                    socket,
-                    workspace.Response.Data + responseLength,
-                    workspace.Response.Length - responseLength,
-                    &received);
-            }
-            else {
-                status = socket.Receive(
-                    workspace.Response.Data + responseLength,
-                    workspace.Response.Length - responseLength,
-                    &received);
-            }
+            status = transport.Receive(
+                workspace.Response.Data + responseLength,
+                workspace.Response.Length - responseLength,
+                &received);
 
             if (!NT_SUCCESS(status)) {
                 if (!IsConnectionCloseStatus(status)) {
@@ -929,6 +913,18 @@ namespace engine
             return STATUS_SUCCESS;
         }
 
+        if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
+            delete connection.Transport;
+            connection.Transport = nullptr;
+        }
+        if (connection.Tls != nullptr) {
+            delete connection.Tls;
+            connection.Tls = nullptr;
+        }
+        if (connection.RawTransport != nullptr) {
+            delete connection.RawTransport;
+            connection.RawTransport = nullptr;
+        }
         if (connection.Socket != nullptr) {
             delete connection.Socket;
             connection.Socket = nullptr;
@@ -975,6 +971,13 @@ namespace engine
                     reinterpret_cast<const SOCKADDR*>(&remoteAddresses[addressIndex]));
                 if (NT_SUCCESS(status)) {
                     connection.Socket = socket;
+                    connection.RawTransport = new core::WskTransport(*connection.Socket);
+                    if (connection.RawTransport == nullptr) {
+                        delete connection.Socket;
+                        connection.Socket = nullptr;
+                        return STATUS_INSUFFICIENT_RESOURCES;
+                    }
+                    connection.Transport = connection.RawTransport;
                     return STATUS_SUCCESS;
                 }
 
@@ -1000,14 +1003,21 @@ namespace engine
         const KhRequest& request,
         _Inout_ KhPooledConnection& connection) noexcept
     {
-        if (session == nullptr || connection.Socket == nullptr) {
+        if (session == nullptr || connection.Socket == nullptr || connection.RawTransport == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (connection.Tls != nullptr && connection.Tls->IsEstablished()) {
+        if (connection.Tls != nullptr &&
+            connection.Tls->IsEstablished() &&
+            connection.Transport != nullptr &&
+            connection.Transport != connection.RawTransport) {
             return STATUS_SUCCESS;
         }
 
+        if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
+            delete connection.Transport;
+            connection.Transport = connection.RawTransport;
+        }
         if (connection.Tls != nullptr) {
             delete connection.Tls;
             connection.Tls = nullptr;
@@ -1020,6 +1030,22 @@ namespace engine
 
         tls::TlsAlpnProtocol alpn = {};
         tls::TlsClientConnectionOptions tlsOptions = {};
+        core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
+        core::WorkspaceScratchAllocator* certificateScratch = nullptr;
+        if (session->Workspace != nullptr) {
+            handshakeScratch = new core::WorkspaceScratchAllocator(
+                *session->Workspace,
+                core::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
+            certificateScratch = new core::WorkspaceScratchAllocator(
+                *session->Workspace,
+                core::WorkspaceScratchAllocator::BufferKind::Certificate);
+            if (handshakeScratch == nullptr || certificateScratch == nullptr) {
+                delete certificateScratch;
+                delete handshakeScratch;
+                delete tlsConnection;
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+        }
         tlsOptions.ServerName = request.Tls.ServerName != nullptr ? request.Tls.ServerName : request.Host;
         tlsOptions.ServerNameLength = request.Tls.ServerName != nullptr ?
             request.Tls.ServerNameLength :
@@ -1029,7 +1055,8 @@ namespace engine
         tlsOptions.MinimumProtocol = ToTlsProtocol(request.Tls.MinVersion);
         tlsOptions.MaximumProtocol = ToTlsProtocol(request.Tls.MaxVersion);
         tlsOptions.HandshakeReceiveTimeoutMilliseconds = request.Tls.HandshakeReceiveTimeoutMilliseconds;
-        tlsOptions.Workspace = session->Workspace;
+        tlsOptions.HandshakeScratchAllocator = handshakeScratch;
+        tlsOptions.CertificateScratchAllocator = certificateScratch;
         tlsOptions.ProviderCache = session->ProviderCache;
         tlsOptions.EnableSessionResumption = true;
 
@@ -1040,7 +1067,7 @@ namespace engine
             tlsOptions.AlpnProtocolCount = 1;
         }
 
-        NTSTATUS status = tlsConnection->Connect(*connection.Socket, tlsOptions);
+        NTSTATUS status = tlsConnection->Connect(*connection.RawTransport, tlsOptions);
         if (!NT_SUCCESS(status) &&
             (status == STATUS_INVALID_NETWORK_RESPONSE ||
              status == STATUS_CONNECTION_RESET ||
@@ -1050,11 +1077,24 @@ namespace engine
             delete tlsConnection;
             tlsConnection = nullptr;
 
+            if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
+                delete connection.Transport;
+                connection.Transport = connection.RawTransport;
+            }
+            if (connection.RawTransport != nullptr) {
+                delete connection.RawTransport;
+                connection.RawTransport = nullptr;
+                connection.Transport = nullptr;
+            }
+            const NTSTATUS reconnectClose = connection.Socket->Close();
+            UNREFERENCED_PARAMETER(reconnectClose);
             delete connection.Socket;
             connection.Socket = nullptr;
 
             auto* retrySocket = new net::WskSocket();
             if (retrySocket == nullptr) {
+                delete certificateScratch;
+                delete handshakeScratch;
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
@@ -1062,6 +1102,8 @@ namespace engine
             HeapArray<wchar_t> serviceName(KhMaxServiceNameLength + 1);
             if (!serverName.IsValid() || !serviceName.IsValid()) {
                 delete retrySocket;
+                delete certificateScratch;
+                delete handshakeScratch;
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
@@ -1073,6 +1115,8 @@ namespace engine
             HeapObject<SOCKADDR_STORAGE> retryAddress;
             if (!retryAddress.IsValid()) {
                 delete retrySocket;
+                delete certificateScratch;
+                delete handshakeScratch;
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
@@ -1090,25 +1134,59 @@ namespace engine
             }
             if (!NT_SUCCESS(status)) {
                 delete retrySocket;
+                delete certificateScratch;
+                delete handshakeScratch;
                 return status;
             }
 
             connection.Socket = retrySocket;
+            connection.RawTransport = new core::WskTransport(*connection.Socket);
+            if (connection.RawTransport == nullptr) {
+                delete connection.Socket;
+                connection.Socket = nullptr;
+                delete certificateScratch;
+                delete handshakeScratch;
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            connection.Transport = connection.RawTransport;
+
             tlsConnection = new tls::TlsConnection();
             if (tlsConnection == nullptr) {
+                delete connection.RawTransport;
+                connection.RawTransport = nullptr;
+                connection.Transport = nullptr;
+                const NTSTATUS retryClose = connection.Socket->Close();
+                UNREFERENCED_PARAMETER(retryClose);
+                delete connection.Socket;
+                connection.Socket = nullptr;
+                delete certificateScratch;
+                delete handshakeScratch;
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
             tlsOptions.MaximumProtocol = tls::TlsProtocol::Tls12;
-            status = tlsConnection->Connect(*connection.Socket, tlsOptions);
+            status = tlsConnection->Connect(*connection.RawTransport, tlsOptions);
         }
 
         if (!NT_SUCCESS(status)) {
             delete tlsConnection;
+            delete certificateScratch;
+            delete handshakeScratch;
             return status;
         }
 
+        auto* tlsTransport = new core::TlsTransport(*connection.RawTransport, *tlsConnection);
+        if (tlsTransport == nullptr) {
+            delete tlsConnection;
+            delete certificateScratch;
+            delete handshakeScratch;
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        delete certificateScratch;
+        delete handshakeScratch;
         connection.Tls = tlsConnection;
+        connection.Transport = tlsTransport;
         return STATUS_SUCCESS;
     }
 #endif
@@ -1233,6 +1311,10 @@ namespace engine
 
         if (tlsConnection != nullptr &&
             TextEqualsLiteral(request.Tls.Alpn, request.Tls.AlpnLength, "h2")) {
+            if (pooledConnection->Transport == nullptr) {
+                return STATUS_INVALID_DEVICE_STATE;
+            }
+
             const char* negotiatedAlpn = tlsConnection->NegotiatedAlpn();
             const SIZE_T negotiatedAlpnLength = tlsConnection->NegotiatedAlpnLength();
             if (!TextEqualsLiteral(negotiatedAlpn, negotiatedAlpnLength, "h2")) {
@@ -1245,8 +1327,7 @@ namespace engine
             status = SendHttp2ViaTransport(
                 request,
                 workspace,
-                *pooledConnection->Socket,
-                *tlsConnection,
+                *pooledConnection->Transport,
                 requestHeaders,
                 requestHeaderCount,
                 parsed,
@@ -1262,16 +1343,13 @@ namespace engine
         }
 
         SIZE_T sent = 0;
-        if (tlsConnection != nullptr) {
-            status = tlsConnection->Send(
-                *pooledConnection->Socket,
-                workspace.Request.Data,
-                builtRequestLength,
-                &sent);
+        if (pooledConnection->Transport == nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
         }
-        else {
-            status = pooledConnection->Socket->Send(workspace.Request.Data, builtRequestLength, &sent);
-        }
+        status = pooledConnection->Transport->Send(
+            workspace.Request.Data,
+            builtRequestLength,
+            &sent);
 
         if (NT_SUCCESS(status) && sent != builtRequestLength) {
             status = STATUS_CONNECTION_DISCONNECTED;
@@ -1281,8 +1359,7 @@ namespace engine
         }
 
         status = ReadHttpResponseFromSocket(
-            *pooledConnection->Socket,
-            tlsConnection,
+            *pooledConnection->Transport,
             workspace,
             request.Method == KhHttpMethod::Head,
             parsed,

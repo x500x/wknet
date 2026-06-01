@@ -12,6 +12,9 @@
     <Filter Include="Source Files\client">
       <UniqueIdentifier>{9D513525-581D-46E5-BCDB-B06F9F0FC8AA}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\core">
+      <UniqueIdentifier>{A82F2D68-30B8-4A4F-B2CF-6AB8E4F3D153}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\crypto">
       <UniqueIdentifier>{1271C8D8-04BC-4EE0-9A2A-2C4D27E15DBD}</UniqueIdentifier>
     </Filter>
@@ -41,6 +44,9 @@
     </Filter>
     <Filter Include="Header Files\client">
       <UniqueIdentifier>{45F02825-5476-4470-A5E4-F08068A6F8FE}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\core">
+      <UniqueIdentifier>{1CCEF3A8-5E95-4D78-A8E5-5F055A3A9A37}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\crypto">
       <UniqueIdentifier>{4F1C3587-045F-47F1-A184-706C5F0E2C2F}</UniqueIdentifier>
@@ -82,6 +88,9 @@
     </ClCompile>
     <ClCompile Include="client\WebSocketClient.cpp">
       <Filter>Source Files\client</Filter>
+    </ClCompile>
+    <ClCompile Include="core\TlsTransport.cpp">
+      <Filter>Source Files\core</Filter>
     </ClCompile>
     <ClCompile Include="crypto\CngProvider.cpp">
       <Filter>Source Files\crypto</Filter>
@@ -247,6 +256,21 @@
     <ClInclude Include="..\..\include\KernelHttp\client\WebSocketClient.h">
       <Filter>Header Files\client</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\core\IScratchAllocator.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\core\ITransport.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\core\TlsTransport.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\core\WorkspaceScratchAllocator.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\core\WskTransport.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\crypto\CngProvider.h">
       <Filter>Header Files\crypto</Filter>
     </ClInclude>
@@ -256,7 +280,19 @@
     <ClInclude Include="..\..\include\KernelHttp\engine\Engine.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\engine\EngineImpl.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\engine\EngineInternal.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\engine\EngineUtils.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\engine\HandleAlloc.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\engine\HandleTypes.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\engine\HttpEngine.h">

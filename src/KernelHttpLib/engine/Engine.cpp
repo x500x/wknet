@@ -1,6 +1,7 @@
-#include <KernelHttp/engine/EngineInternal.h>
 #include <KernelHttp/engine/Async.h>
 #include <KernelHttp/engine/ConnectionPool.h>
+#include <KernelHttp/engine/EngineImpl.h>
+#include <KernelHttp/engine/HandleAlloc.h>
 #include <KernelHttp/engine/UrlParser.h>
 #include <KernelHttp/engine/Workspace.h>
 #include <KernelHttp/crypto/CngProviderCache.h>

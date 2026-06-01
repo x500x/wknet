@@ -1,16 +1,12 @@
 #pragma once
 
-#include <KernelHttp/net/WskSocket.h>
+#include <KernelHttp/core/IScratchAllocator.h>
+#include <KernelHttp/core/ITransport.h>
 #include <KernelHttp/tls/CertificateValidator.h>
 #include <KernelHttp/tls/TlsHandshake13.h>
 
 namespace KernelHttp
 {
-namespace engine
-{
-    struct KhWorkspace;
-}
-
 namespace crypto
 {
     class CngProviderCache;
@@ -38,7 +34,8 @@ namespace tls
         TlsProtocol MaximumProtocol = TlsProtocol::Tls13;
         ULONG HandshakeReceiveTimeoutMilliseconds = TlsHandshakeReceiveTimeoutMilliseconds;
         Tls13SessionCache* SessionCache = nullptr;
-        engine::KhWorkspace* Workspace = nullptr;
+        core::IScratchAllocator* HandshakeScratchAllocator = nullptr;
+        core::IScratchAllocator* CertificateScratchAllocator = nullptr;
         const crypto::CngProviderCache* ProviderCache = nullptr;
         bool EnableSessionResumption = true;
         bool EnableEarlyData = false;
@@ -57,19 +54,19 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS Connect(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             _In_ const TlsClientConnectionOptions& options) noexcept;
 
         _Must_inspect_result_
         NTSTATUS Send(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             _In_reads_bytes_(length) const void* data,
             SIZE_T length,
             _Out_opt_ SIZE_T* bytesSent = nullptr) noexcept;
 
         _Must_inspect_result_
         NTSTATUS Receive(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             _Out_writes_bytes_(length) void* data,
             SIZE_T length,
             _Out_opt_ SIZE_T* bytesReceived = nullptr) noexcept;
@@ -97,19 +94,21 @@ namespace tls
             SIZE_T length,
             _Outptr_result_bytebuffer_(length) UCHAR** buffer) noexcept;
 
+        void ReleaseHandshakeScratch() noexcept;
+
         _Must_inspect_result_
         NTSTATUS ConnectTls12(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             _In_ const TlsClientConnectionOptions& options) noexcept;
 
         _Must_inspect_result_
         NTSTATUS ConnectTls13(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             _In_ const TlsClientConnectionOptions& options) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendPlainRecordWithVersion(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             TlsProtocolVersion version,
             TlsContentType contentType,
             _In_reads_bytes_(fragmentLength) const UCHAR* fragment,
@@ -117,40 +116,40 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS SendPlainRecord(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             TlsContentType contentType,
             _In_reads_bytes_(fragmentLength) const UCHAR* fragment,
             SIZE_T fragmentLength) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendProtectedRecord(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             TlsContentType contentType,
             _In_reads_bytes_(fragmentLength) const UCHAR* fragment,
             SIZE_T fragmentLength) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendProtectedRecord13(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             TlsContentType contentType,
             _In_reads_bytes_(fragmentLength) const UCHAR* fragment,
             SIZE_T fragmentLength) noexcept;
 
         _Must_inspect_result_
         NTSTATUS ReadRecord(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             _Out_ TlsMutablePlaintextRecord& record,
             ULONG receiveTimeoutMilliseconds = WskOperationTimeoutMilliseconds) noexcept;
 
         _Must_inspect_result_
         NTSTATUS ReadHandshakeMessage13(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             _Out_ TlsHandshakeMessageView& message,
             bool updateTranscript) noexcept;
 
         _Must_inspect_result_
         NTSTATUS ReadOptionalCompatibilityChangeCipherSpec(
-            _Inout_ net::WskSocket& socket) noexcept;
+            _Inout_ core::ITransport& transport) noexcept;
 
         _Must_inspect_result_
         NTSTATUS ValidateTls13Certificate(
@@ -180,7 +179,7 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS ReadServerChangeCipherSpec(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             bool allowNewSessionTicket) noexcept;
 
         _Must_inspect_result_
@@ -195,7 +194,7 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS ReadHandshakeMessage(
-            _Inout_ net::WskSocket& socket,
+            _Inout_ core::ITransport& transport,
             _Out_ TlsHandshakeMessageView& message,
             bool updateTranscript) noexcept;
 
@@ -227,7 +226,10 @@ namespace tls
         TlsAeadCipherState clientWriteState_ = {};
         TlsAeadCipherState serverWriteState_ = {};
         TlsTranscriptHash transcript_ = {};
-        engine::KhWorkspace* workspace_ = nullptr;
+        core::IScratchAllocator* handshakeScratchAllocator_ = nullptr;
+        core::IScratchAllocator* certificateScratchAllocator_ = nullptr;
+        UCHAR* handshakeScratch_ = nullptr;
+        SIZE_T handshakeScratchLength_ = 0;
         const crypto::CngProviderCache* providerCache_ = nullptr;
         UCHAR* ownedTlsScratch_ = nullptr;
         SIZE_T ownedTlsScratchLength_ = 0;

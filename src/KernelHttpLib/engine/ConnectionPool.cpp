@@ -1,4 +1,6 @@
 #include <KernelHttp/engine/ConnectionPool.h>
+#include <KernelHttp/core/TlsTransport.h>
+#include <KernelHttp/core/WskTransport.h>
 #include <KernelHttp/net/WskSocket.h>
 #include <KernelHttp/tls/TlsConnection.h>
 
@@ -63,9 +65,18 @@ namespace
     void ResetConnection(_Inout_ KhPooledConnection& connection) noexcept
     {
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (connection.Transport != nullptr &&
+            connection.Transport != connection.RawTransport) {
+            delete connection.Transport;
+            connection.Transport = nullptr;
+        }
         if (connection.Tls != nullptr) {
             delete connection.Tls;
             connection.Tls = nullptr;
+        }
+        if (connection.RawTransport != nullptr) {
+            delete connection.RawTransport;
+            connection.RawTransport = nullptr;
         }
         if (connection.Socket != nullptr) {
             const NTSTATUS closeStatus = connection.Socket->Close();
@@ -223,10 +234,20 @@ namespace
         }
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (connection->Transport != nullptr &&
+            connection->Transport != connection->RawTransport) {
+            delete connection->Transport;
+            connection->Transport = nullptr;
+        }
         if (connection->Tls != nullptr) {
             delete connection->Tls;
             connection->Tls = nullptr;
         }
+        if (connection->RawTransport != nullptr) {
+            delete connection->RawTransport;
+            connection->RawTransport = nullptr;
+        }
+        connection->Transport = nullptr;
         if (connection->Socket != nullptr) {
             const NTSTATUS closeStatus = connection->Socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);

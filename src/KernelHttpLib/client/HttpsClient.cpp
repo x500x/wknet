@@ -1,4 +1,7 @@
 #include <KernelHttp/client/HttpsClient.h>
+#include <KernelHttp/core/TlsTransport.h>
+#include <KernelHttp/core/WorkspaceScratchAllocator.h>
+#include <KernelHttp/core/WskTransport.h>
 #include <KernelHttp/engine/Workspace.h>
 #include <KernelHttp/client/Http2Client.h>
 #include <KernelHttp/http/HttpContentEncoding.h>
@@ -147,6 +150,34 @@ namespace client
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
+        auto* rawTransport = new core::WskTransport(*socket.Get());
+        if (rawTransport == nullptr) {
+            delete tlsConnection;
+            const NTSTATUS closeStatus = socket->Close();
+            UNREFERENCED_PARAMETER(closeStatus);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
+        core::WorkspaceScratchAllocator* certificateScratch = nullptr;
+        if (options.Workspace != nullptr) {
+            handshakeScratch = new core::WorkspaceScratchAllocator(
+                *options.Workspace,
+                core::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
+            certificateScratch = new core::WorkspaceScratchAllocator(
+                *options.Workspace,
+                core::WorkspaceScratchAllocator::BufferKind::Certificate);
+            if (handshakeScratch == nullptr || certificateScratch == nullptr) {
+                delete certificateScratch;
+                delete handshakeScratch;
+                delete rawTransport;
+                delete tlsConnection;
+                const NTSTATUS closeStatus = socket->Close();
+                UNREFERENCED_PARAMETER(closeStatus);
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+        }
+
         static const tls::TlsAlpnProtocol alpnProtocols[] = {
             { "h2", 2 },
             { "http/1.1", 8 }
@@ -160,7 +191,8 @@ namespace client
         tlsOptions.MinimumProtocol = options.MinimumTlsProtocol;
         tlsOptions.MaximumProtocol = options.MaximumTlsProtocol;
         tlsOptions.SessionCache = options.SessionCache;
-        tlsOptions.Workspace = options.Workspace;
+        tlsOptions.HandshakeScratchAllocator = handshakeScratch;
+        tlsOptions.CertificateScratchAllocator = certificateScratch;
         tlsOptions.ProviderCache = options.ProviderCache;
         tlsOptions.EnableSessionResumption = options.EnableSessionResumption;
         tlsOptions.EnableEarlyData = options.EnableEarlyData;
@@ -173,13 +205,25 @@ namespace client
             tlsOptions.AlpnProtocolCount = 2;
         }
 
-        status = tlsConnection->Connect(*socket.Get(), tlsOptions);
+        status = tlsConnection->Connect(*rawTransport, tlsOptions);
+        delete certificateScratch;
+        delete handshakeScratch;
         if (!NT_SUCCESS(status)) {
             kprintf("HttpsClient TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            delete rawTransport;
             delete tlsConnection;
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
             return status;
+        }
+
+        auto* tlsTransport = new core::TlsTransport(*rawTransport, *tlsConnection);
+        if (tlsTransport == nullptr) {
+            delete rawTransport;
+            delete tlsConnection;
+            const NTSTATUS closeStatus = socket->Close();
+            UNREFERENCED_PARAMETER(closeStatus);
+            return STATUS_INSUFFICIENT_RESOURCES;
         }
 
         // Check ALPN negotiation result
@@ -187,28 +231,22 @@ namespace client
         SIZE_T alpnLen = tlsConnection->NegotiatedAlpnLength();
 
         if (options.PreferHttp2 && AlpnIsH2(alpn, alpnLen)) {
-            auto* transport = new http2::Http2TlsTransport(*socket.Get(), *tlsConnection);
-            if (transport == nullptr) {
-                delete tlsConnection;
-                const NTSTATUS closeStatus = socket->Close();
-                UNREFERENCED_PARAMETER(closeStatus);
-                return STATUS_INSUFFICIENT_RESOURCES;
-            }
-
             auto* h2conn = new http2::Http2Connection();
             if (h2conn == nullptr) {
-                delete transport;
+                delete tlsTransport;
+                delete rawTransport;
                 delete tlsConnection;
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
-            status = h2conn->Initialize(*transport);
+            status = h2conn->Initialize(*tlsTransport);
             if (!NT_SUCCESS(status)) {
                 kprintf("HttpsClient H2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 delete h2conn;
-                delete transport;
+                delete tlsTransport;
+                delete rawTransport;
                 delete tlsConnection;
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
@@ -236,9 +274,10 @@ namespace client
 
             HeapObject<Http2HeaderScratch> h2Scratch;
             if (!h2Scratch.IsValid()) {
-                h2conn->Shutdown(*transport);
+                h2conn->Shutdown(*tlsTransport);
                 delete h2conn;
-                delete transport;
+                delete tlsTransport;
+                delete rawTransport;
                 delete tlsConnection;
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
@@ -247,9 +286,10 @@ namespace client
 
             status = PrepareHttp2HeaderScratch(options.Workspace, *h2Scratch.Get());
             if (!NT_SUCCESS(status)) {
-                h2conn->Shutdown(*transport);
+                h2conn->Shutdown(*tlsTransport);
                 delete h2conn;
-                delete transport;
+                delete tlsTransport;
+                delete rawTransport;
                 delete tlsConnection;
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
@@ -266,9 +306,10 @@ namespace client
                 &h2HeaderCount);
             if (!NT_SUCCESS(status)) {
                 ReleaseHttp2HeaderScratch(*h2Scratch.Get());
-                h2conn->Shutdown(*transport);
+                h2conn->Shutdown(*tlsTransport);
                 delete h2conn;
-                delete transport;
+                delete tlsTransport;
+                delete rawTransport;
                 delete tlsConnection;
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
@@ -280,7 +321,7 @@ namespace client
             USHORT respStatusCode = 0;
 
             status = h2conn->SendRequest(
-                *transport,
+                *tlsTransport,
                 h2Scratch->Headers, h2HeaderCount,
                 reinterpret_cast<const UCHAR*>(options.Request.Body),
                 options.Request.BodyLength,
@@ -327,13 +368,11 @@ namespace client
             }
 
             ReleaseHttp2HeaderScratch(*h2Scratch.Get());
-            h2conn->Shutdown(*transport);
+            h2conn->Shutdown(*tlsTransport);
             delete h2conn;
-            delete transport;
         } else {
-            // HTTP/1.1 path (original behavior)
             SIZE_T sent = 0;
-            status = tlsConnection->Send(*socket.Get(), buffers.RequestBuffer, requestLength, &sent);
+            status = tlsConnection->Send(*rawTransport, buffers.RequestBuffer, requestLength, &sent);
             if (NT_SUCCESS(status) && sent != requestLength) {
                 status = STATUS_CONNECTION_DISCONNECTED;
             }
@@ -345,13 +384,15 @@ namespace client
             }
 
             if (NT_SUCCESS(status)) {
-                status = ReadHttpResponse(*socket.Get(), *tlsConnection, options.ResponseBodyForbidden, buffers, response);
+                status = ReadHttpResponse(*tlsTransport, options.ResponseBodyForbidden, buffers, response);
                 if (!NT_SUCCESS(status)) {
                     kprintf("HttpsClient read response failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 }
             }
         }
 
+        delete tlsTransport;
+        delete rawTransport;
         delete tlsConnection;
         const NTSTATUS closeStatus = socket->Close();
         UNREFERENCED_PARAMETER(closeStatus);
@@ -359,8 +400,7 @@ namespace client
     }
 
     NTSTATUS HttpsClient::ReadHttpResponse(
-        net::WskSocket& socket,
-        tls::TlsConnection& tls,
+        core::ITransport& transport,
         bool responseBodyForbidden,
         const HttpsResponseBuffers& buffers,
         http::HttpResponse& response) noexcept
@@ -398,8 +438,7 @@ namespace client
             }
 
             SIZE_T received = 0;
-            status = tls.Receive(
-                socket,
+            status = transport.Receive(
                 buffers.ResponseBuffer + responseLength,
                 buffers.ResponseBufferLength - responseLength,
                 &received);
