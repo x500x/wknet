@@ -97,7 +97,7 @@ KernelHttp 提供了两层 API 供开发者使用：**高层 API** 和 **底层 
 |---------|---------|------|
 | `AsyncWait` | `KhAsyncWait` | 等待完成 |
 | `AsyncCancel` | `KhAsyncCancel` | 取消操作 |
-| `AsyncGetStatus` | `KhAsyncGetStatus` | 获取状态 |
+| `AsyncGetStatus` | 无直接对应 | 获取状态（高层 API 特有） |
 | `AsyncRelease` | `KhAsyncRelease` | 释放操作 |
 
 ### WebSocket

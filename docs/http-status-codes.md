@@ -1,6 +1,6 @@
 # HTTP 状态码参考
 
-本文档列出所有标准 HTTP 状态码及其含义，帮助开发者理解服务器返回的响应状态。
+本文档列出标准 HTTP 状态码及其含义，帮助开发者理解服务器返回的响应状态。
 
 [English Version](#english-version) | 简体中文
 
@@ -8,12 +8,180 @@
 
 ## 目录
 
+- [快速参考（常用状态码）](#快速参考常用状态码)
+- [在 KernelHttp 中使用](#在-kernelhttp-中使用)
 - [1xx 信息响应](#1xx-信息响应)
 - [2xx 成功响应](#2xx-成功响应)
 - [3xx 重定向响应](#3xx-重定向响应)
 - [4xx 客户端错误](#4xx-客户端错误)
 - [5xx 服务器错误](#5xx-服务器错误)
-- [在 KernelHttp 中使用](#在-kernelhttp-中使用)
+
+---
+
+## 快速参考（常用状态码）
+
+以下是 HTTP 开发中最常遇到的状态码：
+
+### 成功响应
+
+| 状态码 | 名称 | 描述 |
+|--------|------|------|
+| 200 | OK | 请求成功 |
+| 201 | Created | 资源已创建（POST/PUT 成功） |
+| 204 | No Content | 成功但无返回内容（DELETE 常用） |
+
+### 客户端错误
+
+| 状态码 | 名称 | 描述 |
+|--------|------|------|
+| 400 | Bad Request | 请求语法错误或参数无效 |
+| 401 | Unauthorized | 需要身份认证 |
+| 403 | Forbidden | 权限不足，拒绝执行 |
+| 404 | Not Found | 资源不存在 |
+| 405 | Method Not Allowed | 请求方法不被允许 |
+| 408 | Request Timeout | 请求超时 |
+| 429 | Too Many Requests | 请求过于频繁（限流） |
+
+### 服务器错误
+
+| 状态码 | 名称 | 描述 |
+|--------|------|------|
+| 500 | Internal Server Error | 服务器内部错误 |
+| 502 | Bad Gateway | 网关错误 |
+| 503 | Service Unavailable | 服务不可用（过载或维护） |
+| 504 | Gateway Timeout | 网关超时 |
+
+---
+
+## 在 KernelHttp 中使用
+
+### 获取状态码
+
+#### 高层 API
+
+```cpp
+khttp::Response* response = nullptr;
+NTSTATUS status = khttp::Get(session, url, urlLen, &response);
+
+if (NT_SUCCESS(status)) {
+    // 获取 HTTP 状态码
+    ULONG statusCode = khttp::ResponseStatusCode(response);
+    
+    // 根据状态码处理
+    switch (statusCode) {
+    case 200:
+        // 成功处理
+        break;
+    case 404:
+        // 资源不存在
+        break;
+    case 500:
+        // 服务器错误
+        break;
+    }
+    
+    khttp::ResponseRelease(response);
+}
+```
+
+#### 底层 API
+
+```cpp
+KH_RESPONSE response = nullptr;
+NTSTATUS status = KhHttpSendSync(session, request, nullptr, &response);
+
+if (NT_SUCCESS(status)) {
+    KhResponseView view = {};
+    KhResponseGetView(response, &view);
+    
+    // view.StatusCode 包含 HTTP 状态码
+    if (view.StatusCode >= 200 && view.StatusCode < 300) {
+        // 成功响应
+    } else if (view.StatusCode >= 400) {
+        // 客户端或服务器错误
+    }
+    
+    KhResponseRelease(response);
+}
+```
+
+### 状态码分类处理
+
+```cpp
+NTSTATUS HandleResponse(ULONG statusCode) {
+    if (statusCode >= 100 && statusCode < 200) {
+        // 1xx 信息响应 - 继续处理
+        return STATUS_SUCCESS;
+    }
+    else if (statusCode >= 200 && statusCode < 300) {
+        // 2xx 成功响应
+        return STATUS_SUCCESS;
+    }
+    else if (statusCode >= 300 && statusCode < 400) {
+        // 3xx 重定向 - 处理重定向
+        return STATUS_REDIRECT;
+    }
+    else if (statusCode >= 400 && statusCode < 500) {
+        // 4xx 客户端错误 - 检查请求
+        return STATUS_INVALID_PARAMETER;
+    }
+    else if (statusCode >= 500 && statusCode < 600) {
+        // 5xx 服务器错误 - 可能需要重试
+        return STATUS_UNSUCCESSFUL;
+    }
+    
+    return STATUS_SUCCESS;
+}
+```
+
+### 完整的错误处理示例
+
+```cpp
+void HandleHttpError(ULONG statusCode) {
+    switch (statusCode) {
+    // 4xx 客户端错误
+    case 400:
+        DbgPrint("Bad Request: check request parameters\n");
+        break;
+    case 401:
+        DbgPrint("Unauthorized: authentication required\n");
+        break;
+    case 403:
+        DbgPrint("Forbidden: insufficient permissions\n");
+        break;
+    case 404:
+        DbgPrint("Not Found: resource does not exist\n");
+        break;
+    case 405:
+        DbgPrint("Method Not Allowed: check HTTP method\n");
+        break;
+    case 408:
+        DbgPrint("Request Timeout: retry may help\n");
+        break;
+    case 429:
+        DbgPrint("Too Many Requests: rate limited, wait and retry\n");
+        break;
+    
+    // 5xx 服务器错误
+    case 500:
+        DbgPrint("Internal Server Error: server issue\n");
+        break;
+    case 502:
+        DbgPrint("Bad Gateway: upstream server issue\n");
+        break;
+    case 503:
+        DbgPrint("Service Unavailable: server overloaded or maintenance\n");
+        break;
+    case 504:
+        DbgPrint("Gateway Timeout: upstream server timeout\n");
+        break;
+    
+    default:
+        DbgPrint("HTTP Error %lu\n", statusCode);
+        break;
+    }
+}
+```
 
 ---
 
@@ -124,94 +292,40 @@
 
 ---
 
-## 在 KernelHttp 中使用
-
-### 获取状态码
-
-#### 高层 API
-
-```cpp
-khttp::Response* response = nullptr;
-NTSTATUS status = khttp::Get(session, url, urlLen, &response);
-
-if (NT_SUCCESS(status)) {
-    // 获取 HTTP 状态码
-    ULONG statusCode = khttp::ResponseStatusCode(response);
-    
-    // 根据状态码处理
-    switch (statusCode) {
-    case 200:
-        // 成功处理
-        break;
-    case 404:
-        // 资源不存在
-        break;
-    case 500:
-        // 服务器错误
-        break;
-    }
-    
-    khttp::ResponseRelease(response);
-}
-```
-
-#### 底层 API
-
-```cpp
-KH_RESPONSE response = nullptr;
-NTSTATUS status = KhHttpSendSync(session, request, nullptr, &response);
-
-if (NT_SUCCESS(status)) {
-    KhResponseView view = {};
-    KhResponseGetView(response, &view);
-    
-    // view.StatusCode 包含 HTTP 状态码
-    if (view.StatusCode >= 200 && view.StatusCode < 300) {
-        // 成功响应
-    } else if (view.StatusCode >= 400) {
-        // 客户端或服务器错误
-    }
-    
-    KhResponseRelease(response);
-}
-```
-
-### 状态码分类处理
-
-```cpp
-NTSTATUS HandleResponse(ULONG statusCode) {
-    if (statusCode >= 100 && statusCode < 200) {
-        // 1xx 信息响应 - 继续处理
-        return STATUS_SUCCESS;
-    }
-    else if (statusCode >= 200 && statusCode < 300) {
-        // 2xx 成功响应
-        return STATUS_SUCCESS;
-    }
-    else if (statusCode >= 300 && statusCode < 400) {
-        // 3xx 重定向 - 处理重定向
-        return STATUS_REDIRECT;
-    }
-    else if (statusCode >= 400 && statusCode < 500) {
-        // 4xx 客户端错误
-        return STATUS_INVALID_PARAMETER;
-    }
-    else if (statusCode >= 500 && statusCode < 600) {
-        // 5xx 服务器错误
-        return STATUS_UNSUCCESSFUL;
-    }
-    
-    return STATUS_SUCCESS;
-}
-```
-
----
-
 ## English Version
 
 # HTTP Status Code Reference
 
-This document lists all standard HTTP status codes and their meanings.
+## Quick Reference (Common Status Codes)
+
+### Success
+
+| Code | Name | Description |
+|------|------|-------------|
+| 200 | OK | Request succeeded |
+| 201 | Created | Resource created (POST/PUT success) |
+| 204 | No Content | Success with no content (DELETE common) |
+
+### Client Errors
+
+| Code | Name | Description |
+|------|------|-------------|
+| 400 | Bad Request | Invalid request syntax or parameters |
+| 401 | Unauthorized | Authentication required |
+| 403 | Forbidden | Insufficient permissions |
+| 404 | Not Found | Resource not found |
+| 405 | Method Not Allowed | HTTP method not allowed |
+| 408 | Request Timeout | Request timeout |
+| 429 | Too Many Requests | Rate limited |
+
+### Server Errors
+
+| Code | Name | Description |
+|------|------|-------------|
+| 500 | Internal Server Error | Server internal error |
+| 502 | Bad Gateway | Upstream server error |
+| 503 | Service Unavailable | Server overloaded or maintenance |
+| 504 | Gateway Timeout | Upstream server timeout |
 
 ## 1xx Informational
 
@@ -292,7 +406,7 @@ This document lists all standard HTTP status codes and their meanings.
 | 501 | Not Implemented | Server doesn't support functionality |
 | 502 | Bad Gateway | Invalid upstream response |
 | 503 | Service Unavailable | Server temporarily unavailable |
-| 504 | Gateway Timeout | Upserver response timeout |
+| 504 | Gateway Timeout | Upstream server response timeout |
 | 505 | HTTP Version Not Supported | HTTP version not supported |
 | 506 | Variant Also Negotiates | Server configuration error |
 | 507 | Insufficient Storage | Cannot store content (WebDAV) |

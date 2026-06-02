@@ -9,11 +9,6 @@
 | 头文件 | 主要内容 |
 |---|---|
 | `engine/Engine.h` | 核心 API：会话、请求、响应、WebSocket、异步操作的完整接口定义 |
-| `engine/EngineInternal.h` | 内部实现：句柄结构体、辅助函数、测试钩子 |
-| `engine/ConnectionPool.h` | 连接池管理：连接复用、池化策略 |
-| `engine/Workspace.h` | 工作空间：缓冲区管理、内存分配 |
-| `engine/Async.h` | 异步操作：任务调度、状态管理、回调机制 |
-| `engine/UrlParser.h` | URL 解析：scheme、host、port、path 提取 |
 
 底层 API 依赖以下模块：
 - `net/WskClient.h`：WSK 客户端，提供网络传输
@@ -22,6 +17,8 @@
 - `http/HttpParser.h`：HTTP 解析器
 - `http2/Http2Connection.h`：HTTP/2 连接
 - `websocket/WebSocketFrame.h`：WebSocket 帧处理
+
+> **注意**：内部实现细节（如 `engine/EngineInternal.h`、`engine/ConnectionPool.h`、`engine/Workspace.h`、`engine/Async.h` 等）不属于公共 API，不应直接使用。
 
 ## 2. 核心概念与句柄类型
 
@@ -429,18 +426,7 @@ NTSTATUS KhAsyncGetWebSocket(
 void KhAsyncRelease(_In_opt_ KH_ASYNC_OPERATION operation) noexcept;
 ```
 
-### 8.2 异步操作状态查询
 
-```cpp
-// 查询异步操作状态
-NTSTATUS KhAsyncGetStatus(_In_opt_ const AsyncOp* operation) noexcept;
-
-// 检查异步操作是否已完成
-bool KhAsyncIsCompleted(_In_opt_ const AsyncOp* operation) noexcept;
-
-// 检查异步操作是否已取消
-bool KhAsyncIsCanceled(_In_opt_ const AsyncOp* operation) noexcept;
-```
 
 ## 9. WebSocket 支持
 
@@ -543,125 +529,20 @@ enum class KhWebSocketMessageType : ULONG {
 NTSTATUS KhWebSocketCloseSync(_In_opt_ KH_WEBSOCKET websocket) noexcept;
 ```
 
-## 10. 内部组件
+## 10. 测试辅助函数
 
-### 10.1 连接池（`KhConnectionPool`）
+底层 API 提供了一系列测试辅助函数，用于单元测试和调试。这些函数仅在定义了 `KERNEL_HTTP_USER_MODE_TEST` 宏时可用。
 
-连接池管理 HTTP/HTTPS 连接的复用，减少连接建立开销。
-
-```cpp
-struct KhConnectionPool final {
-    KhPooledConnection* Entries = nullptr;  // 连接条目数组
-    ULONG Capacity = 0;                    // 池容量
-    ULONG ActiveCount = 0;                 // 活跃连接数
-    ULONG NextConnectionId = 1;            // 下一个连接 ID
-};
-```
-
-连接池键（用于标识连接）：
-```cpp
-struct KhConnectionPoolKey final {
-    char Scheme[6] = {};           // 协议方案
-    SIZE_T SchemeLength = 0;
-    char Host[KhPoolMaxHostLength + 1] = {};  // 主机名
-    SIZE_T HostLength = 0;
-    USHORT Port = 0;               // 端口
-    net::WskAddressFamily AddressFamily = net::WskAddressFamily::Any;  // 地址族
-    KhTlsVersion MinTlsVersion = KhTlsVersion::Tls12;  // 最小 TLS 版本
-    KhTlsVersion MaxTlsVersion = KhTlsVersion::Tls13;  // 最大 TLS 版本
-    KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;  // 证书策略
-    char Alpn[KhPoolMaxAlpnLength + 1] = {};  // ALPN 协议
-    SIZE_T AlpnLength = 0;
-};
-```
-
-### 10.2 工作空间（`KhWorkspace`）
-
-工作空间管理请求和响应的缓冲区，避免频繁内存分配。
-
-```cpp
-struct KhWorkspace final {
-    KhPoolType PoolType = KhPoolType::NonPaged;  // 内存池类型
-    SIZE_T MaxResponseBytes = KhDefaultMaxResponseBytes;  // 0 表示不限制
-    KhWorkspaceBuffer Request = {};      // 请求缓冲区
-    KhWorkspaceBuffer Response = {};     // 响应缓冲区
-    KhWorkspaceBuffer DecodedBody = {};  // 解码后正文缓冲区
-    KhWorkspaceBuffer Http2HeaderScratch = {};  // HTTP/2 头部临时缓冲区
-    KhWorkspaceBuffer TlsHandshakeScratch = {};  // TLS 握手临时缓冲区
-    KhWorkspaceBuffer CertificateScratch = {};  // 证书临时缓冲区
-    KhWorkspaceBuffer WebSocketFrameScratch = {};  // WebSocket 帧临时缓冲区
-    SIZE_T ResponseLength = 0;           // 当前响应长度
-};
-```
-
-### 10.3 异步操作（`KhAsyncOperation`）
-
-异步操作管理后台任务执行，支持取消、等待、状态查询。
-
-```cpp
-struct KhAsyncOperation {
-    ULONG Magic = KhAsyncOperationMagic;  // 魔数校验
-    bool Closed = false;                  // 是否已关闭
-    KhAsyncOperationKind Kind = KhAsyncOperationKind::HttpSend;  // 操作类型
-    volatile LONG ReferenceCount = 1;     // 引用计数
-    volatile LONG Canceled = 0;           // 是否已取消
-    KhAsyncState State = KhAsyncState::Pending;  // 操作状态
-    NTSTATUS Status = STATUS_PENDING;     // 操作状态码
-    KhAsyncWorkerRoutine WorkerRoutine = nullptr;  // 工作例程
-    KhAsyncCleanupRoutine CleanupRoutine = nullptr;  // 清理例程
-    void* Context = nullptr;              // 上下文
-    KhAsyncCompletionCallback CompletionCallback = nullptr;  // 完成回调
-    void* CompletionContext = nullptr;    // 完成回调上下文
-    bool Queued = false;                  // 是否已入队
-#if defined(KERNEL_HTTP_USER_MODE_TEST)
-    bool CompletionSignaled = false;      // 用户模式测试用
-#else
-    KEVENT CompletedEvent = {};           // 内核事件对象
-#endif
-};
-```
-
-## 11. 测试辅助函数
-
-底层 API 提供了一系列测试辅助函数，用于单元测试和调试：
-
-### 11.1 HTTP 传输测试钩子
+### 10.1 HTTP 传输测试钩子
 
 ```cpp
 // 设置 HTTP 传输测试回调
 void KhTestSetHttpTransport(
     KhTestHttpTransportCallback callback,
     void* context) noexcept;
-
-// HTTP 传输测试请求结构体
-struct KhTestHttpTransportRequest final {
-    const char* Scheme = nullptr;
-    SIZE_T SchemeLength = 0;
-    const char* Host = nullptr;
-    SIZE_T HostLength = 0;
-    USHORT Port = 0;
-    KhAddressFamily AddressFamily = KhAddressFamily::Any;
-    const char* BuiltRequest = nullptr;
-    SIZE_T BuiltRequestLength = 0;
-    KhConnectionPolicy ConnectionPolicy = KhConnectionPolicy::ReuseOrCreate;
-    KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
-    const tls::CertificateStore* CertificateStore = nullptr;
-    const char* Alpn = nullptr;
-    SIZE_T AlpnLength = 0;
-    bool PoolableConnection = false;
-    bool ReusedConnection = false;
-    ULONG ConnectionId = 0;
-};
-
-// HTTP 传输测试响应结构体
-struct KhTestHttpTransportResponse final {
-    const char* RawResponse = nullptr;
-    SIZE_T RawResponseLength = 0;
-    bool ConnectionReusable = true;
-};
 ```
 
-### 11.2 WebSocket 传输测试钩子
+### 10.2 WebSocket 传输测试钩子
 
 ```cpp
 // 设置 WebSocket 传输测试回调
@@ -673,7 +554,7 @@ void KhTestSetWebSocketTransport(
     void* context) noexcept;
 ```
 
-### 11.3 异步操作测试辅助
+### 10.3 异步操作测试辅助
 
 ```cpp
 // 设置异步操作自动运行
@@ -692,17 +573,7 @@ bool KhTestAsyncIsCompleted(_In_ KH_ASYNC_OPERATION operation) noexcept;
 bool KhTestAsyncIsCanceled(_In_ KH_ASYNC_OPERATION operation) noexcept;
 ```
 
-### 11.4 IRQL 测试辅助
-
-```cpp
-// 设置当前 IRQL（用于测试）
-void KhTestSetCurrentIrql(ULONG irql) noexcept;
-
-// 重置当前 IRQL
-void KhTestResetCurrentIrql() noexcept;
-```
-
-### 11.5 会话状态查询
+### 10.4 会话状态查询
 
 ```cpp
 // 检查会话是否有工作空间
@@ -712,41 +583,41 @@ bool KhTestSessionHasWorkspace(KH_SESSION session) noexcept;
 bool KhTestSessionHasProviderCache(KH_SESSION session) noexcept;
 ```
 
-## 12. 最佳实践
+## 11. 最佳实践
 
-### 12.1 资源管理
+### 11.1 资源管理
 
 - 始终检查 `NTSTATUS` 返回值
 - 使用 RAII 模式或确保在所有代码路径上释放资源
 - 避免在异步操作完成前释放相关资源
 
-### 12.2 连接复用
+### 11.2 连接复用
 
 - 使用 `KhConnectionPolicy::ReuseOrCreate` 以获得最佳性能
 - 避免频繁创建新连接（`KhConnectionPolicy::ForceNew`）
 - 对于一次性请求，使用 `KhConnectionPolicy::NoPool`
 
-### 12.3 TLS 配置
+### 11.3 TLS 配置
 
 - 在会话级别设置默认 TLS 配置
 - 在请求级别覆盖特定请求的 TLS 配置
 - 使用 `CertificateStore` 进行证书锁定
 
-### 12.4 异步操作
+### 11.4 异步操作
 
 - 使用 `KhAsyncWait` 等待异步操作完成
 - 使用 `KhAsyncCancel` 取消长时间运行的操作
 - 始终调用 `KhAsyncRelease` 释放异步操作句柄
 
-### 12.5 WebSocket
+### 11.5 WebSocket
 
 - 使用 `AutoReplyPing = true` 自动响应 Ping 消息
 - 设置合理的 `MaxMessageBytes` 防止内存耗尽
 - 始终调用 `KhWebSocketCloseSync` 关闭连接
 
-## 13. 错误处理
+## 12. 错误处理
 
-### 13.1 常见错误码
+### 12.1 常见错误码
 
 | NTSTATUS | 描述 |
 |---|---|
@@ -759,7 +630,7 @@ bool KhTestSessionHasProviderCache(KH_SESSION session) noexcept;
 | `STATUS_NOT_SUPPORTED` | 操作不支持 |
 | `STATUS_CANCELLED` | 操作被取消 |
 
-### 13.2 错误处理策略
+### 12.2 错误处理策略
 
 ```cpp
 NTSTATUS status = KhHttpSendSync(session, request, nullptr, &response);
@@ -782,29 +653,29 @@ if (!NT_SUCCESS(status)) {
 }
 ```
 
-## 14. 性能考虑
+## 13. 性能考虑
 
-### 14.1 连接池优化
+### 13.1 连接池优化
 
 - 根据应用需求调整 `ConnectionPoolCapacity`
 - 监控 `ActiveCount` 避免连接池耗尽
 - 使用 `IdleTimeoutMilliseconds` 及时释放空闲连接
 
-### 14.2 内存管理
+### 13.2 内存管理
 
 - 使用 `KhPoolType::Paged` 用于大响应，避免非分页池耗尽
 - 合理设置 `MaxResponseBytes` 防止内存耗尽；0 表示不限制
 - 及时释放不再需要的响应和请求
 
-### 14.3 异步操作
+### 13.3 异步操作
 
 - 使用异步操作避免阻塞线程
 - 合理设置超时时间
 - 使用回调函数处理完成事件
 
-## 15. 示例代码
+## 14. 示例代码
 
-### 15.1 完整的 HTTP GET 请求
+### 14.1 完整的 HTTP GET 请求
 
 ```cpp
 #include <KernelHttp/engine/Engine.h>
@@ -860,7 +731,7 @@ NTSTATUS PerformHttpGet(net::WskClient& wskClient) {
 }
 ```
 
-### 15.2 带 TLS 的 HTTPS 请求
+### 14.2 带 TLS 的 HTTPS 请求
 
 ```cpp
 NTSTATUS PerformHttpsRequest(net::WskClient& wskClient) {
@@ -915,7 +786,7 @@ NTSTATUS PerformHttpsRequest(net::WskClient& wskClient) {
 }
 ```
 
-### 15.3 异步请求
+### 14.3 异步请求
 
 ```cpp
 NTSTATUS PerformAsyncRequest(net::WskClient& wskClient) {
@@ -974,7 +845,7 @@ NTSTATUS PerformAsyncRequest(net::WskClient& wskClient) {
 }
 ```
 
-### 15.4 WebSocket 连接
+### 14.4 WebSocket 连接
 
 ```cpp
 NTSTATUS PerformWebSocketConnection(net::WskClient& wskClient) {
@@ -1030,7 +901,7 @@ NTSTATUS PerformWebSocketConnection(net::WskClient& wskClient) {
 }
 ```
 
-## 16. 与高层 API 的关系
+## 15. 与高层 API 的关系
 
 底层 API 是高层 API 的基础实现。高层 API（`KernelHttp::khttp`）在底层 API 之上提供了更简洁的接口，隐藏了底层细节。选择使用哪个 API 取决于具体需求：
 
@@ -1049,7 +920,7 @@ NTSTATUS PerformWebSocketConnection(net::WskClient& wskClient) {
 - 更少的样板代码
 - 更好的易用性
 
-## 17. 注意事项
+## 16. 注意事项
 
 1. **线程安全**：底层 API 不是线程安全的，多线程访问需要外部同步
 2. **IRQL 要求**：所有 API 必须在 `PASSIVE_LEVEL` 调用
@@ -1058,22 +929,22 @@ NTSTATUS PerformWebSocketConnection(net::WskClient& wskClient) {
 5. **资源释放**：确保在所有代码路径上释放资源
 6. **版本兼容性**：内部结构可能随版本变化，避免直接访问内部字段
 
-## 18. 调试技巧
+## 17. 调试技巧
 
 1. **启用测试钩子**：使用 `KhTestSetHttpTransport` 等函数注入测试回调
 2. **监控连接池**：检查连接池容量和活跃连接数
-3. **跟踪异步操作**：使用 `KhAsyncGetStatus` 监控操作状态
+3. **跟踪异步操作**：使用 `KhAsyncWait` 等待完成，或使用测试辅助函数 `KhTestAsyncStatus` 监控状态
 4. **验证 TLS 配置**：确保 TLS 版本和证书策略正确
 5. **检查缓冲区**：验证缓冲区大小和内容
 
-## 19. 版本历史
+## 18. 版本历史
 
 - v1.0：初始版本，包含完整的底层 API 定义
 - 测试辅助函数：支持用户模式测试和内核模式调试
 - 异步操作：支持后台任务执行和取消
 - WebSocket：支持全双工通信
 
-## 20. 相关文档
+## 19. 相关文档
 
 - [高层 API 文档](high-level-api.md)：高层 API 的详细使用说明，适合大多数应用场景
 - [API 概述](api-overview.md)：高层 API 和底层 API 的对比和选择指南
