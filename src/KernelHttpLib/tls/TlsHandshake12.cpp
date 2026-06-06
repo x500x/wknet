@@ -658,6 +658,35 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS TlsHandshake12::ParseNewSessionTicket(
+        const TlsHandshakeMessageView& message,
+        Tls12NewSessionTicketView& ticket) noexcept
+    {
+        ticket = {};
+
+        if (message.Type != TlsHandshakeType::NewSessionTicket) {
+            return STATUS_NOT_SUPPORTED;
+        }
+        if (message.Body == nullptr || message.BodyLength < 6) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        const SIZE_T ticketLength =
+            (static_cast<SIZE_T>(message.Body[4]) << 8) | message.Body[5];
+        if (ticketLength != message.BodyLength - 6) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        ticket.LifetimeHintSeconds =
+            (static_cast<ULONG>(message.Body[0]) << 24) |
+            (static_cast<ULONG>(message.Body[1]) << 16) |
+            (static_cast<ULONG>(message.Body[2]) << 8) |
+            message.Body[3];
+        ticket.Ticket = message.Body + 6;
+        ticket.TicketLength = ticketLength;
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS TlsHandshake12::EncodeClientHello(
         TlsContext& context,
         const TlsClientHelloOptions& options,

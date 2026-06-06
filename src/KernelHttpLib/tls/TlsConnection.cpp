@@ -1860,9 +1860,31 @@ namespace tls
                 continue;
             }
 
+            if (!tls13RecordProtection_ &&
+                context_.Protocol() == TlsProtocol::Tls12 &&
+                record.ContentType == TlsContentType::Handshake) {
+                status = ConsumeOptionalPlainHandshakeRecord(record.Fragment, record.FragmentLength);
+                if (!NT_SUCCESS(status)) {
+                    kprintf("TlsConnection consume TLS1.2 NewSessionTicket during HTTP read failed: 0x%08X length=%Iu\r\n",
+                        static_cast<ULONG>(status),
+                        record.FragmentLength);
+                    return status;
+                }
+                continue;
+            }
+
             if (record.ContentType == TlsContentType::Alert) {
                 kprintf("TlsConnection receive alert during HTTP read length=%Iu\r\n", record.FragmentLength);
                 return STATUS_CONNECTION_DISCONNECTED;
+            }
+
+            if (!tls13RecordProtection_ &&
+                context_.Protocol() == TlsProtocol::Tls12 &&
+                (handshakeLength_ != 0 || handshakeConsumed_ != 0)) {
+                kprintf("TlsConnection incomplete TLS1.2 handshake before application data length=%Iu consumed=%Iu\r\n",
+                    handshakeLength_,
+                    handshakeConsumed_);
+                return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
             if (record.ContentType != TlsContentType::ApplicationData) {
@@ -2490,18 +2512,13 @@ namespace tls
                 return status;
             }
 
-            if (parsed.Type != TlsHandshakeType::NewSessionTicket) {
-                return STATUS_INVALID_NETWORK_RESPONSE;
-            }
-
-            if (parsed.Body == nullptr || parsed.BodyLength < 6) {
-                return STATUS_INVALID_NETWORK_RESPONSE;
-            }
-
-            const SIZE_T ticketLength =
-                (static_cast<SIZE_T>(parsed.Body[4]) << 8) | parsed.Body[5];
-            if (ticketLength != parsed.BodyLength - 6) {
-                return STATUS_INVALID_NETWORK_RESPONSE;
+            Tls12NewSessionTicketView ticket = {};
+            status = TlsHandshake12::ParseNewSessionTicket(parsed, ticket);
+            if (!NT_SUCCESS(status)) {
+                if (status == STATUS_NOT_SUPPORTED) {
+                    status = STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                return status;
             }
 
             status = AppendTranscript(handshakeBuffer_ + handshakeConsumed_, parsed.BytesConsumed);

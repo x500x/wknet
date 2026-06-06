@@ -133,8 +133,8 @@ namespace engine
         volatile LONG InFlight = 0;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         FAST_MUTEX OperationLock = {};
-        FAST_MUTEX SendLock = {};
-        FAST_MUTEX ReceiveLock = {};
+        KMUTEX SendLock = {};
+        KMUTEX ReceiveLock = {};
         KEVENT DrainEvent = {};
         client::WebSocketClient* Client = nullptr;
 #endif

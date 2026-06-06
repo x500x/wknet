@@ -202,29 +202,30 @@ namespace engine
     };
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
-    class FastMutexScope final
+    class MutexScope final
     {
     public:
-        explicit FastMutexScope(_Inout_ FAST_MUTEX* mutex) noexcept :
+        explicit MutexScope(_Inout_ KMUTEX* mutex) noexcept :
             mutex_(mutex)
         {
             if (mutex_ != nullptr) {
-                ExAcquireFastMutex(mutex_);
+                acquired_ = NT_SUCCESS(KeWaitForSingleObject(mutex_, Executive, KernelMode, FALSE, nullptr));
             }
         }
 
-        ~FastMutexScope() noexcept
+        ~MutexScope() noexcept
         {
-            if (mutex_ != nullptr) {
-                ExReleaseFastMutex(mutex_);
+            if (mutex_ != nullptr && acquired_) {
+                KeReleaseMutex(mutex_, FALSE);
             }
         }
 
-        FastMutexScope(const FastMutexScope&) = delete;
-        FastMutexScope& operator=(const FastMutexScope&) = delete;
+        MutexScope(const MutexScope&) = delete;
+        MutexScope& operator=(const MutexScope&) = delete;
 
     private:
-        FAST_MUTEX* mutex_ = nullptr;
+        KMUTEX* mutex_ = nullptr;
+        bool acquired_ = false;
     };
 #endif
 
@@ -375,8 +376,8 @@ namespace engine
         newWebSocket->InFlight = 0;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         ExInitializeFastMutex(&newWebSocket->OperationLock);
-        ExInitializeFastMutex(&newWebSocket->SendLock);
-        ExInitializeFastMutex(&newWebSocket->ReceiveLock);
+        KeInitializeMutex(&newWebSocket->SendLock, 0);
+        KeInitializeMutex(&newWebSocket->ReceiveLock, 0);
         KeInitializeEvent(&newWebSocket->DrainEvent, NotificationEvent, TRUE);
 #endif
 
@@ -736,11 +737,16 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        FastMutexScope sendLock(&websocket->SendLock);
+        MutexScope sendLock(&websocket->SendLock);
         client::WebSocketIoBuffers buffers = {};
         buffers.FrameBuffer = frameBuffer.Get();
         buffers.FrameBufferLength = frameBuffer.Count();
-        return websocket->Client->SendText(text, textLength, buffers);
+        status = websocket->Client->SendText(text, textLength, buffers);
+        if (!NT_SUCCESS(status)) {
+            kprintf("KhWebSocketSendTextSync Client->SendText failed: 0x%08X\r\n",
+                static_cast<ULONG>(status));
+        }
+        return status;
 #endif
     }
 
@@ -788,11 +794,16 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        FastMutexScope sendLock(&websocket->SendLock);
+        MutexScope sendLock(&websocket->SendLock);
         client::WebSocketIoBuffers buffers = {};
         buffers.FrameBuffer = frameBuffer.Get();
         buffers.FrameBufferLength = frameBuffer.Count();
-        return websocket->Client->SendBinary(data, dataLength, buffers);
+        status = websocket->Client->SendBinary(data, dataLength, buffers);
+        if (!NT_SUCCESS(status)) {
+            kprintf("KhWebSocketSendBinarySync Client->SendBinary failed: 0x%08X\r\n",
+                static_cast<ULONG>(status));
+        }
+        return status;
 #endif
     }
 
@@ -892,7 +903,7 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        FastMutexScope receiveLock(&websocket->ReceiveLock);
+        MutexScope receiveLock(&websocket->ReceiveLock);
         client::WebSocketIoBuffers buffers = {};
         buffers.FrameBuffer = frameBuffer.Get();
         buffers.FrameBufferLength = frameBuffer.Count();
@@ -905,6 +916,8 @@ namespace engine
             payloadBuffer.Count(),
             &bytesReceived);
         if (!NT_SUCCESS(status)) {
+            kprintf("KhWebSocketReceiveSync Client->ReceiveMessage failed: 0x%08X\r\n",
+                static_cast<ULONG>(status));
             return status;
         }
 

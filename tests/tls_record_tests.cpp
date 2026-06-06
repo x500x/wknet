@@ -32,6 +32,7 @@ using KernelHttp::tls::TlsAesGcmExplicitNonceLength;
 using KernelHttp::tls::TlsAesGcmFixedIvLength;
 using KernelHttp::tls::TlsAesGcmTls13IvLength;
 using KernelHttp::tls::TlsAesGcmTagLength;
+using KernelHttp::tls::Tls12NewSessionTicketView;
 using KernelHttp::tls::TlsClientHelloOptions;
 using KernelHttp::tls::TlsRecordHeaderLength;
 using KernelHttp::tls::TlsContentType;
@@ -1748,16 +1749,56 @@ namespace
     void TestParseNewSessionTicketMessage()
     {
         const UCHAR message[] = {
-            4, 0, 0, 6,
-            0, 0, 0, 0, 0, 0
+            4, 0, 0, 9,
+            0, 0, 0, 10,
+            0, 3, 't', 'k', 't'
         };
 
         TlsHandshakeMessageView parsed = {};
-        const NTSTATUS status = TlsHandshake12::ParseMessage(message, sizeof(message), parsed);
+        NTSTATUS status = TlsHandshake12::ParseMessage(message, sizeof(message), parsed);
 
         Expect(status == STATUS_SUCCESS, "NewSessionTicket handshake parses");
         Expect(parsed.Type == TlsHandshakeType::NewSessionTicket, "NewSessionTicket type parses");
-        Expect(parsed.BodyLength == 6, "NewSessionTicket body length parses");
+        Expect(parsed.BodyLength == 9, "NewSessionTicket body length parses");
+
+        Tls12NewSessionTicketView ticket = {};
+        status = TlsHandshake12::ParseNewSessionTicket(parsed, ticket);
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 NewSessionTicket payload parses");
+        Expect(ticket.LifetimeHintSeconds == 10, "TLS 1.2 NewSessionTicket lifetime parses");
+        Expect(ticket.TicketLength == 3, "TLS 1.2 NewSessionTicket ticket length parses");
+        Expect(ticket.Ticket != nullptr && memcmp(ticket.Ticket, "tkt", 3) == 0, "TLS 1.2 NewSessionTicket ticket parses");
+    }
+
+    void TestParseNewSessionTicketRejectsUnexpectedType()
+    {
+        const UCHAR message[] = {
+            static_cast<UCHAR>(TlsHandshakeType::ServerHelloDone), 0, 0, 0
+        };
+
+        TlsHandshakeMessageView parsed = {};
+        NTSTATUS status = TlsHandshake12::ParseMessage(message, sizeof(message), parsed);
+        Expect(status == STATUS_SUCCESS, "unexpected TLS 1.2 handshake message parses generically");
+
+        Tls12NewSessionTicketView ticket = {};
+        status = TlsHandshake12::ParseNewSessionTicket(parsed, ticket);
+        Expect(status == STATUS_NOT_SUPPORTED, "TLS 1.2 NewSessionTicket parser rejects non-ticket messages");
+    }
+
+    void TestParseNewSessionTicketRejectsBadLength()
+    {
+        const UCHAR message[] = {
+            4, 0, 0, 7,
+            0, 0, 0, 10,
+            0, 4, 't'
+        };
+
+        TlsHandshakeMessageView parsed = {};
+        NTSTATUS status = TlsHandshake12::ParseMessage(message, sizeof(message), parsed);
+        Expect(status == STATUS_SUCCESS, "malformed TLS 1.2 NewSessionTicket parses generically");
+
+        Tls12NewSessionTicketView ticket = {};
+        status = TlsHandshake12::ParseNewSessionTicket(parsed, ticket);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "TLS 1.2 NewSessionTicket parser rejects mismatched ticket length");
     }
 
     void TestParseServerHello()
@@ -2242,6 +2283,8 @@ int main()
     TestTls13ClientHelloPskBinderTranscriptLength();
     TestTls13PskBinderRejectsWrongHashLength();
     TestParseNewSessionTicketMessage();
+    TestParseNewSessionTicketRejectsUnexpectedType();
+    TestParseNewSessionTicketRejectsBadLength();
     TestParseServerHello();
     TestParseServerKeyExchange();
     TestParseCertificateListState();

@@ -51,6 +51,13 @@ namespace tls
         SIZE_T BytesConsumed = 0;
     };
 
+    struct Tls12NewSessionTicketView final
+    {
+        ULONG LifetimeHintSeconds = 0;
+        const UCHAR* Ticket = nullptr;
+        SIZE_T TicketLength = 0;
+    };
+
     struct TlsAlpnProtocol final
     {
         const char* Name = nullptr;
@@ -163,6 +170,11 @@ namespace tls
             _In_reads_bytes_(dataLength) const UCHAR* data,
             SIZE_T dataLength,
             _Out_ TlsHandshakeMessageView& message) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS ParseNewSessionTicket(
+            _In_ const TlsHandshakeMessageView& message,
+            _Out_ Tls12NewSessionTicketView& ticket) noexcept;
 
         _Must_inspect_result_
         static NTSTATUS EncodeClientHello(
