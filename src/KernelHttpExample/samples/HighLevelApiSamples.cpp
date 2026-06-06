@@ -45,8 +45,8 @@ namespace
     constexpr const char* HttpOptionsUrl = "http://nghttp2.org/httpbin/";
     constexpr const char* HttpsGetUrl = "https://nghttp2.org/httpbin/get";
     constexpr const char* HttpsBuilderUrl = "https://nghttp2.org/httpbin/anything";
-    constexpr const char* WebSocketSecureEchoUrl = "wss://ws.postman-echo.com/raw";
-    constexpr const char* WebSocketBinaryEchoUrl = "wss://websocket-echo.com";
+    constexpr const char* WebSocketSecureEchoUrl = "wss://echo.websocket.org";
+    constexpr const char* WebSocketBinaryEchoUrl = "wss://echo.websocket.org";
     constexpr const char* AlpnHttp11 = "http/1.1";
     constexpr const char* AlpnH2 = "h2";
 
@@ -61,8 +61,9 @@ namespace
     constexpr UCHAR RawBody[] = { 0x6B, 0x68, 0x74, 0x74, 0x70 };
     constexpr const char* WsHelloMessage = "hello-from-khttp";
     constexpr UCHAR WsBinaryMessage[] = { 0x01, 0x02, 0x03, 0x04 };
+    constexpr ULONG MaxWebSocketEchoReceiveFrames = 4;
     constexpr khttp::AddressFamily DefaultHttpSampleAddressFamily = khttp::AddressFamily::Any;
-    constexpr khttp::AddressFamily DefaultWebSocketSampleAddressFamily = khttp::AddressFamily::Ipv4;
+    constexpr khttp::AddressFamily DefaultWebSocketSampleAddressFamily = khttp::AddressFamily::Any;
 
     enum class SendVariant : ULONG
     {
@@ -1327,31 +1328,42 @@ namespace
             reinterpret_cast<const UCHAR*>(WsHelloMessage);
     }
 
-    NTSTATUS ValidateWebSocketEcho(
-        const char* sampleName,
-        WsSendVariant variant,
-        const khttp::WsMessage& message) noexcept
+    bool IsExpectedWebSocketEcho(WsSendVariant variant, const khttp::WsMessage& message) noexcept
     {
         if (variant == WsSendVariant::None) {
-            return STATUS_SUCCESS;
+            return true;
         }
 
         SIZE_T expectedLength = 0;
         const UCHAR* expected = ExpectedWebSocketEchoPayload(variant, &expectedLength);
         const khttp::WsMsgType expectedType = ExpectedWebSocketEchoType(variant);
-        const bool payloadMatches =
-            expectedLength == 0 ||
-            (message.DataLength == expectedLength &&
-                message.Data != nullptr &&
-                expected != nullptr &&
-                RtlCompareMemory(message.Data, expected, expectedLength) == expectedLength);
 
-        if (message.Type == expectedType &&
-            message.FinalFragment &&
-            message.DataLength == expectedLength &&
-            payloadMatches) {
+        if (message.Type != expectedType ||
+            !message.FinalFragment ||
+            message.DataLength != expectedLength) {
+            return false;
+        }
+        if (expectedLength == 0) {
+            return true;
+        }
+
+        return message.Data != nullptr &&
+            expected != nullptr &&
+            RtlCompareMemory(message.Data, expected, expectedLength) == expectedLength;
+    }
+
+    NTSTATUS ValidateWebSocketEcho(
+        const char* sampleName,
+        WsSendVariant variant,
+        const khttp::WsMessage& message) noexcept
+    {
+        if (IsExpectedWebSocketEcho(variant, message)) {
             return STATUS_SUCCESS;
         }
+
+        SIZE_T expectedLength = 0;
+        const khttp::WsMsgType expectedType = ExpectedWebSocketEchoType(variant);
+        ExpectedWebSocketEchoPayload(variant, &expectedLength);
 
         KHTTP_SAMPLE_LOG(
             "[WebSocket响应] 示例=%s Echo校验失败 期望类型=%s 实际类型=%s 期望长度=%Iu 实际长度=%Iu 最后分片=%s\r\n",
@@ -1362,6 +1374,49 @@ namespace
             message.DataLength,
             BoolName(message.FinalFragment));
         return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+
+    NTSTATUS ReceiveWebSocketEcho(
+        khttp::WebSocket* websocket,
+        const char* sampleName,
+        WsSendVariant sendVariant,
+        bool receiveWithCallback,
+        CallbackStats& callbackStats,
+        khttp::WsMessage& message) noexcept
+    {
+        for (ULONG frameIndex = 0; frameIndex < MaxWebSocketEchoReceiveFrames; ++frameIndex) {
+            NTSTATUS status = STATUS_SUCCESS;
+            if (receiveWithCallback) {
+                khttp::WsReceiveOptions receiveOptions = {};
+                receiveOptions.MaxMessageBytes = 64 * 1024;
+                receiveOptions.AutoAllocate = true;
+                receiveOptions.OnMessage = WebSocketMessageCallback;
+                receiveOptions.CallbackContext = &callbackStats;
+                status = khttp::WsReceiveEx(websocket, &receiveOptions, &message);
+            }
+            else {
+                status = khttp::WsReceive(websocket, &message);
+            }
+
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (IsExpectedWebSocketEcho(sendVariant, message)) {
+                return STATUS_SUCCESS;
+            }
+
+            KHTTP_SAMPLE_LOG(
+                "[WebSocket响应] 示例=%s 跳过非目标Echo帧 序号=%lu 类型=%s 长度=%Iu\r\n",
+                sampleName,
+                frameIndex,
+                WsMsgTypeName(message.Type),
+                message.DataLength);
+            if (message.Type == khttp::WsMsgType::Close) {
+                return STATUS_SUCCESS;
+            }
+        }
+
+        return STATUS_SUCCESS;
     }
 
     NTSTATUS RunWebSocketSample(
@@ -1396,17 +1451,13 @@ namespace
         }
         const bool expectEcho = sendVariant != WsSendVariant::None;
         if (NT_SUCCESS(status) && expectEcho) {
-            if (receiveWithCallback) {
-                khttp::WsReceiveOptions receiveOptions = {};
-                receiveOptions.MaxMessageBytes = 64 * 1024;
-                receiveOptions.AutoAllocate = true;
-                receiveOptions.OnMessage = WebSocketMessageCallback;
-                receiveOptions.CallbackContext = &callbackStats;
-                status = khttp::WsReceiveEx(websocket, &receiveOptions, &message);
-            }
-            else {
-                status = khttp::WsReceive(websocket, &message);
-            }
+            status = ReceiveWebSocketEcho(
+                websocket,
+                sampleName,
+                sendVariant,
+                receiveWithCallback,
+                callbackStats,
+                message);
         }
         if (NT_SUCCESS(status) && expectEcho) {
             status = ValidateWebSocketEcho(sampleName, sendVariant, message);

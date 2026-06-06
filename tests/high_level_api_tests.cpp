@@ -57,8 +57,7 @@ namespace
         SIZE_T WebSocketAnyCalls = 0;
         SIZE_T WebSocketPlainCalls = 0;
         SIZE_T WebSocketSecureCalls = 0;
-        SIZE_T WebSocketPostmanEchoCalls = 0;
-        SIZE_T WebSocketBinaryEchoCalls = 0;
+        SIZE_T WebSocketEchoHostCalls = 0;
         SIZE_T WebSocketVerifyCalls = 0;
         SIZE_T WebSocketVerifyWithStoreCalls = 0;
         SIZE_T WebSocketTls12MaxCalls = 0;
@@ -78,6 +77,8 @@ namespace
         UCHAR LastWebSocketReceiveData[MaxWebSocketPayload] = {};
         SIZE_T LastWebSocketSendLength = 0;
         bool HasLastWebSocketSend = false;
+        bool WebSocketGreetingBeforeEcho = false;
+        bool PendingWebSocketGreeting = false;
     };
 
     NTSTATUS HttpTransport(
@@ -172,11 +173,8 @@ namespace
         if (TextEqualsLiteral(request->Scheme, request->SchemeLength, "wss")) {
             ++capture->WebSocketSecureCalls;
         }
-        if (TextEqualsLiteral(request->Host, request->HostLength, "ws.postman-echo.com")) {
-            ++capture->WebSocketPostmanEchoCalls;
-        }
-        if (TextEqualsLiteral(request->Host, request->HostLength, "websocket-echo.com")) {
-            ++capture->WebSocketBinaryEchoCalls;
+        if (TextEqualsLiteral(request->Host, request->HostLength, "echo.websocket.org")) {
+            ++capture->WebSocketEchoHostCalls;
         }
         if (TextEqualsLiteral(request->Scheme, request->SchemeLength, "wss") &&
             request->CertificatePolicy == KernelHttp::engine::KhCertificatePolicy::Verify) {
@@ -226,6 +224,7 @@ namespace
             memcpy(capture->LastWebSocketSendData, data, dataLength);
         }
         capture->HasLastWebSocketSend = true;
+        capture->PendingWebSocketGreeting = capture->WebSocketGreetingBeforeEcho;
         return STATUS_SUCCESS;
     }
 
@@ -243,6 +242,16 @@ namespace
         ++capture->WebSocketReceiveCalls;
         if (!capture->HasLastWebSocketSend) {
             return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        if (capture->PendingWebSocketGreeting) {
+            static const UCHAR greeting[] = "Request served by high-level-test";
+            capture->PendingWebSocketGreeting = false;
+            message->Type = KernelHttp::engine::KhWebSocketMessageType::Text;
+            message->Data = greeting;
+            message->DataLength = sizeof(greeting) - 1;
+            message->FinalFragment = true;
+            return STATUS_SUCCESS;
         }
 
         if (capture->LastWebSocketSendLength > SampleCapture::MaxWebSocketPayload) {
@@ -281,6 +290,7 @@ namespace
         for (SIZE_T index = 0; index < capture.WebSocketEchoLength; ++index) {
             capture.WebSocketEcho[index] = static_cast<UCHAR>(echo[index]);
         }
+        capture.WebSocketGreetingBeforeEcho = true;
 
         KernelHttp::khttp::test::SetAsyncAutoRun(true);
         KernelHttp::khttp::test::SetHttpTransport(HttpTransport, &capture);
@@ -317,12 +327,11 @@ namespace
         Expect(capture.HttpsHttp2AlpnCalls == 1, "HTTPS HTTP/2 ALPN sample is issued");
 
         Expect(capture.WebSocketConnectCalls == 10, "all websocket connect variants are issued");
-        Expect(capture.WebSocketIpv4Calls == 8, "configured websocket samples force IPv4");
-        Expect(capture.WebSocketAnyCalls == 2, "URL websocket samples use default address family");
+        Expect(capture.WebSocketIpv4Calls == 0, "websocket samples do not force IPv4");
+        Expect(capture.WebSocketAnyCalls == 10, "websocket samples use system default address family");
         Expect(capture.WebSocketPlainCalls == 0, "plain ws URL samples are not part of the success matrix");
         Expect(capture.WebSocketSecureCalls == 10, "secure wss samples are issued");
-        Expect(capture.WebSocketPostmanEchoCalls == 8, "text websocket samples use the postman text echo endpoint");
-        Expect(capture.WebSocketBinaryEchoCalls == 2, "binary websocket samples use a binary echo endpoint");
+        Expect(capture.WebSocketEchoHostCalls == 10, "websocket samples use the IPv6-capable echo endpoint");
         Expect(capture.WebSocketVerifyCalls == 10, "verified websocket samples are issued");
         Expect(capture.WebSocketVerifyWithStoreCalls == 10, "verified websocket samples provide a certificate store");
         Expect(capture.WebSocketTls12MaxCalls == 8, "explicit websocket secure samples cap TLS at 1.2 for endpoint compatibility");
@@ -330,7 +339,7 @@ namespace
         Expect(capture.WebSocketTextSendCalls == 5, "websocket text send variants are issued");
         Expect(capture.WebSocketBinarySendCalls == 2, "websocket binary send variants are issued");
         Expect(capture.WebSocketNonFinalSendCalls == 0, "websocket Ex send options keep sample messages complete");
-        Expect(capture.WebSocketReceiveCalls == 7, "websocket receive variants are issued");
+        Expect(capture.WebSocketReceiveCalls == 14, "websocket receive skips greeting frames and reads echo frames");
         Expect(capture.WebSocketCloseCalls == 10, "each websocket connect path closes its handle");
         Expect(results.WebSocketEcho.BodyLength == capture.WebSocketEchoLength, "websocket echo sample receives body");
         Expect(results.WebSocketBinary.BodyLength == 4, "websocket binary sample receives binary echo body");
