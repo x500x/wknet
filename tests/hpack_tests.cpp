@@ -102,6 +102,15 @@ namespace
         Expect(consumed == 3, "DecodeInteger multibyte consumed");
     }
 
+    void TestDecodeIntegerRejectsOverflow()
+    {
+        const unsigned char data[] = { 0x1f, 0xff, 0xff, 0xff, 0xff, 0x0f };
+        ULONG value = 0;
+        size_t consumed = 0;
+        NTSTATUS s = HpackDecodeInteger(data, sizeof(data), 5, &value, &consumed);
+        Expect(s == STATUS_INTEGER_OVERFLOW, "DecodeInteger rejects ULONG overflow");
+    }
+
     void TestIntegerRoundTrip()
     {
         for (ULONG val : { 0u, 1u, 14u, 15u, 16u, 127u, 128u, 1337u, 100000u, 0x7fffffffu }) {
@@ -325,6 +334,25 @@ namespace
         Expect(TextEqualsLiteral(outHeaders[4].Value, "application/json"), "RT json");
     }
 
+    void TestDecoderRejectsOversizedDynamicTableUpdate()
+    {
+        HpackDecoder decoder;
+        NTSTATUS s = decoder.Initialize(128);
+        Expect(NT_SUCCESS(s), "Decoder init for oversized table update");
+
+        unsigned char block[8] = {};
+        size_t blockLen = 0;
+        s = HpackEncodeInteger(4096, 0x20, 5, block, sizeof(block), &blockLen);
+        Expect(NT_SUCCESS(s), "Encode oversized dynamic table update");
+
+        HttpHeader headers[1] = {};
+        size_t headerCount = 0;
+        char nvBuffer[32] = {};
+        size_t nvUsed = 0;
+        s = decoder.Decode(block, blockLen, headers, 1, &headerCount, nvBuffer, sizeof(nvBuffer), &nvUsed);
+        Expect(s == STATUS_INVALID_NETWORK_RESPONSE, "Decoder rejects dynamic table update above configured max");
+    }
+
     void TestHuffmanEncodedLength()
     {
         // "www.example.com" -> 12 bytes per RFC C.4.1
@@ -341,6 +369,7 @@ int main()
     TestEncodeIntegerEightBit();
     TestDecodeIntegerSimple();
     TestDecodeIntegerMultibyte();
+    TestDecodeIntegerRejectsOverflow();
     TestIntegerRoundTrip();
     TestHuffmanEncodeExample();
     TestHuffmanEncodedLength();
@@ -350,6 +379,7 @@ int main()
     TestDecodeFirstRequest();
     TestDecodeFirstRequestHuffman();
     TestEncoderDecoderRoundTrip();
+    TestDecoderRejectsOversizedDynamicTableUpdate();
 
     if (g_failed) {
         printf("HPACK TESTS FAILED\n");

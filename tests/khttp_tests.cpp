@@ -71,6 +71,23 @@ namespace
         ULONG RetryConnectionId = 0;
     };
 
+    struct CompletionCapture
+    {
+        SIZE_T CallCount = 0;
+        NTSTATUS LastStatus = STATUS_PENDING;
+    };
+
+    void RecordCompletion(void* context, NTSTATUS status) noexcept
+    {
+        auto* capture = static_cast<CompletionCapture*>(context);
+        if (capture == nullptr) {
+            return;
+        }
+
+        ++capture->CallCount;
+        capture->LastStatus = status;
+    }
+
     NTSTATUS TestTransport(
         void* context,
         const KernelHttp::engine::KhTestHttpTransportRequest* request,
@@ -433,6 +450,42 @@ namespace
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
+    void TestIdleTimeoutSkipsExpiredConnection() noexcept
+    {
+        ReusedFailureCapture capture = {};
+        KernelHttp::khttp::test::SetHttpTransport(ReusedFailureTransport, &capture);
+
+        KernelHttp::khttp::SessionConfig config = {};
+        config.IdleTimeoutMs = 1;
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for idle timeout");
+
+        const char* url = "http://example.com/idle";
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "first idle-timeout Get succeeds");
+        KernelHttp::khttp::ResponseRelease(resp);
+        resp = nullptr;
+
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "expired pooled Get creates a new connection");
+        Expect(capture.CallCount == 2, "idle timeout avoids stale reuse attempt");
+        Expect(capture.ReusedCallCount == 0, "expired connection is not reported as reused");
+        Expect(capture.NewConnectionCallCount == 2, "idle timeout uses two new connections");
+        Expect(capture.FirstConnectionId != 0, "first idle connection id captured");
+        Expect(capture.RetryConnectionId != 0, "second idle connection id captured");
+        Expect(capture.RetryConnectionId != capture.FirstConnectionId, "idle timeout uses a different connection id");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
     void TestPostWithBody() noexcept
     {
         const char* response =
@@ -562,6 +615,11 @@ namespace
         Expect(resp != nullptr, "async response non-null");
         Expect(KernelHttp::khttp::ResponseStatusCode(resp) == 202, "async status code");
 
+        KernelHttp::khttp::Response* secondResp = nullptr;
+        status = KernelHttp::khttp::AsyncGetResponse(op, &secondResp);
+        Expect(!NT_SUCCESS(status), "AsyncGetResponse only returns the response once");
+        Expect(secondResp == nullptr, "second async response output stays null");
+
         KernelHttp::khttp::ResponseRelease(resp);
         KernelHttp::khttp::AsyncRelease(op);
         KernelHttp::khttp::SessionClose(session);
@@ -622,6 +680,47 @@ namespace
         KernelHttp::khttp::AsyncRelease(op);
         KernelHttp::khttp::SessionClose(session);
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+    }
+
+    void TestAsyncCancelCompletionOnce() noexcept
+    {
+        KernelHttp::khttp::test::SetAsyncAutoRun(false);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for async cancel");
+
+        KernelHttp::khttp::Request* request = nullptr;
+        status = KernelHttp::khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for async cancel");
+
+        const char* url = "http://example.com/cancel";
+        status = KernelHttp::khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for async cancel");
+
+        CompletionCapture completion = {};
+        KernelHttp::khttp::SendOptions options = {};
+        options.OnComplete = RecordCompletion;
+        options.CompletionContext = &completion;
+
+        KernelHttp::khttp::AsyncOp* op = nullptr;
+        status = KernelHttp::khttp::SendAsync(session, request, &options, &op);
+        Expect(NT_SUCCESS(status), "SendAsync succeeds for async cancel");
+
+        status = KernelHttp::khttp::AsyncCancel(op);
+        Expect(NT_SUCCESS(status), "AsyncCancel succeeds");
+        status = KernelHttp::khttp::test::RunAsyncOperation(op);
+        Expect(status == STATUS_CANCELLED, "manual run preserves canceled status");
+        Expect(completion.CallCount == 1, "completion callback fires once");
+        Expect(completion.LastStatus == STATUS_CANCELLED, "completion status is canceled");
+
+        KernelHttp::khttp::AsyncRelease(op);
+        KernelHttp::khttp::RequestRelease(request);
+        KernelHttp::khttp::SessionClose(session);
         KernelHttp::khttp::test::SetAsyncAutoRun(true);
     }
 
@@ -736,10 +835,12 @@ int main() noexcept
     TestSimpleGet();
     TestMaxResponseBytesZeroIsUnlimited();
     TestReusedConnectionFailureRetriesWithFreshConnection();
+    TestIdleTimeoutSkipsExpiredConnection();
     TestPostWithBody();
     TestRequestBuilder();
     TestAsyncGet();
     TestAsyncRequestIsCopied();
+    TestAsyncCancelCompletionOnce();
     TestIrqlCheck();
     TestWebSocketRoundTrip();
 

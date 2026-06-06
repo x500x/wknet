@@ -1774,6 +1774,18 @@ namespace
         Expect(store.MatchesPin("other.example", strlen("other.example"), otherSpki, sizeof(otherSpki)), "host without configured pin is allowed by pin policy");
     }
 
+    void TestCertificateStoreRejectsEmptyTrustAnchor()
+    {
+        CertificateTrustAnchor anchor = {};
+        CertificateStoreOptions options = {};
+        options.TrustAnchors = &anchor;
+        options.TrustAnchorCount = 1;
+
+        CertificateStore store;
+        const NTSTATUS status = store.Initialize(options);
+        Expect(status == STATUS_INVALID_PARAMETER, "certificate store rejects an empty trust anchor");
+    }
+
     void TestCertificateValidationCanSkipVerification()
     {
         UCHAR pem[TestMaxPemCertificateLength] = {};
@@ -2041,6 +2053,7 @@ int main()
     TestParseServerKeyExchange();
     TestParseCertificateListState();
     TestCertificateStoreTrustAndPin();
+    TestCertificateStoreRejectsEmptyTrustAnchor();
     TestCertificateValidationCanSkipVerification();
     TestCertificateValidationRequiresTrustMaterial();
     TestCertificateValidationAcceptsExternalPemBundle();

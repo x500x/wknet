@@ -68,13 +68,31 @@ namespace
         FreeOperation(operation);
     }
 
+    _Must_inspect_result_
+    bool TryExchangeFlag(_Inout_ volatile LONG* target, LONG desired, LONG expected) noexcept
+    {
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (*target != expected) {
+            return false;
+        }
+        *target = desired;
+        return true;
+#else
+        return InterlockedCompareExchange(target, desired, expected) == expected;
+#endif
+    }
+
     bool IsValidOperation(KH_ASYNC_OPERATION operation) noexcept
     {
-        return operation != nullptr && operation->Magic == KhAsyncOperationMagic && !operation->Closed;
+        return operation != nullptr && operation->Magic == KhAsyncOperationMagic && operation->Closed == 0;
     }
 
     void CompleteOperation(_In_ KhAsyncOperation* operation, NTSTATUS status) noexcept
     {
+        if (!TryExchangeFlag(&operation->Completed, 1, 0)) {
+            return;
+        }
+
         operation->Status = status;
         operation->State = KhAsyncState::Completed;
 
@@ -95,7 +113,7 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (operation->State == KhAsyncState::Completed) {
+        if (operation->Completed != 0) {
             return operation->Status;
         }
 
@@ -114,9 +132,7 @@ namespace
             status = STATUS_CANCELLED;
         }
 
-        if (operation->State != KhAsyncState::Completed) {
-            CompleteOperation(operation, status);
-        }
+        CompleteOperation(operation, status);
 
         return operation->Status;
     }
@@ -154,10 +170,11 @@ namespace
         }
 
         newOperation->Magic = KhAsyncOperationMagic;
-        newOperation->Closed = false;
+        newOperation->Closed = 0;
         newOperation->Kind = options.Kind;
         newOperation->ReferenceCount = 1;
         newOperation->Canceled = 0;
+        newOperation->Completed = 0;
         newOperation->State = KhAsyncState::Pending;
         newOperation->Status = STATUS_PENDING;
         newOperation->WorkerRoutine = options.WorkerRoutine;
@@ -288,7 +305,9 @@ namespace
             return;
         }
 
-        operation->Closed = true;
+        if (!TryExchangeFlag(&operation->Closed, 1, 0)) {
+            return;
+        }
         ReleaseRef(operation);
     }
 
@@ -308,7 +327,7 @@ namespace
 
     bool KhAsyncOperationIsCompleted(KH_ASYNC_OPERATION operation) noexcept
     {
-        return IsValidOperation(operation) && operation->State == KhAsyncState::Completed;
+        return IsValidOperation(operation) && operation->Completed != 0;
     }
 
     bool KhAsyncOperationIsValid(KH_ASYNC_OPERATION operation) noexcept

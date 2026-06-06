@@ -53,9 +53,7 @@ namespace
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         return calloc(1, length);
 #else
-        const ULONG poolFlags =
-            poolType == KhPoolType::Paged ? POOL_FLAG_PAGED : POOL_FLAG_NON_PAGED;
-        return ExAllocatePool2(poolFlags, length, PoolTag);
+        return ExAllocatePool2(POOL_FLAG_NON_PAGED, length, PoolTag);
 #endif
     }
 

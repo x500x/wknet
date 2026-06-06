@@ -34,10 +34,11 @@ namespace engine
     struct KhAsyncOperation
     {
         ULONG Magic = KhAsyncOperationMagic;
-        bool Closed = false;
+        volatile LONG Closed = 0;
         KhAsyncOperationKind Kind = KhAsyncOperationKind::HttpSend;
         volatile LONG ReferenceCount = 1;
         volatile LONG Canceled = 0;
+        volatile LONG Completed = 0;
         KhAsyncState State = KhAsyncState::Pending;
         NTSTATUS Status = STATUS_PENDING;
         KhAsyncWorkerRoutine WorkerRoutine = nullptr;

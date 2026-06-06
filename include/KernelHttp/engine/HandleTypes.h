@@ -34,17 +34,22 @@ namespace engine
     struct KhHandleHeader
     {
         KhHandleKind Kind;
-        bool Closed;
+        volatile LONG Closed;
     };
 
     struct KhSession
     {
-        KhHandleHeader Header = { KhHandleKind::Session, false };
+        KhHandleHeader Header = { KhHandleKind::Session, 0 };
         net::WskClient* WskClient = nullptr;
         KhSessionOptions Options = {};
         KhWorkspace* Workspace = nullptr;
         crypto::CngProviderCache* ProviderCache = nullptr;
         KhConnectionPool ConnectionPool = {};
+        volatile LONG InFlight = 0;
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        FAST_MUTEX OperationLock = {};
+        KEVENT DrainEvent = {};
+#endif
     };
 
     struct KhStoredHeader
@@ -57,7 +62,7 @@ namespace engine
 
     struct KhRequest
     {
-        KhHandleHeader Header = { KhHandleKind::Request, false };
+        KhHandleHeader Header = { KhHandleKind::Request, 0 };
         KH_SESSION Session = nullptr;
         KhHttpMethod Method = KhHttpMethod::Get;
         char* Url = nullptr;
@@ -89,7 +94,7 @@ namespace engine
 
     struct KhResponse
     {
-        KhHandleHeader Header = { KhHandleKind::Response, false };
+        KhHandleHeader Header = { KhHandleKind::Response, 0 };
         ULONG StatusCode = 0;
         UCHAR* Body = nullptr;
         SIZE_T BodyLength = 0;
@@ -105,8 +110,9 @@ namespace engine
 
     struct KhWebSocket
     {
-        KhHandleHeader Header = { KhHandleKind::WebSocket, false };
+        KhHandleHeader Header = { KhHandleKind::WebSocket, 0 };
         KH_SESSION Session = nullptr;
+        KhWorkspace* Workspace = nullptr;
         char* Url = nullptr;
         SIZE_T UrlLength = 0;
         char Scheme[KhMaxSchemeLength + 1] = {};

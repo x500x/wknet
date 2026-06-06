@@ -391,6 +391,76 @@ namespace engine
         return IsHandleHeader(websocket == nullptr ? nullptr : &websocket->Header, KhHandleKind::WebSocket);
     }
 
+    bool KhSessionBeginOperation(KH_SESSION session) noexcept
+    {
+        if (session == nullptr || session->Header.Kind != KhHandleKind::Session) {
+            return false;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (session->Header.Closed != 0) {
+            return false;
+        }
+        ++session->InFlight;
+        if (session->Header.Closed != 0) {
+            --session->InFlight;
+            return false;
+        }
+        return true;
+#else
+        bool active = false;
+        ExAcquireFastMutex(&session->OperationLock);
+        if (session->Header.Closed == 0) {
+            InterlockedIncrement(&session->InFlight);
+            KeClearEvent(&session->DrainEvent);
+            active = true;
+        }
+        ExReleaseFastMutex(&session->OperationLock);
+        return active;
+#endif
+    }
+
+    void KhSessionEndOperation(KH_SESSION session) noexcept
+    {
+        if (session == nullptr || session->Header.Kind != KhHandleKind::Session) {
+            return;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (session->InFlight > 0) {
+            --session->InFlight;
+        }
+#else
+        const LONG remaining = InterlockedDecrement(&session->InFlight);
+        if (remaining == 0) {
+            KeSetEvent(&session->DrainEvent, IO_NO_INCREMENT, FALSE);
+        }
+#endif
+    }
+
+    void WaitForSessionDrain(KH_SESSION session) noexcept
+    {
+        if (session == nullptr) {
+            return;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        UNREFERENCED_PARAMETER(session);
+#else
+        LARGE_INTEGER timeout = {};
+        timeout.QuadPart = -static_cast<LONGLONG>(WskOperationTimeoutMilliseconds) * 10000LL;
+        while (InterlockedCompareExchange(&session->InFlight, 0, 0) != 0) {
+            const NTSTATUS waitStatus = KeWaitForSingleObject(
+                &session->DrainEvent,
+                Executive,
+                KernelMode,
+                FALSE,
+                &timeout);
+            UNREFERENCED_PARAMETER(waitStatus);
+        }
+#endif
+    }
+
     void ReleaseStoredHeader(_Inout_ KhStoredHeader& header) noexcept
     {
         FreeApiMemory(header.Name);
@@ -1120,7 +1190,7 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        clone->Header = { KhHandleKind::Request, false };
+        clone->Header = { KhHandleKind::Request, 0 };
         clone->Session = source.Session;
         clone->Method = source.Method;
         clone->UrlLength = source.UrlLength;
@@ -1227,6 +1297,8 @@ namespace engine
 
     void ReleaseWebSocketStorage(_Inout_ KhWebSocket& websocket) noexcept
     {
+        KhWorkspaceRelease(websocket.Workspace);
+        websocket.Workspace = nullptr;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         if (websocket.Client != nullptr) {
             delete websocket.Client;
@@ -1279,9 +1351,14 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        newSession->Header = { KhHandleKind::Session, false };
+        newSession->Header = { KhHandleKind::Session, 0 };
         newSession->WskClient = wskClient;
         newSession->Options = effectiveOptions;
+        newSession->InFlight = 0;
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        ExInitializeFastMutex(&newSession->OperationLock);
+        KeInitializeEvent(&newSession->DrainEvent, NotificationEvent, TRUE);
+#endif
 
         KhWorkspaceOptions workspaceOptions = {};
         workspaceOptions.PoolType = effectiveOptions.ResponsePoolType;
@@ -1312,7 +1389,8 @@ namespace engine
 
         status = KhConnectionPoolInitialize(
             &newSession->ConnectionPool,
-            effectiveOptions.ConnectionPoolCapacity);
+            effectiveOptions.ConnectionPoolCapacity,
+            effectiveOptions.IdleTimeoutMilliseconds);
         if (!NT_SUCCESS(status)) {
             newSession->ProviderCache->Shutdown();
             FreeHandle(newSession->ProviderCache);
@@ -1333,11 +1411,23 @@ namespace engine
             return;
         }
 
-        if (!IsSessionHandle(session)) {
+        if (session->Header.Kind != KhHandleKind::Session) {
             return;
         }
 
-        session->Header.Closed = true;
+        bool shouldClose = false;
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        ExAcquireFastMutex(&session->OperationLock);
+        shouldClose = TryCloseHandleHeader(&session->Header, KhHandleKind::Session);
+        ExReleaseFastMutex(&session->OperationLock);
+#else
+        shouldClose = TryCloseHandleHeader(&session->Header, KhHandleKind::Session);
+#endif
+        if (!shouldClose) {
+            return;
+        }
+
+        WaitForSessionDrain(session);
         KhConnectionPoolShutdown(&session->ConnectionPool);
         if (session->ProviderCache != nullptr) {
             session->ProviderCache->Shutdown();
@@ -1367,7 +1457,7 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        newRequest->Header = { KhHandleKind::Request, false };
+        newRequest->Header = { KhHandleKind::Request, 0 };
         newRequest->Session = session;
         newRequest->Method = KhHttpMethod::Get;
         newRequest->Tls = session->Options.Tls;
@@ -1381,11 +1471,10 @@ namespace engine
             return;
         }
 
-        if (!IsRequestHandle(request)) {
+        if (!TryCloseHandleHeader(&request->Header, KhHandleKind::Request)) {
             return;
         }
 
-        request->Header.Closed = true;
         ReleaseRequestStorage(*request);
         FreeHandle(request);
     }
@@ -1994,11 +2083,10 @@ namespace engine
             return;
         }
 
-        if (!IsResponseHandle(response)) {
+        if (!TryCloseHandleHeader(&response->Header, KhHandleKind::Response)) {
             return;
         }
 
-        response->Header.Closed = true;
         ReleaseResponseStorage(*response);
         FreeHandle(response);
     }

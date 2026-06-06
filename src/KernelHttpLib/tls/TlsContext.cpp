@@ -240,6 +240,16 @@ namespace tls
             state.SequenceNumber = 0;
             return STATUS_SUCCESS;
         }
+
+        void SecureZeroContextSecrets(
+            _Inout_ TlsSessionSecrets& secrets,
+            _Inout_ Tls13TrafficSecrets& tls13Secrets,
+            _Inout_ Tls13SessionCache& tls13SessionCache) noexcept
+        {
+            RtlSecureZeroMemory(&secrets, sizeof(secrets));
+            RtlSecureZeroMemory(&tls13Secrets, sizeof(tls13Secrets));
+            RtlSecureZeroMemory(&tls13SessionCache, sizeof(tls13SessionCache));
+        }
     }
 
     TlsContext::TlsContext() noexcept
@@ -247,15 +257,18 @@ namespace tls
         Reset();
     }
 
+    TlsContext::~TlsContext() noexcept
+    {
+        SecureZeroContextSecrets(secrets_, tls13Secrets_, tls13SessionCache_);
+    }
+
     void TlsContext::Reset() noexcept
     {
+        SecureZeroContextSecrets(secrets_, tls13Secrets_, tls13SessionCache_);
         protocol_ = TlsProtocol::Tls12;
         version_ = { 3, 3 };
         state_ = TlsHandshakeState::Idle;
-        secrets_ = {};
         secrets_.CipherSuite = TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256;
-        tls13Secrets_ = {};
-        tls13SessionCache_ = {};
     }
 
     NTSTATUS TlsContext::InitializeClient(TlsProtocolVersion version) noexcept

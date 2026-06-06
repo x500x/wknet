@@ -14,6 +14,43 @@ namespace engine
 {
 namespace
 {
+    struct KhDetachedConnectionResources final
+    {
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        net::WskSocket* Socket = nullptr;
+        core::WskTransport* RawTransport = nullptr;
+        core::ITransport* Transport = nullptr;
+        tls::TlsConnection* Tls = nullptr;
+#endif
+    };
+
+    void InitializePoolLock(_Inout_ KhConnectionPool* pool) noexcept
+    {
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        ExInitializeFastMutex(&pool->Lock);
+#else
+        UNREFERENCED_PARAMETER(pool);
+#endif
+    }
+
+    void LockPool(_Inout_ KhConnectionPool* pool) noexcept
+    {
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        ExAcquireFastMutex(&pool->Lock);
+#else
+        UNREFERENCED_PARAMETER(pool);
+#endif
+    }
+
+    void UnlockPool(_Inout_ KhConnectionPool* pool) noexcept
+    {
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        ExReleaseFastMutex(&pool->Lock);
+#else
+        UNREFERENCED_PARAMETER(pool);
+#endif
+    }
+
     _Ret_maybenull_
     void* AllocatePoolMemory(SIZE_T length) noexcept
     {
@@ -41,6 +78,32 @@ namespace
 #endif
     }
 
+    _Must_inspect_result_
+    ULONGLONG QueryPoolTime() noexcept
+    {
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        static ULONGLONG time100ns = 0;
+        time100ns += 10000;
+        return time100ns;
+#else
+        return KeQueryInterruptTime();
+#endif
+    }
+
+    _Must_inspect_result_
+    bool IsIdleExpired(
+        _In_ const KhConnectionPool& pool,
+        _In_ const KhPooledConnection& connection,
+        ULONGLONG now) noexcept
+    {
+        if (pool.IdleTimeoutMilliseconds == 0 || connection.LastUsedTime == 0 || now < connection.LastUsedTime) {
+            return false;
+        }
+
+        const ULONGLONG timeout100ns = static_cast<ULONGLONG>(pool.IdleTimeoutMilliseconds) * 10000ULL;
+        return now - connection.LastUsedTime >= timeout100ns;
+    }
+
     bool TextEquals(
         const char* left,
         SIZE_T leftLength,
@@ -62,40 +125,81 @@ namespace
         return RtlCompareMemory(left, right, leftLength) == leftLength;
     }
 
-    void ResetConnection(_Inout_ KhPooledConnection& connection) noexcept
+    _Must_inspect_result_
+    bool HasConnectionState(_In_ const KhPooledConnection& connection) noexcept
     {
+        if (connection.InUse || connection.Connected) {
+            return true;
+        }
+
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
-        if (connection.Transport != nullptr &&
-            connection.Transport != connection.RawTransport) {
-            delete connection.Transport;
-            connection.Transport = nullptr;
+        return connection.Socket != nullptr ||
+            connection.RawTransport != nullptr ||
+            connection.Transport != nullptr ||
+            connection.Tls != nullptr;
+#else
+        return false;
+#endif
+    }
+
+    void DetachConnectionResources(
+        _Inout_ KhPooledConnection& connection,
+        _Out_ KhDetachedConnectionResources* detached) noexcept
+    {
+        if (detached == nullptr) {
+            return;
         }
-        if (connection.Tls != nullptr) {
-            delete connection.Tls;
-            connection.Tls = nullptr;
-        }
-        if (connection.RawTransport != nullptr) {
-            delete connection.RawTransport;
-            connection.RawTransport = nullptr;
-        }
-        if (connection.Socket != nullptr) {
-            const NTSTATUS closeStatus = connection.Socket->Close();
-            UNREFERENCED_PARAMETER(closeStatus);
-            delete connection.Socket;
-            connection.Socket = nullptr;
-        }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        detached->Socket = connection.Socket;
+        detached->RawTransport = connection.RawTransport;
+        detached->Transport = connection.Transport;
+        detached->Tls = connection.Tls;
 #endif
         RtlZeroMemory(&connection, sizeof(connection));
     }
+
+    void CloseDetachedConnectionResources(_Inout_ KhDetachedConnectionResources* detached) noexcept
+    {
+        if (detached == nullptr) {
+            return;
+        }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (detached->Transport != nullptr &&
+            detached->Transport != detached->RawTransport) {
+            delete detached->Transport;
+            detached->Transport = nullptr;
+        }
+        if (detached->Tls != nullptr) {
+            delete detached->Tls;
+            detached->Tls = nullptr;
+        }
+        if (detached->RawTransport != nullptr) {
+            delete detached->RawTransport;
+            detached->RawTransport = nullptr;
+        }
+        if (detached->Socket != nullptr) {
+            const NTSTATUS closeStatus = detached->Socket->Close();
+            UNREFERENCED_PARAMETER(closeStatus);
+            delete detached->Socket;
+            detached->Socket = nullptr;
+        }
+#endif
+    }
 }
 
-    NTSTATUS KhConnectionPoolInitialize(KhConnectionPool* pool, ULONG capacity) noexcept
+    NTSTATUS KhConnectionPoolInitialize(
+        KhConnectionPool* pool,
+        ULONG capacity,
+        ULONG idleTimeoutMilliseconds) noexcept
     {
         if (pool == nullptr || capacity == 0) {
             return STATUS_INVALID_PARAMETER;
         }
 
         RtlZeroMemory(pool, sizeof(*pool));
+        InitializePoolLock(pool);
         pool->Entries = static_cast<KhPooledConnection*>(
             AllocatePoolMemory(sizeof(KhPooledConnection) * capacity));
         if (pool->Entries == nullptr) {
@@ -104,6 +208,7 @@ namespace
 
         pool->Capacity = capacity;
         pool->NextConnectionId = 1;
+        pool->IdleTimeoutMilliseconds = idleTimeoutMilliseconds;
         return STATUS_SUCCESS;
     }
 
@@ -113,12 +218,39 @@ namespace
             return;
         }
 
-        if (pool->Entries != nullptr) {
-            for (ULONG index = 0; index < pool->Capacity; ++index) {
-                ResetConnection(pool->Entries[index]);
-            }
-            RtlSecureZeroMemory(pool->Entries, sizeof(KhPooledConnection) * pool->Capacity);
+        if (pool->Entries == nullptr) {
+            RtlZeroMemory(pool, sizeof(*pool));
+            return;
         }
+
+        for (;;) {
+            KhDetachedConnectionResources detached = {};
+            bool found = false;
+
+            LockPool(pool);
+            for (ULONG index = 0; index < pool->Capacity; ++index) {
+                KhPooledConnection& entry = pool->Entries[index];
+                if (!HasConnectionState(entry)) {
+                    continue;
+                }
+
+                const bool wasConnected = entry.Connected;
+                DetachConnectionResources(entry, &detached);
+                if (wasConnected && pool->ActiveCount != 0) {
+                    --pool->ActiveCount;
+                }
+                found = true;
+                break;
+            }
+            UnlockPool(pool);
+
+            CloseDetachedConnectionResources(&detached);
+            if (!found) {
+                break;
+            }
+        }
+
+        RtlSecureZeroMemory(pool->Entries, sizeof(KhPooledConnection) * pool->Capacity);
         FreePoolMemory(pool->Entries);
         RtlZeroMemory(pool, sizeof(*pool));
     }
@@ -155,58 +287,85 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
+        KhDetachedConnectionResources detached = {};
+        KhPooledConnection* selected = nullptr;
+        const ULONGLONG now = QueryPoolTime();
+
+        LockPool(pool);
         if (policy != KhConnectionPolicy::ForceNew && policy != KhConnectionPolicy::NoPool) {
             for (ULONG index = 0; index < pool->Capacity; ++index) {
                 KhPooledConnection& candidate = pool->Entries[index];
                 if (candidate.Connected &&
                     !candidate.InUse &&
                     KhConnectionPoolKeysEqual(candidate.Key, key)) {
+                    if (IsIdleExpired(*pool, candidate, now)) {
+                        DetachConnectionResources(candidate, &detached);
+                        if (pool->ActiveCount != 0) {
+                            --pool->ActiveCount;
+                        }
+                        break;
+                    }
+
                     candidate.InUse = true;
-                    *connection = &candidate;
+                    selected = &candidate;
                     *reused = true;
-                    return STATUS_SUCCESS;
+                    break;
                 }
             }
         }
 
-        for (ULONG index = 0; index < pool->Capacity; ++index) {
-            KhPooledConnection& candidate = pool->Entries[index];
-            if (!candidate.Connected && !candidate.InUse) {
-                ResetConnection(candidate);
-                candidate.InUse = true;
-                candidate.Connected = true;
-                candidate.Key = key;
-                candidate.Id = pool->NextConnectionId++;
-                if (candidate.Id == 0) {
+        if (selected == nullptr) {
+            for (ULONG index = 0; index < pool->Capacity; ++index) {
+                KhPooledConnection& candidate = pool->Entries[index];
+                if (!candidate.Connected && !candidate.InUse) {
+                    DetachConnectionResources(candidate, &detached);
+                    candidate.InUse = true;
+                    candidate.Connected = true;
+                    candidate.Key = key;
                     candidate.Id = pool->NextConnectionId++;
+                    candidate.LastUsedTime = 0;
+                    if (candidate.Id == 0) {
+                        candidate.Id = pool->NextConnectionId++;
+                    }
+                    ++pool->ActiveCount;
+                    selected = &candidate;
+                    break;
                 }
-                ++pool->ActiveCount;
-                *connection = &candidate;
-                return STATUS_SUCCESS;
             }
         }
 
-        if (policy == KhConnectionPolicy::NoPool) {
+        if (selected == nullptr && policy != KhConnectionPolicy::NoPool) {
+            for (ULONG index = 0; index < pool->Capacity; ++index) {
+                KhPooledConnection& candidate = pool->Entries[index];
+                if (!candidate.InUse) {
+                    const bool wasConnected = candidate.Connected;
+                    DetachConnectionResources(candidate, &detached);
+                    candidate.InUse = true;
+                    candidate.Connected = true;
+                    candidate.Key = key;
+                    candidate.Id = pool->NextConnectionId++;
+                    candidate.LastUsedTime = 0;
+                    if (candidate.Id == 0) {
+                        candidate.Id = pool->NextConnectionId++;
+                    }
+                    if (!wasConnected) {
+                        ++pool->ActiveCount;
+                    }
+                    selected = &candidate;
+                    break;
+                }
+            }
+        }
+        UnlockPool(pool);
+
+        CloseDetachedConnectionResources(&detached);
+
+        if (selected == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        for (ULONG index = 0; index < pool->Capacity; ++index) {
-            KhPooledConnection& candidate = pool->Entries[index];
-            if (!candidate.InUse) {
-                ResetConnection(candidate);
-                candidate.InUse = true;
-                candidate.Connected = true;
-                candidate.Key = key;
-                candidate.Id = pool->NextConnectionId++;
-                if (candidate.Id == 0) {
-                    candidate.Id = pool->NextConnectionId++;
-                }
-                *connection = &candidate;
-                return STATUS_SUCCESS;
-            }
-        }
-
-        return STATUS_INSUFFICIENT_RESOURCES;
+        *connection = selected;
+        return STATUS_SUCCESS;
     }
 
     void KhConnectionPoolRelease(
@@ -214,49 +373,37 @@ namespace
         KhPooledConnection* connection,
         bool reusable) noexcept
     {
-        UNREFERENCED_PARAMETER(pool);
-        if (connection == nullptr) {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr) {
             return;
         }
 
         if (!reusable) {
-            KhConnectionPoolClose(connection);
+            KhConnectionPoolClose(pool, connection);
             return;
         }
 
+        LockPool(pool);
+        connection->LastUsedTime = QueryPoolTime();
         connection->InUse = false;
+        UnlockPool(pool);
     }
 
-    void KhConnectionPoolClose(KhPooledConnection* connection) noexcept
+    void KhConnectionPoolClose(KhConnectionPool* pool, KhPooledConnection* connection) noexcept
     {
-        if (connection == nullptr) {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr) {
             return;
         }
 
-#if !defined(KERNEL_HTTP_USER_MODE_TEST)
-        if (connection->Transport != nullptr &&
-            connection->Transport != connection->RawTransport) {
-            delete connection->Transport;
-            connection->Transport = nullptr;
+        KhDetachedConnectionResources detached = {};
+        LockPool(pool);
+        const bool wasConnected = connection->Connected;
+        DetachConnectionResources(*connection, &detached);
+        if (wasConnected && pool->ActiveCount != 0) {
+            --pool->ActiveCount;
         }
-        if (connection->Tls != nullptr) {
-            delete connection->Tls;
-            connection->Tls = nullptr;
-        }
-        if (connection->RawTransport != nullptr) {
-            delete connection->RawTransport;
-            connection->RawTransport = nullptr;
-        }
-        connection->Transport = nullptr;
-        if (connection->Socket != nullptr) {
-            const NTSTATUS closeStatus = connection->Socket->Close();
-            UNREFERENCED_PARAMETER(closeStatus);
-            delete connection->Socket;
-            connection->Socket = nullptr;
-        }
-#endif
-        connection->InUse = false;
-        connection->Connected = false;
+        UnlockPool(pool);
+
+        CloseDetachedConnectionResources(&detached);
     }
 }
 }

@@ -69,7 +69,8 @@ namespace tls
             _Inout_ core::ITransport& transport,
             _Out_writes_bytes_(length) void* data,
             SIZE_T length,
-            _Out_opt_ SIZE_T* bytesReceived = nullptr) noexcept;
+            _Out_opt_ SIZE_T* bytesReceived = nullptr,
+            ULONG receiveTimeoutMilliseconds = WskOperationTimeoutMilliseconds) noexcept;
 
         _Must_inspect_result_
         bool IsEstablished() const noexcept;

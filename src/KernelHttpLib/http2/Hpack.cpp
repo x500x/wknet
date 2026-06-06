@@ -42,6 +42,26 @@ namespace http2
                 d[i] = s[i];
             }
         }
+
+        _Must_inspect_result_
+        bool RangeFits(SIZE_T offset, SIZE_T length, SIZE_T capacity) noexcept
+        {
+            return offset <= capacity && length <= capacity - offset;
+        }
+
+        _Must_inspect_result_
+        bool MultiplySize(SIZE_T left, SIZE_T right, _Out_ SIZE_T* result) noexcept
+        {
+            if (result == nullptr) {
+                return false;
+            }
+            if (left != 0 && right > static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) / left) {
+                *result = 0;
+                return false;
+            }
+            *result = left * right;
+            return true;
+        }
     }
 
     // ========================================================================
@@ -117,12 +137,17 @@ namespace http2
             }
 
             UCHAR b = src[offset++];
-            // Overflow check: m can be at most 28 for ULONG
-            if (m >= 28 && (b & 0x7f) > 0x0f) {
+            const ULONG chunk = static_cast<ULONG>(b & 0x7f);
+            if (m >= 32 || (m >= 28 && chunk > 0x0f)) {
                 return STATUS_INTEGER_OVERFLOW;
             }
 
-            result += static_cast<ULONG>(b & 0x7f) << m;
+            const ULONG increment = chunk << m;
+            if (result > static_cast<ULONG>(~0UL) - increment) {
+                return STATUS_INTEGER_OVERFLOW;
+            }
+
+            result += increment;
             m += 7;
 
             if ((b & 0x80) == 0) {
@@ -483,6 +508,7 @@ namespace http2
 
     NTSTATUS HpackDecoder::Initialize(SIZE_T maxTableSize) noexcept
     {
+        maxTableSize_ = maxTableSize;
         return table_.Initialize(maxTableSize);
     }
 
@@ -576,11 +602,13 @@ namespace http2
                     if (!NT_SUCCESS(status)) return status;
                     offset += consumed;
 
-                    if (offset + nameStrLen > blockLen) return STATUS_INVALID_NETWORK_RESPONSE;
+                    if (!RangeFits(offset, static_cast<SIZE_T>(nameStrLen), blockLen)) return STATUS_INVALID_NETWORK_RESPONSE;
 
                     if (huffmanName) {
                         SIZE_T decoded = 0;
-                        if (nvOffset + nameStrLen * 2 > nameValueCapacity) return STATUS_BUFFER_TOO_SMALL;
+                        SIZE_T huffmanCapacityHint = 0;
+                        if (!MultiplySize(static_cast<SIZE_T>(nameStrLen), 2, &huffmanCapacityHint) ||
+                            !RangeFits(nvOffset, huffmanCapacityHint, nameValueCapacity)) return STATUS_BUFFER_TOO_SMALL;
                         status = HpackHuffmanDecode(block + offset, nameStrLen,
                             reinterpret_cast<UCHAR*>(nameValueBuffer + nvOffset),
                             nameValueCapacity - nvOffset, &decoded);
@@ -589,7 +617,7 @@ namespace http2
                         nameLen = decoded;
                         nvOffset += decoded;
                     } else {
-                        if (nvOffset + nameStrLen > nameValueCapacity) return STATUS_BUFFER_TOO_SMALL;
+                        if (!RangeFits(nvOffset, static_cast<SIZE_T>(nameStrLen), nameValueCapacity)) return STATUS_BUFFER_TOO_SMALL;
                         MemCopy(nameValueBuffer + nvOffset, block + offset, nameStrLen);
                         namePtr = reinterpret_cast<const UCHAR*>(nameValueBuffer + nvOffset);
                         nameLen = nameStrLen;
@@ -606,11 +634,13 @@ namespace http2
                 if (!NT_SUCCESS(status2)) return status2;
                 offset += consumed;
 
-                if (offset + valueStrLen > blockLen) return STATUS_INVALID_NETWORK_RESPONSE;
+                if (!RangeFits(offset, static_cast<SIZE_T>(valueStrLen), blockLen)) return STATUS_INVALID_NETWORK_RESPONSE;
 
                 if (huffmanValue) {
                     SIZE_T decoded = 0;
-                    if (nvOffset + valueStrLen * 2 > nameValueCapacity) return STATUS_BUFFER_TOO_SMALL;
+                    SIZE_T huffmanCapacityHint = 0;
+                    if (!MultiplySize(static_cast<SIZE_T>(valueStrLen), 2, &huffmanCapacityHint) ||
+                        !RangeFits(nvOffset, huffmanCapacityHint, nameValueCapacity)) return STATUS_BUFFER_TOO_SMALL;
                     status2 = HpackHuffmanDecode(block + offset, valueStrLen,
                         reinterpret_cast<UCHAR*>(nameValueBuffer + nvOffset),
                         nameValueCapacity - nvOffset, &decoded);
@@ -619,7 +649,7 @@ namespace http2
                     valueLen = decoded;
                     nvOffset += decoded;
                 } else {
-                    if (nvOffset + valueStrLen > nameValueCapacity) return STATUS_BUFFER_TOO_SMALL;
+                    if (!RangeFits(nvOffset, static_cast<SIZE_T>(valueStrLen), nameValueCapacity)) return STATUS_BUFFER_TOO_SMALL;
                     MemCopy(nameValueBuffer + nvOffset, block + offset, valueStrLen);
                     valuePtr = reinterpret_cast<const UCHAR*>(nameValueBuffer + nvOffset);
                     valueLen = valueStrLen;
@@ -661,11 +691,13 @@ namespace http2
                     if (!NT_SUCCESS(status)) return status;
                     offset += consumed;
 
-                    if (offset + nameStrLen > blockLen) return STATUS_INVALID_NETWORK_RESPONSE;
+                    if (!RangeFits(offset, static_cast<SIZE_T>(nameStrLen), blockLen)) return STATUS_INVALID_NETWORK_RESPONSE;
 
                     if (huffmanName) {
                         SIZE_T decoded = 0;
-                        if (nvOffset + nameStrLen * 2 > nameValueCapacity) return STATUS_BUFFER_TOO_SMALL;
+                        SIZE_T huffmanCapacityHint = 0;
+                        if (!MultiplySize(static_cast<SIZE_T>(nameStrLen), 2, &huffmanCapacityHint) ||
+                            !RangeFits(nvOffset, huffmanCapacityHint, nameValueCapacity)) return STATUS_BUFFER_TOO_SMALL;
                         status = HpackHuffmanDecode(block + offset, nameStrLen,
                             reinterpret_cast<UCHAR*>(nameValueBuffer + nvOffset),
                             nameValueCapacity - nvOffset, &decoded);
@@ -674,7 +706,7 @@ namespace http2
                         nameLen = decoded;
                         nvOffset += decoded;
                     } else {
-                        if (nvOffset + nameStrLen > nameValueCapacity) return STATUS_BUFFER_TOO_SMALL;
+                        if (!RangeFits(nvOffset, static_cast<SIZE_T>(nameStrLen), nameValueCapacity)) return STATUS_BUFFER_TOO_SMALL;
                         MemCopy(nameValueBuffer + nvOffset, block + offset, nameStrLen);
                         namePtr = reinterpret_cast<const UCHAR*>(nameValueBuffer + nvOffset);
                         nameLen = nameStrLen;
@@ -692,11 +724,13 @@ namespace http2
                 if (!NT_SUCCESS(status2)) return status2;
                 offset += consumed2;
 
-                if (offset + valueStrLen > blockLen) return STATUS_INVALID_NETWORK_RESPONSE;
+                if (!RangeFits(offset, static_cast<SIZE_T>(valueStrLen), blockLen)) return STATUS_INVALID_NETWORK_RESPONSE;
 
                 if (huffmanValue) {
                     SIZE_T decoded = 0;
-                    if (nvOffset + valueStrLen * 2 > nameValueCapacity) return STATUS_BUFFER_TOO_SMALL;
+                    SIZE_T huffmanCapacityHint = 0;
+                    if (!MultiplySize(static_cast<SIZE_T>(valueStrLen), 2, &huffmanCapacityHint) ||
+                        !RangeFits(nvOffset, huffmanCapacityHint, nameValueCapacity)) return STATUS_BUFFER_TOO_SMALL;
                     status2 = HpackHuffmanDecode(block + offset, valueStrLen,
                         reinterpret_cast<UCHAR*>(nameValueBuffer + nvOffset),
                         nameValueCapacity - nvOffset, &decoded);
@@ -705,7 +739,7 @@ namespace http2
                     valueLen = decoded;
                     nvOffset += decoded;
                 } else {
-                    if (nvOffset + valueStrLen > nameValueCapacity) return STATUS_BUFFER_TOO_SMALL;
+                    if (!RangeFits(nvOffset, static_cast<SIZE_T>(valueStrLen), nameValueCapacity)) return STATUS_BUFFER_TOO_SMALL;
                     MemCopy(nameValueBuffer + nvOffset, block + offset, valueStrLen);
                     valuePtr = reinterpret_cast<const UCHAR*>(nameValueBuffer + nvOffset);
                     valueLen = valueStrLen;
@@ -723,6 +757,7 @@ namespace http2
                 if (!NT_SUCCESS(status)) return status;
                 offset += consumed;
 
+                if (static_cast<SIZE_T>(newSize) > maxTableSize_) return STATUS_INVALID_NETWORK_RESPONSE;
                 table_.UpdateMaxSize(static_cast<SIZE_T>(newSize));
                 continue;
             }

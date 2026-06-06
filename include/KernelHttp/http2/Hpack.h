@@ -130,6 +130,7 @@ namespace http2
 
     private:
         HpackDynamicTable table_;
+        SIZE_T maxTableSize_ = 4096;
     };
 
     // HPACK Encoder (RFC 7541 Section 6)

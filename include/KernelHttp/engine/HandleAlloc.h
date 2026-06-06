@@ -117,7 +117,24 @@ namespace engine
 
     inline bool IsHandleHeader(const KhHandleHeader* header, KhHandleKind expectedKind) noexcept
     {
-        return header != nullptr && header->Kind == expectedKind && !header->Closed;
+        return header != nullptr && header->Kind == expectedKind && header->Closed == 0;
+    }
+
+    inline bool TryCloseHandleHeader(KhHandleHeader* header, KhHandleKind expectedKind) noexcept
+    {
+        if (header == nullptr || header->Kind != expectedKind) {
+            return false;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (header->Closed != 0) {
+            return false;
+        }
+        header->Closed = 1;
+        return true;
+#else
+        return InterlockedCompareExchange(&header->Closed, 1, 0) == 0;
+#endif
     }
 }
 }

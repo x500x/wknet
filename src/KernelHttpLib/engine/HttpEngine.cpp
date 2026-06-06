@@ -61,6 +61,52 @@ namespace engine
         SIZE_T HostHeaderCapacity = 0;
     };
 
+    class WorkspaceGuard final
+    {
+    public:
+        WorkspaceGuard() noexcept = default;
+
+        ~WorkspaceGuard() noexcept
+        {
+            Reset();
+        }
+
+        WorkspaceGuard(const WorkspaceGuard&) = delete;
+        WorkspaceGuard& operator=(const WorkspaceGuard&) = delete;
+
+        _Must_inspect_result_
+        NTSTATUS Create(SIZE_T maxResponseBytes) noexcept
+        {
+            Reset();
+
+            KhWorkspaceOptions workspaceOptions = {};
+            workspaceOptions.PoolType = KhPoolType::NonPaged;
+            workspaceOptions.MaxResponseBytes = maxResponseBytes;
+            return KhWorkspaceCreate(&workspaceOptions, &workspace_);
+        }
+
+        void Reset() noexcept
+        {
+            KhWorkspaceRelease(workspace_);
+            workspace_ = nullptr;
+        }
+
+        _Ret_maybenull_
+        KhWorkspace* Get() noexcept
+        {
+            return workspace_;
+        }
+
+        _Must_inspect_result_
+        bool IsValid() const noexcept
+        {
+            return workspace_ != nullptr;
+        }
+
+    private:
+        KhWorkspace* workspace_ = nullptr;
+    };
+
     _Must_inspect_result_
     NTSTATUS PrepareApiHttpHeaderScratch(
         _Inout_ KhWorkspace& workspace,
@@ -344,7 +390,7 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        newResponse->Header = { KhHandleKind::Response, false };
+        newResponse->Header = { KhHandleKind::Response, 0 };
         newResponse->StatusCode = parsed.StatusCode;
 
         if (rawResponse != nullptr && rawResponseLength != 0) {
@@ -745,6 +791,41 @@ namespace engine
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
     _Must_inspect_result_
+    ULONGLONG MakeResponseReadDeadline() noexcept
+    {
+        return KeQueryInterruptTime() +
+            (static_cast<ULONGLONG>(WskOperationTimeoutMilliseconds) * 10000ULL);
+    }
+
+    _Must_inspect_result_
+    bool TryGetRemainingResponseReadTimeout(
+        ULONGLONG deadline,
+        _Out_ ULONG* timeoutMilliseconds) noexcept
+    {
+        if (timeoutMilliseconds == nullptr) {
+            return false;
+        }
+
+        const ULONGLONG now = KeQueryInterruptTime();
+        if (now >= deadline) {
+            *timeoutMilliseconds = 0;
+            return false;
+        }
+
+        const ULONGLONG remaining100ns = deadline - now;
+        ULONGLONG remainingMilliseconds = (remaining100ns + 9999ULL) / 10000ULL;
+        if (remainingMilliseconds == 0) {
+            remainingMilliseconds = 1;
+        }
+        if (remainingMilliseconds > 0xffffffffULL) {
+            remainingMilliseconds = 0xffffffffULL;
+        }
+
+        *timeoutMilliseconds = static_cast<ULONG>(remainingMilliseconds);
+        return true;
+    }
+
+    _Must_inspect_result_
     NTSTATUS ReadHttpResponseFromSocket(
         _Inout_ core::ITransport& transport,
         _Inout_ KhWorkspace& workspace,
@@ -760,6 +841,7 @@ namespace engine
 
         *rawResponseLength = 0;
         SIZE_T responseLength = 0;
+        const ULONGLONG responseReadDeadline = MakeResponseReadDeadline();
 
         for (;;) {
             http::HttpParseOptions parseOptions = {};
@@ -799,10 +881,16 @@ namespace engine
             }
 
             SIZE_T received = 0;
-            status = transport.Receive(
+            ULONG receiveTimeoutMilliseconds = WskOperationTimeoutMilliseconds;
+            if (!TryGetRemainingResponseReadTimeout(responseReadDeadline, &receiveTimeoutMilliseconds)) {
+                return STATUS_IO_TIMEOUT;
+            }
+
+            status = transport.ReceiveWithTimeout(
                 workspace.Response.Data + responseLength,
                 workspace.Response.Length - responseLength,
-                &received);
+                &received,
+                receiveTimeoutMilliseconds);
 
             if (!NT_SUCCESS(status)) {
                 if (!IsConnectionCloseStatus(status)) {
@@ -1001,6 +1089,7 @@ namespace engine
     NTSTATUS EnsureTlsConnected(
         _In_ KH_SESSION session,
         const KhRequest& request,
+        _Inout_ KhWorkspace& workspace,
         _Inout_ KhPooledConnection& connection) noexcept
     {
         if (session == nullptr || connection.Socket == nullptr || connection.RawTransport == nullptr) {
@@ -1032,19 +1121,17 @@ namespace engine
         tls::TlsClientConnectionOptions tlsOptions = {};
         core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
         core::WorkspaceScratchAllocator* certificateScratch = nullptr;
-        if (session->Workspace != nullptr) {
-            handshakeScratch = new core::WorkspaceScratchAllocator(
-                *session->Workspace,
-                core::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
-            certificateScratch = new core::WorkspaceScratchAllocator(
-                *session->Workspace,
-                core::WorkspaceScratchAllocator::BufferKind::Certificate);
-            if (handshakeScratch == nullptr || certificateScratch == nullptr) {
-                delete certificateScratch;
-                delete handshakeScratch;
-                delete tlsConnection;
-                return STATUS_INSUFFICIENT_RESOURCES;
-            }
+        handshakeScratch = new core::WorkspaceScratchAllocator(
+            workspace,
+            core::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
+        certificateScratch = new core::WorkspaceScratchAllocator(
+            workspace,
+            core::WorkspaceScratchAllocator::BufferKind::Certificate);
+        if (handshakeScratch == nullptr || certificateScratch == nullptr) {
+            delete certificateScratch;
+            delete handshakeScratch;
+            delete tlsConnection;
+            return STATUS_INSUFFICIENT_RESOURCES;
         }
         tlsOptions.ServerName = request.Tls.ServerName != nullptr ? request.Tls.ServerName : request.Host;
         tlsOptions.ServerNameLength = request.Tls.ServerName != nullptr ?
@@ -1068,105 +1155,6 @@ namespace engine
         }
 
         NTSTATUS status = tlsConnection->Connect(*connection.RawTransport, tlsOptions);
-        if (!NT_SUCCESS(status) &&
-            (status == STATUS_INVALID_NETWORK_RESPONSE ||
-             status == STATUS_CONNECTION_RESET ||
-             status == STATUS_CONNECTION_ABORTED) &&
-            tlsOptions.MinimumProtocol <= tls::TlsProtocol::Tls12 &&
-            tlsOptions.MaximumProtocol >= tls::TlsProtocol::Tls13) {
-            delete tlsConnection;
-            tlsConnection = nullptr;
-
-            if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
-                delete connection.Transport;
-                connection.Transport = connection.RawTransport;
-            }
-            if (connection.RawTransport != nullptr) {
-                delete connection.RawTransport;
-                connection.RawTransport = nullptr;
-                connection.Transport = nullptr;
-            }
-            const NTSTATUS reconnectClose = connection.Socket->Close();
-            UNREFERENCED_PARAMETER(reconnectClose);
-            delete connection.Socket;
-            connection.Socket = nullptr;
-
-            auto* retrySocket = new net::WskSocket();
-            if (retrySocket == nullptr) {
-                delete certificateScratch;
-                delete handshakeScratch;
-                return STATUS_INSUFFICIENT_RESOURCES;
-            }
-
-            HeapArray<wchar_t> serverName(KhMaxHostLength + 1);
-            HeapArray<wchar_t> serviceName(KhMaxServiceNameLength + 1);
-            if (!serverName.IsValid() || !serviceName.IsValid()) {
-                delete retrySocket;
-                delete certificateScratch;
-                delete handshakeScratch;
-                return STATUS_INSUFFICIENT_RESOURCES;
-            }
-
-            status = CopyAsciiToWide(request.Host, request.HostLength, serverName.Get(), serverName.Count());
-            if (NT_SUCCESS(status)) {
-                status = FormatServiceName(request.Port, serviceName.Get(), serviceName.Count());
-            }
-
-            HeapObject<SOCKADDR_STORAGE> retryAddress;
-            if (!retryAddress.IsValid()) {
-                delete retrySocket;
-                delete certificateScratch;
-                delete handshakeScratch;
-                return STATUS_INSUFFICIENT_RESOURCES;
-            }
-
-            if (NT_SUCCESS(status)) {
-                status = session->WskClient->Resolve(
-                    serverName.Get(),
-                    serviceName.Get(),
-                    retryAddress.Get(),
-                    ToWskAddressFamily(request.AddressFamily));
-            }
-            if (NT_SUCCESS(status)) {
-                status = retrySocket->Connect(
-                    *session->WskClient,
-                    reinterpret_cast<const SOCKADDR*>(retryAddress.Get()));
-            }
-            if (!NT_SUCCESS(status)) {
-                delete retrySocket;
-                delete certificateScratch;
-                delete handshakeScratch;
-                return status;
-            }
-
-            connection.Socket = retrySocket;
-            connection.RawTransport = new core::WskTransport(*connection.Socket);
-            if (connection.RawTransport == nullptr) {
-                delete connection.Socket;
-                connection.Socket = nullptr;
-                delete certificateScratch;
-                delete handshakeScratch;
-                return STATUS_INSUFFICIENT_RESOURCES;
-            }
-            connection.Transport = connection.RawTransport;
-
-            tlsConnection = new tls::TlsConnection();
-            if (tlsConnection == nullptr) {
-                delete connection.RawTransport;
-                connection.RawTransport = nullptr;
-                connection.Transport = nullptr;
-                const NTSTATUS retryClose = connection.Socket->Close();
-                UNREFERENCED_PARAMETER(retryClose);
-                delete connection.Socket;
-                connection.Socket = nullptr;
-                delete certificateScratch;
-                delete handshakeScratch;
-                return STATUS_INSUFFICIENT_RESOURCES;
-            }
-
-            tlsOptions.MaximumProtocol = tls::TlsProtocol::Tls12;
-            status = tlsConnection->Connect(*connection.RawTransport, tlsOptions);
-        }
 
         if (!NT_SUCCESS(status)) {
             delete tlsConnection;
@@ -1301,6 +1289,7 @@ namespace engine
             status = EnsureTlsConnected(
                 session,
                 request,
+                workspace,
                 *pooledConnection);
             if (!NT_SUCCESS(status)) {
                 return status;
@@ -1382,7 +1371,45 @@ namespace engine
         KH_REQUEST Request = nullptr;
         KhHttpSendOptions Options = {};
         KH_RESPONSE Response = nullptr;
+        volatile LONG SessionOperationEnded = 0;
     };
+
+    _Ret_maybenull_
+    KH_RESPONSE TakeAsyncHttpResponse(_Inout_ KhAsyncHttpContext* context) noexcept
+    {
+        if (context == nullptr) {
+            return nullptr;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        KH_RESPONSE response = context->Response;
+        context->Response = nullptr;
+        return response;
+#else
+        return static_cast<KH_RESPONSE>(InterlockedExchangePointer(
+            reinterpret_cast<PVOID volatile*>(&context->Response),
+            nullptr));
+#endif
+    }
+
+    void EndAsyncHttpSessionOperation(_Inout_ KhAsyncHttpContext* context) noexcept
+    {
+        if (context == nullptr || context->Session == nullptr) {
+            return;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (context->SessionOperationEnded != 0) {
+            return;
+        }
+        context->SessionOperationEnded = 1;
+#else
+        if (InterlockedCompareExchange(&context->SessionOperationEnded, 1, 0) != 0) {
+            return;
+        }
+#endif
+        KhSessionEndOperation(context->Session);
+    }
 
 
     _Ret_maybenull_
@@ -1415,9 +1442,11 @@ namespace engine
             return;
         }
 
-        if (httpContext->Response != nullptr) {
-            KhResponseRelease(httpContext->Response);
-            httpContext->Response = nullptr;
+        EndAsyncHttpSessionOperation(httpContext);
+
+        KH_RESPONSE response = TakeAsyncHttpResponse(httpContext);
+        if (response != nullptr) {
+            KhResponseRelease(response);
         }
 
         if (httpContext->Request != nullptr) {
@@ -1435,8 +1464,11 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
+        NTSTATUS status = STATUS_SUCCESS;
         if (KhAsyncOperationIsCanceled(operation)) {
-            return STATUS_CANCELLED;
+            status = STATUS_CANCELLED;
+            EndAsyncHttpSessionOperation(httpContext);
+            return status;
         }
 
         KH_RESPONSE response = nullptr;
@@ -1448,7 +1480,7 @@ namespace engine
             responseOutput = &response;
         }
 
-        NTSTATUS status = KhHttpSendSync(
+        status = KhHttpSendSync(
             httpContext->Session,
             httpContext->Request,
             &httpContext->Options,
@@ -1461,9 +1493,10 @@ namespace engine
         }
 
         if (KhAsyncOperationIsCanceled(operation) && status == STATUS_SUCCESS) {
-            return STATUS_CANCELLED;
+            status = STATUS_CANCELLED;
         }
 
+        EndAsyncHttpSessionOperation(httpContext);
         return status;
     }
 
@@ -1481,6 +1514,11 @@ namespace engine
 
         if (response != nullptr) {
             *response = nullptr;
+        }
+
+        KhSessionOperationScope sessionScope(session);
+        if (!sessionScope.IsActive()) {
+            return STATUS_INVALID_PARAMETER;
         }
 
         if (!IsSessionHandle(session) || !IsRequestHandle(request) || request->Session != session) {
@@ -1516,15 +1554,20 @@ namespace engine
 
         const SIZE_T maxResponseBytes =
             EffectiveMaxResponseBytes(options, session->Options.MaxResponseBytes);
-        session->Workspace->MaxResponseBytes = maxResponseBytes;
-        KhWorkspaceReset(session->Workspace);
+        WorkspaceGuard requestWorkspace;
+        status = requestWorkspace.Create(maxResponseBytes);
+        if (!NT_SUCCESS(status) || !requestWorkspace.IsValid()) {
+            return !NT_SUCCESS(status) ? status : STATUS_INSUFFICIENT_RESOURCES;
+        }
+        KhWorkspace& workspace = *requestWorkspace.Get();
+        KhWorkspaceReset(&workspace);
 
         HeapObject<ApiHttpHeaderScratch> headerScratch;
         if (!headerScratch.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        status = PrepareApiHttpHeaderScratch(*session->Workspace, headerScratch.Get());
+        status = PrepareApiHttpHeaderScratch(workspace, headerScratch.Get());
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1533,7 +1576,7 @@ namespace engine
         SIZE_T requestHeaderCount = 0;
         status = BuildRequestBytes(
             *request,
-            *session->Workspace,
+            workspace,
             headerScratch->HostHeader,
             headerScratch->HostHeaderCapacity,
             headerScratch->RequestHeaders,
@@ -1573,7 +1616,7 @@ namespace engine
         status = SendViaTransport(
             session,
             *request,
-            *session->Workspace,
+            workspace,
             pooledConnection,
             reusedConnection,
             builtRequestLength,
@@ -1587,7 +1630,7 @@ namespace engine
 
         if (!NT_SUCCESS(status) && reusedConnection &&
             request->ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate) {
-            KhConnectionPoolClose(pooledConnection);
+            KhConnectionPoolClose(&session->ConnectionPool, pooledConnection);
 
             KhPooledConnection* retryConnection = nullptr;
             bool retryReused = false;
@@ -1598,12 +1641,12 @@ namespace engine
                 &retryConnection,
                 &retryReused);
             if (NT_SUCCESS(retryStatus) && !retryReused) {
-                KhWorkspaceReset(session->Workspace);
-                retryStatus = PrepareApiHttpHeaderScratch(*session->Workspace, headerScratch.Get());
+                KhWorkspaceReset(&workspace);
+                retryStatus = PrepareApiHttpHeaderScratch(workspace, headerScratch.Get());
                 if (NT_SUCCESS(retryStatus)) {
                     retryStatus = BuildRequestBytes(
                         *request,
-                        *session->Workspace,
+                        workspace,
                         headerScratch->HostHeader,
                         headerScratch->HostHeaderCapacity,
                         headerScratch->RequestHeaders,
@@ -1622,7 +1665,7 @@ namespace engine
                 status = SendViaTransport(
                     session,
                     *request,
-                    *session->Workspace,
+                    workspace,
                     retryConnection,
                     retryReused,
                     builtRequestLength,
@@ -1650,7 +1693,7 @@ namespace engine
         if (NT_SUCCESS(status) && shouldAggregate) {
             status = CreateOwnedResponse(
                 parsed,
-                reinterpret_cast<const char*>(session->Workspace->Response.Data),
+                reinterpret_cast<const char*>(workspace.Response.Data),
                 rawResponseLength,
                 response);
         }
@@ -1678,11 +1721,17 @@ namespace engine
             *operation = nullptr;
         }
 
+        if (!KhSessionBeginOperation(session)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
         if (!IsSessionHandle(session) || !IsRequestHandle(request) || operation == nullptr || request->Session != session) {
+            KhSessionEndOperation(session);
             return STATUS_INVALID_PARAMETER;
         }
 
         if (request->Url == nullptr || request->UrlLength == 0) {
+            KhSessionEndOperation(session);
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -1692,17 +1741,20 @@ namespace engine
         }
 
         if (!IsValidSendOptions(effectiveOptions, *session)) {
+            KhSessionEndOperation(session);
             return STATUS_INVALID_PARAMETER;
         }
 
         auto* context = AllocateAsyncHttpContext();
         if (context == nullptr) {
+            KhSessionEndOperation(session);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
         context->Session = session;
         context->Options = effectiveOptions;
         context->Response = nullptr;
+        context->SessionOperationEnded = 0;
 
         status = CloneRequestForAsync(*request, &context->Request);
         if (!NT_SUCCESS(status)) {
@@ -1717,10 +1769,18 @@ namespace engine
         createOptions.Context = context;
         createOptions.CompletionCallback = effectiveOptions.CompletionCallback;
         createOptions.CompletionContext = effectiveOptions.CompletionContext;
+        createOptions.StartSuspended = true;
 
         status = KhAsyncOperationCreate(createOptions, operation);
         if (!NT_SUCCESS(status)) {
             CleanupAsyncHttpContext(context);
+            return status;
+        }
+
+        status = KhAsyncOperationQueue(*operation);
+        if (!NT_SUCCESS(status)) {
+            KhAsyncOperationRelease(*operation);
+            *operation = nullptr;
         }
 
         return status;
@@ -1750,12 +1810,12 @@ namespace engine
         }
 
         auto* context = static_cast<KhAsyncHttpContext*>(KhAsyncOperationContext(operation));
-        if (context == nullptr || context->Response == nullptr) {
+        KH_RESPONSE asyncResponse = TakeAsyncHttpResponse(context);
+        if (asyncResponse == nullptr) {
             return STATUS_NOT_FOUND;
         }
 
-        *response = context->Response;
-        context->Response = nullptr;
+        *response = asyncResponse;
         return STATUS_SUCCESS;
     }
 

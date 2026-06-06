@@ -69,6 +69,41 @@ namespace engine
     bool IsResponseHandle(KH_RESPONSE response) noexcept;
     bool IsWebSocketHandle(KH_WEBSOCKET websocket) noexcept;
 
+    _Must_inspect_result_
+    bool KhSessionBeginOperation(_In_opt_ KH_SESSION session) noexcept;
+
+    void KhSessionEndOperation(_In_opt_ KH_SESSION session) noexcept;
+
+    class KhSessionOperationScope final
+    {
+    public:
+        explicit KhSessionOperationScope(_In_opt_ KH_SESSION session) noexcept :
+            session_(session),
+            active_(KhSessionBeginOperation(session))
+        {
+        }
+
+        ~KhSessionOperationScope() noexcept
+        {
+            if (active_) {
+                KhSessionEndOperation(session_);
+            }
+        }
+
+        KhSessionOperationScope(const KhSessionOperationScope&) = delete;
+        KhSessionOperationScope& operator=(const KhSessionOperationScope&) = delete;
+
+        _Must_inspect_result_
+        bool IsActive() const noexcept
+        {
+            return active_;
+        }
+
+    private:
+        KH_SESSION session_ = nullptr;
+        bool active_ = false;
+    };
+
     void ReleaseRequestStorage(_Inout_ KhRequest& request) noexcept;
 
     _Must_inspect_result_

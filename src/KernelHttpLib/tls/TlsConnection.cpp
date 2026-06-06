@@ -209,35 +209,44 @@ namespace tls
         }
 
         _Must_inspect_result_
-        crypto::SignatureAlgorithm ToTls13SignatureAlgorithm(TlsSignatureScheme scheme) noexcept
+        NTSTATUS GetTls13SignatureParameters(
+            TlsSignatureScheme scheme,
+            _Out_ crypto::HashAlgorithm* hashAlgorithm,
+            _Out_ crypto::SignatureAlgorithm* signatureAlgorithm) noexcept
         {
+            if (hashAlgorithm == nullptr || signatureAlgorithm == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
             switch (scheme) {
             case TlsSignatureScheme::RsaPssRsaeSha256:
-                return crypto::SignatureAlgorithm::RsaPssSha256;
+                *hashAlgorithm = crypto::HashAlgorithm::Sha256;
+                *signatureAlgorithm = crypto::SignatureAlgorithm::RsaPssSha256;
+                return STATUS_SUCCESS;
             case TlsSignatureScheme::RsaPssRsaeSha384:
-                return crypto::SignatureAlgorithm::RsaPssSha384;
-            case TlsSignatureScheme::RsaPkcs1Sha384:
-                return crypto::SignatureAlgorithm::RsaPkcs1Sha384;
+                *hashAlgorithm = crypto::HashAlgorithm::Sha384;
+                *signatureAlgorithm = crypto::SignatureAlgorithm::RsaPssSha384;
+                return STATUS_SUCCESS;
             case TlsSignatureScheme::EcdsaSecp256r1Sha256:
-                return crypto::SignatureAlgorithm::EcdsaSha256;
+                *hashAlgorithm = crypto::HashAlgorithm::Sha256;
+                *signatureAlgorithm = crypto::SignatureAlgorithm::EcdsaSha256;
+                return STATUS_SUCCESS;
             case TlsSignatureScheme::EcdsaSecp384r1Sha384:
-                return crypto::SignatureAlgorithm::EcdsaSha384;
+                *hashAlgorithm = crypto::HashAlgorithm::Sha384;
+                *signatureAlgorithm = crypto::SignatureAlgorithm::EcdsaSha384;
+                return STATUS_SUCCESS;
             case TlsSignatureScheme::RsaPkcs1Sha256:
-            default:
-                return crypto::SignatureAlgorithm::RsaPkcs1Sha256;
-            }
-        }
-
-        _Must_inspect_result_
-        crypto::HashAlgorithm HashForTls13Signature(TlsSignatureScheme scheme) noexcept
-        {
-            switch (scheme) {
-            case TlsSignatureScheme::RsaPssRsaeSha384:
+                *hashAlgorithm = crypto::HashAlgorithm::Sha256;
+                *signatureAlgorithm = crypto::SignatureAlgorithm::RsaPkcs1Sha256;
+                return STATUS_SUCCESS;
             case TlsSignatureScheme::RsaPkcs1Sha384:
-            case TlsSignatureScheme::EcdsaSecp384r1Sha384:
-                return crypto::HashAlgorithm::Sha384;
+                *hashAlgorithm = crypto::HashAlgorithm::Sha384;
+                *signatureAlgorithm = crypto::SignatureAlgorithm::RsaPkcs1Sha384;
+                return STATUS_SUCCESS;
             default:
-                return crypto::HashAlgorithm::Sha256;
+                *hashAlgorithm = crypto::HashAlgorithm::Sha256;
+                *signatureAlgorithm = crypto::SignatureAlgorithm::RsaPkcs1Sha256;
+                return STATUS_NOT_SUPPORTED;
             }
         }
 
@@ -1671,7 +1680,8 @@ namespace tls
         core::ITransport& transport,
         void* data,
         SIZE_T length,
-        SIZE_T* bytesReceived) noexcept
+        SIZE_T* bytesReceived,
+        ULONG receiveTimeoutMilliseconds) noexcept
     {
         if (bytesReceived != nullptr) {
             *bytesReceived = 0;
@@ -1699,7 +1709,7 @@ namespace tls
 
         for (;;) {
             TlsMutablePlaintextRecord record = {};
-            NTSTATUS status = ReadRecord(transport, record);
+            NTSTATUS status = ReadRecord(transport, record, receiveTimeoutMilliseconds);
             if (!NT_SUCCESS(status)) {
                 kprintf("TlsConnection read record failed before HTTP: 0x%08X\r\n", static_cast<ULONG>(status));
                 return status;
@@ -2135,8 +2145,18 @@ namespace tls
         const UCHAR* transcriptHash,
         SIZE_T transcriptHashLength) noexcept
     {
+        crypto::HashAlgorithm hashAlgorithm = crypto::HashAlgorithm::Sha256;
+        crypto::SignatureAlgorithm signatureAlgorithm = crypto::SignatureAlgorithm::RsaPkcs1Sha256;
+        NTSTATUS status = GetTls13SignatureParameters(
+            certificateVerify.SignatureScheme,
+            &hashAlgorithm,
+            &signatureAlgorithm);
+        if (!NT_SUCCESS(status)) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
         UCHAR* signedInput = nullptr;
-        NTSTATUS status = GetHandshakeScratch(
+        status = GetHandshakeScratch(
             TlsScratchSignedInputOffset,
             TlsScratchSignedInputLength,
             &signedInput);
@@ -2164,7 +2184,7 @@ namespace tls
         SIZE_T hashLength = 0;
         status = crypto::CngProvider::Hash(
             providerCache_,
-            HashForTls13Signature(certificateVerify.SignatureScheme),
+            hashAlgorithm,
             signedInput,
             signedInputLength,
             hash.Get(),
@@ -2177,7 +2197,7 @@ namespace tls
 
         status = crypto::CngProvider::VerifySignature(
             providerCache_,
-            ToTls13SignatureAlgorithm(certificateVerify.SignatureScheme),
+            signatureAlgorithm,
             serverPublicKey,
             hash.Get(),
             hashLength,

@@ -27,8 +27,7 @@ namespace core
         _Out_opt_ SIZE_T* bytesReceived,
         ULONG timeoutMilliseconds) noexcept
     {
-        (void)timeoutMilliseconds;
-        return tls_.Receive(rawTransport_, buffer, length, bytesReceived);
+        return tls_.Receive(rawTransport_, buffer, length, bytesReceived, timeoutMilliseconds);
     }
 }
 }

@@ -97,7 +97,47 @@ namespace engine
         char* Url = nullptr;
         char* Subprotocol = nullptr;
         KH_WEBSOCKET WebSocket = nullptr;
+        volatile LONG SessionOperationEnded = 0;
     };
+
+    _Ret_maybenull_
+    KH_WEBSOCKET TakeAsyncWebSocketConnectResult(
+        _Inout_ KhAsyncWebSocketConnectContext* context) noexcept
+    {
+        if (context == nullptr) {
+            return nullptr;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        KH_WEBSOCKET websocket = context->WebSocket;
+        context->WebSocket = nullptr;
+        return websocket;
+#else
+        return static_cast<KH_WEBSOCKET>(InterlockedExchangePointer(
+            reinterpret_cast<PVOID volatile*>(&context->WebSocket),
+            nullptr));
+#endif
+    }
+
+    void EndAsyncWebSocketSessionOperation(
+        _Inout_ KhAsyncWebSocketConnectContext* context) noexcept
+    {
+        if (context == nullptr || context->Session == nullptr) {
+            return;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (context->SessionOperationEnded != 0) {
+            return;
+        }
+        context->SessionOperationEnded = 1;
+#else
+        if (InterlockedCompareExchange(&context->SessionOperationEnded, 1, 0) != 0) {
+            return;
+        }
+#endif
+        KhSessionEndOperation(context->Session);
+    }
 
 
     _Ret_maybenull_
@@ -130,12 +170,14 @@ namespace engine
             return;
         }
 
+        EndAsyncWebSocketSessionOperation(connectContext);
+
         FreeApiMemory(connectContext->Url);
         FreeApiMemory(connectContext->Subprotocol);
-        if (connectContext->WebSocket != nullptr) {
-            const NTSTATUS status = KhWebSocketCloseSync(connectContext->WebSocket);
+        KH_WEBSOCKET websocket = TakeAsyncWebSocketConnectResult(connectContext);
+        if (websocket != nullptr) {
+            const NTSTATUS status = KhWebSocketCloseSync(websocket);
             UNREFERENCED_PARAMETER(status);
-            connectContext->WebSocket = nullptr;
         }
         FreeAsyncWebSocketConnectContext(connectContext);
     }
@@ -196,13 +238,24 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        newWebSocket->Header = { KhHandleKind::WebSocket, false };
+        newWebSocket->Header = { KhHandleKind::WebSocket, 0 };
         newWebSocket->Session = session;
         newWebSocket->Url = urlCopy;
         newWebSocket->UrlLength = options.UrlLength;
         newWebSocket->MaxMessageBytes = options.MaxMessageBytes;
         newWebSocket->AutoReplyPing = options.AutoReplyPing;
-        NTSTATUS status = ParseUrlParts(
+
+        KhWorkspaceOptions workspaceOptions = {};
+        workspaceOptions.PoolType = KhPoolType::NonPaged;
+        workspaceOptions.MaxResponseBytes = options.MaxMessageBytes;
+        NTSTATUS status = KhWorkspaceCreate(&workspaceOptions, &newWebSocket->Workspace);
+        if (!NT_SUCCESS(status)) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return status;
+        }
+
+        status = ParseUrlParts(
             newWebSocket->Url,
             newWebSocket->UrlLength,
             true,
@@ -250,11 +303,11 @@ namespace engine
             effectiveTls.ServerNameLength = newWebSocket->HostLength;
         }
 
-        session->Workspace->MaxResponseBytes = options.MaxMessageBytes;
-        KhWorkspaceReset(session->Workspace);
+        newWebSocket->Workspace->MaxResponseBytes = options.MaxMessageBytes;
+        KhWorkspaceReset(newWebSocket->Workspace);
 
         SIZE_T handshakeLength = 0;
-        status = BuildWebSocketHandshakeRequest(*newWebSocket, *session->Workspace, &handshakeLength);
+        status = BuildWebSocketHandshakeRequest(*newWebSocket, *newWebSocket->Workspace, &handshakeLength);
         if (!NT_SUCCESS(status)) {
             ReleaseWebSocketStorage(*newWebSocket);
             FreeHandle(newWebSocket);
@@ -320,14 +373,14 @@ namespace engine
         }
 
         client::WebSocketIoBuffers buffers = {};
-        buffers.RequestBuffer = reinterpret_cast<char*>(session->Workspace->Request.Data);
-        buffers.RequestBufferLength = session->Workspace->Request.Length;
-        buffers.ResponseBuffer = reinterpret_cast<char*>(session->Workspace->Response.Data);
-        buffers.ResponseBufferLength = session->Workspace->Response.Length;
-        buffers.FrameBuffer = session->Workspace->WebSocketFrameScratch.Data;
-        buffers.FrameBufferLength = session->Workspace->WebSocketFrameScratch.Length;
-        buffers.PayloadBuffer = session->Workspace->DecodedBody.Data;
-        buffers.PayloadBufferLength = session->Workspace->DecodedBody.Length;
+        buffers.RequestBuffer = reinterpret_cast<char*>(newWebSocket->Workspace->Request.Data);
+        buffers.RequestBufferLength = newWebSocket->Workspace->Request.Length;
+        buffers.ResponseBuffer = reinterpret_cast<char*>(newWebSocket->Workspace->Response.Data);
+        buffers.ResponseBufferLength = newWebSocket->Workspace->Response.Length;
+        buffers.FrameBuffer = newWebSocket->Workspace->WebSocketFrameScratch.Data;
+        buffers.FrameBufferLength = newWebSocket->Workspace->WebSocketFrameScratch.Length;
+        buffers.PayloadBuffer = newWebSocket->Workspace->DecodedBody.Data;
+        buffers.PayloadBufferLength = newWebSocket->Workspace->DecodedBody.Length;
         HeapArray<http::HttpHeader> responseHeaders(KhMaxHeadersPerResponse);
         if (!responseHeaders.IsValid()) {
             ReleaseWebSocketStorage(*newWebSocket);
@@ -351,7 +404,7 @@ namespace engine
         connectOptions.Subprotocol = newWebSocket->Subprotocol;
         connectOptions.SubprotocolLength = newWebSocket->SubprotocolLength;
         connectOptions.CertificateStore = effectiveTls.CertificateStore;
-        connectOptions.Workspace = session->Workspace;
+        connectOptions.Workspace = newWebSocket->Workspace;
         connectOptions.ProviderCache = session->ProviderCache;
         connectOptions.AddressFamily = ToWskAddressFamily(options.AddressFamily);
         connectOptions.MinimumTlsProtocol = ToTlsProtocol(effectiveTls.MinVersion);
@@ -383,12 +436,15 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
+        NTSTATUS status = STATUS_SUCCESS;
         if (KhAsyncOperationIsCanceled(operation)) {
-            return STATUS_CANCELLED;
+            status = STATUS_CANCELLED;
+            EndAsyncWebSocketSessionOperation(connectContext);
+            return status;
         }
 
         KH_WEBSOCKET websocket = nullptr;
-        NTSTATUS status = CompleteWebSocketConnect(connectContext->Session, connectContext->Options, &websocket);
+        status = CompleteWebSocketConnect(connectContext->Session, connectContext->Options, &websocket);
         if (NT_SUCCESS(status)) {
             connectContext->WebSocket = websocket;
         }
@@ -398,9 +454,10 @@ namespace engine
         }
 
         if (KhAsyncOperationIsCanceled(operation) && status == STATUS_SUCCESS) {
-            return STATUS_CANCELLED;
+            status = STATUS_CANCELLED;
         }
 
+        EndAsyncWebSocketSessionOperation(connectContext);
         return status;
     }
 
@@ -416,6 +473,11 @@ namespace engine
 
         if (websocket != nullptr) {
             *websocket = nullptr;
+        }
+
+        KhSessionOperationScope sessionScope(session);
+        if (!sessionScope.IsActive()) {
+            return STATUS_INVALID_PARAMETER;
         }
 
         if (!IsSessionHandle(session) || options == nullptr || websocket == nullptr || !IsValidWebSocketConnectOptions(*options)) {
@@ -439,17 +501,24 @@ namespace engine
             *operation = nullptr;
         }
 
+        if (!KhSessionBeginOperation(session)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
         if (!IsSessionHandle(session) || options == nullptr || operation == nullptr || !IsValidWebSocketConnectOptions(*options)) {
+            KhSessionEndOperation(session);
             return STATUS_INVALID_PARAMETER;
         }
 
         auto* context = AllocateAsyncWebSocketConnectContext();
         if (context == nullptr) {
+            KhSessionEndOperation(session);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
         context->Session = session;
         context->Options = *options;
+        context->SessionOperationEnded = 0;
         context->Url = AllocateTextCopy(options->Url, options->UrlLength);
         if (context->Url == nullptr) {
             CleanupAsyncWebSocketConnectContext(context);
@@ -471,10 +540,18 @@ namespace engine
         createOptions.WorkerRoutine = RunWebSocketConnectAsyncOperation;
         createOptions.CleanupRoutine = CleanupAsyncWebSocketConnectContext;
         createOptions.Context = context;
+        createOptions.StartSuspended = true;
 
         status = KhAsyncOperationCreate(createOptions, operation);
         if (!NT_SUCCESS(status)) {
             CleanupAsyncWebSocketConnectContext(context);
+            return status;
+        }
+
+        status = KhAsyncOperationQueue(*operation);
+        if (!NT_SUCCESS(status)) {
+            KhAsyncOperationRelease(*operation);
+            *operation = nullptr;
         }
 
         return status;
@@ -514,13 +591,13 @@ namespace engine
             finalFragment);
 #else
         UNREFERENCED_PARAMETER(finalFragment);
-        if (websocket->Client == nullptr || websocket->Session == nullptr || websocket->Session->Workspace == nullptr) {
+        if (websocket->Client == nullptr || websocket->Workspace == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
         client::WebSocketIoBuffers buffers = {};
-        buffers.FrameBuffer = websocket->Session->Workspace->WebSocketFrameScratch.Data;
-        buffers.FrameBufferLength = websocket->Session->Workspace->WebSocketFrameScratch.Length;
+        buffers.FrameBuffer = websocket->Workspace->WebSocketFrameScratch.Data;
+        buffers.FrameBufferLength = websocket->Workspace->WebSocketFrameScratch.Length;
         return websocket->Client->SendText(text, textLength, buffers);
 #endif
     }
@@ -559,13 +636,13 @@ namespace engine
             finalFragment);
 #else
         UNREFERENCED_PARAMETER(finalFragment);
-        if (websocket->Client == nullptr || websocket->Session == nullptr || websocket->Session->Workspace == nullptr) {
+        if (websocket->Client == nullptr || websocket->Workspace == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
         client::WebSocketIoBuffers buffers = {};
-        buffers.FrameBuffer = websocket->Session->Workspace->WebSocketFrameScratch.Data;
-        buffers.FrameBufferLength = websocket->Session->Workspace->WebSocketFrameScratch.Length;
+        buffers.FrameBuffer = websocket->Workspace->WebSocketFrameScratch.Data;
+        buffers.FrameBufferLength = websocket->Workspace->WebSocketFrameScratch.Length;
         return websocket->Client->SendBinary(data, dataLength, buffers);
 #endif
     }
@@ -653,26 +730,26 @@ namespace engine
 
         return STATUS_SUCCESS;
 #else
-        if (websocket->Client == nullptr || websocket->Session == nullptr || websocket->Session->Workspace == nullptr) {
+        if (websocket->Client == nullptr || websocket->Workspace == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
         const SIZE_T maxMessageBytes =
             effectiveOptions.MaxMessageBytes != 0 ? effectiveOptions.MaxMessageBytes : websocket->MaxMessageBytes;
         const SIZE_T outputCapacity =
-            maxMessageBytes < websocket->Session->Workspace->DecodedBody.Length ?
+            maxMessageBytes < websocket->Workspace->DecodedBody.Length ?
             maxMessageBytes :
-            websocket->Session->Workspace->DecodedBody.Length;
+            websocket->Workspace->DecodedBody.Length;
 
         client::WebSocketIoBuffers buffers = {};
-        buffers.FrameBuffer = websocket->Session->Workspace->WebSocketFrameScratch.Data;
-        buffers.FrameBufferLength = websocket->Session->Workspace->WebSocketFrameScratch.Length;
+        buffers.FrameBuffer = websocket->Workspace->WebSocketFrameScratch.Data;
+        buffers.FrameBufferLength = websocket->Workspace->WebSocketFrameScratch.Length;
         KernelHttp::websocket::WebSocketOpcode opcode = KernelHttp::websocket::WebSocketOpcode::Continuation;
         SIZE_T bytesReceived = 0;
         status = websocket->Client->ReceiveMessage(
             buffers,
             &opcode,
-            websocket->Session->Workspace->DecodedBody.Data,
+            websocket->Workspace->DecodedBody.Data,
             outputCapacity,
             &bytesReceived);
         if (!NT_SUCCESS(status)) {
@@ -688,7 +765,7 @@ namespace engine
             websocket->Connected = false;
         }
 
-        const UCHAR* data = websocket->Session->Workspace->DecodedBody.Data;
+        const UCHAR* data = websocket->Workspace->DecodedBody.Data;
         if (effectiveOptions.MessageCallback != nullptr) {
             status = effectiveOptions.MessageCallback(
                 effectiveOptions.CallbackContext,
@@ -724,8 +801,12 @@ namespace engine
             return status;
         }
 
-        if (!IsWebSocketHandle(websocket)) {
-            return websocket == nullptr ? STATUS_SUCCESS : STATUS_INVALID_PARAMETER;
+        if (websocket == nullptr) {
+            return STATUS_SUCCESS;
+        }
+
+        if (!TryCloseHandleHeader(&websocket->Header, KhHandleKind::WebSocket)) {
+            return STATUS_INVALID_PARAMETER;
         }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -734,17 +815,16 @@ namespace engine
         }
 #endif
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
-        if (websocket->Client != nullptr && websocket->Session != nullptr && websocket->Session->Workspace != nullptr) {
+        if (websocket->Client != nullptr && websocket->Workspace != nullptr) {
             client::WebSocketIoBuffers buffers = {};
-            buffers.FrameBuffer = websocket->Session->Workspace->WebSocketFrameScratch.Data;
-            buffers.FrameBufferLength = websocket->Session->Workspace->WebSocketFrameScratch.Length;
+            buffers.FrameBuffer = websocket->Workspace->WebSocketFrameScratch.Data;
+            buffers.FrameBufferLength = websocket->Workspace->WebSocketFrameScratch.Length;
             const NTSTATUS closeStatus = websocket->Client->Close(buffers);
             UNREFERENCED_PARAMETER(closeStatus);
         }
 #endif
         websocket->Connected = false;
         ReleaseWebSocketStorage(*websocket);
-        websocket->Header.Closed = true;
         FreeHandle(websocket);
         return STATUS_SUCCESS;
     }
@@ -773,12 +853,12 @@ namespace engine
         }
 
         auto* context = static_cast<KhAsyncWebSocketConnectContext*>(KhAsyncOperationContext(operation));
-        if (context == nullptr || context->WebSocket == nullptr) {
+        KH_WEBSOCKET asyncWebSocket = TakeAsyncWebSocketConnectResult(context);
+        if (asyncWebSocket == nullptr) {
             return STATUS_NOT_FOUND;
         }
 
-        *websocket = context->WebSocket;
-        context->WebSocket = nullptr;
+        *websocket = asyncWebSocket;
         return STATUS_SUCCESS;
     }
 

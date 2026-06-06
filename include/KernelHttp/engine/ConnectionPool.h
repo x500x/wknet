@@ -45,6 +45,7 @@ namespace engine
         bool InUse = false;
         bool Connected = false;
         ULONG Id = 0;
+        ULONGLONG LastUsedTime = 0;
         KhConnectionPoolKey Key = {};
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         net::WskSocket* Socket = nullptr;
@@ -60,12 +61,17 @@ namespace engine
         ULONG Capacity = 0;
         ULONG ActiveCount = 0;
         ULONG NextConnectionId = 1;
+        ULONG IdleTimeoutMilliseconds = 0;
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        FAST_MUTEX Lock = {};
+#endif
     };
 
     _Must_inspect_result_
     NTSTATUS KhConnectionPoolInitialize(
         _Inout_ KhConnectionPool* pool,
-        ULONG capacity) noexcept;
+        ULONG capacity,
+        ULONG idleTimeoutMilliseconds) noexcept;
 
     void KhConnectionPoolShutdown(_Inout_ KhConnectionPool* pool) noexcept;
 
@@ -88,6 +94,7 @@ namespace engine
         bool reusable) noexcept;
 
     void KhConnectionPoolClose(
+        _Inout_ KhConnectionPool* pool,
         _Inout_opt_ KhPooledConnection* connection) noexcept;
 }
 }

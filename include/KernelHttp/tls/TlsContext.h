@@ -108,6 +108,7 @@ namespace tls
     {
     public:
         TlsContext() noexcept;
+        ~TlsContext() noexcept;
 
         void Reset() noexcept;
 

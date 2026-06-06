@@ -86,7 +86,7 @@ namespace tls
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS TlsConnection::Receive(core::ITransport&, void*, SIZE_T, SIZE_T*) noexcept
+    NTSTATUS TlsConnection::Receive(core::ITransport&, void*, SIZE_T, SIZE_T*, ULONG) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }
