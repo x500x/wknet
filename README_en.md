@@ -22,14 +22,15 @@ KernelHttp is a pure kernel-mode HTTP/HTTPS client library designed specifically
 ### ✨ Key Features
 
 - **🔒 Pure Kernel-Mode Implementation**: No dependency on WinHTTP, WinINet, SChannel, or other user-mode components
-- **🌐 WSK Network Transport**: Uses Windows Sockets Kernel (WSK) for network communication, with `ITransport` abstraction supporting multiple transport layers
+- **🌐 WSK Network Transport**: Uses Windows Sockets Kernel (WSK) for network communication, with `ITransport` abstraction supporting WSK and TLS transport layers
 - **🔐 CNG/BCrypt Cryptography**: Uses kernel-mode CNG (Cryptography Next Generation) for cryptographic operations, supporting TLS 1.2/1.3 handshake
 - **📡 Complete Protocol Stack**: Supports HTTP/1.1, HTTP/2 (with h2c plaintext upgrade), WebSocket, TLS 1.2/1.3
-- **🔄 Connection Pool Management**: Built-in connection pool with connection reuse, idle timeout, and automatic management
-- **⚡ Asynchronous Operations**: Supports async requests to avoid blocking kernel threads
+- **🔄 Connection Pool Management**: Built-in connection pool with connection reuse, idle timeout, concurrency protection, and automatic management
+- **⚡ Asynchronous Operations**: Supports async requests with concurrency protection and workspace isolation, avoiding blocking kernel threads
 - **🎯 Two-Layer API**: Provides both high-level simplified API (`khttp`) and low-level fine-grained control API (`engine`)
-- **🛡️ Certificate Verification**: Supports Certificate Pinning, Trust Anchors, and SPKI hash verification
+- **🛡️ Certificate Verification**: Supports Certificate Pinning, Trust Anchors, SPKI hash verification, and TLS 1.3 signature scheme validation
 - **📦 Content Encoding**: Supports gzip, deflate, br (Brotli) response body decoding
+- **🧱 Heap Memory Management**: Uses `HeapObject<T>` / `HeapArray<T>` for unified heap memory management, high-frequency buffers resident in Workspace
 
 ---
 
@@ -257,10 +258,10 @@ KernelHttp/
 │       │   └── WebSocketClient.h    # WebSocket client (supports ws:// and wss://)
 │       ├── core/                    # Core abstraction layer
 │       │   ├── ITransport.h         # Transport abstraction interface (Send/Receive/ReceiveWithTimeout)
-│       │   ├── IScratchAllocator.h  # Temporary memory allocator interface
-│       │   ├── TlsTransport.h       # TLS transport adapter (ITransport + TlsConnection)
-│       │   ├── WskTransport.h       # WSK transport adapter (ITransport + WskSocket)
-│       │   └── WorkspaceScratchAllocator.h  # Workspace temporary allocator
+│       │   ├── IScratchAllocator.h  # Temporary memory allocator interface (TLS handshake, cert validation, etc.)
+│       │   ├── TlsTransport.h       # TLS transport adapter (ITransport + TlsConnection, auto encrypt/decrypt)
+│       │   ├── WskTransport.h       # WSK transport adapter (ITransport + WskSocket, plaintext transport)
+│       │   └── WorkspaceScratchAllocator.h  # Workspace temporary allocator (resident heap memory)
 │       ├── khttp/                   # High-level API (KernelHttp::khttp)
 │       │   ├── Types.h              # Handle types, enums, config structs, callbacks
 │       │   ├── Session.h            # Session create/close
@@ -567,11 +568,23 @@ config.Tls.MaxVersion = khttp::TlsVersion::Tls13;
 // Certificate verification
 config.Tls.Certificate = khttp::CertPolicy::Verify;
 
+// TLS handshake timeout (default 120 seconds)
+config.Tls.HandshakeTimeoutMs = 120000;
+
 // Custom certificate store
 tls::CertificateStore store = {};
 // Add trust anchors...
 config.Tls.Store = &store;
 ```
+
+### TLS 1.3 Security Enhancements
+
+The project implements the following TLS 1.3 security hardening:
+
+- **Signature Scheme Validation**: Strictly validates server certificate signature algorithms, rejecting weak schemes
+- **Downgrade Protection**: Prevents protocol downgrade attacks from TLS 1.3 to TLS 1.2
+- **Key Zeroization**: Securely zeros all key materials after session termination
+- **Trust Anchor Validation**: Validates certificate chain integrity to trusted roots
 
 ### Certificate Pinning
 

@@ -22,14 +22,15 @@ KernelHttp 是一个纯内核态的 HTTP/HTTPS 客户端库，专为 Windows 内
 ### ✨ 核心特点
 
 - **🔒 纯内核态实现**：不依赖 WinHTTP、WinINet、SChannel 等用户态组件
-- **🌐 WSK 网络传输**：使用 Windows Sockets Kernel (WSK) 进行网络通信，通过 `ITransport` 抽象接口支持多种传输层
+- **🌐 WSK 网络传输**：使用 Windows Sockets Kernel (WSK) 进行网络通信，通过 `ITransport` 抽象接口支持 WSK 和 TLS 两种传输层
 - **🔐 CNG/BCrypt 密码学**：使用内核态 CNG (Cryptography Next Generation) 进行加密操作，支持 TLS 1.2/1.3 握手
 - **📡 完整的协议栈**：支持 HTTP/1.1、HTTP/2（含 h2c 明文升级）、WebSocket、TLS 1.2/1.3
-- **🔄 连接池管理**：内置连接池，支持连接复用、空闲超时和自动管理
-- **⚡ 异步操作**：支持异步请求，避免阻塞内核线程
+- **🔄 连接池管理**：内置连接池，支持连接复用、空闲超时、并发保护和自动管理
+- **⚡ 异步操作**：支持异步请求，带并发保护和 Workspace 隔离，避免阻塞内核线程
 - **🎯 两层 API**：提供高层简洁 API（`khttp`）和底层精细控制 API（`engine`）
-- **🛡️ 证书验证**：支持证书锁定（Certificate Pinning）、信任锚（Trust Anchor）和 SPKI 哈希验证
+- **🛡️ 证书验证**：支持证书锁定（Certificate Pinning）、信任锚（Trust Anchor）、SPKI 哈希验证和 TLS 1.3 签名方案校验
 - **📦 内容编码**：支持 gzip、deflate、br（Brotli）响应体解码
+- **🧱 堆内存管理**：使用 `HeapObject<T>` / `HeapArray<T>` 统一管理堆内存，高频缓冲常驻 Workspace
 
 ---
 
@@ -257,10 +258,10 @@ KernelHttp/
 │       │   └── WebSocketClient.h    # WebSocket 客户端（支持 ws:// 和 wss://）
 │       ├── core/                    # 核心抽象层
 │       │   ├── ITransport.h         # 传输层抽象接口（Send/Receive/ReceiveWithTimeout）
-│       │   ├── IScratchAllocator.h  # 临时内存分配器接口
-│       │   ├── TlsTransport.h       # TLS 传输层适配器（ITransport + TlsConnection）
-│       │   ├── WskTransport.h       # WSK 传输层适配器（ITransport + WskSocket）
-│       │   └── WorkspaceScratchAllocator.h  # 工作空间临时分配器
+│       │   ├── IScratchAllocator.h  # 临时内存分配器接口（TLS 握手、证书验证等）
+│       │   ├── TlsTransport.h       # TLS 传输层适配器（ITransport + TlsConnection，自动加解密）
+│       │   ├── WskTransport.h       # WSK 传输层适配器（ITransport + WskSocket，明文传输）
+│       │   └── WorkspaceScratchAllocator.h  # 工作空间临时分配器（常驻堆内存）
 │       ├── khttp/                   # 高层 API（KernelHttp::khttp）
 │       │   ├── Types.h              # 句柄类型、枚举、配置结构体、回调类型
 │       │   ├── Session.h            # 会话创建/关闭
@@ -567,11 +568,23 @@ config.Tls.MaxVersion = khttp::TlsVersion::Tls13;
 // 证书验证
 config.Tls.Certificate = khttp::CertPolicy::Verify;
 
+// TLS 握手超时（默认 120 秒）
+config.Tls.HandshakeTimeoutMs = 120000;
+
 // 自定义证书存储
 tls::CertificateStore store = {};
 // 添加信任锚...
 config.Tls.Store = &store;
 ```
+
+### TLS 1.3 安全增强
+
+项目已实现以下 TLS 1.3 安全加固：
+
+- **签名方案校验**：严格校验服务器证书签名算法，拒绝弱签名方案
+- **降级保护**：防止 TLS 1.3 到 TLS 1.2 的协议降级攻击
+- **密钥清零**：会话结束后安全清零所有密钥材料
+- **信任锚校验**：验证证书链到可信根的完整性
 
 ### 证书锁定
 
