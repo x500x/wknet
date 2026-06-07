@@ -169,7 +169,8 @@ namespace
         if (isHttps && TextEqualsLiteral(request->Alpn, request->AlpnLength, "h2")) {
             ++capture->HttpsHttp2AlpnCalls;
         }
-        if (isHttps && TextEqualsLiteral(request->Host, request->HostLength, "self-signed.badssl.com")) {
+        if (isHttps &&
+            BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /httpbin/status/204 ")) {
             return STATUS_TRUST_FAILURE;
         }
         if (isHttps && TextEqualsLiteral(request->Alpn, request->AlpnLength, "kernel-http-test")) {

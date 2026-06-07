@@ -26,7 +26,7 @@ namespace samples
         constexpr const char* LargeResponseUrl = "http://nghttp2.org/httpbin/bytes/65536";
         constexpr const char* LargePostUrl = "http://nghttp2.org/httpbin/post";
         constexpr const char* DelayUrl = "http://nghttp2.org/httpbin/delay/5";
-        constexpr const char* SelfSignedUrl = "https://self-signed.badssl.com/";
+        constexpr const char* TrustFailureUrl = "https://nghttp2.org/httpbin/status/204";
         constexpr const char* HttpsGetUrl = "https://nghttp2.org/httpbin/get";
         constexpr const char* WebSocketUrl = "wss://ws.postman-echo.com/raw";
         constexpr const char* WebSocketText = "kernel-http advanced websocket";
@@ -418,14 +418,28 @@ namespace samples
         status = RunAsyncWaitTimeoutSample(session, results->HttpAsyncWaitTimeout);
         MergeSampleStatus(aggregate, status);
 
-        khttp::TlsConfig trustFailureTls = khttp::DefaultTlsConfig();
-        trustFailureTls.Store = &trustStore.Store;
-        status = RunExpectedTlsFailure(
-            session,
-            SelfSignedUrl,
-            trustFailureTls,
-            STATUS_TRUST_FAILURE,
-            results->HttpsTrustFailure);
+        HeapObject<tls::CertificateStore> emptyTrustStore;
+        if (!emptyTrustStore.IsValid()) {
+            status = STATUS_INSUFFICIENT_RESOURCES;
+            CaptureStatus(results->HttpsTrustFailure, status, static_cast<ULONG>(status), 0);
+        }
+        else {
+            tls::CertificateStoreOptions emptyStoreOptions = {};
+            status = emptyTrustStore->Initialize(emptyStoreOptions);
+            if (!NT_SUCCESS(status)) {
+                CaptureStatus(results->HttpsTrustFailure, status, static_cast<ULONG>(status), 0);
+            }
+            else {
+                khttp::TlsConfig trustFailureTls = khttp::DefaultTlsConfig();
+                trustFailureTls.Store = emptyTrustStore.Get();
+                status = RunExpectedTlsFailure(
+                    session,
+                    TrustFailureUrl,
+                    trustFailureTls,
+                    STATUS_TRUST_FAILURE,
+                    results->HttpsTrustFailure);
+            }
+        }
         MergeSampleStatus(aggregate, status);
 
         khttp::TlsConfig alpnMismatchTls = khttp::DefaultTlsConfig();
