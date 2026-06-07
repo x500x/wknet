@@ -1,5 +1,6 @@
 #include "samples/HttpVerbSamples.h"
 
+#include <KernelHttp/KernelHttpConfig.h>
 #include <KernelHttp/client/HttpClient.h>
 #include <KernelHttp/client/HttpsClient.h>
 #include <KernelHttp/client/WebSocketClient.h>
@@ -171,8 +172,8 @@ namespace samples
         {
             result = {};
 
-            auto* buffers = new SampleIoBuffers();
-            if (buffers == nullptr) {
+            HeapObject<SampleIoBuffers> buffers;
+            if (!buffers.IsValid()) {
                 result.Status = STATUS_INSUFFICIENT_RESOURCES;
                 return result.Status;
             }
@@ -196,9 +197,8 @@ namespace samples
             options.ResponseBodyForbidden = responseBodyForbidden;
 
             http::HttpResponse response = {};
-            auto* client = new client::HttpClient();
-            if (client == nullptr) {
-                delete buffers;
+            HeapObject<client::HttpClient> client;
+            if (!client.IsValid()) {
                 result.Status = STATUS_INSUFFICIENT_RESOURCES;
                 return result.Status;
             }
@@ -220,8 +220,6 @@ namespace samples
                 kprintf("[%s] request failed: 0x%08X\r\n", methodName, static_cast<ULONG>(result.Status));
             }
 
-            delete client;
-            delete buffers;
             return result.Status;
         }
 
@@ -292,8 +290,8 @@ namespace samples
         {
             result = {};
 
-            auto* buffers = new SampleIoBuffers();
-            if (buffers == nullptr) {
+            HeapObject<SampleIoBuffers> buffers;
+            if (!buffers.IsValid()) {
                 result.Status = STATUS_INSUFFICIENT_RESOURCES;
                 return result.Status;
             }
@@ -304,7 +302,6 @@ namespace samples
                 kprintf("[%s] HTTPS resolve failed: 0x%08X\r\n",
                     methodName,
                     static_cast<ULONG>(result.Status));
-                delete buffers;
                 return result.Status;
             }
 
@@ -335,9 +332,8 @@ namespace samples
                 http::TextEqualsIgnoreCase(request.Host, http::MakeText(NgHttp2HostName));
 
             http::HttpResponse response = {};
-            auto* client = new client::HttpsClient();
-            if (client == nullptr) {
-                delete buffers;
+            HeapObject<client::HttpsClient> client;
+            if (!client.IsValid()) {
                 result.Status = STATUS_INSUFFICIENT_RESOURCES;
                 return result.Status;
             }
@@ -360,8 +356,6 @@ namespace samples
                 kprintf("[%s] HTTPS request failed: 0x%08X\r\n", methodName, static_cast<ULONG>(result.Status));
             }
 
-            delete client;
-            delete buffers;
             return result.Status;
         }
 
@@ -494,8 +488,8 @@ namespace samples
 
         *result = {};
 
-        auto* buffers = new WebSocketSampleIoBuffers();
-        if (buffers == nullptr) {
+        HeapObject<WebSocketSampleIoBuffers> buffers;
+        if (!buffers.IsValid()) {
             result->Status = STATUS_INSUFFICIENT_RESOURCES;
             return result->Status;
         }
@@ -527,9 +521,8 @@ namespace samples
         options.UseTls = true;
         options.VerifyCertificate = verifyCertificate;
 
-        auto* webSocket = new client::WebSocketClient();
-        if (webSocket == nullptr) {
-            delete buffers;
+        HeapObject<client::WebSocketClient> webSocket;
+        if (!webSocket.IsValid()) {
             result->Status = STATUS_INSUFFICIENT_RESOURCES;
             return result->Status;
         }
@@ -570,8 +563,6 @@ namespace samples
 
         const NTSTATUS closeStatus = webSocket->Close(io);
         UNREFERENCED_PARAMETER(closeStatus);
-        delete webSocket;
-
         result->Status = status;
         if (NT_SUCCESS(status)) {
             kprintf("[%s] status=%u echoed=%Iu verify=%s\r\n",
@@ -589,7 +580,6 @@ namespace samples
                 verifyCertificate ? "on" : "off");
         }
 
-        delete buffers;
         return status;
     }
 
@@ -1448,11 +1438,9 @@ namespace samples
             status,
             RunWebSocketEchoNoVerifySample(wskClient, &results->WebSocketEchoNoVerify));
 
-#if defined(KERNEL_HTTP_ENABLE_REMOTE_HTTPS_ADDRESS_FAMILY_SAMPLE) || defined(KERNEL_HTTP_REMOTE_HTTPS_ADDRESS_FAMILY_ONLY)
         status = MergeSampleStatus(
             status,
             RunRemoteHttpsAddressFamilySamples(wskClient, results));
-#endif
 
         return status;
     }

@@ -227,7 +227,7 @@ A: 使用 `CertificateStore` 进行证书锁定，或设置 `CertificatePolicy::
 
 - **公开头文件**：`include/KernelHttp/` 目录，推荐从 `include/KernelHttp/KernelHttp.h` 总头开始
 - **核心实现**：`src/KernelHttpLib/` 目录
-- **示例代码**：`src/KernelHttpExample/samples/` 目录
+- **示例代码**：`src/KernelHttpTest/samples/` 目录
 - **测试代码**：`tests/` 目录
 - **构建工具**：`tools/` 目录
 
@@ -361,7 +361,7 @@ NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
 
 - **Public Headers**: `include/KernelHttp/` directory, start from `include/KernelHttp/KernelHttp.h`
 - **Core Implementation**: `src/KernelHttpLib/` directory
-- **Example Code**: `src/KernelHttpExample/samples/` directory
+- **Example Code**: `src/KernelHttpTest/samples/` directory
 - **Test Code**: `tests/` directory
 - **Build Tools**: `tools/` directory
 

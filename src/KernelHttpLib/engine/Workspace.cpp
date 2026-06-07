@@ -39,7 +39,8 @@ namespace
     _Must_inspect_result_
     bool IsValidOptions(const KhWorkspaceOptions& options) noexcept
     {
-        return options.PoolType == KhPoolType::NonPaged;
+        return options.PoolType == KhPoolType::NonPaged &&
+            options.RequestBufferBytes != 0;
     }
 
     _Ret_maybenull_
@@ -167,7 +168,7 @@ namespace
 
         const SIZE_T initialResponseBytes = InitialResponseBytes(effectiveOptions.MaxResponseBytes);
 
-        NTSTATUS status = AllocateBuffer(effectiveOptions.PoolType, KhWorkspaceRequestBufferBytes, &newWorkspace->Request);
+        NTSTATUS status = AllocateBuffer(effectiveOptions.PoolType, effectiveOptions.RequestBufferBytes, &newWorkspace->Request);
         if (NT_SUCCESS(status)) {
             status = AllocateBuffer(effectiveOptions.PoolType, initialResponseBytes, &newWorkspace->Response);
         }

@@ -249,6 +249,10 @@ namespace
 
     bool IsValidSessionOptions(const KhSessionOptions& options) noexcept
     {
+        if (options.RequestBufferBytes == 0) {
+            return false;
+        }
+
         if (!IsValidMaxResponseBytes(options.MaxResponseBytes)) {
             return false;
         }
@@ -1637,6 +1641,7 @@ namespace
 
         KhWorkspaceOptions workspaceOptions = {};
         workspaceOptions.PoolType = effectiveOptions.ResponsePoolType;
+        workspaceOptions.RequestBufferBytes = effectiveOptions.RequestBufferBytes;
         workspaceOptions.MaxResponseBytes = effectiveOptions.MaxResponseBytes;
         status = KhWorkspaceCreate(&workspaceOptions, &newSession->Workspace);
         if (!NT_SUCCESS(status)) {

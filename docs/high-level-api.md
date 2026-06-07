@@ -66,6 +66,7 @@ void SessionClose(Session* session) noexcept;
 ```cpp
 struct SessionConfig final {
     PoolType ResponsePool      = PoolType::NonPaged; // 响应缓冲使用的池
+    SIZE_T   RequestBufferBytes = DefaultRequestBufferBytes; // 请求行/头/体构造缓冲
     SIZE_T   MaxResponseBytes  = DefaultMaxResponseBytes;   // 0 表示不限制
     ULONG    PoolCapacity      = DefaultPoolCapacity;       // 8 个连接槽位
     ULONG    MaxConnsPerHost   = DefaultMaxConnsPerHost;    // 每主机 2
@@ -291,6 +292,7 @@ NTSTATUS WsClose     (WebSocket*);
 `SendFlags`：`SendFlagNone (0)`、`SendFlagAggregateWithCallbacks (0x1)`
 
 ```cpp
+constexpr SIZE_T DefaultRequestBufferBytes      = 16 * 1024;
 constexpr SIZE_T DefaultMaxResponseBytes        = 1024 * 1024;
 constexpr ULONG  DefaultPoolCapacity            = 8;
 constexpr ULONG  DefaultMaxConnsPerHost         = 2;
@@ -309,9 +311,9 @@ constexpr ULONG  DefaultTlsHandshakeTimeoutMs   = TlsHandshakeReceiveTimeoutMill
 
 ## 14. 完整可运行示例索引
 
-`src/KernelHttpExample/samples/HighLevelApiSamples.cpp` 中按场景列出了：会话创建、HTTP 同步快捷函数、Request 构造、各类请求体、Send 选项与回调、响应头读取、各种异步入口、`AsyncCancel`、HTTPS（含 ALPN 切换）、WebSocket 同步与异步连接、文本 / 二进制 / Ex / 回调接收等。可以直接对照阅读，每个样例都打印请求与响应详情，便于调试。
+`src/KernelHttpTest/samples/HighLevelApiSamples.cpp` 中按场景列出了：会话创建、HTTP 同步快捷函数、Request 构造、各类请求体、Send 选项与回调、响应头读取、各种异步入口、`AsyncCancel`、HTTPS（含 ALPN 切换）、WebSocket 同步与异步连接、文本 / 二进制 / Ex / 回调接收等。可以直接对照阅读，每个样例都打印请求与响应详情，便于调试。
 
-`src/KernelHttpExample/samples/ExternalTrustStore.{h,cpp}` 给出了如何构造会话级证书 `Store`（`tls::CertificateTrustAnchor` + `tls::CertificatePin`）的完整模板，并被 `RunHighLevelApiSamples` 在创建 Session 时使用。
+`src/KernelHttpTest/samples/ExternalTrustStore.{h,cpp}` 给出了如何构造会话级证书 `Store`（`tls::CertificateTrustAnchor` + `tls::CertificatePin`）的完整模板，并被 `RunHighLevelApiSamples` 在创建 Session 时使用。
 
 ## 15. 相关文档
 

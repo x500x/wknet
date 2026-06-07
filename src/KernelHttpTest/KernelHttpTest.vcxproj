@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DriverEntry.cpp" />
+    <ClCompile Include="samples\AdvancedScenarioSamples.cpp" />
     <ClCompile Include="samples\ExternalTrustStore.cpp" />
     <ClCompile Include="samples\HighLevelApiSamples.cpp" />
     <ClCompile Include="samples\Http2VerbSamples.cpp" />
@@ -28,6 +29,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\include\KernelHttp\KernelHttp.h" />
+    <ClInclude Include="samples\AdvancedScenarioSamples.h" />
     <ClInclude Include="samples\ExternalTrustStore.h" />
     <ClInclude Include="samples\HighLevelApiSamples.h" />
     <ClInclude Include="samples\Http2VerbSamples.h" />
@@ -35,7 +37,7 @@
     <ClInclude Include="samples\KhttpSamples.h" />
   </ItemGroup>
   <ItemGroup>
-    <Inf Include="KernelHttpExample.inf" />
+    <Inf Include="KernelHttpTest.inf" />
   </ItemGroup>
   <ItemDefinitionGroup>
     <Inf>
@@ -58,7 +60,7 @@
     <TemplateGuid>{5ce256cb-a826-4703-9b24-ad2d556ad23b}</TemplateGuid>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
-    <RootNamespace>KernelHttpExample</RootNamespace>
+    <RootNamespace>KernelHttpTest</RootNamespace>
     <Driver_SpectreMitigation>false</Driver_SpectreMitigation>
     <SkipPackageVerification>true</SkipPackageVerification>
     <Configuration>Debug</Configuration>
@@ -105,7 +107,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <TargetName>KernelHttpExample</TargetName>
+    <TargetName>KernelHttpTest</TargetName>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>

@@ -328,7 +328,7 @@ KernelHttp/
 │   │   ├── net/                     # 网络传输 (WSK)
 │   │   ├── tls/                     # TLS 协议实现
 │   │   └── websocket/               # WebSocket 实现
-│   └── KernelHttpExample/           # 示例驱动项目
+│   └── KernelHttpTest/              # 测试驱动项目
 │       └── samples/                 # 示例代码
 ├── tests/                            # 测试代码
 ├── docs/                             # 文档
@@ -361,6 +361,9 @@ khttp::SessionConfig config = khttp::DefaultSessionConfig();
 // 响应缓冲区大小（默认 1 MiB，0 表示不限制）
 config.MaxResponseBytes = 2 * 1024 * 1024;  // 2 MiB
 
+// 请求构造缓冲区（默认 16 KiB；大请求体可按需增大）
+config.RequestBufferBytes = 96 * 1024;
+
 // 连接池容量（默认 8）
 config.PoolCapacity = 16;
 
@@ -370,8 +373,8 @@ config.MaxConnsPerHost = 4;
 // 空闲超时（默认 30 秒）
 config.IdleTimeoutMs = 60000;  // 60 秒
 
-// 响应缓冲池类型（默认 NonPaged）
-config.ResponsePool = khttp::PoolType::Paged;  // 大响应使用分页池
+// 响应缓冲池类型（默认 NonPaged；内核路径当前要求 NonPaged）
+config.ResponsePool = khttp::PoolType::NonPaged;
 
 // TLS 配置
 config.Tls.MinVersion = khttp::TlsVersion::Tls13;
@@ -549,7 +552,10 @@ config.IdleTimeoutMs = 120000;      // 延长空闲超时
 // 响应缓冲区（0 表示不限制）
 config.MaxResponseBytes = 4 * 1024 * 1024;  // 4 MiB
 
-// 请求缓冲区
+// 请求构造缓冲区，需容纳 HTTP/1.1 请求行、请求头和请求体
+config.RequestBufferBytes = 96 * 1024;
+
+// 单次发送覆盖响应上限
 khttp::SendOptions options = khttp::DefaultSendOptions();
 options.MaxResponseBytes = 0;  // 0 表示不限制
 ```

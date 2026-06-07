@@ -4,6 +4,7 @@
 
 #include <KernelHttp/khttp/Test.h>
 
+#include "samples/AdvancedScenarioSamples.h"
 #include "samples/HighLevelApiSamples.h"
 
 #include <string.h>
@@ -33,6 +34,28 @@ namespace
             }
         }
         return literal[valueLength] == '\0';
+    }
+
+    bool BufferContainsLiteral(const char* value, SIZE_T valueLength, const char* literal) noexcept
+    {
+        if (value == nullptr || literal == nullptr) {
+            return false;
+        }
+
+        SIZE_T literalLength = 0;
+        while (literal[literalLength] != '\0') {
+            ++literalLength;
+        }
+        if (literalLength == 0 || literalLength > valueLength) {
+            return false;
+        }
+
+        for (SIZE_T offset = 0; offset + literalLength <= valueLength; ++offset) {
+            if (memcmp(value + offset, literal, literalLength) == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     struct SampleCapture final
@@ -138,6 +161,64 @@ namespace
         }
         if (isHttps && TextEqualsLiteral(request->Alpn, request->AlpnLength, "h2")) {
             ++capture->HttpsHttp2AlpnCalls;
+        }
+        if (isHttps && TextEqualsLiteral(request->Host, request->HostLength, "self-signed.badssl.com")) {
+            return STATUS_TRUST_FAILURE;
+        }
+        if (isHttps && TextEqualsLiteral(request->Alpn, request->AlpnLength, "kernel-http-test")) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        static const char redirectResponse[] =
+            "HTTP/1.1 302 Found\r\n"
+            "Location: /httpbin/get\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        static const char notFoundResponse[] =
+            "HTTP/1.1 404 Not Found\r\n"
+            "Content-Length: 9\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "not found";
+        static const char serverErrorResponse[] =
+            "HTTP/1.1 500 Internal Server Error\r\n"
+            "Content-Length: 12\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "server error";
+        static const char largeResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 96\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            "cccccccccccccccccccccccccccccccc";
+
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /httpbin/redirect/1 ")) {
+            response->RawResponse = redirectResponse;
+            response->RawResponseLength = sizeof(redirectResponse) - 1;
+            response->ConnectionReusable = false;
+            return STATUS_SUCCESS;
+        }
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /httpbin/status/404 ")) {
+            response->RawResponse = notFoundResponse;
+            response->RawResponseLength = sizeof(notFoundResponse) - 1;
+            response->ConnectionReusable = false;
+            return STATUS_SUCCESS;
+        }
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /httpbin/status/500 ")) {
+            response->RawResponse = serverErrorResponse;
+            response->RawResponseLength = sizeof(serverErrorResponse) - 1;
+            response->ConnectionReusable = false;
+            return STATUS_SUCCESS;
+        }
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /httpbin/bytes/65536 ")) {
+            response->RawResponse = largeResponse;
+            response->RawResponseLength = sizeof(largeResponse) - 1;
+            response->ConnectionReusable = false;
+            return STATUS_SUCCESS;
         }
 
         static const char rawResponse[] =
@@ -392,6 +473,50 @@ namespace
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
+
+    void TestAdvancedScenarioSamplesCoverMissingSurface() noexcept
+    {
+        SampleCapture capture = {};
+        static const char echo[] = "advanced-khttp";
+        capture.WebSocketEchoLength = sizeof(echo) - 1;
+        for (SIZE_T index = 0; index < capture.WebSocketEchoLength; ++index) {
+            capture.WebSocketEcho[index] = static_cast<UCHAR>(echo[index]);
+        }
+
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(HttpTransport, &capture);
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WebSocketConnect,
+            WebSocketSend,
+            WebSocketReceive,
+            WebSocketClose,
+            &capture);
+
+        KernelHttp::samples::AdvancedScenarioSampleResults results = {};
+        NTSTATUS status = KernelHttp::samples::RunAdvancedScenarioSamples(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            "certs\\cacert.pem",
+            &results);
+
+        Expect(NT_SUCCESS(status), "advanced scenario samples succeed under test transport");
+        Expect(results.HttpRedirect.StatusCode == 302, "redirect sample observes 302");
+        Expect(results.HttpNotFound.StatusCode == 404, "404 sample observes 404");
+        Expect(results.HttpServerError.StatusCode == 500, "500 sample observes 500");
+        Expect(results.HttpLargeResponse.BodyLength == 96, "large response sample records body");
+        Expect(NT_SUCCESS(results.HttpResponseLimit.Status), "response limit sample treats buffer limit as expected");
+        Expect(results.HttpLargePost.StatusCode == 200, "large POST sample succeeds");
+        Expect(results.HttpConcurrentAsync.StatusCode == 3, "concurrent async sample completes all operations");
+        Expect(NT_SUCCESS(results.HttpAsyncWaitTimeout.Status), "async wait timeout sample observes timeout");
+        Expect(NT_SUCCESS(results.HttpsTrustFailure.Status), "trust failure sample treats STATUS_TRUST_FAILURE as expected");
+        Expect(NT_SUCCESS(results.HttpsAlpnMismatch.Status), "ALPN mismatch sample treats STATUS_NOT_SUPPORTED as expected");
+        Expect(NT_SUCCESS(results.WebSocketClose.Status), "websocket close sample succeeds");
+        Expect(NT_SUCCESS(results.WebSocketFragmentSend.Status), "websocket fragment send sample succeeds");
+        Expect(capture.WebSocketNonFinalSendCalls == 1, "websocket fragment sample sends a non-final frame");
+        Expect(capture.WebSocketCloseCalls >= 2, "advanced websocket samples close handles");
+
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
 }
 
 int main() noexcept
@@ -399,6 +524,7 @@ int main() noexcept
     KernelHttp::khttp::test::ResetCurrentIrql();
     TestLoadTimeSamplesCoverHighLevelSurface();
     TestLoadTimeSamplesReportIpv6Failure();
+    TestAdvancedScenarioSamplesCoverMissingSurface();
 
     if (g_failed) {
         printf("high-level API tests FAILED\n");

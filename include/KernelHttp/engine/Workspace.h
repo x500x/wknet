@@ -6,7 +6,7 @@ namespace KernelHttp
 {
 namespace engine
 {
-    constexpr SIZE_T KhWorkspaceRequestBufferBytes = 16 * 1024;
+    constexpr SIZE_T KhWorkspaceRequestBufferBytes = KhDefaultRequestBufferBytes;
     constexpr SIZE_T KhWorkspaceResponseInitialBytes = 4 * 1024;
     constexpr SIZE_T KhWorkspaceDecodedBodyBytes = 16 * 1024;
     constexpr SIZE_T KhWorkspaceHttpHeaderScratchBytes = 4 * 1024;
@@ -24,6 +24,7 @@ namespace engine
     struct KhWorkspaceOptions final
     {
         KhPoolType PoolType = KhPoolType::NonPaged;
+        SIZE_T RequestBufferBytes = KhDefaultRequestBufferBytes;
         // 0 means no response-size limit.
         SIZE_T MaxResponseBytes = KhDefaultMaxResponseBytes;
     };

@@ -328,7 +328,7 @@ KernelHttp/
 │   │   ├── net/                     # Network transport (WSK)
 │   │   ├── tls/                     # TLS protocol implementation
 │   │   └── websocket/               # WebSocket implementation
-│   └── KernelHttpExample/           # Example driver project
+│   └── KernelHttpTest/              # Test driver project
 │       └── samples/                 # Example code
 ├── tests/                            # Test code
 ├── docs/                             # Documentation
@@ -361,6 +361,9 @@ khttp::SessionConfig config = khttp::DefaultSessionConfig();
 // Response buffer size (default 1 MiB, 0 means unlimited)
 config.MaxResponseBytes = 2 * 1024 * 1024;  // 2 MiB
 
+// Request construction buffer (default 16 KiB; increase for large bodies)
+config.RequestBufferBytes = 96 * 1024;
+
 // Connection pool capacity (default 8)
 config.PoolCapacity = 16;
 
@@ -370,8 +373,8 @@ config.MaxConnsPerHost = 4;
 // Idle timeout (default 30 seconds)
 config.IdleTimeoutMs = 60000;  // 60 seconds
 
-// Response buffer pool type (default NonPaged)
-config.ResponsePool = khttp::PoolType::Paged;  // Use paged pool for large responses
+// Response buffer pool type (default NonPaged; kernel path currently requires NonPaged)
+config.ResponsePool = khttp::PoolType::NonPaged;
 
 // TLS configuration
 config.Tls.MinVersion = khttp::TlsVersion::Tls13;
@@ -549,7 +552,10 @@ config.IdleTimeoutMs = 120000;      // Extend idle timeout
 // Response buffer (0 means unlimited)
 config.MaxResponseBytes = 4 * 1024 * 1024;  // 4 MiB
 
-// Request buffer
+// Request construction buffer; it must hold the HTTP/1.1 request line, headers, and body
+config.RequestBufferBytes = 96 * 1024;
+
+// Per-send response limit override
 khttp::SendOptions options = khttp::DefaultSendOptions();
 options.MaxResponseBytes = 0;  // 0 means unlimited
 ```

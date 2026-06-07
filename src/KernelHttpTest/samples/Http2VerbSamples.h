@@ -22,6 +22,10 @@ namespace samples
         Http2VerbSampleResult Http2PostHttpBin = {};
         Http2VerbSampleResult H2cPriorKnowledgeGet = {};
         Http2VerbSampleResult H2cUpgradeGet = {};
+        Http2VerbSampleResult GoAwayFrame = {};
+        Http2VerbSampleResult RstStreamFrame = {};
+        Http2VerbSampleResult WindowUpdateFrame = {};
+        Http2VerbSampleResult ContinuationFrame = {};
     };
 
     _Must_inspect_result_

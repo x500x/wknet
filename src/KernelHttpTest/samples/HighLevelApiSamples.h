@@ -89,7 +89,19 @@ namespace samples
 
     _Must_inspect_result_
     NTSTATUS RunHighLevelApiSamples(
+        _In_ khttp::Session* session,
+        _In_opt_z_ const char* certificateBundlePath,
+        _Out_ HighLevelApiSampleResults* results) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS RunHighLevelApiSamples(
         _In_ net::WskClient* wskClient,
+        _Out_ HighLevelApiSampleResults* results) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS RunHighLevelApiSamples(
+        _In_ net::WskClient* wskClient,
+        _In_opt_z_ const char* certificateBundlePath,
         _Out_ HighLevelApiSampleResults* results) noexcept;
 }
 }

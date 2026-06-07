@@ -10,7 +10,7 @@ param(
     [switch]$TestDriverScenarios,
     [switch]$KeepService,
 
-    [string]$ServiceName = 'KernelHttpExample',
+    [string]$ServiceName = 'KernelHttpTest',
     [string]$DriverPath
 )
 
@@ -110,7 +110,7 @@ function Compile-UserModeTest {
         '/wd4127',
         '/D', 'KERNEL_HTTP_USER_MODE_TEST=1',
         '/I', (Join-Path $script:Root 'include'),
-        '/I', (Join-Path $script:Root 'src\KernelHttpExample'),
+        '/I', (Join-Path $script:Root 'src\KernelHttpTest'),
         '/I', (Join-Path $script:Root 'third_party\brotli\c\include'),
         ('/Fe:' + $output),
         ('/Fo' + $objectDir + '\'),
@@ -248,8 +248,9 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\engine\Async.cpp',
             'src\KernelHttpLib\engine\ConnectionPool.cpp',
             'src\KernelHttpLib\engine\Workspace.cpp',
-            'src\KernelHttpExample\samples\ExternalTrustStore.cpp',
-            'src\KernelHttpExample\samples\HighLevelApiSamples.cpp',
+            'src\KernelHttpTest\samples\AdvancedScenarioSamples.cpp',
+            'src\KernelHttpTest\samples\ExternalTrustStore.cpp',
+            'src\KernelHttpTest\samples\HighLevelApiSamples.cpp',
             'src\KernelHttpLib\http\HttpTypes.cpp',
             'src\KernelHttpLib\http\HttpRequest.cpp',
             'src\KernelHttpLib\http\HttpResponse.cpp',
@@ -345,7 +346,7 @@ function Invoke-DriverLoadSmoke {
     }
 
     $candidate = if ([string]::IsNullOrWhiteSpace($DriverPath)) {
-        Join-Path $script:Root "$Platform\$Configuration\KernelHttpExample.sys"
+        Join-Path $script:Root "$Platform\$Configuration\KernelHttpTest.sys"
     }
     else {
         $DriverPath
@@ -354,6 +355,15 @@ function Invoke-DriverLoadSmoke {
     if (-not (Test-Path -LiteralPath $candidate)) {
         throw "Driver binary not found: $candidate"
     }
+
+    $certificateSource = Join-Path $script:Root 'certs\cacert.pem'
+    if (-not (Test-Path -LiteralPath $certificateSource)) {
+        throw "Certificate bundle not found: $certificateSource"
+    }
+
+    $driverDirectory = Split-Path -Parent $candidate
+    $certificateTarget = Join-Path $driverDirectory 'cacert.pem'
+    Copy-Item -LiteralPath $certificateSource -Destination $certificateTarget -Force
 
     $existing = & sc.exe query $ServiceName 2>$null
     if ($LASTEXITCODE -eq 0) {

@@ -50,6 +50,7 @@ public:
 连接池管理 HTTP/HTTPS 连接的复用，支持：
 - 可配置的池容量（`PoolCapacity`）
 - 每主机最大连接数（`MaxConnsPerHost`）
+- 可配置的请求构造缓冲（`RequestBufferBytes`）
 - 空闲超时自动释放（`IdleTimeoutMs`）
 - 连接策略：`ReuseOrCreate`（复用或新建）、`ForceNew`（强制新建）、`NoPool`（不进池）
 
@@ -474,7 +475,7 @@ NTSTATUS MixedUsage(net::WskClient& wskClient) {
 
 ### 高层 API 调试
 
-- 使用示例代码作为参考（`src/KernelHttpExample/samples/HighLevelApiSamples.cpp`）。
+- 使用示例代码作为参考（`src/KernelHttpTest/samples/HighLevelApiSamples.cpp`）。
 - 检查 `NTSTATUS` 返回值。
 - 使用日志记录请求和响应。
 

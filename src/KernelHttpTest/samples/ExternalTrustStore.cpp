@@ -2,6 +2,7 @@
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <stdio.h>
+#include <stdlib.h>
 #else
 #include <KernelHttp/KernelHttpConfig.h>
 #endif
@@ -20,7 +21,7 @@ namespace samples
             }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
-            return new UCHAR[length]();
+            return static_cast<UCHAR*>(calloc(length, sizeof(UCHAR)));
 #else
             return static_cast<UCHAR*>(ExAllocatePool2(POOL_FLAG_NON_PAGED, length, PoolTag));
 #endif
@@ -33,7 +34,7 @@ namespace samples
             }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
-            delete[] data;
+            free(data);
 #else
             ExFreePoolWithTag(data, PoolTag);
 #endif

@@ -75,12 +75,13 @@ namespace engine
         WorkspaceGuard& operator=(const WorkspaceGuard&) = delete;
 
         _Must_inspect_result_
-        NTSTATUS Create(SIZE_T maxResponseBytes) noexcept
+        NTSTATUS Create(SIZE_T maxResponseBytes, SIZE_T requestBufferBytes) noexcept
         {
             Reset();
 
             KhWorkspaceOptions workspaceOptions = {};
             workspaceOptions.PoolType = KhPoolType::NonPaged;
+            workspaceOptions.RequestBufferBytes = requestBufferBytes;
             workspaceOptions.MaxResponseBytes = maxResponseBytes;
             return KhWorkspaceCreate(&workspaceOptions, &workspace_);
         }
@@ -1577,7 +1578,7 @@ namespace engine
         const SIZE_T maxResponseBytes =
             EffectiveMaxResponseBytes(options, session->Options.MaxResponseBytes);
         WorkspaceGuard requestWorkspace;
-        status = requestWorkspace.Create(maxResponseBytes);
+        status = requestWorkspace.Create(maxResponseBytes, session->Options.RequestBufferBytes);
         if (!NT_SUCCESS(status) || !requestWorkspace.IsValid()) {
             return !NT_SUCCESS(status) ? status : STATUS_INSUFFICIENT_RESOURCES;
         }

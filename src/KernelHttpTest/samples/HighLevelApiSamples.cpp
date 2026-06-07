@@ -330,9 +330,10 @@ namespace
     void LogSessionConfig(const char* sampleName, const khttp::SessionConfig& config) noexcept
     {
         KHTTP_SAMPLE_LOG(
-            "[会话示例] %s：响应池=%s 最大响应=%Iu 连接池容量=%lu 每主机最大连接=%lu 空闲超时=%lums TLS=%s-%s 证书策略=%s TLS握手超时=%lums\r\n",
+            "[会话示例] %s：响应池=%s 请求缓冲=%Iu 最大响应=%Iu 连接池容量=%lu 每主机最大连接=%lu 空闲超时=%lums TLS=%s-%s 证书策略=%s TLS握手超时=%lums\r\n",
             sampleName,
             PoolTypeName(config.ResponsePool),
+            config.RequestBufferBytes,
             config.MaxResponseBytes,
             config.PoolCapacity,
             config.MaxConnsPerHost,
@@ -1604,6 +1605,7 @@ namespace
 
     NTSTATUS RunHighLevelApiSamplesOnSession(
         khttp::Session* session,
+        const char* certificateBundlePath,
         HighLevelApiSampleResults* results) noexcept
     {
         if (session == nullptr || results == nullptr) {
@@ -1617,7 +1619,9 @@ namespace
         const SIZE_T jsonLen = LiteralLength(JsonBody);
 
         ExternalTrustStore trustStore = {};
-        status = InitializeExternalTrustStore(trustStore);
+        status = InitializeExternalTrustStore(
+            trustStore,
+            certificateBundlePath != nullptr ? certificateBundlePath : ExternalTrustStoreDefaultBundlePath);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1753,6 +1757,14 @@ namespace
 
 NTSTATUS RunHighLevelApiSamples(khttp::Session* session, HighLevelApiSampleResults* results) noexcept
 {
+    return RunHighLevelApiSamples(session, ExternalTrustStoreDefaultBundlePath, results);
+}
+
+NTSTATUS RunHighLevelApiSamples(
+    khttp::Session* session,
+    const char* certificateBundlePath,
+    HighLevelApiSampleResults* results) noexcept
+{
     if (session == nullptr || results == nullptr) {
         return STATUS_INVALID_PARAMETER;
     }
@@ -1771,10 +1783,18 @@ NTSTATUS RunHighLevelApiSamples(khttp::Session* session, HighLevelApiSampleResul
     LogSessionConfig("自定义 SessionConfig 写法说明", customConfig);
     CaptureStatus(results->SessionCustomConfig, STATUS_SUCCESS, 1, customConfig.MaxResponseBytes);
 
-    return RunHighLevelApiSamplesOnSession(session, results);
+    return RunHighLevelApiSamplesOnSession(session, certificateBundlePath, results);
 }
 
 NTSTATUS RunHighLevelApiSamples(net::WskClient* wskClient, HighLevelApiSampleResults* results) noexcept
+{
+    return RunHighLevelApiSamples(wskClient, ExternalTrustStoreDefaultBundlePath, results);
+}
+
+NTSTATUS RunHighLevelApiSamples(
+    net::WskClient* wskClient,
+    const char* certificateBundlePath,
+    HighLevelApiSampleResults* results) noexcept
 {
     if (wskClient == nullptr || results == nullptr) {
         return STATUS_INVALID_PARAMETER;
@@ -1785,7 +1805,9 @@ NTSTATUS RunHighLevelApiSamples(net::WskClient* wskClient, HighLevelApiSampleRes
     NTSTATUS status = STATUS_SUCCESS;
 
     ExternalTrustStore trustStore = {};
-    status = InitializeExternalTrustStore(trustStore);
+    status = InitializeExternalTrustStore(
+        trustStore,
+        certificateBundlePath != nullptr ? certificateBundlePath : ExternalTrustStoreDefaultBundlePath);
     if (!NT_SUCCESS(status)) {
         return status;
     }
@@ -1803,7 +1825,7 @@ NTSTATUS RunHighLevelApiSamples(net::WskClient* wskClient, HighLevelApiSampleRes
     MergeSampleStatus(aggregate, status);
 
     if (NT_SUCCESS(status)) {
-        status = RunHighLevelApiSamplesOnSession(session, results);
+        status = RunHighLevelApiSamplesOnSession(session, certificateBundlePath, results);
         MergeSampleStatus(aggregate, status);
         khttp::SessionClose(session);
         KHTTP_SAMPLE_LOG("[会话示例] 默认会话请求矩阵结束，SessionClose 已调用\r\n");

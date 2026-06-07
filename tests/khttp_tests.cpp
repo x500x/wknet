@@ -57,6 +57,7 @@ namespace
         USHORT Port = 0;
         char Body[256] = {};
         SIZE_T BodyLength = 0;
+        SIZE_T ObservedBodyLength = 0;
         SIZE_T CallCount = 0;
         const char* RawResponse = nullptr;
         SIZE_T RawResponseLength = 0;
@@ -119,6 +120,7 @@ namespace
             if (memcmp(requestBytes + index, bodyMarker, markerLength) == 0) {
                 const char* bodyStart = requestBytes + index + markerLength;
                 SIZE_T bodyLength = requestLength - (index + markerLength);
+                captured->ObservedBodyLength = bodyLength;
                 if (bodyLength >= sizeof(captured->Body)) {
                     bodyLength = sizeof(captured->Body) - 1;
                 }
@@ -585,6 +587,75 @@ namespace
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
+    void TestSessionRequestBufferBytesLimitsRequestBody() noexcept
+    {
+        static UCHAR body[20 * 1024] = {};
+        for (SIZE_T index = 0; index < sizeof(body); ++index) {
+            body[index] = static_cast<UCHAR>('a' + (index % 26));
+        }
+
+        const char* response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        KernelHttp::khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for default request buffer test");
+
+        const char* url = "http://example.com/large-post";
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Post(
+            session,
+            url,
+            Length(url),
+            body,
+            sizeof(body),
+            &resp);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "default request buffer rejects oversized request body");
+        Expect(captured.CallCount == 0, "oversized request body does not reach transport");
+        Expect(resp == nullptr, "oversized request body does not allocate response");
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+
+        KernelHttp::khttp::SessionConfig config = KernelHttp::khttp::DefaultSessionConfig();
+        config.RequestBufferBytes = 32 * 1024;
+        captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+
+        session = nullptr;
+        status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate accepts custom request buffer");
+
+        resp = nullptr;
+        status = KernelHttp::khttp::Post(
+            session,
+            url,
+            Length(url),
+            body,
+            sizeof(body),
+            &resp);
+        Expect(NT_SUCCESS(status), "custom request buffer allows larger request body");
+        Expect(captured.CallCount == 1, "larger request body reaches transport");
+        Expect(captured.ObservedBodyLength == sizeof(body), "larger request body length reaches transport");
+        Expect(KernelHttp::khttp::ResponseStatusCode(resp) == 200, "larger request body response parses");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
     void TestRequestBuilder() noexcept
     {
         const char* response =
@@ -899,6 +970,7 @@ int main() noexcept
     TestReusedConnectionFailureRetriesWithFreshConnection();
     TestIdleTimeoutSkipsExpiredConnection();
     TestPostWithBody();
+    TestSessionRequestBufferBytesLimitsRequestBody();
     TestRequestBuilder();
     TestAsyncGet();
     TestAsyncRequestIsCopied();

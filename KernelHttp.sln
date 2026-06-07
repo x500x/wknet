@@ -4,7 +4,7 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KernelHttpLib", "src\KernelHttpLib\KernelHttpLib.vcxproj", "{2F05C2F0-8C5F-4B05-B0D9-F72F40E1D5D6}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KernelHttpExample", "src\KernelHttpExample\KernelHttpExample.vcxproj", "{8A1D1794-6FC3-4F17-BC7C-7151C6E5D08A}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KernelHttpTest", "src\KernelHttpTest\KernelHttpTest.vcxproj", "{8A1D1794-6FC3-4F17-BC7C-7151C6E5D08A}"
 	ProjectSection(ProjectDependencies) = postProject
 		{2F05C2F0-8C5F-4B05-B0D9-F72F40E1D5D6} = {2F05C2F0-8C5F-4B05-B0D9-F72F40E1D5D6}
 	EndProjectSection

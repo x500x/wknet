@@ -1,0 +1,49 @@
+;
+; KernelHttpTest.inf
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%ManufacturerName%
+CatalogFile=KernelHttpTest.cat
+DriverVer=05/20/2026,0.1.0.0
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir = 12
+KernelHttpTest_CopyFiles = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+KernelHttpTest.sys = 1
+
+[DefaultInstall.NTamd64]
+CopyFiles = KernelHttpTest_CopyFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService = KernelHttpTest,,KernelHttpTest_Service_Inst
+
+[DefaultInstall.NTarm64]
+CopyFiles = KernelHttpTest_CopyFiles
+
+[DefaultInstall.NTarm64.Services]
+AddService = KernelHttpTest,,KernelHttpTest_Service_Inst
+
+[KernelHttpTest_CopyFiles]
+KernelHttpTest.sys
+
+[KernelHttpTest_Service_Inst]
+DisplayName = %KernelHttpTest.SVCDESC%
+ServiceType = 1
+StartType = 3
+ErrorControl = 1
+ServiceBinary = %12%\KernelHttpTest.sys
+
+[Strings]
+ManufacturerName = "KernelHttp"
+DiskName = "KernelHttpTest Installation Disk"
+KernelHttpTest.SVCDESC = "Kernel HTTP Test Driver"

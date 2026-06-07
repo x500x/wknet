@@ -33,6 +33,7 @@ namespace engine
     typedef KhWebSocket* KH_WEBSOCKET;
     typedef KhAsyncOperation* KH_ASYNC_OPERATION;
 
+    constexpr SIZE_T KhDefaultRequestBufferBytes = 16 * 1024;
     constexpr SIZE_T KhDefaultMaxResponseBytes = 1024 * 1024;
     constexpr ULONG KhDefaultConnectionPoolCapacity = 8;
     constexpr ULONG KhDefaultConnectionsPerHost = 2;
@@ -142,6 +143,7 @@ namespace engine
     struct KhSessionOptions final
     {
         KhPoolType ResponsePoolType = KhPoolType::NonPaged;
+        SIZE_T RequestBufferBytes = KhDefaultRequestBufferBytes;
         // SIZE_T is unsigned; 0 means no response-size limit.
         SIZE_T MaxResponseBytes = KhDefaultMaxResponseBytes;
         ULONG ConnectionPoolCapacity = KhDefaultConnectionPoolCapacity;

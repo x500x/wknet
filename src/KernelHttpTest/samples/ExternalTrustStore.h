@@ -11,7 +11,7 @@ namespace samples
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
     constexpr const char* ExternalTrustStoreDefaultBundlePath = "certs\\cacert.pem";
 #else
-    constexpr const char* ExternalTrustStoreDefaultBundlePath = "\\??\\C:\\ProgramData\\KernelHttp\\cacert.pem";
+    constexpr const char* ExternalTrustStoreDefaultBundlePath = nullptr;
 #endif
 
     struct ExternalTrustStore final

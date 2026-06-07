@@ -168,6 +168,7 @@ namespace net
                     kprintf("WSK canceled IRP did not complete within %u ms; abandoned count=%ld\r\n",
                         WskCancelCompletionTimeoutMilliseconds,
                         abandonedCount);
+                    UNREFERENCED_PARAMETER(abandonedCount);
                     return STATUS_IO_TIMEOUT;
                 }
             }

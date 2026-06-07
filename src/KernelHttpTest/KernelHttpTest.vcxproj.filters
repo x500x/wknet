@@ -24,6 +24,9 @@
     <ClCompile Include="DriverEntry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="samples\AdvancedScenarioSamples.cpp">
+      <Filter>Source Files\samples</Filter>
+    </ClCompile>
     <ClCompile Include="samples\ExternalTrustStore.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
@@ -44,6 +47,9 @@
     <ClInclude Include="..\..\include\KernelHttp\KernelHttp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="samples\AdvancedScenarioSamples.h">
+      <Filter>Header Files\samples</Filter>
+    </ClInclude>
     <ClInclude Include="samples\ExternalTrustStore.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
@@ -61,7 +67,7 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Inf Include="KernelHttpExample.inf">
+    <Inf Include="KernelHttpTest.inf">
       <Filter>Driver Files</Filter>
     </Inf>
   </ItemGroup>

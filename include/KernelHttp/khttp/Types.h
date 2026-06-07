@@ -128,6 +128,7 @@ namespace khttp
         SendFlagAggregateWithCallbacks = 0x00000001
     };
 
+    constexpr SIZE_T DefaultRequestBufferBytes = 16 * 1024;
     constexpr SIZE_T DefaultMaxResponseBytes = 1024 * 1024;
     constexpr ULONG DefaultPoolCapacity = 8;
     constexpr ULONG DefaultMaxConnsPerHost = 2;
@@ -174,6 +175,7 @@ namespace khttp
     struct SessionConfig final
     {
         PoolType ResponsePool = PoolType::NonPaged;
+        SIZE_T RequestBufferBytes = DefaultRequestBufferBytes;
         // SIZE_T is unsigned; 0 means no response-size limit.
         SIZE_T MaxResponseBytes = DefaultMaxResponseBytes;
         ULONG PoolCapacity = DefaultPoolCapacity;
