@@ -578,7 +578,8 @@ namespace client
     NTSTATUS WebSocketClient::SendText(
         const char* message,
         SIZE_T messageLength,
-        const WebSocketIoBuffers& buffers) noexcept
+        const WebSocketIoBuffers& buffers,
+        bool finalFragment) noexcept
     {
         if (!connected_ ||
             (message == nullptr && messageLength != 0) ||
@@ -600,7 +601,7 @@ namespace client
         SIZE_T frameLength = 0;
         status = websocket::WebSocketCodec::EncodeClientFrame(
             websocket::WebSocketOpcode::Text,
-            true,
+            finalFragment,
             reinterpret_cast<const UCHAR*>(message),
             messageLength,
             maskingKey_,
@@ -623,7 +624,8 @@ namespace client
     NTSTATUS WebSocketClient::SendBinary(
         const UCHAR* message,
         SIZE_T messageLength,
-        const WebSocketIoBuffers& buffers) noexcept
+        const WebSocketIoBuffers& buffers,
+        bool finalFragment) noexcept
     {
         if (!connected_ ||
             (message == nullptr && messageLength != 0) ||
@@ -645,7 +647,7 @@ namespace client
         SIZE_T frameLength = 0;
         status = websocket::WebSocketCodec::EncodeClientFrame(
             websocket::WebSocketOpcode::Binary,
-            true,
+            finalFragment,
             message,
             messageLength,
             maskingKey_,

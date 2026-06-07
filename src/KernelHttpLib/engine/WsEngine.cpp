@@ -709,7 +709,6 @@ namespace engine
             textLength,
             finalFragment);
 #else
-        UNREFERENCED_PARAMETER(finalFragment);
         if (websocket->Client == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
@@ -723,7 +722,7 @@ namespace engine
         client::WebSocketIoBuffers buffers = {};
         buffers.FrameBuffer = frameBuffer.Get();
         buffers.FrameBufferLength = frameBuffer.Count();
-        status = websocket->Client->SendText(text, textLength, buffers);
+        status = websocket->Client->SendText(text, textLength, buffers, finalFragment);
         if (!NT_SUCCESS(status)) {
             kprintf("KhWebSocketSendTextSync Client->SendText failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
@@ -766,7 +765,6 @@ namespace engine
             dataLength,
             finalFragment);
 #else
-        UNREFERENCED_PARAMETER(finalFragment);
         if (websocket->Client == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
@@ -780,7 +778,7 @@ namespace engine
         client::WebSocketIoBuffers buffers = {};
         buffers.FrameBuffer = frameBuffer.Get();
         buffers.FrameBufferLength = frameBuffer.Count();
-        status = websocket->Client->SendBinary(data, dataLength, buffers);
+        status = websocket->Client->SendBinary(data, dataLength, buffers, finalFragment);
         if (!NT_SUCCESS(status)) {
             kprintf("KhWebSocketSendBinarySync Client->SendBinary failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));

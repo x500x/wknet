@@ -237,7 +237,9 @@ namespace samples
             NTSTATUS waitStatus = status;
             if (NT_SUCCESS(status)) {
                 waitStatus = khttp::AsyncWait(operation, AsyncWaitImmediateMs);
-                if (waitStatus == STATUS_TIMEOUT || waitStatus == STATUS_PENDING) {
+                if (waitStatus == STATUS_TIMEOUT ||
+                    waitStatus == STATUS_PENDING ||
+                    waitStatus == STATUS_MORE_PROCESSING_REQUIRED) {
                     status = STATUS_SUCCESS;
                     (void)khttp::AsyncCancel(operation);
                 }

@@ -78,6 +78,7 @@ namespace
         const void* data,
         size_t dataLength,
         WebSocketOpcode* opcode,
+        bool* fin,
         unsigned char* payload,
         size_t payloadCapacity,
         size_t* payloadLength)
@@ -85,10 +86,18 @@ namespace
         if (opcode != nullptr) {
             *opcode = WebSocketOpcode::Continuation;
         }
+        if (fin != nullptr) {
+            *fin = false;
+        }
         if (payloadLength != nullptr) {
             *payloadLength = 0;
         }
-        if (data == nullptr || opcode == nullptr || payload == nullptr || payloadLength == nullptr || dataLength < 6) {
+        if (data == nullptr ||
+            opcode == nullptr ||
+            fin == nullptr ||
+            payload == nullptr ||
+            payloadLength == nullptr ||
+            dataLength < 6) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -97,6 +106,7 @@ namespace
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
+        *fin = (bytes[0] & 0x80) != 0;
         *opcode = static_cast<WebSocketOpcode>(bytes[0] & 0x0f);
         size_t cursor = 2;
         size_t length = bytes[1] & 0x7f;
@@ -176,6 +186,7 @@ namespace
         size_t InitialFrameLength = 0;
         unsigned char LastClientPayload[256] = {};
         size_t LastClientPayloadLength = 0;
+        bool LastClientFin = false;
         size_t PongCount = 0;
         size_t ConnectAttempts = 0;
         size_t FailConnectAttempts = 0;
@@ -268,6 +279,7 @@ namespace
                 data,
                 dataLength,
                 &opcode,
+                &LastClientFin,
                 LastClientPayload,
                 sizeof(LastClientPayload),
                 &LastClientPayloadLength);
@@ -434,6 +446,45 @@ namespace
         Expect(opcode == WebSocketOpcode::Text, "echo opcode is text");
         Expect(bytesReceived == sizeof(text) - 1, "echo length matches");
         Expect(memcmp(payload, text, sizeof(text) - 1) == 0, "echo payload matches");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestSendTextCanEmitNonFinalFrame()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for non-final send succeeds");
+
+        const char text[] = "fragment-start";
+        status = client.SendText(text, sizeof(text) - 1, buffers, false);
+        Expect(NT_SUCCESS(status), "non-final text send succeeds");
+        Expect(!server.LastClientFin, "non-final text send clears FIN");
+        Expect(server.LastClientPayloadLength == sizeof(text) - 1, "non-final text payload length matches");
+        Expect(memcmp(server.LastClientPayload, text, sizeof(text) - 1) == 0, "non-final text payload matches");
 
         const NTSTATUS closeStatus = client.Close(buffers);
         UNREFERENCED_PARAMETER(closeStatus);
@@ -927,6 +978,7 @@ namespace net
 int main()
 {
     TestHandshakeBufferedFrameSurvivesSendScratchReuse();
+    TestSendTextCanEmitNonFinalFrame();
     TestConnectRetriesResolvedAddresses();
     TestAutoPongDoesNotCorruptBufferedEcho();
     TestReceiveHonorsOutputCapacity();

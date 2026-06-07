@@ -90,13 +90,15 @@ namespace client
         NTSTATUS SendText(
             _In_reads_bytes_(messageLength) const char* message,
             SIZE_T messageLength,
-            _In_ const WebSocketIoBuffers& buffers) noexcept;
+            _In_ const WebSocketIoBuffers& buffers,
+            bool finalFragment = true) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendBinary(
             _In_reads_bytes_(messageLength) const UCHAR* message,
             SIZE_T messageLength,
-            _In_ const WebSocketIoBuffers& buffers) noexcept;
+            _In_ const WebSocketIoBuffers& buffers,
+            bool finalFragment = true) noexcept;
 
         _Must_inspect_result_
         NTSTATUS ReceiveMessage(
