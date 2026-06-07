@@ -75,6 +75,7 @@ namespace
         SIZE_T HttpsNoVerifyWithoutStoreCalls = 0;
         SIZE_T HttpsHttp11AlpnCalls = 0;
         SIZE_T HttpsHttp2AlpnCalls = 0;
+        SIZE_T HttpsUnsupportedAlpnCalls = 0;
         SIZE_T WebSocketConnectCalls = 0;
         SIZE_T WebSocketIpv4Calls = 0;
         SIZE_T WebSocketAnyCalls = 0;
@@ -166,6 +167,7 @@ namespace
             return STATUS_TRUST_FAILURE;
         }
         if (isHttps && TextEqualsLiteral(request->Alpn, request->AlpnLength, "kernel-http-test")) {
+            ++capture->HttpsUnsupportedAlpnCalls;
             return STATUS_NOT_SUPPORTED;
         }
 
@@ -509,6 +511,7 @@ namespace
         Expect(NT_SUCCESS(results.HttpAsyncWaitTimeout.Status), "async wait timeout sample observes timeout");
         Expect(NT_SUCCESS(results.HttpsTrustFailure.Status), "trust failure sample treats STATUS_TRUST_FAILURE as expected");
         Expect(NT_SUCCESS(results.HttpsAlpnMismatch.Status), "ALPN mismatch sample treats STATUS_NOT_SUPPORTED as expected");
+        Expect(capture.HttpsUnsupportedAlpnCalls == 0, "unsupported ALPN is rejected before transport");
         Expect(NT_SUCCESS(results.WebSocketClose.Status), "websocket close sample succeeds");
         Expect(NT_SUCCESS(results.WebSocketFragmentSend.Status), "websocket fragment send sample succeeds");
         Expect(capture.WebSocketNonFinalSendCalls == 1, "websocket fragment sample sends a non-final frame");

@@ -261,6 +261,12 @@ namespace engine
         return TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, name);
     }
 
+    bool IsSupportedHttpAlpn(const char* alpn, SIZE_T alpnLength) noexcept
+    {
+        return TextEqualsLiteral(alpn, alpnLength, "h2") ||
+            TextEqualsLiteral(alpn, alpnLength, "http/1.1");
+    }
+
     _Must_inspect_result_
     NTSTATUS BuildHttpRequestOptions(
         const KhRequest& request,
@@ -1231,6 +1237,13 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
+        if (TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https") &&
+            request.Tls.Alpn != nullptr &&
+            request.Tls.AlpnLength != 0 &&
+            !IsSupportedHttpAlpn(request.Tls.Alpn, request.Tls.AlpnLength)) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         UNREFERENCED_PARAMETER(requestHeaders);
         UNREFERENCED_PARAMETER(requestHeaderCount);
@@ -1550,6 +1563,13 @@ namespace engine
 
         if (request->Url == nullptr || request->UrlLength == 0) {
             return STATUS_INVALID_PARAMETER;
+        }
+
+        if (TextEqualsLiteralIgnoreCase(request->Scheme, request->SchemeLength, "https") &&
+            request->Tls.Alpn != nullptr &&
+            request->Tls.AlpnLength != 0 &&
+            !IsSupportedHttpAlpn(request->Tls.Alpn, request->Tls.AlpnLength)) {
+            return STATUS_NOT_SUPPORTED;
         }
 
         KhHttpSendOptions effectiveOptions = {};
