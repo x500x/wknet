@@ -222,7 +222,8 @@ namespace
         return true;
     }
 
-    bool AppendResponseHeaders(
+    bool AppendResponseHeadersForStream(
+        ULONG streamId,
         bool endStream,
         bool endHeaders,
         UCHAR* script,
@@ -232,7 +233,7 @@ namespace
         const UCHAR status200[] = { 0x88 };
         SIZE_T written = 0;
         const NTSTATUS status = Http2FrameCodec::EncodeHeaders(
-            1,
+            streamId,
             status200,
             sizeof(status200),
             endStream,
@@ -245,6 +246,16 @@ namespace
         }
         *length += written;
         return true;
+    }
+
+    bool AppendResponseHeaders(
+        bool endStream,
+        bool endHeaders,
+        UCHAR* script,
+        SIZE_T capacity,
+        SIZE_T* length)
+    {
+        return AppendResponseHeadersForStream(1, endStream, endHeaders, script, capacity, length);
     }
 
     bool AppendResponseContinuation(UCHAR* script, SIZE_T capacity, SIZE_T* length)
@@ -482,6 +493,92 @@ namespace
         Expect(TextEquals(acceptEncoding->Value, "identity"), "extra accept-encoding value is preserved");
     }
 
+    void TestUpgradeReceivesResponseOnStreamOne()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "Upgrade server settings fixture builds");
+        Expect(AppendResponseHeadersForStream(1, true, true, script, sizeof(script), &scriptLength),
+            "Upgrade stream 1 response fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.InitializeAfterUpgrade(transport);
+        Expect(status == STATUS_SUCCESS, "InitializeAfterUpgrade succeeds");
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.ReceiveResponse(
+            transport,
+            1,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_SUCCESS, "Upgrade stream 1 response succeeds");
+        Expect(statusCode == 200, "Upgrade stream 1 status is decoded");
+        Expect(responseHeaderCount == 1, "Upgrade stream 1 header count matches");
+        Expect(responseBodyLength == 0, "Upgrade stream 1 response body is empty");
+    }
+
+    void TestUpgradeReservesStreamOneForInitiatingRequest()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "Upgrade server settings fixture builds");
+        Expect(AppendResponseHeadersForStream(3, true, true, script, sizeof(script), &scriptLength),
+            "Upgrade stream 3 response fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.InitializeAfterUpgrade(transport);
+        Expect(status == STATUS_SUCCESS, "InitializeAfterUpgrade reserves stream 1");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("http") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_SUCCESS, "Post-upgrade request uses stream 3");
+        Expect(statusCode == 200, "Post-upgrade stream 3 status is decoded");
+    }
+
     void TestConnectionRejectsOrphanContinuation()
     {
         UCHAR script[256] = {};
@@ -603,6 +700,8 @@ int main()
 {
     TestPromotedAcceptEncodingIsNotDuplicated();
     TestExtraAcceptEncodingRemainsWhenNotPromoted();
+    TestUpgradeReceivesResponseOnStreamOne();
+    TestUpgradeReservesStreamOneForInitiatingRequest();
     TestConnectionRejectsOrphanContinuation();
     TestConnectionRejectsInterleavedFrameDuringContinuation();
     TestConnectionRejectsWindowUpdateOverflow();

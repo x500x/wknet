@@ -149,6 +149,21 @@ namespace http2
         return Initialize(adapter);
     }
 
+    NTSTATUS Http2Connection::InitializeAfterUpgrade(Http2Transport& transport) noexcept
+    {
+        NTSTATUS status = Initialize(transport);
+        if (!NT_SUCCESS(status)) return status;
+
+        nextStreamId_ = 3;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS Http2Connection::InitializeAfterUpgrade(core::ITransport& transport) noexcept
+    {
+        Http2ITransportAdapter adapter(transport);
+        return InitializeAfterUpgrade(adapter);
+    }
+
     NTSTATUS Http2Connection::SendRequest(
         Http2Transport& transport,
         const http::HttpHeader* requestHeaders,
@@ -315,7 +330,116 @@ namespace http2
             return status;
         }
 
-        // Read response frames
+        return ReceiveResponseFrames(
+            transport,
+            stream,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBody,
+            responseBodyCapacity,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
+    NTSTATUS Http2Connection::ReceiveResponse(
+        Http2Transport& transport,
+        ULONG streamId,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        char* responseBody,
+        SIZE_T responseBodyCapacity,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
+        NTSTATUS status = EnsureBuffers();
+        if (!NT_SUCCESS(status)) return status;
+
+        if (streamId == 0 || (streamId & 1u) == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        Http2Stream stream;
+        stream.Initialize(streamId, localSettings_.InitialWindowSize, peerSettings_.InitialWindowSize);
+
+        // h2c Upgrade maps the initiating HTTP/1.1 request to stream 1.
+        // The client side is already closed when we start reading the HTTP/2 response.
+        status = stream.SendHeaders(true);
+        if (!NT_SUCCESS(status)) return status;
+
+        return ReceiveResponseFrames(
+            transport,
+            stream,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBody,
+            responseBodyCapacity,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
+    NTSTATUS Http2Connection::ReceiveResponse(
+        core::ITransport& transport,
+        ULONG streamId,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        char* responseBody,
+        SIZE_T responseBodyCapacity,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
+        Http2ITransportAdapter adapter(transport);
+        return ReceiveResponse(
+            adapter,
+            streamId,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBody,
+            responseBodyCapacity,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
+    NTSTATUS Http2Connection::ReceiveResponseFrames(
+        Http2Transport& transport,
+        Http2Stream& stream,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        char* responseBody,
+        SIZE_T responseBodyCapacity,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
+        if (responseHeaders == nullptr ||
+            responseHeaderCount == nullptr ||
+            responseBody == nullptr ||
+            responseBodyLength == nullptr ||
+            statusCode == nullptr ||
+            nameValueBuffer == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *responseHeaderCount = 0;
+        *responseBodyLength = 0;
+        *statusCode = 0;
+
         bool streamClosed = false;
         bool responseHeadersReceived = false;
         bool expectingContinuation = false;
@@ -332,11 +456,11 @@ namespace http2
             UCHAR* fp = framePayload_;
             SIZE_T fpLen = 0;
 
-            status = ReadFrame(transport, &fh, fp, Http2DefaultMaxFrameSize, &fpLen);
+            NTSTATUS status = ReadFrame(transport, &fh, fp, Http2DefaultMaxFrameSize, &fpLen);
             if (!NT_SUCCESS(status)) {
                 kprintf("Http2Connection ReadFrame failed: 0x%08X stream=%u headers=%u body=%Iu\r\n",
                     static_cast<ULONG>(status),
-                    streamId,
+                    stream.StreamId(),
                     responseHeadersReceived ? 1u : 0u,
                     bodyLen);
                 if (status == STATUS_IO_TIMEOUT && responseHeadersReceived && bodyLen > 0) {
@@ -350,7 +474,7 @@ namespace http2
                 static_cast<unsigned>(fh.Flags),
                 fh.StreamId,
                 fh.Length,
-                streamId);
+                stream.StreamId());
 
             if (fh.Type == Http2FrameType::Continuation) {
                 if (!expectingContinuation || fh.StreamId != continuationStreamId) {
@@ -379,14 +503,14 @@ namespace http2
                 if (goAwayReceived_) {
                     kprintf("Http2Connection GOAWAY received lastStream=%u target=%u\r\n",
                         goAwayLastStreamId_,
-                        streamId);
+                        stream.StreamId());
                     return STATUS_CONNECTION_DISCONNECTED;
                 }
                 continue;
             }
 
             // Stream-level frame
-            if (fh.StreamId != streamId) {
+            if (fh.StreamId != stream.StreamId()) {
                 // Unexpected stream - ignore or RST
                 continue;
             }
@@ -433,7 +557,7 @@ namespace http2
                         kprintf("Http2Connection HPACK decode failed: 0x%08X block=%Iu stream=%u\r\n",
                             static_cast<ULONG>(status),
                             responseHeaderBlockLen,
-                            streamId);
+                            stream.StreamId());
                         return status;
                     }
 
@@ -480,7 +604,7 @@ namespace http2
 
                 // Update flow control
                 connectionRecvConsumed_ += static_cast<ULONG>(fpLen);
-                status = SendWindowUpdateIfNeeded(transport, streamId, static_cast<ULONG>(fpLen));
+                status = SendWindowUpdateIfNeeded(transport, stream.StreamId(), static_cast<ULONG>(fpLen));
                 if (!NT_SUCCESS(status)) return status;
 
                 if ((fh.Flags & Http2FrameFlags::EndStream) != 0) {

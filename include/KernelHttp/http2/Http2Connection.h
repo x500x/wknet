@@ -80,6 +80,10 @@ namespace http2
 
         NTSTATUS Initialize(_Inout_ core::ITransport& transport) noexcept;
 
+        NTSTATUS InitializeAfterUpgrade(_Inout_ Http2Transport& transport) noexcept;
+
+        NTSTATUS InitializeAfterUpgrade(_Inout_ core::ITransport& transport) noexcept;
+
         NTSTATUS SendRequest(
             _Inout_ Http2Transport& transport,
             _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
@@ -102,6 +106,32 @@ namespace http2
             SIZE_T requestHeaderCount,
             _In_reads_bytes_opt_(bodyLength) const UCHAR* body,
             SIZE_T bodyLength,
+            _Out_writes_(responseHeaderCapacity) http::HttpHeader* responseHeaders,
+            SIZE_T responseHeaderCapacity,
+            _Out_ SIZE_T* responseHeaderCount,
+            _Out_writes_bytes_(responseBodyCapacity) char* responseBody,
+            SIZE_T responseBodyCapacity,
+            _Out_ SIZE_T* responseBodyLength,
+            _Out_ USHORT* statusCode,
+            _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,
+            SIZE_T nameValueCapacity) noexcept;
+
+        NTSTATUS ReceiveResponse(
+            _Inout_ Http2Transport& transport,
+            ULONG streamId,
+            _Out_writes_(responseHeaderCapacity) http::HttpHeader* responseHeaders,
+            SIZE_T responseHeaderCapacity,
+            _Out_ SIZE_T* responseHeaderCount,
+            _Out_writes_bytes_(responseBodyCapacity) char* responseBody,
+            SIZE_T responseBodyCapacity,
+            _Out_ SIZE_T* responseBodyLength,
+            _Out_ USHORT* statusCode,
+            _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,
+            SIZE_T nameValueCapacity) noexcept;
+
+        NTSTATUS ReceiveResponse(
+            _Inout_ core::ITransport& transport,
+            ULONG streamId,
             _Out_writes_(responseHeaderCapacity) http::HttpHeader* responseHeaders,
             SIZE_T responseHeaderCapacity,
             _Out_ SIZE_T* responseHeaderCount,
@@ -149,6 +179,19 @@ namespace http2
             _Inout_ Http2Transport& transport,
             ULONG streamId,
             ULONG consumed) noexcept;
+
+        NTSTATUS ReceiveResponseFrames(
+            _Inout_ Http2Transport& transport,
+            _Inout_ Http2Stream& stream,
+            _Out_writes_(responseHeaderCapacity) http::HttpHeader* responseHeaders,
+            SIZE_T responseHeaderCapacity,
+            _Out_ SIZE_T* responseHeaderCount,
+            _Out_writes_bytes_(responseBodyCapacity) char* responseBody,
+            SIZE_T responseBodyCapacity,
+            _Out_ SIZE_T* responseBodyLength,
+            _Out_ USHORT* statusCode,
+            _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,
+            SIZE_T nameValueCapacity) noexcept;
 
         ULONG AllocateStreamId() noexcept;
 
