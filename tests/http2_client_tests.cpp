@@ -198,6 +198,16 @@ namespace
             return STATUS_SUCCESS;
         }
 
+        const UCHAR* SentBytes() const noexcept
+        {
+            return sentBytes_;
+        }
+
+        SIZE_T SentLength() const noexcept
+        {
+            return sentLength_;
+        }
+
     private:
         const UCHAR* receiveBytes_ = nullptr;
         SIZE_T receiveLength_ = 0;
@@ -370,6 +380,48 @@ namespace
         }
         *length += payloadLength + 9;
         return true;
+    }
+
+    SIZE_T CountSentFrames(
+        const ScriptedHttp2Transport& transport,
+        KernelHttp::http2::Http2FrameType type,
+        ULONG streamId)
+    {
+        const UCHAR* data = transport.SentBytes();
+        SIZE_T length = transport.SentLength();
+        SIZE_T offset = 0;
+
+        if (length >= KernelHttp::http2::Http2ConnectionPrefaceLength &&
+            memcmp(
+                data,
+                KernelHttp::http2::Http2ConnectionPreface,
+                KernelHttp::http2::Http2ConnectionPrefaceLength) == 0) {
+            offset = KernelHttp::http2::Http2ConnectionPrefaceLength;
+        }
+
+        SIZE_T count = 0;
+        while (offset + KernelHttp::http2::Http2FrameHeaderLength <= length) {
+            KernelHttp::http2::Http2FrameHeader header = {};
+            const NTSTATUS status = Http2FrameCodec::DecodeFrameHeader(
+                data + offset,
+                KernelHttp::http2::Http2FrameHeaderLength,
+                &header);
+            if (!NT_SUCCESS(status)) {
+                break;
+            }
+
+            offset += KernelHttp::http2::Http2FrameHeaderLength;
+            if (header.Length > length - offset) {
+                break;
+            }
+
+            if (header.Type == type && header.StreamId == streamId) {
+                ++count;
+            }
+            offset += header.Length;
+        }
+
+        return count;
     }
 
     NTSTATUS SendScriptedHttp2Request(const UCHAR* script, SIZE_T scriptLength)
@@ -579,6 +631,69 @@ namespace
         Expect(statusCode == 200, "Post-upgrade stream 3 status is decoded");
     }
 
+    void TestEndStreamDataSkipsStreamWindowUpdate()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR body[] = { 'h', 'e', 'l', 'l', 'o' };
+
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
+        Expect(AppendResponseHeaders(false, true, script, sizeof(script), &scriptLength),
+            "HTTP/2 response headers fixture builds");
+        Expect(AppendRawFrame(
+            KernelHttp::http2::Http2FrameType::Data,
+            Http2FrameFlags::EndStream,
+            1,
+            body,
+            sizeof(body),
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 response END_STREAM DATA fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 connection initializes for END_STREAM DATA test");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_SUCCESS, "END_STREAM DATA response succeeds");
+        Expect(statusCode == 200, "END_STREAM DATA response status is decoded");
+        Expect(responseBodyLength == sizeof(body), "END_STREAM DATA response body length matches");
+        Expect(memcmp(responseBody, body, sizeof(body)) == 0, "END_STREAM DATA response body matches");
+        Expect(
+            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::WindowUpdate, 1) == 0,
+            "closed stream does not receive WINDOW_UPDATE");
+    }
+
     void TestConnectionRejectsOrphanContinuation()
     {
         UCHAR script[256] = {};
@@ -702,6 +817,7 @@ int main()
     TestExtraAcceptEncodingRemainsWhenNotPromoted();
     TestUpgradeReceivesResponseOnStreamOne();
     TestUpgradeReservesStreamOneForInitiatingRequest();
+    TestEndStreamDataSkipsStreamWindowUpdate();
     TestConnectionRejectsOrphanContinuation();
     TestConnectionRejectsInterleavedFrameDuringContinuation();
     TestConnectionRejectsWindowUpdateOverflow();

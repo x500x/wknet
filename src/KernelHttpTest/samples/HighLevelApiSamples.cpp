@@ -16,6 +16,26 @@
 #define KHTTP_SAMPLE_LOG(...) kprintf(__VA_ARGS__)
 #endif
 
+#ifndef STATUS_CONNECTION_REFUSED
+#define STATUS_CONNECTION_REFUSED ((NTSTATUS)0xC0000236L)
+#endif
+
+#ifndef STATUS_NETWORK_UNREACHABLE
+#define STATUS_NETWORK_UNREACHABLE ((NTSTATUS)0xC000023CL)
+#endif
+
+#ifndef STATUS_HOST_UNREACHABLE
+#define STATUS_HOST_UNREACHABLE ((NTSTATUS)0xC000023DL)
+#endif
+
+#ifndef STATUS_PROTOCOL_UNREACHABLE
+#define STATUS_PROTOCOL_UNREACHABLE ((NTSTATUS)0xC000023EL)
+#endif
+
+#ifndef STATUS_NO_MATCH
+#define STATUS_NO_MATCH ((NTSTATUS)0xC0000272L)
+#endif
+
 namespace KernelHttp
 {
 namespace samples
@@ -315,6 +335,41 @@ namespace
         if (!NT_SUCCESS(status) && NT_SUCCESS(aggregate)) {
             aggregate = status;
         }
+    }
+
+    bool IsPublicWebSocketConnectEnvironmentStatus(NTSTATUS status) noexcept
+    {
+        return status == STATUS_CONNECTION_REFUSED ||
+            status == STATUS_NETWORK_UNREACHABLE ||
+            status == STATUS_HOST_UNREACHABLE ||
+            status == STATUS_PROTOCOL_UNREACHABLE ||
+            status == STATUS_NO_MATCH ||
+            status == STATUS_IO_TIMEOUT ||
+            status == STATUS_CONNECTION_DISCONNECTED ||
+            status == STATUS_CONNECTION_RESET ||
+            status == STATUS_CONNECTION_ABORTED ||
+            status == STATUS_DEVICE_NOT_CONNECTED;
+    }
+
+    void MergePublicWebSocketSampleStatus(
+        NTSTATUS& aggregate,
+        NTSTATUS status,
+        bool publicWebSocketValidated,
+        const char* sampleName) noexcept
+    {
+        if (NT_SUCCESS(status)) {
+            return;
+        }
+
+        if (publicWebSocketValidated && IsPublicWebSocketConnectEnvironmentStatus(status)) {
+            KHTTP_SAMPLE_LOG(
+                "[WebSocket响应] 示例=%s 公网连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                sampleName,
+                static_cast<ULONG>(status));
+            return;
+        }
+
+        MergeSampleStatus(aggregate, status);
     }
 
     void CaptureStatus(
@@ -1644,6 +1699,7 @@ namespace
         khttp::TlsConfig webSocketTls = khttp::DefaultTlsConfig();
         webSocketTls.Store = &trustStore.Store;
         webSocketTls.MaxVersion = khttp::TlsVersion::Tls12;
+        bool publicWebSocketValidated = false;
 
         // HTTP 快捷函数示例：这些入口直接创建并发送请求。
         status = RunShortcutHttp(session, "HTTP GET 快捷函数", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpShortcutGet);
@@ -1730,26 +1786,56 @@ namespace
         MergeSampleStatus(aggregate, status);
 
         status = RunWebSocketSample(session, "WebSocket Echo", WsConnectVariant::Config, WsSendVariant::Text, false, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketEcho);
-        MergeSampleStatus(aggregate, status);
+        if (NT_SUCCESS(status)) {
+            publicWebSocketValidated = true;
+        }
+        MergePublicWebSocketSampleStatus(aggregate, status, publicWebSocketValidated, "WebSocket Echo");
         results->WebSocketConfigConnect = results->WebSocketEcho;
         status = RunWebSocketSample(session, "WebSocket URL 直连", WsConnectVariant::Url, WsSendVariant::Text, false, WebSocketSecureEchoUrl, nullptr, results->WebSocketUrlConnect);
-        MergeSampleStatus(aggregate, status);
+        if (NT_SUCCESS(status)) {
+            publicWebSocketValidated = true;
+        }
+        MergePublicWebSocketSampleStatus(aggregate, status, publicWebSocketValidated, "WebSocket URL 直连");
         status = RunWebSocketSample(session, "WebSocket ConnectEx", WsConnectVariant::Ex, WsSendVariant::Text, false, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketConnectEx);
-        MergeSampleStatus(aggregate, status);
+        if (NT_SUCCESS(status)) {
+            publicWebSocketValidated = true;
+        }
+        MergePublicWebSocketSampleStatus(aggregate, status, publicWebSocketValidated, "WebSocket ConnectEx");
         status = RunWebSocketSample(session, "WebSocket 文本发送 Ex", WsConnectVariant::Ex, WsSendVariant::TextEx, false, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketTextEx);
-        MergeSampleStatus(aggregate, status);
+        if (NT_SUCCESS(status)) {
+            publicWebSocketValidated = true;
+        }
+        MergePublicWebSocketSampleStatus(aggregate, status, publicWebSocketValidated, "WebSocket 文本发送 Ex");
         status = RunWebSocketSample(session, "WebSocket 二进制发送", WsConnectVariant::Ex, WsSendVariant::Binary, false, WebSocketBinaryEchoUrl, &webSocketTls, results->WebSocketBinary);
-        MergeSampleStatus(aggregate, status);
+        if (NT_SUCCESS(status)) {
+            publicWebSocketValidated = true;
+        }
+        MergePublicWebSocketSampleStatus(aggregate, status, publicWebSocketValidated, "WebSocket 二进制发送");
         status = RunWebSocketSample(session, "WebSocket 二进制发送 Ex", WsConnectVariant::Ex, WsSendVariant::BinaryEx, false, WebSocketBinaryEchoUrl, &webSocketTls, results->WebSocketBinaryEx);
-        MergeSampleStatus(aggregate, status);
+        if (NT_SUCCESS(status)) {
+            publicWebSocketValidated = true;
+        }
+        MergePublicWebSocketSampleStatus(aggregate, status, publicWebSocketValidated, "WebSocket 二进制发送 Ex");
         status = RunWebSocketSample(session, "WebSocket 接收 Ex 回调", WsConnectVariant::Ex, WsSendVariant::Text, true, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketReceiveEx);
-        MergeSampleStatus(aggregate, status);
+        if (NT_SUCCESS(status)) {
+            publicWebSocketValidated = true;
+        }
+        MergePublicWebSocketSampleStatus(aggregate, status, publicWebSocketValidated, "WebSocket 接收 Ex 回调");
         status = RunWebSocketAsyncSample(session, "WebSocket 异步 URL 直连", WsConnectVariant::Url, WebSocketSecureEchoUrl, nullptr, results->WebSocketConnectAsync);
-        MergeSampleStatus(aggregate, status);
+        if (NT_SUCCESS(status)) {
+            publicWebSocketValidated = true;
+        }
+        MergePublicWebSocketSampleStatus(aggregate, status, publicWebSocketValidated, "WebSocket 异步 URL 直连");
         status = RunWebSocketAsyncSample(session, "WebSocket 异步配置连接", WsConnectVariant::Config, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketConfigConnectAsync);
-        MergeSampleStatus(aggregate, status);
+        if (NT_SUCCESS(status)) {
+            publicWebSocketValidated = true;
+        }
+        MergePublicWebSocketSampleStatus(aggregate, status, publicWebSocketValidated, "WebSocket 异步配置连接");
         status = RunWebSocketAsyncSample(session, "WebSocket 异步 ConnectEx", WsConnectVariant::Ex, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketConnectAsyncEx);
-        MergeSampleStatus(aggregate, status);
+        if (NT_SUCCESS(status)) {
+            publicWebSocketValidated = true;
+        }
+        MergePublicWebSocketSampleStatus(aggregate, status, publicWebSocketValidated, "WebSocket 异步 ConnectEx");
 
         ResetExternalTrustStore(trustStore);
         return aggregate;

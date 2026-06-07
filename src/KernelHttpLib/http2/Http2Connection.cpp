@@ -587,7 +587,8 @@ namespace http2
                 status = Http2FrameCodec::StripPadding(fh.Flags, fp, fpLen, &content, &contentLen);
                 if (!NT_SUCCESS(status)) return status;
 
-                status = stream.ReceiveData(fpLen, (fh.Flags & Http2FrameFlags::EndStream) != 0);
+                const bool dataEndsStream = (fh.Flags & Http2FrameFlags::EndStream) != 0;
+                status = stream.ReceiveData(fpLen, dataEndsStream);
                 if (!NT_SUCCESS(status)) return status;
 
                 if (connectionRecvWindow_ < 0 ||
@@ -604,7 +605,10 @@ namespace http2
 
                 // Update flow control
                 connectionRecvConsumed_ += static_cast<ULONG>(fpLen);
-                status = SendWindowUpdateIfNeeded(transport, stream.StreamId(), static_cast<ULONG>(fpLen));
+                status = SendWindowUpdateIfNeeded(
+                    transport,
+                    dataEndsStream ? 0 : stream.StreamId(),
+                    static_cast<ULONG>(fpLen));
                 if (!NT_SUCCESS(status)) return status;
 
                 if ((fh.Flags & Http2FrameFlags::EndStream) != 0) {
@@ -859,7 +863,7 @@ namespace http2
         }
 
         // Stream-level window update
-        if (consumed > 0) {
+        if (streamId != 0 && consumed > 0) {
             UCHAR* buf = sendBuffer_;
             SIZE_T written = 0;
             NTSTATUS status = Http2FrameCodec::EncodeWindowUpdate(

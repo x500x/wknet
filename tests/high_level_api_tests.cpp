@@ -10,6 +10,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifndef STATUS_HOST_UNREACHABLE
+#define STATUS_HOST_UNREACHABLE ((NTSTATUS)0xC000023DL)
+#endif
+
 namespace
 {
     bool g_failed = false;
@@ -96,6 +100,9 @@ namespace
         bool FailHttpByAddressFamily = false;
         KernelHttp::engine::KhAddressFamily HttpFailureAddressFamily = KernelHttp::engine::KhAddressFamily::Any;
         NTSTATUS HttpFailureStatus = STATUS_UNSUCCESSFUL;
+        bool FailWebSocketConnectFromCall = false;
+        SIZE_T WebSocketConnectFailureStartCall = 0;
+        NTSTATUS WebSocketConnectFailureStatus = STATUS_HOST_UNREACHABLE;
         UCHAR WebSocketEcho[32] = {};
         SIZE_T WebSocketEchoLength = 0;
         KernelHttp::engine::KhWebSocketMessageType LastWebSocketSendType = KernelHttp::engine::KhWebSocketMessageType::Text;
@@ -280,6 +287,12 @@ namespace
                 ++capture->WebSocketTls12MaxCalls;
             }
         }
+
+        if (capture->FailWebSocketConnectFromCall &&
+            capture->WebSocketConnectCalls >= capture->WebSocketConnectFailureStartCall) {
+            return capture->WebSocketConnectFailureStatus;
+        }
+
         return STATUS_SUCCESS;
     }
 
@@ -534,6 +547,48 @@ namespace
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
 
+    void TestLoadTimeSamplesIgnoreRepeatedPublicWebSocketConnectFailures() noexcept
+    {
+        SampleCapture capture = {};
+        static const char echo[] = "hello-from-khttp";
+        capture.WebSocketEchoLength = sizeof(echo) - 1;
+        for (SIZE_T index = 0; index < capture.WebSocketEchoLength; ++index) {
+            capture.WebSocketEcho[index] = static_cast<UCHAR>(echo[index]);
+        }
+        capture.FailWebSocketConnectFromCall = true;
+        capture.WebSocketConnectFailureStartCall = 2;
+        capture.WebSocketConnectFailureStatus = STATUS_HOST_UNREACHABLE;
+
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(HttpTransport, &capture);
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WebSocketConnect,
+            WebSocketSend,
+            WebSocketReceive,
+            WebSocketClose,
+            &capture);
+
+        KernelHttp::samples::HighLevelApiSampleResults results = {};
+        NTSTATUS status = KernelHttp::samples::RunHighLevelApiSamples(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &results);
+
+        Expect(NT_SUCCESS(status), "load-time samples keep succeeding after one public websocket success");
+        Expect(NT_SUCCESS(results.WebSocketEcho.Status), "first websocket sample succeeds");
+        Expect(
+            results.WebSocketUrlConnect.Status == STATUS_HOST_UNREACHABLE,
+            "repeated websocket URL connect stores transient failure");
+        Expect(
+            results.WebSocketConnectEx.Status == STATUS_HOST_UNREACHABLE,
+            "repeated websocket ConnectEx stores transient failure");
+        Expect(capture.WebSocketConnectCalls == 10, "all websocket connect samples are still issued");
+        Expect(capture.WebSocketSendCalls == 1, "only validated websocket sample sends a message");
+        Expect(capture.WebSocketCloseCalls == 1, "only validated websocket sample closes a live handle");
+
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
+
     void TestAdvancedScenarioSamplesCoverMissingSurface() noexcept
     {
         SampleCapture capture = {};
@@ -592,6 +647,7 @@ int main() noexcept
     KernelHttp::khttp::test::ResetCurrentIrql();
     TestLoadTimeSamplesCoverHighLevelSurface();
     TestLoadTimeSamplesReportIpv6Failure();
+    TestLoadTimeSamplesIgnoreRepeatedPublicWebSocketConnectFailures();
     TestAdvancedScenarioSamplesCoverMissingSurface();
 
     if (g_failed) {
