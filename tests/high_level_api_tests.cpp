@@ -14,6 +14,10 @@
 #define STATUS_HOST_UNREACHABLE ((NTSTATUS)0xC000023DL)
 #endif
 
+#ifndef STATUS_IO_TIMEOUT
+#define STATUS_IO_TIMEOUT ((NTSTATUS)0xC00000B5L)
+#endif
+
 namespace
 {
     bool g_failed = false;
@@ -507,6 +511,7 @@ namespace
         Expect(NT_SUCCESS(results.WebSocketBinaryEx.Status), "websocket binary Ex sample validates binary echo body");
         Expect(results.WebSocketReceiveEx.BodyLength == capture.WebSocketEchoLength, "websocket receive callback records body");
         Expect(results.HttpAsyncCancel.StatusCode == 1, "async cancel sample marks operation canceled");
+        Expect(results.HttpAsyncCancel.BodyLength == 1, "async cancel sample waits for terminal operation state");
 
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
@@ -542,6 +547,41 @@ namespace
         Expect(!NT_SUCCESS(status), "load-time high-level samples report IPv6 HTTP sample failure");
         Expect(results.HttpGetIpv6.Status == STATUS_UNSUCCESSFUL, "IPv6 HTTP sample stores failure status");
         Expect(NT_SUCCESS(results.HttpGetAny.Status), "Any address-family HTTP sample still runs after IPv6 failure");
+
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
+
+    void TestLoadTimeSamplesIgnoreIpv6EnvironmentFailure() noexcept
+    {
+        SampleCapture capture = {};
+        static const char echo[] = "hello-from-khttp";
+        capture.WebSocketEchoLength = sizeof(echo) - 1;
+        for (SIZE_T index = 0; index < capture.WebSocketEchoLength; ++index) {
+            capture.WebSocketEcho[index] = static_cast<UCHAR>(echo[index]);
+        }
+
+        capture.FailHttpByAddressFamily = true;
+        capture.HttpFailureAddressFamily = KernelHttp::engine::KhAddressFamily::Ipv6;
+        capture.HttpFailureStatus = STATUS_IO_TIMEOUT;
+
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(HttpTransport, &capture);
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WebSocketConnect,
+            WebSocketSend,
+            WebSocketReceive,
+            WebSocketClose,
+            &capture);
+
+        KernelHttp::samples::HighLevelApiSampleResults results = {};
+        NTSTATUS status = KernelHttp::samples::RunHighLevelApiSamples(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &results);
+
+        Expect(NT_SUCCESS(status), "load-time high-level samples ignore IPv6 environment timeout");
+        Expect(results.HttpGetIpv6.Status == STATUS_IO_TIMEOUT, "IPv6 HTTP sample records environment timeout");
+        Expect(NT_SUCCESS(results.HttpGetAny.Status), "Any address-family HTTP sample still runs after IPv6 timeout");
 
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
@@ -623,6 +663,7 @@ namespace
         Expect(results.HttpLargePost.StatusCode == 200, "large POST sample succeeds");
         Expect(results.HttpConcurrentAsync.StatusCode == 3, "concurrent async sample completes all operations");
         Expect(NT_SUCCESS(results.HttpAsyncWaitTimeout.Status), "async wait timeout sample observes timeout");
+        Expect(results.HttpAsyncWaitTimeout.BodyLength == 1, "async wait timeout sample drains canceled operation");
         Expect(NT_SUCCESS(results.HttpsTrustFailure.Status), "trust failure sample treats STATUS_TRUST_FAILURE as expected");
         Expect(
             results.HttpsTrustFailure.StatusCode == static_cast<ULONG>(STATUS_TRUST_FAILURE),
@@ -648,6 +689,7 @@ int main() noexcept
     KernelHttp::khttp::test::ResetCurrentIrql();
     TestLoadTimeSamplesCoverHighLevelSurface();
     TestLoadTimeSamplesReportIpv6Failure();
+    TestLoadTimeSamplesIgnoreIpv6EnvironmentFailure();
     TestLoadTimeSamplesIgnoreRepeatedPublicWebSocketConnectFailures();
     TestAdvancedScenarioSamplesCoverMissingSurface();
 

@@ -100,6 +100,15 @@ namespace
         ULONG RetryConnectionId = 0;
     };
 
+    struct FreshTimeoutCapture
+    {
+        SIZE_T CallCount = 0;
+        SIZE_T ReusedCallCount = 0;
+        SIZE_T NewConnectionCallCount = 0;
+        ULONG FirstConnectionId = 0;
+        ULONG RetryConnectionId = 0;
+    };
+
     struct CompletionCapture
     {
         SIZE_T CallCount = 0;
@@ -272,6 +281,42 @@ namespace
         response->RawResponse = responseBytes;
         response->RawResponseLength = sizeof(responseBytes) - 1;
         response->ConnectionReusable = true;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS FreshTimeoutTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<FreshTimeoutCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->CallCount;
+        if (request->ReusedConnection) {
+            ++capture->ReusedCallCount;
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        ++capture->NewConnectionCallCount;
+        if (capture->FirstConnectionId == 0) {
+            capture->FirstConnectionId = request->ConnectionId;
+            return STATUS_IO_TIMEOUT;
+        }
+
+        capture->RetryConnectionId = request->ConnectionId;
+
+        static const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "ok";
+        response->RawResponse = responseBytes;
+        response->RawResponseLength = sizeof(responseBytes) - 1;
+        response->ConnectionReusable = false;
         return STATUS_SUCCESS;
     }
 
@@ -652,6 +697,68 @@ namespace
         Expect(capture.FirstConnectionId != 0, "first idle connection id captured");
         Expect(capture.RetryConnectionId != 0, "second idle connection id captured");
         Expect(capture.RetryConnectionId != capture.FirstConnectionId, "idle timeout uses a different connection id");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestFreshSafeConnectionTimeoutRetriesWithFreshConnection() noexcept
+    {
+        FreshTimeoutCapture capture = {};
+        KernelHttp::khttp::test::SetHttpTransport(FreshTimeoutTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for fresh timeout retry");
+
+        const char* url = "http://example.com/fresh-timeout";
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "fresh GET timeout retries with a new connection");
+        Expect(capture.CallCount == 2, "fresh timeout retry makes two transport calls");
+        Expect(capture.ReusedCallCount == 0, "fresh timeout retry does not reuse a stale connection");
+        Expect(capture.NewConnectionCallCount == 2, "fresh timeout retry opens two connections");
+        Expect(capture.FirstConnectionId != 0, "fresh timeout first connection id captured");
+        Expect(capture.RetryConnectionId != 0, "fresh timeout retry connection id captured");
+        Expect(capture.RetryConnectionId != capture.FirstConnectionId, "fresh timeout retry uses a different connection id");
+        Expect(KernelHttp::khttp::ResponseStatusCode(resp) == 200, "fresh timeout retry response status is 200");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestFreshPostTimeoutDoesNotRetry() noexcept
+    {
+        FreshTimeoutCapture capture = {};
+        KernelHttp::khttp::test::SetHttpTransport(FreshTimeoutTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for fresh POST timeout");
+
+        const char* url = "http://example.com/fresh-post-timeout";
+        const char* body = "payload";
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Post(
+            session,
+            url,
+            Length(url),
+            reinterpret_cast<const UCHAR*>(body),
+            Length(body),
+            &resp);
+        Expect(status == STATUS_IO_TIMEOUT, "fresh POST timeout is not retried");
+        Expect(resp == nullptr, "fresh POST timeout does not allocate a response");
+        Expect(capture.CallCount == 1, "fresh POST timeout makes one transport call");
+        Expect(capture.NewConnectionCallCount == 1, "fresh POST timeout opens one connection");
+        Expect(capture.RetryConnectionId == 0, "fresh POST timeout has no retry connection id");
 
         KernelHttp::khttp::ResponseRelease(resp);
         KernelHttp::khttp::SessionClose(session);
@@ -1256,6 +1363,8 @@ int main() noexcept
     TestRequestRejectsHeaderAndUrlInjection();
     TestReusedConnectionFailureRetriesWithFreshConnection();
     TestIdleTimeoutSkipsExpiredConnection();
+    TestFreshSafeConnectionTimeoutRetriesWithFreshConnection();
+    TestFreshPostTimeoutDoesNotRetry();
     TestPostWithBody();
     TestSessionRequestBufferBytesLimitsRequestBody();
     TestRequestBuilder();

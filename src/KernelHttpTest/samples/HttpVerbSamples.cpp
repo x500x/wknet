@@ -306,8 +306,20 @@ namespace samples
                 return result.Status;
             }
 
-            SOCKADDR_STORAGE remoteAddress = {};
-            result.Status = wskClient.Resolve(serverName, serviceName, &remoteAddress, addressFamily);
+            HeapArray<SOCKADDR_STORAGE> remoteAddresses(net::WskMaxResolvedAddresses);
+            if (!remoteAddresses.IsValid()) {
+                result.Status = STATUS_INSUFFICIENT_RESOURCES;
+                return result.Status;
+            }
+
+            SIZE_T remoteAddressCount = 0;
+            result.Status = wskClient.ResolveAll(
+                serverName,
+                serviceName,
+                remoteAddresses.Get(),
+                net::WskMaxResolvedAddresses,
+                &remoteAddressCount,
+                addressFamily);
             if (!NT_SUCCESS(result.Status)) {
                 kprintf("[%s] HTTPS resolve failed: 0x%08X\r\n",
                     methodName,
@@ -328,7 +340,6 @@ namespace samples
             responseBuffers.HeaderCapacity = SampleHeaderCapacity;
 
             client::HttpsRequestOptions options = {};
-            options.RemoteAddress = reinterpret_cast<const SOCKADDR*>(&remoteAddress);
             options.ServerName = tlsServerName;
             options.ServerNameLength = tlsServerNameLength;
             options.Request = request;
@@ -353,17 +364,31 @@ namespace samples
 
             kprintf("[%s] HTTPS verify=%s\r\n", methodName, verifyCertificate ? "on" : "off");
             LogRequestStart(methodName, request.Path, acceptEncoding);
-            result.Status = client->SendRequest(wskClient, options, responseBuffers, response);
-            if (NT_SUCCESS(result.Status)) {
-                result.StatusCode = response.StatusCode;
-                result.HeaderCount = response.HeaderCount;
-                result.BodyLength = response.BodyLength;
-                LogResponse(methodName, response);
-            }
-            else {
-                kprintf("[%s] HTTPS request failed: 0x%08X\r\n", methodName, static_cast<ULONG>(result.Status));
+
+            NTSTATUS lastStatus = STATUS_NOT_FOUND;
+            for (SIZE_T addressIndex = 0; addressIndex < remoteAddressCount; ++addressIndex) {
+                options.RemoteAddress = reinterpret_cast<const SOCKADDR*>(&remoteAddresses[addressIndex]);
+                response = {};
+
+                result.Status = client->SendRequest(wskClient, options, responseBuffers, response);
+                if (NT_SUCCESS(result.Status)) {
+                    result.StatusCode = response.StatusCode;
+                    result.HeaderCount = response.HeaderCount;
+                    result.BodyLength = response.BodyLength;
+                    LogResponse(methodName, response);
+                    return result.Status;
+                }
+
+                lastStatus = result.Status;
+                kprintf("[%s] HTTPS address attempt failed: 0x%08X index=%Iu family=%u\r\n",
+                    methodName,
+                    static_cast<ULONG>(result.Status),
+                    addressIndex,
+                    static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
             }
 
+            result.Status = lastStatus;
+            kprintf("[%s] HTTPS request failed: 0x%08X\r\n", methodName, static_cast<ULONG>(result.Status));
             return result.Status;
         }
 

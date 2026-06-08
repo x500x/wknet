@@ -32,6 +32,7 @@ namespace samples
         constexpr const char* WebSocketText = "kernel-http advanced websocket";
         constexpr SIZE_T LargeBodyBytes = 64 * 1024;
         constexpr ULONG AsyncWaitImmediateMs = 0;
+        constexpr ULONG AsyncWaitForeverMs = 0xffffffffUL;
 
         SIZE_T LiteralLength(_In_z_ const char* text) noexcept
         {
@@ -281,19 +282,31 @@ namespace samples
             khttp::AsyncOp* operation = nullptr;
             NTSTATUS status = khttp::GetAsync(session, DelayUrl, LiteralLength(DelayUrl), &operation);
             NTSTATUS waitStatus = status;
+            NTSTATUS completionStatus = status;
             if (NT_SUCCESS(status)) {
                 waitStatus = khttp::AsyncWait(operation, AsyncWaitImmediateMs);
                 if (waitStatus == STATUS_TIMEOUT ||
                     waitStatus == STATUS_PENDING ||
                     waitStatus == STATUS_MORE_PROCESSING_REQUIRED) {
-                    status = STATUS_SUCCESS;
-                    (void)khttp::AsyncCancel(operation);
+                    const NTSTATUS cancelStatus = khttp::AsyncCancel(operation);
+                    status = cancelStatus;
+                    if (NT_SUCCESS(cancelStatus)) {
+                        completionStatus = khttp::AsyncWait(operation, AsyncWaitForeverMs);
+                        if (khttp::AsyncIsCompleted(operation)) {
+                            status = STATUS_SUCCESS;
+                        }
+                        else {
+                            status = completionStatus;
+                        }
+                    }
                 }
                 else if (NT_SUCCESS(waitStatus)) {
                     status = STATUS_UNSUCCESSFUL;
+                    completionStatus = waitStatus;
                 }
                 else {
                     status = waitStatus;
+                    completionStatus = waitStatus;
                 }
             }
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -302,8 +315,13 @@ namespace samples
             }
             khttp::test::SetAsyncAutoRun(true);
 #endif
+            const bool terminalObserved = operation != nullptr && khttp::AsyncIsCompleted(operation);
             khttp::AsyncRelease(operation);
-            CaptureStatus(result, status, static_cast<ULONG>(waitStatus), 0);
+            CaptureStatus(
+                result,
+                status,
+                static_cast<ULONG>(waitStatus),
+                terminalObserved ? 1 : 0);
             return status;
         }
 

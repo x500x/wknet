@@ -268,6 +268,19 @@ namespace engine
             TextEqualsLiteral(alpn, alpnLength, "http/1.1");
     }
 
+    bool IsSafeFreshConnectionRetryMethod(KhHttpMethod method) noexcept
+    {
+        return method == KhHttpMethod::Get ||
+            method == KhHttpMethod::Head ||
+            method == KhHttpMethod::Options;
+    }
+
+    bool IsFreshConnectionRetryStatus(NTSTATUS status) noexcept
+    {
+        return IsConnectionCloseStatus(status) ||
+            status == STATUS_IO_TIMEOUT;
+    }
+
     _Must_inspect_result_
     NTSTATUS BuildHttpRequestOptions(
         const KhRequest& request,
@@ -1703,8 +1716,14 @@ namespace engine
             rawResponseLength,
             &connectionReusable);
 
-        if (!NT_SUCCESS(status) && reusedConnection &&
-            request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate) {
+        const bool shouldRetryWithFreshConnection =
+            !NT_SUCCESS(status) &&
+            request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate &&
+            (reusedConnection ||
+                (IsSafeFreshConnectionRetryMethod(request.Method) &&
+                    IsFreshConnectionRetryStatus(status)));
+
+        if (shouldRetryWithFreshConnection) {
             KhConnectionPoolClose(&session->ConnectionPool, pooledConnection);
             pooledConnection = nullptr;
 

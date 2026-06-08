@@ -55,6 +55,7 @@ namespace detail
 namespace
 {
     constexpr ULONG AsyncWaitTimeoutMs = 60000;
+    constexpr ULONG AsyncWaitForeverMs = 0xffffffffUL;
 
     constexpr const char* HttpGetUrl = "http://nghttp2.org/httpbin/get";
     constexpr const char* HttpPostUrl = "http://nghttp2.org/httpbin/post";
@@ -337,7 +338,7 @@ namespace
         }
     }
 
-    bool IsPublicWebSocketConnectEnvironmentStatus(NTSTATUS status) noexcept
+    bool IsPublicNetworkEnvironmentStatus(NTSTATUS status) noexcept
     {
         return status == STATUS_CONNECTION_REFUSED ||
             status == STATUS_NETWORK_UNREACHABLE ||
@@ -349,6 +350,32 @@ namespace
             status == STATUS_CONNECTION_RESET ||
             status == STATUS_CONNECTION_ABORTED ||
             status == STATUS_DEVICE_NOT_CONNECTED;
+    }
+
+    bool IsPublicWebSocketConnectEnvironmentStatus(NTSTATUS status) noexcept
+    {
+        return IsPublicNetworkEnvironmentStatus(status);
+    }
+
+    void MergeAddressFamilySampleStatus(
+        NTSTATUS& aggregate,
+        NTSTATUS status,
+        khttp::AddressFamily family,
+        const char* sampleName) noexcept
+    {
+        if (NT_SUCCESS(status)) {
+            return;
+        }
+
+        if (family == khttp::AddressFamily::Ipv6 && IsPublicNetworkEnvironmentStatus(status)) {
+            KHTTP_SAMPLE_LOG(
+                "[HTTP响应] 示例=%s 公网 IPv6 环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                sampleName,
+                static_cast<ULONG>(status));
+            return;
+        }
+
+        MergeSampleStatus(aggregate, status);
     }
 
     void MergePublicWebSocketSampleStatus(
@@ -1198,21 +1225,35 @@ namespace
 
     NTSTATUS RunAsyncCancelSample(khttp::Session* session, HighLevelApiSampleResult& result) noexcept
     {
-        KHTTP_SAMPLE_LOG("[HTTP异步] 示例=AsyncCancel 创建一个异步 GET 后立即请求取消\r\n");
+        KHTTP_SAMPLE_LOG("[HTTP异步] 示例=AsyncCancel 创建一个异步 GET 后立即请求取消并等待终态\r\n");
         khttp::AsyncOp* op = nullptr;
         NTSTATUS status = khttp::GetAsync(session, HttpGetUrl, LiteralLength(HttpGetUrl), &op);
+        NTSTATUS cancelStatus = status;
+        NTSTATUS waitStatus = status;
         if (NT_SUCCESS(status)) {
-            status = khttp::AsyncCancel(op);
+            cancelStatus = khttp::AsyncCancel(op);
+            status = cancelStatus;
+        }
+        if (NT_SUCCESS(status)) {
+            waitStatus = khttp::AsyncWait(op, AsyncWaitForeverMs);
+            if (khttp::AsyncIsCompleted(op)) {
+                status = STATUS_SUCCESS;
+            }
+            else {
+                status = waitStatus;
+            }
         }
 
         const bool canceled = khttp::AsyncIsCanceled(op);
+        const bool terminalObserved = khttp::AsyncIsCompleted(op);
         KHTTP_SAMPLE_LOG(
-            "[HTTP异步] 示例=AsyncCancel 取消状态=0x%08X 已取消=%s 当前状态=0x%08X\r\n",
-            static_cast<ULONG>(status),
+            "[HTTP异步] 示例=AsyncCancel 取消状态=0x%08X 等待状态=0x%08X 已取消=%s 当前状态=0x%08X\r\n",
+            static_cast<ULONG>(cancelStatus),
+            static_cast<ULONG>(waitStatus),
             BoolName(canceled),
             static_cast<ULONG>(khttp::AsyncGetStatus(op)));
 
-        CaptureStatus(result, status, canceled ? 1 : 0, 0);
+        CaptureStatus(result, status, canceled && terminalObserved ? 1 : 0, terminalObserved ? 1 : 0);
         khttp::AsyncRelease(op);
         return status;
     }
@@ -1735,7 +1776,7 @@ namespace
         status = RunSimpleSync(session, "HTTP GET IPv4 地址族", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGetIpv4, nullptr, khttp::ConnPolicy::ReuseOrCreate, khttp::AddressFamily::Ipv4);
         MergeSampleStatus(aggregate, status);
         status = RunSimpleSync(session, "HTTP GET IPv6 地址族", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGetIpv6, nullptr, khttp::ConnPolicy::ReuseOrCreate, khttp::AddressFamily::Ipv6);
-        MergeSampleStatus(aggregate, status);
+        MergeAddressFamilySampleStatus(aggregate, status, khttp::AddressFamily::Ipv6, "HTTP GET IPv6 地址族");
         status = RunSimpleSync(session, "HTTP GET Any 地址族", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGetAny, nullptr, khttp::ConnPolicy::ReuseOrCreate, khttp::AddressFamily::Any);
         MergeSampleStatus(aggregate, status);
 
