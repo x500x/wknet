@@ -47,6 +47,7 @@ using KernelHttp::tls::Tls13ClientHelloOptions;
 using KernelHttp::tls::Tls13CertificateVerifyInputMaxLength;
 using KernelHttp::tls::Tls13EncryptedExtensionsView;
 using KernelHttp::tls::Tls13KeyShareEntry;
+using KernelHttp::tls::Tls13MaxTicketIdentityLength;
 using KernelHttp::tls::Tls13NewSessionTicketView;
 using KernelHttp::tls::Tls13ServerHelloView;
 using KernelHttp::tls::TlsMutablePlaintextRecord;
@@ -1474,6 +1475,29 @@ namespace
         Expect(ticket.MaxEarlyDataSize == 1024, "TLS 1.3 ticket early data size parses");
     }
 
+    void TestParseTls13NewSessionTicketAllowsLargeIdentity()
+    {
+        constexpr SIZE_T TicketLength = Tls13MaxTicketIdentityLength + 1;
+        constexpr SIZE_T BodyLength = 4 + 4 + 1 + 2 + TicketLength + 2;
+        UCHAR body[BodyLength] = {};
+        body[3] = 10;
+        body[7] = 1;
+        body[9] = static_cast<UCHAR>((TicketLength >> 8) & 0xff);
+        body[10] = static_cast<UCHAR>(TicketLength & 0xff);
+        memset(body + 11, 0x5a, TicketLength);
+
+        TlsHandshakeMessageView message = {};
+        message.Type = TlsHandshakeType::NewSessionTicket;
+        message.Body = body;
+        message.BodyLength = sizeof(body);
+
+        Tls13NewSessionTicketView ticket = {};
+        const NTSTATUS status = TlsHandshake13::ParseNewSessionTicket(message, ticket);
+
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 NewSessionTicket parser accepts large ticket identity");
+        Expect(ticket.TicketLength == TicketLength, "TLS 1.3 large ticket identity length parses");
+    }
+
     void TestParseMultipleTls13NewSessionTicketsFromOneRecord()
     {
         const UCHAR tickets[] = {
@@ -2275,6 +2299,7 @@ int main()
     TestParseTls13HelloRetryRequest();
     TestParseTls13EncryptedExtensions();
     TestParseTls13NewSessionTicket();
+    TestParseTls13NewSessionTicketAllowsLargeIdentity();
     TestParseMultipleTls13NewSessionTicketsFromOneRecord();
     TestParseTls13PostHandshakeRejectsUnexpectedType();
     TestTls13FinishedVerifyData();

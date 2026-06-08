@@ -2404,10 +2404,18 @@ namespace tls
         Tls13SessionCache* externalCache) noexcept
     {
         if (ticket.Ticket == nullptr ||
-            ticket.TicketLength == 0 ||
-            ticket.TicketLength > Tls13MaxTicketIdentityLength ||
-            ticket.NonceLength > Tls13MaxTicketNonceLength) {
+            ticket.TicketLength == 0) {
             return STATUS_INVALID_PARAMETER;
+        }
+        if (ticket.TicketLength > Tls13MaxTicketIdentityLength ||
+            ticket.NonceLength > Tls13MaxTicketNonceLength) {
+#if defined(DBG) && !defined(KERNEL_HTTP_USER_MODE_TEST)
+            kprintf(
+                "TlsConnection TLS1.3 skip uncacheable NewSessionTicket ticket=%Iu nonce=%Iu\r\n",
+                ticket.TicketLength,
+                ticket.NonceLength);
+#endif
+            return STATUS_SUCCESS;
         }
 
         Tls13SessionTicket stored = {};
