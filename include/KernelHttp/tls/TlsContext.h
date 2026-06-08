@@ -14,7 +14,10 @@ namespace tls
     constexpr SIZE_T Tls13MaxHashLength = 48;
     constexpr SIZE_T Tls13MaxTicketIdentityLength = 256;
     constexpr SIZE_T Tls13MaxTicketNonceLength = 32;
+    constexpr SIZE_T Tls13MaxTicketServerNameLength = 255;
+    constexpr SIZE_T Tls13MaxTicketAlpnLength = 15;
     constexpr SIZE_T Tls13MaxTicketCount = 4;
+    constexpr ULONG Tls13MaxTicketLifetimeSeconds = 604800;
 
     enum class TlsProtocol : UCHAR
     {
@@ -93,6 +96,12 @@ namespace tls
         ULONG LifetimeSeconds = 0;
         ULONG AgeAdd = 0;
         ULONG MaxEarlyDataSize = 0;
+        ULONGLONG IssueTimeMilliseconds = 0;
+        TlsProtocolVersion Version = { 3, 4 };
+        char ServerName[Tls13MaxTicketServerNameLength + 1] = {};
+        SIZE_T ServerNameLength = 0;
+        char Alpn[Tls13MaxTicketAlpnLength + 1] = {};
+        SIZE_T AlpnLength = 0;
         TlsCipherSuite CipherSuite = TlsCipherSuite::TlsAes128GcmSha256;
         UCHAR ResumptionSecret[Tls13MaxSecretLength] = {};
         SIZE_T ResumptionSecretLength = 0;

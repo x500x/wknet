@@ -687,6 +687,59 @@ namespace
         g_server = nullptr;
     }
 
+    void TestSendAllowsEmptyMessagesAndRejectsInvalidUtf8()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for empty send succeeds");
+
+        const char empty[] = "";
+        status = client.SendText(empty, 0, buffers);
+        Expect(NT_SUCCESS(status), "empty text send succeeds");
+        Expect(server.LastClientPayloadLength == 0, "empty text payload length is zero");
+
+        status = client.SendBinary(nullptr, 0, buffers);
+        Expect(NT_SUCCESS(status), "empty binary send succeeds with null payload pointer");
+        Expect(server.LastClientPayloadLength == 0, "empty binary payload length is zero");
+
+        status = client.SendText(empty, 0, buffers, false);
+        Expect(NT_SUCCESS(status), "empty non-final text send succeeds");
+        status = client.SendContinuation(nullptr, 0, buffers, true);
+        Expect(NT_SUCCESS(status), "empty continuation send succeeds");
+
+        const unsigned char invalidText[] = { 0xc3, 0x28 };
+        status = client.SendText(
+            reinterpret_cast<const char*>(invalidText),
+            sizeof(invalidText),
+            buffers);
+        Expect(status == STATUS_INVALID_PARAMETER, "invalid UTF-8 text send is rejected before framing");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
     void TestContinuationCompletesFragmentedText()
     {
         FakeWebSocketServer server;
@@ -1366,6 +1419,127 @@ namespace
         g_server = nullptr;
     }
 
+    void TestReceivePongWithoutAutoReplyReturnsControlEvent()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        const unsigned char pong[] = "hb";
+        const unsigned char text[] = "after-pong";
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Pong,
+            pong,
+            sizeof(pong) - 1);
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Text,
+            text,
+            sizeof(text) - 1);
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for manual pong test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived, false);
+        Expect(NT_SUCCESS(status), "manual pong receive succeeds");
+        Expect(opcode == WebSocketOpcode::Pong, "manual pong returns pong opcode");
+        Expect(bytesReceived == sizeof(pong) - 1, "manual pong payload length matches");
+        Expect(memcmp(payload, pong, sizeof(pong) - 1) == 0, "manual pong payload matches");
+
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(NT_SUCCESS(status), "data after manual pong is received");
+        Expect(opcode == WebSocketOpcode::Text, "data after manual pong opcode is text");
+        Expect(bytesReceived == sizeof(text) - 1, "data after manual pong length matches");
+        Expect(memcmp(payload, text, sizeof(text) - 1) == 0, "data after manual pong payload matches");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestReceiveProtocolHeaderErrorSendsClose1002AndTerminates()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        const unsigned char maskedServerFrame[] = {
+            0x81, 0x80, 0x01, 0x02, 0x03, 0x04
+        };
+        AppendBytes(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            maskedServerFrame,
+            sizeof(maskedServerFrame));
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for header error test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "masked server frame is a protocol error");
+        Expect(server.CloseCount == 1, "protocol header error sends one close frame");
+        Expect(server.LastClosePayloadLength == 2, "protocol header error close carries status code");
+        Expect(server.LastClosePayload[0] == 0x03 && server.LastClosePayload[1] == 0xea,
+            "protocol header error close status is 1002");
+
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(status == STATUS_CONNECTION_DISCONNECTED, "receive after protocol error is disconnected");
+
+        const char text[] = "after-error";
+        status = client.SendText(text, sizeof(text) - 1, buffers);
+        Expect(status == STATUS_CONNECTION_DISCONNECTED, "send after protocol error is disconnected");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
     void TestReceiveCloseEchoesAndBlocksData()
     {
         FakeWebSocketServer server;
@@ -1795,6 +1969,7 @@ int main()
     TestHandshakeHostHeaderFormatting();
     TestHandshakeBufferedFrameSurvivesSendScratchReuse();
     TestSendTextCanEmitNonFinalFrame();
+    TestSendAllowsEmptyMessagesAndRejectsInvalidUtf8();
     TestContinuationCompletesFragmentedText();
     TestConnectRetriesResolvedAddresses();
     TestAutoPongDoesNotCorruptBufferedEcho();
@@ -1809,6 +1984,8 @@ int main()
     TestReceiveHonorsOutputCapacity();
     TestReceiveMessageLargerThanFrameScratch();
     TestReceivePingWithoutAutoReplyReturnsControlEvent();
+    TestReceivePongWithoutAutoReplyReturnsControlEvent();
+    TestReceiveProtocolHeaderErrorSendsClose1002AndTerminates();
     TestReceiveCloseEchoesAndBlocksData();
     TestReceiveRejectsInvalidTextUtf8();
     TestReceiveRejectsMalformedCloseFrames();

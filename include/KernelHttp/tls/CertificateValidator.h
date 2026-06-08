@@ -75,6 +75,7 @@ namespace tls
         bool AllowsKeyCertSign = false;
         bool HasExtendedKeyUsage = false;
         bool AllowsServerAuth = false;
+        bool HasNameConstraints = false;
     };
 
     struct CertificateChainView final
@@ -93,6 +94,7 @@ namespace tls
         const crypto::CngProviderCache* ProviderCache = nullptr;
         bool VerifyCertificate = true;
         bool RequireServerAuthEku = true;
+        bool RequireRevocationCheck = false;
     };
 
     struct CertificateValidationResult final

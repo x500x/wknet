@@ -1256,6 +1256,54 @@ namespace
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "chunked decoder rejects missing CRLF after data");
     }
 
+    void TestChunkedDecodeRejectsMalformedTrailer()
+    {
+        const char chunkedBody[] =
+            "0\r\n"
+            "Bad Name: value\r\n"
+            "\r\n";
+
+        char decoded[8] = {};
+        size_t decodedLength = 0;
+        size_t bytesConsumed = 0;
+
+        const NTSTATUS status = HttpParser::DecodeChunkedBody(
+            chunkedBody,
+            strlen(chunkedBody),
+            decoded,
+            sizeof(decoded),
+            &decodedLength,
+            &bytesConsumed);
+
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "chunked decoder rejects malformed trailer field name");
+        Expect(decodedLength == 0, "malformed trailer does not expose decoded body");
+        Expect(bytesConsumed == 0, "malformed trailer does not consume the message");
+    }
+
+    void TestChunkedDecodeRejectsForbiddenTrailer()
+    {
+        const char chunkedBody[] =
+            "0\r\n"
+            "Content-Length: 7\r\n"
+            "\r\n";
+
+        char decoded[8] = {};
+        size_t decodedLength = 0;
+        size_t bytesConsumed = 0;
+
+        const NTSTATUS status = HttpParser::DecodeChunkedBody(
+            chunkedBody,
+            strlen(chunkedBody),
+            decoded,
+            sizeof(decoded),
+            &decodedLength,
+            &bytesConsumed);
+
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "chunked decoder rejects forbidden trailer field");
+        Expect(decodedLength == 0, "forbidden trailer does not expose decoded body");
+        Expect(bytesConsumed == 0, "forbidden trailer does not consume the message");
+    }
+
     void TestUnsupportedTransferEncoding()
     {
         const char responseBytes[] =
@@ -1843,6 +1891,8 @@ int main()
     TestContentEncodingRejectsTooManyCodings();
     TestChunkedDecodeRequiresCapacity();
     TestChunkedDecodeRejectsBadTerminator();
+    TestChunkedDecodeRejectsMalformedTrailer();
+    TestChunkedDecodeRejectsForbiddenTrailer();
     TestUnsupportedTransferEncoding();
     TestTransferEncodingRejectsContentLength();
     TestTransferEncodingRejectsHttp10();

@@ -43,6 +43,24 @@ namespace http2
             }
         }
 
+        void MemMove(UCHAR* dst, const UCHAR* src, SIZE_T len) noexcept
+        {
+            if (dst == src || len == 0) {
+                return;
+            }
+
+            if (dst < src) {
+                for (SIZE_T i = 0; i < len; ++i) {
+                    dst[i] = src[i];
+                }
+                return;
+            }
+
+            for (SIZE_T i = len; i > 0; --i) {
+                dst[i - 1] = src[i - 1];
+            }
+        }
+
         _Must_inspect_result_
         bool RangeFits(SIZE_T offset, SIZE_T length, SIZE_T capacity) noexcept
         {
@@ -108,6 +126,109 @@ namespace http2
             }
             *output = buffer + *offset;
             *offset += length;
+            return STATUS_SUCCESS;
+        }
+
+        constexpr SIZE_T MaxSizeT = ~static_cast<SIZE_T>(0);
+
+        _Must_inspect_result_
+        bool AddHeaderListSize(
+            SIZE_T nameLength,
+            SIZE_T valueLength,
+            SIZE_T maxHeaderListSize,
+            _Inout_ SIZE_T* headerListSize) noexcept
+        {
+            if (headerListSize == nullptr) {
+                return false;
+            }
+
+            if (nameLength > MaxSizeT - valueLength) {
+                return false;
+            }
+            SIZE_T fieldSize = nameLength + valueLength;
+            if (fieldSize > MaxSizeT - HpackEntryOverhead) {
+                return false;
+            }
+            fieldSize += HpackEntryOverhead;
+
+            if (*headerListSize > MaxSizeT - fieldSize) {
+                return false;
+            }
+            if (maxHeaderListSize != MaxSizeT) {
+                if (fieldSize > maxHeaderListSize ||
+                    *headerListSize > maxHeaderListSize - fieldSize) {
+                    return false;
+                }
+            }
+
+            *headerListSize += fieldSize;
+            return true;
+        }
+
+        _Must_inspect_result_
+        bool IsSensitiveHeaderName(const char* name, SIZE_T nameLen) noexcept
+        {
+            return NameEquals(name, nameLen, "authorization", 13) ||
+                NameEquals(name, nameLen, "cookie", 6) ||
+                NameEquals(name, nameLen, "proxy-authorization", 19);
+        }
+
+        _Must_inspect_result_
+        NTSTATUS EncodeHeaderString(
+            _In_reads_bytes_(length) const char* data,
+            SIZE_T length,
+            _Out_writes_bytes_(capacity) UCHAR* dest,
+            SIZE_T capacity,
+            _Inout_ SIZE_T* offset) noexcept
+        {
+            if ((data == nullptr && length != 0) || dest == nullptr || offset == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (*offset > capacity) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            const SIZE_T huffLen = HpackHuffmanEncodedLength(
+                reinterpret_cast<const UCHAR*>(data), length);
+            if (huffLen < length && length > 0) {
+                SIZE_T written = 0;
+                NTSTATUS status = HpackEncodeInteger(
+                    static_cast<ULONG>(huffLen),
+                    0x80,
+                    7,
+                    dest + *offset,
+                    capacity - *offset,
+                    &written);
+                if (!NT_SUCCESS(status)) return status;
+                *offset += written;
+
+                status = HpackHuffmanEncode(
+                    reinterpret_cast<const UCHAR*>(data),
+                    length,
+                    dest + *offset,
+                    capacity - *offset,
+                    &written);
+                if (!NT_SUCCESS(status)) return status;
+                *offset += written;
+                return STATUS_SUCCESS;
+            }
+
+            SIZE_T written = 0;
+            NTSTATUS status = HpackEncodeInteger(
+                static_cast<ULONG>(length),
+                0x00,
+                7,
+                dest + *offset,
+                capacity - *offset,
+                &written);
+            if (!NT_SUCCESS(status)) return status;
+            *offset += written;
+
+            if (length != 0) {
+                if (!RangeFits(*offset, length, capacity)) return STATUS_BUFFER_TOO_SMALL;
+                MemCopy(dest + *offset, data, length);
+                *offset += length;
+            }
             return STATUS_SUCCESS;
         }
     }
@@ -415,6 +536,7 @@ namespace http2
         while (currentSize_ > maxSize_ && entryCount_ > 0) {
             Evict();
         }
+        CompactData();
     }
 
     NTSTATUS HpackDynamicTable::Insert(
@@ -440,28 +562,44 @@ namespace http2
         // Ensure data buffer has space
         SIZE_T dataNeeded = nameLen + valueLen;
         if (dataUsed_ + dataNeeded > dataCapacity_) {
-            // Compact: move all live data to front
-            if (entryCount_ == 0) {
-                dataUsed_ = 0;
-            } else {
-                // Simple approach: reallocate
-                SIZE_T newCapacity = dataCapacity_ * 2;
-                if (newCapacity < dataUsed_ + dataNeeded + 1024) {
-                    newCapacity = dataUsed_ + dataNeeded + 1024;
-                }
-                UCHAR* newBuffer = new UCHAR[newCapacity];
-                if (newBuffer == nullptr) return STATUS_INSUFFICIENT_RESOURCES;
-                MemCopy(newBuffer, dataBuffer_, dataUsed_);
-                if (PointerInRange(name, dataBuffer_, dataUsed_)) {
-                    name = newBuffer + (name - dataBuffer_);
-                }
-                if (PointerInRange(value, dataBuffer_, dataUsed_)) {
-                    value = newBuffer + (value - dataBuffer_);
-                }
-                delete[] dataBuffer_;
-                dataBuffer_ = newBuffer;
-                dataCapacity_ = newCapacity;
+            const bool nameFromTable = PointerInRange(name, dataBuffer_, dataUsed_);
+            const bool valueFromTable = PointerInRange(value, dataBuffer_, dataUsed_);
+            SIZE_T nameOffset = 0;
+            SIZE_T valueOffset = 0;
+            if (nameFromTable) {
+                nameOffset = static_cast<SIZE_T>(name - dataBuffer_);
             }
+            if (valueFromTable) {
+                valueOffset = static_cast<SIZE_T>(value - dataBuffer_);
+            }
+
+            CompactData(nameFromTable ? &nameOffset : nullptr, valueFromTable ? &valueOffset : nullptr);
+
+            if (nameFromTable) {
+                name = dataBuffer_ + nameOffset;
+            }
+            if (valueFromTable) {
+                value = dataBuffer_ + valueOffset;
+            }
+        }
+
+        if (dataUsed_ + dataNeeded > dataCapacity_) {
+            SIZE_T newCapacity = dataCapacity_ * 2;
+            if (newCapacity < dataUsed_ + dataNeeded + 1024) {
+                newCapacity = dataUsed_ + dataNeeded + 1024;
+            }
+            UCHAR* newBuffer = new UCHAR[newCapacity];
+            if (newBuffer == nullptr) return STATUS_INSUFFICIENT_RESOURCES;
+            MemCopy(newBuffer, dataBuffer_, dataUsed_);
+            if (PointerInRange(name, dataBuffer_, dataUsed_)) {
+                name = newBuffer + (name - dataBuffer_);
+            }
+            if (PointerInRange(value, dataBuffer_, dataUsed_)) {
+                value = newBuffer + (value - dataBuffer_);
+            }
+            delete[] dataBuffer_;
+            dataBuffer_ = newBuffer;
+            dataCapacity_ = newCapacity;
         }
 
         // Ensure entry array has space
@@ -554,6 +692,66 @@ namespace http2
         SIZE_T entrySize = entry.NameLength + entry.ValueLength + HpackEntryOverhead;
         currentSize_ -= entrySize;
         --entryCount_;
+        if (entryCount_ == 0) {
+            entryHead_ = 0;
+            dataUsed_ = 0;
+        }
+    }
+
+    void HpackDynamicTable::CompactData(SIZE_T* firstOffset, SIZE_T* secondOffset) noexcept
+    {
+        if (entryCount_ == 0) {
+            dataUsed_ = 0;
+            entryHead_ = 0;
+            return;
+        }
+
+        SIZE_T writeOffset = 0;
+        SIZE_T previousStart = 0;
+        bool havePreviousStart = false;
+
+        for (SIZE_T processed = 0; processed < entryCount_; ++processed) {
+            Entry* candidate = nullptr;
+            SIZE_T candidateStart = MaxSizeT;
+
+            for (SIZE_T i = 0; i < entryCount_; ++i) {
+                Entry& entry = entries_[(entryHead_ + i) % entryCapacity_];
+                const SIZE_T start = entry.NameOffset;
+                if (havePreviousStart && start <= previousStart) {
+                    continue;
+                }
+                if (start < candidateStart) {
+                    candidateStart = start;
+                    candidate = &entry;
+                }
+            }
+
+            if (candidate == nullptr) {
+                return;
+            }
+
+            const SIZE_T totalLength = candidate->NameLength + candidate->ValueLength;
+            if (totalLength != 0) {
+                MemMove(dataBuffer_ + writeOffset, dataBuffer_ + candidateStart, totalLength);
+            }
+            if (firstOffset != nullptr &&
+                *firstOffset >= candidateStart &&
+                *firstOffset < candidateStart + totalLength) {
+                *firstOffset = writeOffset + (*firstOffset - candidateStart);
+            }
+            if (secondOffset != nullptr &&
+                *secondOffset >= candidateStart &&
+                *secondOffset < candidateStart + totalLength) {
+                *secondOffset = writeOffset + (*secondOffset - candidateStart);
+            }
+            candidate->NameOffset = writeOffset;
+            candidate->ValueOffset = writeOffset + candidate->NameLength;
+            writeOffset += totalLength;
+            previousStart = candidateStart;
+            havePreviousStart = true;
+        }
+
+        dataUsed_ = writeOffset;
     }
 
     // ========================================================================
@@ -571,6 +769,12 @@ namespace http2
         table_.Reset();
     }
 
+    void HpackDecoder::UpdateMaxTableSize(SIZE_T maxTableSize) noexcept
+    {
+        maxTableSize_ = maxTableSize;
+        table_.UpdateMaxSize(maxTableSize);
+    }
+
     NTSTATUS HpackDecoder::Decode(
         const UCHAR* block,
         SIZE_T blockLen,
@@ -580,6 +784,29 @@ namespace http2
         char* nameValueBuffer,
         SIZE_T nameValueCapacity,
         SIZE_T* nameValueUsed) noexcept
+    {
+        return Decode(
+            block,
+            blockLen,
+            headers,
+            headerCapacity,
+            headerCount,
+            nameValueBuffer,
+            nameValueCapacity,
+            nameValueUsed,
+            MaxSizeT);
+    }
+
+    NTSTATUS HpackDecoder::Decode(
+        const UCHAR* block,
+        SIZE_T blockLen,
+        http::HttpHeader* headers,
+        SIZE_T headerCapacity,
+        SIZE_T* headerCount,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity,
+        SIZE_T* nameValueUsed,
+        SIZE_T maxHeaderListSize) noexcept
     {
         if (block == nullptr && blockLen > 0) return STATUS_INVALID_PARAMETER;
         if (headers == nullptr || headerCount == nullptr) return STATUS_INVALID_PARAMETER;
@@ -591,6 +818,8 @@ namespace http2
         SIZE_T offset = 0;
         SIZE_T hdrIdx = 0;
         SIZE_T nvOffset = 0;
+        SIZE_T headerListSize = 0;
+        bool allowTableSizeUpdate = true;
 
         while (offset < blockLen) {
             UCHAR byte = block[offset];
@@ -603,6 +832,7 @@ namespace http2
 
             if ((byte & 0x80) != 0) {
                 // Indexed Header Field (Section 6.1)
+                allowTableSizeUpdate = false;
                 ULONG index = 0;
                 SIZE_T consumed = 0;
                 NTSTATUS status = HpackDecodeInteger(block + offset, blockLen - offset, 7, &index, &consumed);
@@ -627,6 +857,7 @@ namespace http2
             }
             else if ((byte & 0xC0) == 0x40) {
                 // Literal Header Field with Incremental Indexing (Section 6.2.1)
+                allowTableSizeUpdate = false;
                 ULONG index = 0;
                 SIZE_T consumed = 0;
                 NTSTATUS status = HpackDecodeInteger(block + offset, blockLen - offset, 6, &index, &consumed);
@@ -716,6 +947,7 @@ namespace http2
             else if ((byte & 0xF0) == 0x00 || (byte & 0xF0) == 0x10) {
                 // Literal Header Field without Indexing (Section 6.2.2) - 0000xxxx
                 // Literal Header Field Never Indexed (Section 6.2.3) - 0001xxxx
+                allowTableSizeUpdate = false;
                 UCHAR prefixBits = 4;
                 ULONG index = 0;
                 SIZE_T consumed = 0;
@@ -805,6 +1037,7 @@ namespace http2
             }
             else if ((byte & 0xE0) == 0x20) {
                 // Dynamic Table Size Update (Section 6.3)
+                if (!allowTableSizeUpdate) return STATUS_INVALID_NETWORK_RESPONSE;
                 ULONG newSize = 0;
                 SIZE_T consumed = 0;
                 NTSTATUS status = HpackDecodeInteger(block + offset, blockLen - offset, 5, &newSize, &consumed);
@@ -831,6 +1064,10 @@ namespace http2
             materializeStatus = MaterializeHeaderPart(
                 valuePtr, valueLen, nameValueBuffer, nameValueCapacity, &nvOffset, &outValue);
             if (!NT_SUCCESS(materializeStatus)) return materializeStatus;
+
+            if (!AddHeaderListSize(outNameLen, outValueLen, maxHeaderListSize, &headerListSize)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
 
             if (addToTable) {
                 NTSTATUS insertStatus = table_.Insert(
@@ -859,12 +1096,28 @@ namespace http2
 
     NTSTATUS HpackEncoder::Initialize(SIZE_T maxTableSize) noexcept
     {
+        maxTableSize_ = maxTableSize;
+        pendingTableSize_ = maxTableSize;
+        tableSizeUpdatePending_ = false;
         return table_.Initialize(maxTableSize);
     }
 
     void HpackEncoder::Reset() noexcept
     {
         table_.Reset();
+        tableSizeUpdatePending_ = false;
+    }
+
+    void HpackEncoder::UpdateMaxTableSize(SIZE_T maxTableSize) noexcept
+    {
+        if (maxTableSize_ == maxTableSize) {
+            return;
+        }
+
+        maxTableSize_ = maxTableSize;
+        pendingTableSize_ = maxTableSize;
+        tableSizeUpdatePending_ = true;
+        table_.UpdateMaxSize(maxTableSize);
     }
 
     SIZE_T HpackEncoder::FindMatch(
@@ -928,15 +1181,35 @@ namespace http2
 
         SIZE_T offset = 0;
 
+        if (tableSizeUpdatePending_) {
+            SIZE_T written = 0;
+            NTSTATUS status = HpackEncodeInteger(
+                static_cast<ULONG>(pendingTableSize_),
+                0x20,
+                5,
+                dest + offset,
+                capacity - offset,
+                &written);
+            if (!NT_SUCCESS(status)) return status;
+            offset += written;
+            tableSizeUpdatePending_ = false;
+        }
+
         for (SIZE_T i = 0; i < headerCount; ++i) {
             const http::HttpHeader& hdr = headers[i];
+            if (hdr.Name.Data == nullptr || hdr.Name.Length == 0 ||
+                (hdr.Value.Data == nullptr && hdr.Value.Length != 0)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
             bool nameOnly = false;
             SIZE_T matchIdx = FindMatch(
                 hdr.Name.Data, hdr.Name.Length,
                 hdr.Value.Data, hdr.Value.Length,
                 &nameOnly);
+            const bool neverIndex = IsSensitiveHeaderName(hdr.Name.Data, hdr.Name.Length);
 
-            if (matchIdx > 0 && !nameOnly) {
+            if (matchIdx > 0 && !nameOnly && !neverIndex) {
                 // Indexed Header Field (Section 6.1)
                 SIZE_T written = 0;
                 NTSTATUS status = HpackEncodeInteger(
@@ -946,87 +1219,44 @@ namespace http2
                 offset += written;
             }
             else {
-                // Literal Header Field with Incremental Indexing (Section 6.2.1)
+                const UCHAR literalPrefix = neverIndex ? 0x10 : 0x40;
+                const UCHAR literalPrefixBits = neverIndex ? 4 : 6;
                 if (matchIdx > 0) {
                     // Name indexed
                     SIZE_T written = 0;
                     NTSTATUS status = HpackEncodeInteger(
-                        static_cast<ULONG>(matchIdx), 0x40, 6,
+                        static_cast<ULONG>(matchIdx), literalPrefix, literalPrefixBits,
                         dest + offset, capacity - offset, &written);
                     if (!NT_SUCCESS(status)) return status;
                     offset += written;
                 } else {
                     // New name
                     if (offset >= capacity) return STATUS_BUFFER_TOO_SMALL;
-                    dest[offset++] = 0x40;
+                    dest[offset++] = literalPrefix;
 
-                    // Encode name (try Huffman)
-                    SIZE_T huffLen = HpackHuffmanEncodedLength(
-                        reinterpret_cast<const UCHAR*>(hdr.Name.Data), hdr.Name.Length);
-                    if (huffLen < hdr.Name.Length) {
-                        // Use Huffman
-                        SIZE_T written = 0;
-                        NTSTATUS status = HpackEncodeInteger(
-                            static_cast<ULONG>(huffLen), 0x80, 7,
-                            dest + offset, capacity - offset, &written);
-                        if (!NT_SUCCESS(status)) return status;
-                        offset += written;
-
-                        status = HpackHuffmanEncode(
-                            reinterpret_cast<const UCHAR*>(hdr.Name.Data), hdr.Name.Length,
-                            dest + offset, capacity - offset, &written);
-                        if (!NT_SUCCESS(status)) return status;
-                        offset += written;
-                    } else {
-                        // Plain
-                        SIZE_T written = 0;
-                        NTSTATUS status = HpackEncodeInteger(
-                            static_cast<ULONG>(hdr.Name.Length), 0x00, 7,
-                            dest + offset, capacity - offset, &written);
-                        if (!NT_SUCCESS(status)) return status;
-                        offset += written;
-
-                        if (offset + hdr.Name.Length > capacity) return STATUS_BUFFER_TOO_SMALL;
-                        MemCopy(dest + offset, hdr.Name.Data, hdr.Name.Length);
-                        offset += hdr.Name.Length;
-                    }
+                    NTSTATUS status = EncodeHeaderString(
+                        hdr.Name.Data,
+                        hdr.Name.Length,
+                        dest,
+                        capacity,
+                        &offset);
+                    if (!NT_SUCCESS(status)) return status;
                 }
 
-                // Encode value (try Huffman)
-                SIZE_T huffLen = HpackHuffmanEncodedLength(
-                    reinterpret_cast<const UCHAR*>(hdr.Value.Data), hdr.Value.Length);
-                if (huffLen < hdr.Value.Length && hdr.Value.Length > 0) {
-                    SIZE_T written = 0;
-                    NTSTATUS status = HpackEncodeInteger(
-                        static_cast<ULONG>(huffLen), 0x80, 7,
-                        dest + offset, capacity - offset, &written);
-                    if (!NT_SUCCESS(status)) return status;
-                    offset += written;
+                NTSTATUS status = EncodeHeaderString(
+                    hdr.Value.Data,
+                    hdr.Value.Length,
+                    dest,
+                    capacity,
+                    &offset);
+                if (!NT_SUCCESS(status)) return status;
 
-                    status = HpackHuffmanEncode(
-                        reinterpret_cast<const UCHAR*>(hdr.Value.Data), hdr.Value.Length,
-                        dest + offset, capacity - offset, &written);
+                if (!neverIndex) {
+                    status = table_.Insert(
+                        reinterpret_cast<const UCHAR*>(hdr.Name.Data), hdr.Name.Length,
+                        reinterpret_cast<const UCHAR*>(hdr.Value.Data), hdr.Value.Length);
                     if (!NT_SUCCESS(status)) return status;
-                    offset += written;
-                } else {
-                    SIZE_T written = 0;
-                    NTSTATUS status = HpackEncodeInteger(
-                        static_cast<ULONG>(hdr.Value.Length), 0x00, 7,
-                        dest + offset, capacity - offset, &written);
-                    if (!NT_SUCCESS(status)) return status;
-                    offset += written;
-
-                    if (hdr.Value.Length > 0) {
-                        if (offset + hdr.Value.Length > capacity) return STATUS_BUFFER_TOO_SMALL;
-                        MemCopy(dest + offset, hdr.Value.Data, hdr.Value.Length);
-                        offset += hdr.Value.Length;
-                    }
                 }
-
-                // Add to dynamic table
-                table_.Insert(
-                    reinterpret_cast<const UCHAR*>(hdr.Name.Data), hdr.Name.Length,
-                    reinterpret_cast<const UCHAR*>(hdr.Value.Data), hdr.Value.Length);
             }
         }
 

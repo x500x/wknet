@@ -3,6 +3,7 @@
 #endif
 
 #include <KernelHttp/KernelHttp.h>
+#include <KernelHttp/engine/ConnectionPool.h>
 #include <KernelHttp/khttp/Test.h>
 
 #include <stdio.h>
@@ -134,8 +135,16 @@ namespace
     struct RedirectCapture
     {
         SIZE_T CallCount = 0;
-        char Requests[4][512] = {};
-        SIZE_T RequestLengths[4] = {};
+        char Requests[8][512] = {};
+        SIZE_T RequestLengths[8] = {};
+    };
+
+    struct RedirectMethodCapture
+    {
+        USHORT RedirectStatus = 302;
+        SIZE_T CallCount = 0;
+        char Requests[2][512] = {};
+        SIZE_T RequestLengths[2] = {};
     };
 
     struct ReusedFailureCapture
@@ -295,6 +304,161 @@ namespace
             response->RawResponseLength = sizeof(redirectToFinal) - 1;
         }
         else if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, " /final ")) {
+            response->RawResponse = finalResponse;
+            response->RawResponseLength = sizeof(finalResponse) - 1;
+        }
+        else {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS RelativeRedirectTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<RedirectCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        CaptureRedirectRequest(*capture, *request);
+        ++capture->CallCount;
+
+        static const char redirectToSibling[] =
+            "HTTP/1.1 302 Found\r\n"
+            "Location: next\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        static const char redirectToParent[] =
+            "HTTP/1.1 302 Found\r\n"
+            "Location: ../other?x=1\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        static const char redirectQueryOnly[] =
+            "HTTP/1.1 302 Found\r\n"
+            "Location: ?page=2\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        static const char redirectToOtherOrigin[] =
+            "HTTP/1.1 302 Found\r\n"
+            "Location: //other.example/final\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        static const char finalResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 4\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "done";
+
+        switch (capture->CallCount) {
+        case 1:
+            response->RawResponse = redirectToSibling;
+            response->RawResponseLength = sizeof(redirectToSibling) - 1;
+            break;
+        case 2:
+            response->RawResponse = redirectToParent;
+            response->RawResponseLength = sizeof(redirectToParent) - 1;
+            break;
+        case 3:
+            response->RawResponse = redirectQueryOnly;
+            response->RawResponseLength = sizeof(redirectQueryOnly) - 1;
+            break;
+        case 4:
+            response->RawResponse = redirectToOtherOrigin;
+            response->RawResponseLength = sizeof(redirectToOtherOrigin) - 1;
+            break;
+        case 5:
+            response->RawResponse = finalResponse;
+            response->RawResponseLength = sizeof(finalResponse) - 1;
+            break;
+        default:
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS HttpsDowngradeRedirectTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<RedirectCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        CaptureRedirectRequest(*capture, *request);
+        ++capture->CallCount;
+
+        static const char downgradeRedirect[] =
+            "HTTP/1.1 302 Found\r\n"
+            "Location: http://secure.example/final\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        response->RawResponse = downgradeRedirect;
+        response->RawResponseLength = sizeof(downgradeRedirect) - 1;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS RedirectMethodTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<RedirectMethodCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (capture->CallCount < sizeof(capture->Requests) / sizeof(capture->Requests[0])) {
+            const SIZE_T index = capture->CallCount;
+            const SIZE_T copy = request->BuiltRequestLength < sizeof(capture->Requests[index]) - 1
+                ? request->BuiltRequestLength
+                : sizeof(capture->Requests[index]) - 1;
+            memcpy(capture->Requests[index], request->BuiltRequest, copy);
+            capture->Requests[index][copy] = '\0';
+            capture->RequestLengths[index] = copy;
+        }
+        ++capture->CallCount;
+
+        static char redirectResponse[160] = {};
+        static const char finalResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "ok";
+
+        if (capture->CallCount == 1) {
+            const int written = snprintf(
+                redirectResponse,
+                sizeof(redirectResponse),
+                "HTTP/1.1 %u Redirect\r\n"
+                "Location: /target\r\n"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n"
+                "\r\n",
+                static_cast<unsigned>(capture->RedirectStatus));
+            if (written <= 0 || static_cast<SIZE_T>(written) >= sizeof(redirectResponse)) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            response->RawResponse = redirectResponse;
+            response->RawResponseLength = static_cast<SIZE_T>(written);
+        }
+        else if (capture->CallCount == 2) {
             response->RawResponse = finalResponse;
             response->RawResponseLength = sizeof(finalResponse) - 1;
         }
@@ -798,6 +962,108 @@ namespace
         KernelHttp::khttp::ResponseRelease(resp);
         KernelHttp::khttp::SessionClose(session);
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestReusedConnectionPostFailureDoesNotRetry() noexcept
+    {
+        ReusedFailureCapture capture = {};
+        KernelHttp::khttp::test::SetHttpTransport(ReusedFailureTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for reused POST retry test");
+
+        const char* url = "http://example.com/retry-post";
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "first pooled Get succeeds before reused POST");
+        KernelHttp::khttp::ResponseRelease(resp);
+        resp = nullptr;
+
+        KernelHttp::khttp::Request* request = nullptr;
+        status = KernelHttp::khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for reused POST");
+        status = KernelHttp::khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for reused POST");
+        status = KernelHttp::khttp::RequestSetMethod(request, KernelHttp::khttp::Method::Post);
+        Expect(NT_SUCCESS(status), "RequestSetMethod POST succeeds for reused POST");
+        const char* payload = "payload";
+        status = KernelHttp::khttp::RequestSetBody(
+            request,
+            reinterpret_cast<const UCHAR*>(payload),
+            Length(payload));
+        Expect(NT_SUCCESS(status), "RequestSetBody succeeds for reused POST");
+
+        status = KernelHttp::khttp::Send(session, request, nullptr, &resp);
+        Expect(status == STATUS_CONNECTION_RESET, "reused POST failure is not retried");
+        Expect(capture.CallCount == 2, "reused POST sees initial and failed reuse only");
+        Expect(capture.ReusedCallCount == 1, "reused POST attempts one stale connection");
+        Expect(capture.NewConnectionCallCount == 1, "reused POST does not create retry connection");
+        Expect(capture.RetryConnectionId == 0, "reused POST records no retry connection id");
+        Expect(resp == nullptr, "reused POST failure returns no response");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::RequestRelease(request);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestConnectionPoolHonorsMaxConnectionsPerHost() noexcept
+    {
+        KernelHttp::engine::KhConnectionPool pool = {};
+        NTSTATUS status = KernelHttp::engine::KhConnectionPoolInitialize(&pool, 4, 1, 30000);
+        Expect(NT_SUCCESS(status), "connection pool initializes with per-host limit");
+
+        KernelHttp::engine::KhConnectionPoolKey firstKey = {};
+        memcpy(firstKey.Scheme, "http", Length("http"));
+        firstKey.SchemeLength = Length("http");
+        memcpy(firstKey.Host, "example.com", Length("example.com"));
+        firstKey.HostLength = Length("example.com");
+        firstKey.Port = 80;
+
+        KernelHttp::engine::KhConnectionPoolKey secondKey = firstKey;
+        memcpy(secondKey.Host, "other.example", Length("other.example"));
+        secondKey.HostLength = Length("other.example");
+
+        KernelHttp::engine::KhPooledConnection* first = nullptr;
+        bool reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquire(
+            &pool,
+            firstKey,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            &first,
+            &reused);
+        Expect(NT_SUCCESS(status), "first per-host connection acquires");
+        Expect(first != nullptr && !reused, "first per-host acquire is fresh");
+
+        KernelHttp::engine::KhPooledConnection* blocked = nullptr;
+        reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquire(
+            &pool,
+            firstKey,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            &blocked,
+            &reused);
+        Expect(status == STATUS_INSUFFICIENT_RESOURCES, "same host is limited while first is active");
+        Expect(blocked == nullptr, "blocked same-host acquire returns no connection");
+
+        KernelHttp::engine::KhPooledConnection* other = nullptr;
+        reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquire(
+            &pool,
+            secondKey,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            &other,
+            &reused);
+        Expect(NT_SUCCESS(status), "different host can acquire under same pool capacity");
+        Expect(other != nullptr && !reused, "different host acquire is fresh");
+
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, other, false);
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, first, false);
+        KernelHttp::engine::KhConnectionPoolShutdown(&pool);
     }
 
     void TestIdleTimeoutSkipsExpiredConnection() noexcept
@@ -1458,6 +1724,191 @@ namespace
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
+    void TestAutoRedirectResolvesRelativeReferencesAndSanitizesCrossOriginHeaders() noexcept
+    {
+        RedirectCapture capture = {};
+        KernelHttp::khttp::test::SetHttpTransport(RelativeRedirectTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for relative redirect");
+
+        KernelHttp::khttp::Request* request = nullptr;
+        status = KernelHttp::khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for relative redirect");
+
+        const char* url = "https://example.com/dir/page?keep=1#frag";
+        status = KernelHttp::khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for relative redirect");
+
+        status = KernelHttp::khttp::RequestSetHeader(
+            request,
+            "Authorization",
+            Length("Authorization"),
+            "Bearer secret",
+            Length("Bearer secret"));
+        Expect(NT_SUCCESS(status), "Authorization header is accepted before redirect");
+        status = KernelHttp::khttp::RequestSetHeader(
+            request,
+            "Cookie",
+            Length("Cookie"),
+            "sid=secret",
+            Length("sid=secret"));
+        Expect(NT_SUCCESS(status), "Cookie header is accepted before redirect");
+        status = KernelHttp::khttp::RequestSetHeader(
+            request,
+            "Proxy-Authorization",
+            Length("Proxy-Authorization"),
+            "Basic secret",
+            Length("Basic secret"));
+        Expect(NT_SUCCESS(status), "Proxy-Authorization header is accepted before redirect");
+
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Send(session, request, nullptr, &resp);
+        Expect(NT_SUCCESS(status), "relative redirect chain succeeds");
+        Expect(capture.CallCount == 5, "relative redirect follows all hops");
+        Expect(
+            BufferContainsLiteral(capture.Requests[1], capture.RequestLengths[1], "GET /dir/next "),
+            "relative redirect resolves sibling path");
+        Expect(
+            BufferContainsLiteral(capture.Requests[2], capture.RequestLengths[2], "GET /other?x=1 "),
+            "relative redirect resolves parent path");
+        Expect(
+            BufferContainsLiteral(capture.Requests[3], capture.RequestLengths[3], "GET /other?page=2 "),
+            "query-only redirect inherits current path");
+        Expect(
+            BufferContainsLiteral(capture.Requests[4], capture.RequestLengths[4], "Host: other.example\r\n"),
+            "scheme-relative redirect switches authority");
+        Expect(
+            !BufferContainsLiteral(capture.Requests[4], capture.RequestLengths[4], "Authorization:"),
+            "cross-origin redirect strips Authorization");
+        Expect(
+            !BufferContainsLiteral(capture.Requests[4], capture.RequestLengths[4], "Cookie:"),
+            "cross-origin redirect strips Cookie");
+        Expect(
+            !BufferContainsLiteral(capture.Requests[4], capture.RequestLengths[4], "Proxy-Authorization:"),
+            "cross-origin redirect strips Proxy-Authorization");
+        Expect(KernelHttp::khttp::ResponseStatusCode(resp) == 200, "relative redirect final status is 200");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::RequestRelease(request);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttpsDowngradeRedirectIsRejected() noexcept
+    {
+        RedirectCapture capture = {};
+        KernelHttp::khttp::test::SetHttpTransport(HttpsDowngradeRedirectTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for downgrade redirect");
+
+        KernelHttp::khttp::Response* resp = nullptr;
+        const char* url = "https://secure.example/redirect";
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(status == STATUS_NOT_SUPPORTED, "HTTPS to HTTP redirect is rejected by default");
+        Expect(capture.CallCount == 1, "downgrade redirect does not send target request");
+        Expect(resp == nullptr, "downgrade redirect does not allocate final response");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void RunRedirectMethodCase(
+        const char* label,
+        KernelHttp::khttp::Method method,
+        USHORT statusCode,
+        const char* expectedFirstMethod,
+        const char* expectedSecondMethod,
+        bool expectBodyOnSecond) noexcept
+    {
+        RedirectMethodCapture capture = {};
+        capture.RedirectStatus = statusCode;
+        KernelHttp::khttp::test::SetHttpTransport(RedirectMethodTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), label);
+
+        KernelHttp::khttp::Request* request = nullptr;
+        status = KernelHttp::khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for redirect method case");
+        status = KernelHttp::khttp::RequestSetUrl(request, "http://example.com/source", Length("http://example.com/source"));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for redirect method case");
+        status = KernelHttp::khttp::RequestSetMethod(request, method);
+        Expect(NT_SUCCESS(status), "RequestSetMethod succeeds for redirect method case");
+
+        const char* payload = "payload";
+        status = KernelHttp::khttp::RequestSetBody(
+            request,
+            reinterpret_cast<const UCHAR*>(payload),
+            Length(payload));
+        Expect(NT_SUCCESS(status), "RequestSetBody succeeds for redirect method case");
+
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Send(session, request, nullptr, &resp);
+        Expect(NT_SUCCESS(status), "redirect method case send succeeds");
+        Expect(capture.CallCount == 2, "redirect method case follows one hop");
+        Expect(
+            BufferContainsLiteral(capture.Requests[0], capture.RequestLengths[0], expectedFirstMethod),
+            "redirect method first request method matches");
+        Expect(
+            BufferContainsLiteral(capture.Requests[1], capture.RequestLengths[1], expectedSecondMethod),
+            "redirect method second request method matches");
+        Expect(
+            BufferContainsLiteral(capture.Requests[1], capture.RequestLengths[1], payload) == expectBodyOnSecond,
+            "redirect method body rewrite matches");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::RequestRelease(request);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestRedirectMethodRewriteRules() noexcept
+    {
+        RunRedirectMethodCase(
+            "SessionCreate succeeds for PUT 302 redirect method case",
+            KernelHttp::khttp::Method::Put,
+            302,
+            "PUT /source ",
+            "PUT /target ",
+            true);
+        RunRedirectMethodCase(
+            "SessionCreate succeeds for POST 303 redirect method case",
+            KernelHttp::khttp::Method::Post,
+            303,
+            "POST /source ",
+            "GET /target ",
+            false);
+        RunRedirectMethodCase(
+            "SessionCreate succeeds for POST 307 redirect method case",
+            KernelHttp::khttp::Method::Post,
+            307,
+            "POST /source ",
+            "POST /target ",
+            true);
+        RunRedirectMethodCase(
+            "SessionCreate succeeds for POST 308 redirect method case",
+            KernelHttp::khttp::Method::Post,
+            308,
+            "POST /source ",
+            "POST /target ",
+            true);
+    }
+
     void TestAsyncGet() noexcept
     {
         const char* response =
@@ -1715,6 +2166,8 @@ int main() noexcept
     TestSessionMaxResponseBytesLimitsSimpleApi();
     TestRequestRejectsHeaderAndUrlInjection();
     TestReusedConnectionFailureRetriesWithFreshConnection();
+    TestReusedConnectionPostFailureDoesNotRetry();
+    TestConnectionPoolHonorsMaxConnectionsPerHost();
     TestIdleTimeoutSkipsExpiredConnection();
     TestCloseDelimitedResponseDoesNotEnterPool();
     TestHttp10ConnectionReuseRules();
@@ -1729,6 +2182,9 @@ int main() noexcept
     TestAutoRedirectCanBeDisabled();
     TestAutoRedirectHonorsCustomMaximum();
     TestPostRedirectRewritesToGet();
+    TestAutoRedirectResolvesRelativeReferencesAndSanitizesCrossOriginHeaders();
+    TestHttpsDowngradeRedirectIsRejected();
+    TestRedirectMethodRewriteRules();
     TestAsyncGet();
     TestAsyncRequestIsCopied();
     TestAsyncCancelCompletionOnce();

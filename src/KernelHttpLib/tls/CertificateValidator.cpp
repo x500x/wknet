@@ -44,6 +44,7 @@ namespace tls
         const UCHAR OidBasicConstraints[] = { 0x55, 0x1d, 0x13 };
         const UCHAR OidKeyUsage[] = { 0x55, 0x1d, 0x0f };
         const UCHAR OidSubjectAltName[] = { 0x55, 0x1d, 0x11 };
+        const UCHAR OidNameConstraints[] = { 0x55, 0x1d, 0x1e };
         const UCHAR OidExtendedKeyUsage[] = { 0x55, 0x1d, 0x25 };
         const UCHAR OidServerAuth[] = { 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01 };
         constexpr SIZE_T CertificateMaxAuthorityDerLength = 8192;
@@ -684,6 +685,9 @@ namespace tls
         }
 
         _Must_inspect_result_
+        bool IsAsciiBytes(_In_reads_bytes_(length) const UCHAR* value, SIZE_T length) noexcept;
+
+        _Must_inspect_result_
         NTSTATUS ParseSubjectAltName(_In_ const DerElement& extensionValue, _Inout_ ParsedCertificate& certificate) noexcept
         {
             SIZE_T valueOffset = 0;
@@ -701,11 +705,17 @@ namespace tls
                     return status;
                 }
 
-                if (name.Tag == TagDnsName && certificate.DnsNameCount < (sizeof(certificate.DnsNames) / sizeof(certificate.DnsNames[0]))) {
-                    const SIZE_T index = certificate.DnsNameCount;
-                    certificate.DnsNames[index] = reinterpret_cast<const char*>(name.Value);
-                    certificate.DnsNameLengths[index] = name.ValueLength;
-                    ++certificate.DnsNameCount;
+                if (name.Tag == TagDnsName) {
+                    if (!IsAsciiBytes(name.Value, name.ValueLength)) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+
+                    if (certificate.DnsNameCount < (sizeof(certificate.DnsNames) / sizeof(certificate.DnsNames[0]))) {
+                        const SIZE_T index = certificate.DnsNameCount;
+                        certificate.DnsNames[index] = reinterpret_cast<const char*>(name.Value);
+                        certificate.DnsNameLengths[index] = name.ValueLength;
+                        ++certificate.DnsNameCount;
+                    }
                 }
                 else if (name.Tag == TagIpAddress) {
                     if (name.Value == nullptr ||
@@ -722,6 +732,23 @@ namespace tls
                 }
             }
 
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ParseNameConstraints(_In_ const DerElement& extensionValue, _Inout_ ParsedCertificate& certificate) noexcept
+        {
+            SIZE_T valueOffset = 0;
+            DerElement constraints = {};
+            const NTSTATUS status = ReadExpected(extensionValue.Value, extensionValue.ValueLength, &valueOffset, TagSequence, constraints);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (valueOffset != extensionValue.ValueLength) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            certificate.HasNameConstraints = true;
             return STATUS_SUCCESS;
         }
 
@@ -807,6 +834,9 @@ namespace tls
                 }
                 else if (OidEquals(oid, OidSubjectAltName, sizeof(OidSubjectAltName))) {
                     status = ParseSubjectAltName(value, certificate);
+                }
+                else if (OidEquals(oid, OidNameConstraints, sizeof(OidNameConstraints))) {
+                    status = ParseNameConstraints(value, certificate);
                 }
                 else if (OidEquals(oid, OidExtendedKeyUsage, sizeof(OidExtendedKeyUsage))) {
                     status = ParseExtendedKeyUsage(value, certificate);
@@ -904,6 +934,38 @@ namespace tls
             }
 
             return left == right;
+        }
+
+        _Must_inspect_result_
+        bool ContainsNonAscii(_In_reads_(length) const char* value, SIZE_T length) noexcept
+        {
+            if (value == nullptr) {
+                return length != 0;
+            }
+
+            for (SIZE_T index = 0; index < length; ++index) {
+                if (static_cast<UCHAR>(value[index]) > 0x7f) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        _Must_inspect_result_
+        bool IsAsciiBytes(_In_reads_bytes_(length) const UCHAR* value, SIZE_T length) noexcept
+        {
+            if (value == nullptr) {
+                return length != 0;
+            }
+
+            for (SIZE_T index = 0; index < length; ++index) {
+                if (value[index] > 0x7f) {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         _Must_inspect_result_
@@ -1173,6 +1235,9 @@ namespace tls
         {
             if (options.HostName == nullptr || options.HostNameLength == 0) {
                 return STATUS_INVALID_PARAMETER;
+            }
+            if (ContainsNonAscii(options.HostName, options.HostNameLength)) {
+                return STATUS_NOT_SUPPORTED;
             }
 
             HeapArray<UCHAR> hostAddress(16);
@@ -1631,10 +1696,56 @@ namespace tls
         }
 
         _Must_inspect_result_
+        bool IsSelfIssued(_In_ const ParsedCertificate& certificate) noexcept
+        {
+            return certificate.SubjectLength == certificate.IssuerLength &&
+                MemoryEquals(certificate.Subject, certificate.Issuer, certificate.SubjectLength);
+        }
+
+        _Must_inspect_result_
+        SIZE_T CountSubordinateCaCertificates(
+            _In_reads_(certificateCount) const ParsedCertificate* certificates,
+            SIZE_T certificateCount,
+            SIZE_T issuerIndex) noexcept
+        {
+            if (certificates == nullptr || issuerIndex > certificateCount) {
+                return 0;
+            }
+
+            SIZE_T count = 0;
+            for (SIZE_T index = 1; index < issuerIndex; ++index) {
+                if (certificates[index].IsCa && !IsSelfIssued(certificates[index])) {
+                    ++count;
+                }
+            }
+
+            return count;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS RejectUnsupportedCertificatePolicies(
+            _In_reads_(certificateCount) const ParsedCertificate* certificates,
+            SIZE_T certificateCount) noexcept
+        {
+            if (certificates == nullptr || certificateCount == 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            for (SIZE_T index = 0; index < certificateCount; ++index) {
+                if (certificates[index].HasNameConstraints) {
+                    return STATUS_NOT_SUPPORTED;
+                }
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
         NTSTATUS AnchorSignsCertificate(
             _In_opt_ const crypto::CngProviderCache* providerCache,
             _In_ const ParsedCertificate& certificate,
             _In_ const ParsedCertificate& anchor,
+            SIZE_T subordinateCaCount,
             _Out_ bool* trusted) noexcept
         {
             if (trusted == nullptr) {
@@ -1651,7 +1762,7 @@ namespace tls
                 !anchor.IsCa ||
                 !anchor.HasKeyUsage ||
                 !anchor.AllowsKeyCertSign ||
-                (anchor.HasPathLenConstraint && certificate.IsCa && anchor.PathLenConstraint == 0) ||
+                (anchor.HasPathLenConstraint && subordinateCaCount > anchor.PathLenConstraint) ||
                 certificate.IssuerLength != anchor.SubjectLength ||
                 !MemoryEquals(certificate.Issuer, anchor.Subject, certificate.IssuerLength)) {
                 return STATUS_SUCCESS;
@@ -1671,6 +1782,7 @@ namespace tls
             _In_opt_ const crypto::CngProviderCache* providerCache,
             _In_ const ParsedCertificate& certificate,
             _In_ const CertificateAuthorityBundle& bundle,
+            SIZE_T subordinateCaCount,
             _Out_writes_bytes_(scratchCapacity) UCHAR* scratch,
             SIZE_T scratchCapacity,
             _Out_ bool* trusted) noexcept
@@ -1704,7 +1816,7 @@ namespace tls
                     return status;
                 }
 
-                return AnchorSignsCertificate(providerCache, certificate, anchor, trusted);
+                return AnchorSignsCertificate(providerCache, certificate, anchor, subordinateCaCount, trusted);
             }
 
             SIZE_T offset = firstPem;
@@ -1732,7 +1844,7 @@ namespace tls
                     return status;
                 }
 
-                status = AnchorSignsCertificate(providerCache, certificate, anchor, trusted);
+                status = AnchorSignsCertificate(providerCache, certificate, anchor, subordinateCaCount, trusted);
                 if (!NT_SUCCESS(status) || *trusted) {
                     return status;
                 }
@@ -1749,6 +1861,7 @@ namespace tls
             _In_opt_ const CertificateStore* store,
             _In_ const ParsedCertificate& certificate,
             _In_reads_bytes_(CertificateSha256ThumbprintLength) const UCHAR* certificateSpkiSha256,
+            SIZE_T subordinateCaCount,
             _Out_writes_bytes_(scratchCapacity) UCHAR* scratch,
             SIZE_T scratchCapacity,
             _Out_ bool* trusted) noexcept
@@ -1782,6 +1895,7 @@ namespace tls
                         providerCache,
                         certificate,
                         *bundle,
+                        subordinateCaCount,
                         scratch,
                         scratchCapacity,
                         trusted);
@@ -1833,11 +1947,16 @@ namespace tls
                     index, certSpkiSha256[0], certSpkiSha256[1], certSpkiSha256[2], certSpkiSha256[3]);
 
                 bool trusted = false;
+                const SIZE_T subordinateCaCount = CountSubordinateCaCertificates(
+                    certificates,
+                    certificateCount,
+                    index + 1);
                 status = StoreHasTrustedAnchor(
                     providerCache,
                     store,
                     certificates[index],
                     certSpkiSha256.Get(),
+                    subordinateCaCount,
                     scratch,
                     scratchCapacity,
                     &trusted);
@@ -2009,6 +2128,9 @@ namespace tls
             (options.HostName == nullptr || options.HostNameLength == 0)) {
             return STATUS_INVALID_PARAMETER;
         }
+        if (options.VerifyCertificate && options.RequireRevocationCheck) {
+            return STATUS_NOT_SUPPORTED;
+        }
 
         CertificateValidationScratch scratch = {};
         NTSTATUS status = PrepareCertificateValidationScratch(options, scratch);
@@ -2060,6 +2182,14 @@ namespace tls
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return STATUS_SUCCESS;
+        }
+
+        status = RejectUnsupportedCertificatePolicies(parsed, chain.CertificateCount);
+        if (!NT_SUCCESS(status)) {
+            kprintf("CertificateValidator: Unsupported certificate policy failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
+            ReleaseCertificateValidationScratch(scratch);
+            return status;
         }
 
         long long now = 0;
@@ -2128,7 +2258,12 @@ namespace tls
                 return STATUS_TRUST_FAILURE;
             }
 
-            if (parsed[index + 1].HasPathLenConstraint && index > parsed[index + 1].PathLenConstraint) {
+            const SIZE_T subordinateCaCount = CountSubordinateCaCertificates(
+                parsed,
+                chain.CertificateCount,
+                index + 1);
+            if (parsed[index + 1].HasPathLenConstraint &&
+                subordinateCaCount > parsed[index + 1].PathLenConstraint) {
                 kprintf("CertificateValidator: pathLenConstraint failed at %Iu\r\n", index + 1);
                 RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
                 ReleaseCertificateValidationScratch(scratch);

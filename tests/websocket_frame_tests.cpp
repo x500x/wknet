@@ -97,6 +97,53 @@ namespace
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "bad accept value is rejected");
     }
 
+    void TestValidateHandshakeRejectsDuplicateAccept()
+    {
+        const char clientKey[] = "dGhlIHNhbXBsZSBub25jZQ==";
+        HttpHeader headers[] = {
+            { MakeText("Upgrade"), MakeText("websocket") },
+            { MakeText("Connection"), MakeText("Upgrade") },
+            { MakeText("Sec-WebSocket-Accept"), MakeText("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") },
+            { MakeText("Sec-WebSocket-Accept"), MakeText("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") }
+        };
+
+        HttpResponse response = {};
+        response.MajorVersion = 1;
+        response.MinorVersion = 1;
+        response.StatusCode = 101;
+        response.Headers = headers;
+        response.HeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        const NTSTATUS status = WebSocketCodec::ValidateServerHandshake(
+            response,
+            clientKey,
+            strlen(clientKey));
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "duplicate Sec-WebSocket-Accept is rejected");
+    }
+
+    void TestValidateHandshakeRejectsHttp10()
+    {
+        const char clientKey[] = "dGhlIHNhbXBsZSBub25jZQ==";
+        HttpHeader headers[] = {
+            { MakeText("Upgrade"), MakeText("websocket") },
+            { MakeText("Connection"), MakeText("Upgrade") },
+            { MakeText("Sec-WebSocket-Accept"), MakeText("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") }
+        };
+
+        HttpResponse response = {};
+        response.MajorVersion = 1;
+        response.MinorVersion = 0;
+        response.StatusCode = 101;
+        response.Headers = headers;
+        response.HeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        const NTSTATUS status = WebSocketCodec::ValidateServerHandshake(
+            response,
+            clientKey,
+            strlen(clientKey));
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/1.0 WebSocket upgrade is rejected");
+    }
+
     void TestValidateHandshakeSubprotocolRules()
     {
         const char clientKey[] = "dGhlIHNhbXBsZSBub25jZQ==";
@@ -242,6 +289,86 @@ namespace
         Expect(BytesEqual(frame, expected, sizeof(expected)), "high-level sample text frame bytes match");
     }
 
+    void TestEncodeClientFrameLengthBoundaries()
+    {
+        const unsigned char mask[] = { 0x37, 0xFA, 0x21, 0x3D };
+        const unsigned char payload[1] = { 0 };
+        unsigned char frame[8] = {};
+        size_t frameLength = 0;
+
+        NTSTATUS status = WebSocketCodec::EncodeClientFrame(
+            WebSocketOpcode::Binary,
+            true,
+            payload,
+            125,
+            mask,
+            frame,
+            0,
+            &frameLength);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "payload length 125 reports required size");
+        Expect(frameLength == 131, "payload length 125 required size includes base header and mask");
+
+        status = WebSocketCodec::EncodeClientFrame(
+            WebSocketOpcode::Binary,
+            true,
+            payload,
+            126,
+            mask,
+            frame,
+            0,
+            &frameLength);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "payload length 126 reports required size");
+        Expect(frameLength == 134, "payload length 126 required size includes 16-bit length");
+
+        status = WebSocketCodec::EncodeClientFrame(
+            WebSocketOpcode::Binary,
+            true,
+            payload,
+            65535,
+            mask,
+            frame,
+            0,
+            &frameLength);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "payload length 65535 reports required size");
+        Expect(frameLength == 65543, "payload length 65535 required size includes 16-bit length");
+
+        status = WebSocketCodec::EncodeClientFrame(
+            WebSocketOpcode::Binary,
+            true,
+            payload,
+            65536,
+            mask,
+            frame,
+            0,
+            &frameLength);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "payload length 65536 reports required size");
+        Expect(frameLength == 65550, "payload length 65536 required size includes 64-bit length");
+
+#if defined(_WIN64) || defined(__x86_64__) || defined(_M_X64)
+        status = WebSocketCodec::EncodeClientFrame(
+            WebSocketOpcode::Binary,
+            true,
+            payload,
+            static_cast<size_t>(0x7fffffffffffffffULL),
+            mask,
+            frame,
+            0,
+            &frameLength);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "maximum legal 63-bit length reports required size");
+
+        status = WebSocketCodec::EncodeClientFrame(
+            WebSocketOpcode::Binary,
+            true,
+            payload,
+            static_cast<size_t>(0x8000000000000000ULL),
+            mask,
+            frame,
+            sizeof(frame),
+            &frameLength);
+        Expect(status == STATUS_INVALID_PARAMETER, "payload length with high bit set is rejected");
+#endif
+    }
+
     void TestDecodeServerTextFrame()
     {
         const unsigned char frame[] = {
@@ -336,9 +463,12 @@ int main()
     TestComputeAcceptValueRfcExample();
     TestValidateHandshake();
     TestValidateHandshakeRejectsBadAccept();
+    TestValidateHandshakeRejectsDuplicateAccept();
+    TestValidateHandshakeRejectsHttp10();
     TestValidateHandshakeSubprotocolRules();
     TestEncodeClientTextFrame();
     TestEncodeHighLevelEchoTextFrame();
+    TestEncodeClientFrameLengthBoundaries();
     TestDecodeServerTextFrame();
     TestDecodeExtendedPayloadLength();
     TestControlFrameRejectsFragmented();

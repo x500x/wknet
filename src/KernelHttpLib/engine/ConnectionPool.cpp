@@ -142,6 +142,26 @@ namespace
 #endif
     }
 
+    _Must_inspect_result_
+    ULONG CountConnectionsForKey(
+        _In_ const KhConnectionPool& pool,
+        _In_ const KhConnectionPoolKey& key) noexcept
+    {
+        ULONG count = 0;
+        if (pool.Entries == nullptr) {
+            return 0;
+        }
+
+        for (ULONG index = 0; index < pool.Capacity; ++index) {
+            const KhPooledConnection& candidate = pool.Entries[index];
+            if ((candidate.Connected || candidate.InUse) &&
+                KhConnectionPoolKeysEqual(candidate.Key, key)) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
     void DetachConnectionResources(
         _Inout_ KhPooledConnection& connection,
         _Out_ KhDetachedConnectionResources* detached) noexcept
@@ -192,9 +212,13 @@ namespace
     NTSTATUS KhConnectionPoolInitialize(
         KhConnectionPool* pool,
         ULONG capacity,
+        ULONG maxConnectionsPerHost,
         ULONG idleTimeoutMilliseconds) noexcept
     {
-        if (pool == nullptr || capacity == 0) {
+        if (pool == nullptr ||
+            capacity == 0 ||
+            maxConnectionsPerHost == 0 ||
+            maxConnectionsPerHost > capacity) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -207,6 +231,7 @@ namespace
         }
 
         pool->Capacity = capacity;
+        pool->MaxConnectionsPerHost = maxConnectionsPerHost;
         pool->NextConnectionId = 1;
         pool->IdleTimeoutMilliseconds = idleTimeoutMilliseconds;
         return STATUS_SUCCESS;
@@ -315,6 +340,12 @@ namespace
         }
 
         if (selected == nullptr) {
+            if (CountConnectionsForKey(*pool, key) >= pool->MaxConnectionsPerHost) {
+                UnlockPool(pool);
+                CloseDetachedConnectionResources(&detached);
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
             for (ULONG index = 0; index < pool->Capacity; ++index) {
                 KhPooledConnection& candidate = pool->Entries[index];
                 if (!candidate.Connected && !candidate.InUse) {

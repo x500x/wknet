@@ -9,6 +9,7 @@ namespace websocket
         constexpr const char WebSocketGuid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
         constexpr SIZE_T WebSocketGuidLength = sizeof(WebSocketGuid) - 1;
         constexpr SIZE_T Sha1DigestLength = 20;
+        constexpr ULONGLONG WebSocketMaximumPayloadLength = 0x7fffffffffffffffULL;
 
         _Must_inspect_result_
         bool IsValidBuffer(_In_reads_bytes_opt_(length) const void* data, SIZE_T length) noexcept
@@ -231,6 +232,24 @@ namespace websocket
         }
 
         _Must_inspect_result_
+        SIZE_T CountHeaders(
+            _In_ const http::HttpResponse& response,
+            _In_ http::HttpText name) noexcept
+        {
+            SIZE_T count = 0;
+            if (response.Headers == nullptr && response.HeaderCount != 0) {
+                return 0;
+            }
+
+            for (SIZE_T index = 0; index < response.HeaderCount; ++index) {
+                if (http::TextEqualsIgnoreCase(response.Headers[index].Name, name)) {
+                    ++count;
+                }
+            }
+            return count;
+        }
+
+        _Must_inspect_result_
         NTSTATUS ValidateSelectedSubprotocol(
             _In_ http::HttpText selected,
             _In_ http::HttpText requested) noexcept
@@ -444,13 +463,16 @@ namespace websocket
         SIZE_T requestedSubprotocolLength) noexcept
     {
         if (response.StatusCode != 101 ||
+            (response.MajorVersion == 1 && response.MinorVersion == 0) ||
             !response.HasHeaderValueToken(http::MakeText("Connection"), http::MakeText("Upgrade")) ||
             !response.HasHeaderValueToken(http::MakeText("Upgrade"), http::MakeText("websocket"))) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
         const http::HttpHeader* accept = nullptr;
-        if (!response.FindHeader(http::MakeText("Sec-WebSocket-Accept"), &accept) || accept == nullptr) {
+        if (CountHeaders(response, http::MakeText("Sec-WebSocket-Accept")) != 1 ||
+            !response.FindHeader(http::MakeText("Sec-WebSocket-Accept"), &accept) ||
+            accept == nullptr) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
@@ -528,13 +550,22 @@ namespace websocket
             return STATUS_INVALID_PARAMETER;
         }
 
-        SIZE_T required = 2 + WebSocketMaskingKeyLength + payloadLength;
+        if (static_cast<ULONGLONG>(payloadLength) > WebSocketMaximumPayloadLength) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        SIZE_T headerLength = 2 + WebSocketMaskingKeyLength;
         if (payloadLength > 125 && payloadLength <= 0xffff) {
-            required += 2;
+            headerLength += 2;
         }
         else if (payloadLength > 0xffff) {
-            required += 8;
+            headerLength += 8;
         }
+
+        if (payloadLength > static_cast<SIZE_T>(-1) - headerLength) {
+            return STATUS_INTEGER_OVERFLOW;
+        }
+        const SIZE_T required = headerLength + payloadLength;
 
         if (destinationCapacity < required) {
             if (bytesWritten != nullptr) {

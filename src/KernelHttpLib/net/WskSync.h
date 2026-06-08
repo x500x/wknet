@@ -14,6 +14,18 @@ namespace net
     static volatile LONG g_wskAbandonedIrpCount = 0;
 
     typedef void (*WskSyncCleanupRoutine)(_In_opt_ void* context);
+    typedef void (*WskSyncCompletionCleanupRoutine)(
+        _In_opt_ void* context,
+        NTSTATUS status,
+        SIZE_T information);
+
+    struct WskSyncCompletionResult final
+    {
+        bool CancelIssued = false;
+        bool CallerCancellation = false;
+        bool TimeoutCancellation = false;
+        bool CompletionOwnedCleanup = false;
+    };
 
     // Synchronous WSK operation ownership:
     // - pending: caller and completion routine each own one context reference.
@@ -21,8 +33,9 @@ namespace net
     // - timed out: caller requests IoCancelIrp and waits for the completion routine.
     // - caller canceled: async cancellation uses the same IoCancelIrp path and reports STATUS_CANCELLED.
     // - cancel completed: STATUS_CANCELLED caused by timeout is reported as STATUS_IO_TIMEOUT.
-    // - late cleanup: if a canceled IRP does not complete within the bounded cancel wait,
-    //   the completion reference intentionally owns IRP/buffer cleanup when it eventually arrives.
+    // - completion-owned cleanup: if a canceled IRP does not complete within the bounded
+    //   cancel wait, the completion reference owns IRP/buffer cleanup and optional
+    //   operation-specific cleanup when the late completion eventually arrives.
     struct WskSyncIrpContext final
     {
         KEVENT Event = {};
@@ -31,8 +44,11 @@ namespace net
         volatile LONG Completed = 0;
         NTSTATUS Status = STATUS_PENDING;
         SIZE_T Information = 0;
+        volatile LONG CompletionOwnedCleanup = 0;
         WskSyncCleanupRoutine CleanupRoutine = nullptr;
         void* CleanupContext = nullptr;
+        WskSyncCompletionCleanupRoutine CompletionCleanupRoutine = nullptr;
+        void* CompletionCleanupContext = nullptr;
     };
 
     inline void WskSyncReleaseContext(_In_opt_ WskSyncIrpContext* context) noexcept
@@ -46,15 +62,27 @@ namespace net
             return;
         }
 
-        if (context->Irp != nullptr) {
-            IoFreeIrp(context->Irp);
-            context->Irp = nullptr;
+        const bool completionOwnedCleanup =
+            InterlockedCompareExchange(&context->CompletionOwnedCleanup, 0, 0) != 0;
+
+        if (completionOwnedCleanup && context->CompletionCleanupRoutine != nullptr) {
+            context->CompletionCleanupRoutine(
+                context->CompletionCleanupContext,
+                context->Status,
+                context->Information);
+            context->CompletionCleanupRoutine = nullptr;
+            context->CompletionCleanupContext = nullptr;
         }
 
         if (context->CleanupRoutine != nullptr) {
             context->CleanupRoutine(context->CleanupContext);
             context->CleanupRoutine = nullptr;
             context->CleanupContext = nullptr;
+        }
+
+        if (context->Irp != nullptr) {
+            IoFreeIrp(context->Irp);
+            context->Irp = nullptr;
         }
 
         delete context;
@@ -132,6 +160,27 @@ namespace net
         }
 
         WskSyncDropCompletionReferenceIfNotCompleted(context);
+        WskSyncReleaseContext(context);
+    }
+
+    inline void WskSyncDetachSubmittedIrp(
+        NTSTATUS requestStatus,
+        _In_opt_ WskSyncIrpContext* context) noexcept
+    {
+        if (context == nullptr) {
+            return;
+        }
+
+        if (requestStatus != STATUS_PENDING) {
+            if (InterlockedCompareExchange(&context->Completed, 0, 0) == 0) {
+                context->Status = requestStatus;
+                context->Information = context->Irp != nullptr
+                    ? static_cast<SIZE_T>(context->Irp->IoStatus.Information)
+                    : 0;
+            }
+            WskSyncDropCompletionReferenceIfNotCompleted(context);
+        }
+
         WskSyncReleaseContext(context);
     }
 
@@ -213,10 +262,15 @@ namespace net
         _In_ WskSyncIrpContext* context,
         ULONG timeoutMilliseconds,
         _Out_opt_ SIZE_T* information,
-        _In_opt_ const WskCancellationToken* cancellation = nullptr) noexcept
+        _In_opt_ const WskCancellationToken* cancellation = nullptr,
+        _Out_opt_ WskSyncCompletionResult* completionResult = nullptr) noexcept
     {
         if (information != nullptr) {
             *information = 0;
+        }
+
+        if (completionResult != nullptr) {
+            *completionResult = {};
         }
 
         if (context == nullptr || context->Irp == nullptr) {
@@ -232,6 +286,12 @@ namespace net
             if (waitStatus == STATUS_TIMEOUT || waitStatus == STATUS_CANCELLED) {
                 cancelIssuedForTimeout = waitStatus == STATUS_TIMEOUT;
                 cancelIssuedForCaller = waitStatus == STATUS_CANCELLED;
+                if (completionResult != nullptr) {
+                    completionResult->CancelIssued = true;
+                    completionResult->TimeoutCancellation = cancelIssuedForTimeout;
+                    completionResult->CallerCancellation = cancelIssuedForCaller;
+                }
+
                 IoCancelIrp(context->Irp);
 
                 LARGE_INTEGER cancelTimeout = {};
@@ -244,6 +304,11 @@ namespace net
                     &cancelTimeout);
 
                 if (waitStatus == STATUS_TIMEOUT) {
+                    InterlockedExchange(&context->CompletionOwnedCleanup, 1);
+                    if (completionResult != nullptr) {
+                        completionResult->CompletionOwnedCleanup = true;
+                    }
+
                     const LONG abandonedCount = InterlockedIncrement(&g_wskAbandonedIrpCount);
                     kprintf("WSK canceled IRP did not complete within %u ms; abandoned count=%ld\r\n",
                         WskCancelCompletionTimeoutMilliseconds,
@@ -258,7 +323,7 @@ namespace net
             }
 
             requestStatus = context->Status;
-            if (cancelIssuedForTimeout && requestStatus == STATUS_CANCELLED) {
+            if (cancelIssuedForTimeout) {
                 requestStatus = STATUS_IO_TIMEOUT;
             }
             else if (cancelIssuedForCaller) {

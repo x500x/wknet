@@ -158,6 +158,11 @@ namespace client
             SIZE_T payloadLength,
             _In_ const WebSocketIoBuffers& buffers) noexcept;
 
+        NTSTATUS FailConnectionWithClose(
+            USHORT statusCode,
+            _In_ const WebSocketIoBuffers& buffers,
+            NTSTATUS returnStatus) noexcept;
+
         _Must_inspect_result_
         NTSTATUS SendFrame(
             websocket::WebSocketOpcode opcode,

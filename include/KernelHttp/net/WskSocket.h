@@ -87,8 +87,26 @@ namespace net
         PWSK_SOCKET NativeSocket() const noexcept;
 
     private:
+        enum class OwnershipState : UCHAR
+        {
+            Closed,
+            Active,
+            CancelPending,
+            ClosePending,
+            CompletionOwnedCleanup
+        };
+
+        _Must_inspect_result_
+        NTSTATUS CloseOwnedSocket(ULONG timeoutMilliseconds) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS CloseAfterCancelledOperation(
+            bool completionOwnedCleanup) noexcept;
+
         PWSK_SOCKET socket_ = nullptr;
         const WSK_PROVIDER_CONNECTION_DISPATCH* dispatch_ = nullptr;
+        OwnershipState ownershipState_ = OwnershipState::Closed;
+        volatile LONG closeIssued_ = 0;
     };
 }
 }

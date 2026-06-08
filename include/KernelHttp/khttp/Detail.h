@@ -120,6 +120,7 @@ namespace detail
         case engine::KhWebSocketMessageType::Close: return WsMsgType::Close;
         case engine::KhWebSocketMessageType::Continuation: return WsMsgType::Continuation;
         case engine::KhWebSocketMessageType::Ping: return WsMsgType::Ping;
+        case engine::KhWebSocketMessageType::Pong: return WsMsgType::Pong;
         case engine::KhWebSocketMessageType::Binary:
         default: return WsMsgType::Binary;
         }
@@ -132,6 +133,7 @@ namespace detail
         case WsMsgType::Close: return engine::KhWebSocketMessageType::Close;
         case WsMsgType::Continuation: return engine::KhWebSocketMessageType::Continuation;
         case WsMsgType::Ping: return engine::KhWebSocketMessageType::Ping;
+        case WsMsgType::Pong: return engine::KhWebSocketMessageType::Pong;
         case WsMsgType::Binary:
         default: return engine::KhWebSocketMessageType::Binary;
         }

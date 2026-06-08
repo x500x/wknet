@@ -1556,11 +1556,15 @@ namespace engine
 
     bool ShouldRewriteRedirectToGet(USHORT statusCode, KhHttpMethod method) noexcept
     {
-        if (method == KhHttpMethod::Get || method == KhHttpMethod::Head) {
+        if (statusCode == 303) {
+            return method != KhHttpMethod::Head;
+        }
+
+        if (statusCode != 301 && statusCode != 302) {
             return false;
         }
 
-        return statusCode == 301 || statusCode == 302 || statusCode == 303;
+        return method == KhHttpMethod::Post;
     }
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -1597,6 +1601,59 @@ namespace engine
             StartsWithLiteralIgnoreCase(location.Data, location.Length, "https://");
     }
 
+    http::HttpText TrimRedirectLocation(http::HttpText location) noexcept
+    {
+        while (location.Length != 0 &&
+            (location.Data[0] == ' ' || location.Data[0] == '\t')) {
+            ++location.Data;
+            --location.Length;
+        }
+
+        while (location.Length != 0 &&
+            (location.Data[location.Length - 1] == ' ' ||
+                location.Data[location.Length - 1] == '\t')) {
+            --location.Length;
+        }
+        return location;
+    }
+
+    bool IsUriSchemeChar(char value, bool first) noexcept
+    {
+        if ((value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z')) {
+            return true;
+        }
+        if (first) {
+            return false;
+        }
+        return (value >= '0' && value <= '9') ||
+            value == '+' ||
+            value == '-' ||
+            value == '.';
+    }
+
+    bool HasUriScheme(http::HttpText location) noexcept
+    {
+        if (location.Data == nullptr || location.Length == 0) {
+            return false;
+        }
+
+        for (SIZE_T index = 0; index < location.Length; ++index) {
+            const char value = location.Data[index];
+            if (value == ':' && index != 0) {
+                for (SIZE_T schemeIndex = 0; schemeIndex < index; ++schemeIndex) {
+                    if (!IsUriSchemeChar(location.Data[schemeIndex], schemeIndex == 0)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            if (value == '/' || value == '?' || value == '#') {
+                return false;
+            }
+        }
+        return false;
+    }
+
     bool IsSchemeRelativeLocation(http::HttpText location) noexcept
     {
         return location.Data != nullptr &&
@@ -1613,6 +1670,382 @@ namespace engine
     }
 
     _Must_inspect_result_
+    NTSTATUS AppendRedirectText(
+        _Out_writes_bytes_(destinationCapacity) char* destination,
+        SIZE_T destinationCapacity,
+        _Inout_ SIZE_T* offset,
+        _In_reads_bytes_(textLength) const char* text,
+        SIZE_T textLength) noexcept
+    {
+        if (destination == nullptr ||
+            offset == nullptr ||
+            (text == nullptr && textLength != 0) ||
+            *offset > destinationCapacity ||
+            textLength > destinationCapacity - *offset) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        if (textLength != 0) {
+            RtlCopyMemory(destination + *offset, text, textLength);
+            *offset += textLength;
+        }
+        return STATUS_SUCCESS;
+    }
+
+    void RemovePreviousRedirectPathSegment(
+        _Inout_updates_(*pathLength) char* path,
+        _Inout_ SIZE_T* pathLength) noexcept
+    {
+        if (path == nullptr || pathLength == nullptr || *pathLength == 0) {
+            return;
+        }
+
+        SIZE_T end = *pathLength;
+        if (end > 1 && path[end - 1] == '/') {
+            --end;
+        }
+
+        while (end > 0 && path[end - 1] != '/') {
+            --end;
+        }
+
+        *pathLength = end == 0 ? 0 : end;
+        if (*pathLength == 0) {
+            path[(*pathLength)++] = '/';
+        }
+    }
+
+    void RemoveRedirectDotSegments(
+        _Inout_updates_(*pathLength) char* path,
+        _Inout_ SIZE_T* pathLength) noexcept
+    {
+        if (path == nullptr || pathLength == nullptr || *pathLength == 0) {
+            return;
+        }
+
+        const SIZE_T inputLength = *pathLength;
+        SIZE_T read = 0;
+        SIZE_T write = 0;
+        while (read < inputLength) {
+            if (path[read] == '/') {
+                path[write++] = path[read++];
+                continue;
+            }
+
+            const SIZE_T segmentStart = read;
+            while (read < inputLength && path[read] != '/') {
+                ++read;
+            }
+            const SIZE_T segmentLength = read - segmentStart;
+
+            if (segmentLength == 1 && path[segmentStart] == '.') {
+                if (read < inputLength && path[read] == '/') {
+                    ++read;
+                }
+                continue;
+            }
+
+            if (segmentLength == 2 &&
+                path[segmentStart] == '.' &&
+                path[segmentStart + 1] == '.') {
+                RemovePreviousRedirectPathSegment(path, &write);
+                if (read < inputLength && path[read] == '/') {
+                    ++read;
+                }
+                continue;
+            }
+
+            if (write != segmentStart) {
+                RtlMoveMemory(path + write, path + segmentStart, segmentLength);
+            }
+            write += segmentLength;
+        }
+
+        if (write == 0) {
+            path[write++] = '/';
+        }
+        *pathLength = write;
+    }
+
+    SIZE_T FindRedirectChar(
+        _In_reads_bytes_opt_(textLength) const char* text,
+        SIZE_T textLength,
+        char needle) noexcept
+    {
+        if (text == nullptr) {
+            return textLength;
+        }
+        for (SIZE_T index = 0; index < textLength; ++index) {
+            if (text[index] == needle) {
+                return index;
+            }
+        }
+        return textLength;
+    }
+
+    http::HttpText BaseRequestFragment(const KhRequest& request) noexcept
+    {
+        if (request.Url == nullptr || request.UrlLength == 0) {
+            return {};
+        }
+
+        const SIZE_T fragment = FindRedirectChar(request.Url, request.UrlLength, '#');
+        if (fragment == request.UrlLength) {
+            return {};
+        }
+        return { request.Url + fragment, request.UrlLength - fragment };
+    }
+
+    _Must_inspect_result_
+    NTSTATUS AppendRedirectOrigin(
+        const KhRequest& request,
+        _Out_writes_bytes_(destinationCapacity) char* destination,
+        SIZE_T destinationCapacity,
+        _Inout_ SIZE_T* offset) noexcept
+    {
+        NTSTATUS status = AppendRedirectText(
+            destination,
+            destinationCapacity,
+            offset,
+            request.Scheme,
+            request.SchemeLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = AppendRedirectText(destination, destinationCapacity, offset, "://", 3);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        SIZE_T authorityLength = 0;
+        status = BuildHostHeaderValue(
+            request,
+            destination + *offset,
+            destinationCapacity - *offset,
+            &authorityLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        *offset += authorityLength;
+        return STATUS_SUCCESS;
+    }
+
+    void SplitRedirectReference(
+        http::HttpText location,
+        _Out_ http::HttpText* path,
+        _Out_ http::HttpText* query,
+        _Out_ http::HttpText* fragment,
+        _Out_ bool* hasQuery,
+        _Out_ bool* hasFragment) noexcept
+    {
+        if (path != nullptr) {
+            *path = {};
+        }
+        if (query != nullptr) {
+            *query = {};
+        }
+        if (fragment != nullptr) {
+            *fragment = {};
+        }
+        if (hasQuery != nullptr) {
+            *hasQuery = false;
+        }
+        if (hasFragment != nullptr) {
+            *hasFragment = false;
+        }
+
+        if (location.Data == nullptr) {
+            return;
+        }
+
+        const SIZE_T fragmentIndex = FindRedirectChar(location.Data, location.Length, '#');
+        const SIZE_T queryIndex = FindRedirectChar(location.Data, fragmentIndex, '?');
+        if (path != nullptr) {
+            *path = { location.Data, queryIndex };
+        }
+        if (queryIndex < fragmentIndex) {
+            if (hasQuery != nullptr) {
+                *hasQuery = true;
+            }
+            if (query != nullptr) {
+                *query = { location.Data + queryIndex, fragmentIndex - queryIndex };
+            }
+        }
+        if (fragmentIndex < location.Length) {
+            if (hasFragment != nullptr) {
+                *hasFragment = true;
+            }
+            if (fragment != nullptr) {
+                *fragment = { location.Data + fragmentIndex, location.Length - fragmentIndex };
+            }
+        }
+    }
+
+    _Must_inspect_result_
+    NTSTATUS AppendRedirectPathAndSuffix(
+        const KhRequest& request,
+        http::HttpText location,
+        _Out_writes_bytes_(destinationCapacity) char* destination,
+        SIZE_T destinationCapacity,
+        _Inout_ SIZE_T* offset) noexcept
+    {
+        http::HttpText referencePath = {};
+        http::HttpText referenceQuery = {};
+        http::HttpText referenceFragment = {};
+        bool hasReferenceQuery = false;
+        bool hasReferenceFragment = false;
+        SplitRedirectReference(
+            location,
+            &referencePath,
+            &referenceQuery,
+            &referenceFragment,
+            &hasReferenceQuery,
+            &hasReferenceFragment);
+
+        const SIZE_T baseQueryIndex = FindRedirectChar(request.Path, request.PathLength, '?');
+        const http::HttpText basePath = { request.Path, baseQueryIndex };
+        const http::HttpText baseQuery =
+            baseQueryIndex < request.PathLength ?
+            http::HttpText{ request.Path + baseQueryIndex, request.PathLength - baseQueryIndex } :
+            http::HttpText{};
+
+        const SIZE_T pathStartOffset = *offset;
+        NTSTATUS status = STATUS_SUCCESS;
+        if (referencePath.Length == 0) {
+            status = AppendRedirectText(
+                destination,
+                destinationCapacity,
+                offset,
+                basePath.Data,
+                basePath.Length);
+        }
+        else if (referencePath.Data[0] == '/') {
+            status = AppendRedirectText(
+                destination,
+                destinationCapacity,
+                offset,
+                referencePath.Data,
+                referencePath.Length);
+        }
+        else {
+            SIZE_T baseDirectoryLength = basePath.Length;
+            while (baseDirectoryLength != 0 && basePath.Data[baseDirectoryLength - 1] != '/') {
+                --baseDirectoryLength;
+            }
+            if (baseDirectoryLength == 0) {
+                status = AppendRedirectText(destination, destinationCapacity, offset, "/", 1);
+            }
+            else {
+                status = AppendRedirectText(
+                    destination,
+                    destinationCapacity,
+                    offset,
+                    basePath.Data,
+                    baseDirectoryLength);
+            }
+            if (NT_SUCCESS(status)) {
+                status = AppendRedirectText(
+                    destination,
+                    destinationCapacity,
+                    offset,
+                    referencePath.Data,
+                    referencePath.Length);
+            }
+        }
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        SIZE_T normalizedPathLength = *offset - pathStartOffset;
+        RemoveRedirectDotSegments(destination + pathStartOffset, &normalizedPathLength);
+        *offset = pathStartOffset + normalizedPathLength;
+
+        if (hasReferenceQuery) {
+            status = AppendRedirectText(
+                destination,
+                destinationCapacity,
+                offset,
+                referenceQuery.Data,
+                referenceQuery.Length);
+        }
+        else if (referencePath.Length == 0 && baseQuery.Data != nullptr) {
+            status = AppendRedirectText(
+                destination,
+                destinationCapacity,
+                offset,
+                baseQuery.Data,
+                baseQuery.Length);
+        }
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        const http::HttpText fragmentToAppend =
+            hasReferenceFragment ? referenceFragment : BaseRequestFragment(request);
+        if (fragmentToAppend.Data != nullptr && fragmentToAppend.Length != 0) {
+            status = AppendRedirectText(
+                destination,
+                destinationCapacity,
+                offset,
+                fragmentToAppend.Data,
+                fragmentToAppend.Length);
+        }
+        return status;
+    }
+
+    void ReleaseStoredRedirectHeader(_Inout_ KhStoredHeader& header) noexcept
+    {
+        FreeApiMemory(header.Name);
+        FreeApiMemory(header.Value);
+        header = {};
+    }
+
+    void RemoveRedirectSensitiveHeaders(_Inout_ KhRequest& request) noexcept
+    {
+        SIZE_T index = 0;
+        while (index < request.HeaderCount) {
+            const KhStoredHeader& header = request.Headers[index];
+            const bool sensitive =
+                TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, "Authorization") ||
+                TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, "Cookie") ||
+                TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, "Proxy-Authorization");
+            if (!sensitive) {
+                ++index;
+                continue;
+            }
+
+            ReleaseStoredRedirectHeader(request.Headers[index]);
+            for (SIZE_T moveIndex = index + 1; moveIndex < request.HeaderCount; ++moveIndex) {
+                request.Headers[moveIndex - 1] = request.Headers[moveIndex];
+            }
+            --request.HeaderCount;
+            request.Headers[request.HeaderCount] = {};
+        }
+    }
+
+    bool IsCrossOriginRedirect(
+        const char* oldScheme,
+        SIZE_T oldSchemeLength,
+        const char* oldHost,
+        SIZE_T oldHostLength,
+        USHORT oldPort,
+        const KhRequest& redirected) noexcept
+    {
+        return oldPort != redirected.Port ||
+            !TextEqualsIgnoreCase(oldScheme, oldSchemeLength, redirected.Scheme, redirected.SchemeLength) ||
+            !TextEqualsIgnoreCase(oldHost, oldHostLength, redirected.Host, redirected.HostLength);
+    }
+
+    bool IsHttpsDowngradeRedirect(
+        const KhRequest& request,
+        http::HttpText redirectUrl) noexcept
+    {
+        return TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https") &&
+            StartsWithLiteralIgnoreCase(redirectUrl.Data, redirectUrl.Length, "http://");
+    }
+
+    _Must_inspect_result_
     NTSTATUS BuildRedirectUrl(
         const KhRequest& request,
         http::HttpText location,
@@ -1624,6 +2057,7 @@ namespace engine
             *destinationLength = 0;
         }
 
+        location = TrimRedirectLocation(location);
         if (location.Data == nullptr ||
             location.Length == 0 ||
             destination == nullptr ||
@@ -1633,53 +2067,80 @@ namespace engine
         }
 
         if (IsAbsoluteHttpLocation(location)) {
-            *destinationLength = location.Length;
-            return STATUS_SUCCESS;
-        }
-
-        if (!IsPathAbsoluteLocation(location)) {
-            return STATUS_NOT_FOUND;
-        }
-
-        SIZE_T offset = 0;
-        if (request.SchemeLength > destinationCapacity) {
-            return STATUS_BUFFER_TOO_SMALL;
-        }
-        RtlCopyMemory(destination, request.Scheme, request.SchemeLength);
-        offset += request.SchemeLength;
-
-        if (IsSchemeRelativeLocation(location)) {
-            if (offset + 1 > destinationCapacity) {
-                return STATUS_BUFFER_TOO_SMALL;
-            }
-            destination[offset++] = ':';
-        }
-        else {
-            if (offset + 3 > destinationCapacity) {
-                return STATUS_BUFFER_TOO_SMALL;
-            }
-            destination[offset++] = ':';
-            destination[offset++] = '/';
-            destination[offset++] = '/';
-
-            SIZE_T authorityLength = 0;
-            NTSTATUS status = BuildHostHeaderValue(
-                request,
-                destination + offset,
-                destinationCapacity - offset,
-                &authorityLength);
+            SIZE_T offset = 0;
+            NTSTATUS status = AppendRedirectText(
+                destination,
+                destinationCapacity,
+                &offset,
+                location.Data,
+                location.Length);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
-            offset += authorityLength;
+
+            if (FindRedirectChar(location.Data, location.Length, '#') == location.Length) {
+                const http::HttpText baseFragment = BaseRequestFragment(request);
+                if (baseFragment.Data != nullptr && baseFragment.Length != 0) {
+                    status = AppendRedirectText(
+                        destination,
+                        destinationCapacity,
+                        &offset,
+                        baseFragment.Data,
+                        baseFragment.Length);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                }
+            }
+
+            *destinationLength = offset;
+            return STATUS_SUCCESS;
         }
 
-        if (location.Length > destinationCapacity - offset) {
-            return STATUS_BUFFER_TOO_SMALL;
+        if (HasUriScheme(location)) {
+            return STATUS_NOT_SUPPORTED;
         }
 
-        RtlCopyMemory(destination + offset, location.Data, location.Length);
-        offset += location.Length;
+        SIZE_T offset = 0;
+        if (IsSchemeRelativeLocation(location)) {
+            NTSTATUS status = AppendRedirectText(
+                destination,
+                destinationCapacity,
+                &offset,
+                request.Scheme,
+                request.SchemeLength);
+            if (NT_SUCCESS(status)) {
+                status = AppendRedirectText(destination, destinationCapacity, &offset, ":", 1);
+            }
+            if (NT_SUCCESS(status)) {
+                status = AppendRedirectText(
+                    destination,
+                    destinationCapacity,
+                    &offset,
+                    location.Data,
+                    location.Length);
+            }
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            *destinationLength = offset;
+            return STATUS_SUCCESS;
+        }
+
+        NTSTATUS status = AppendRedirectOrigin(request, destination, destinationCapacity, &offset);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = AppendRedirectPathAndSuffix(
+            request,
+            location,
+            destination,
+            destinationCapacity,
+            &offset);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
         *destinationLength = offset;
         return STATUS_SUCCESS;
     }
@@ -1691,21 +2152,43 @@ namespace engine
         http::HttpText location,
         _Inout_ KhWorkspace& workspace) noexcept
     {
-        const char* redirectUrl = location.Data;
-        SIZE_T redirectUrlLength = location.Length;
-        NTSTATUS status = STATUS_SUCCESS;
+        char oldScheme[KhMaxSchemeLength + 1] = {};
+        char oldHost[KhMaxHostLength + 1] = {};
+        const SIZE_T oldSchemeLength = request.SchemeLength;
+        const SIZE_T oldHostLength = request.HostLength;
+        const USHORT oldPort = request.Port;
+        RtlCopyMemory(oldScheme, request.Scheme, sizeof(oldScheme));
+        RtlCopyMemory(oldHost, request.Host, sizeof(oldHost));
 
-        if (!IsAbsoluteHttpLocation(location)) {
-            status = BuildRedirectUrl(
-                request,
-                location,
-                reinterpret_cast<char*>(workspace.Request.Data),
-                workspace.Request.Length,
-                &redirectUrlLength);
-            if (!NT_SUCCESS(status)) {
-                return status;
-            }
-            redirectUrl = reinterpret_cast<const char*>(workspace.Request.Data);
+        SIZE_T redirectUrlLength = 0;
+        NTSTATUS status = BuildRedirectUrl(
+            request,
+            location,
+            reinterpret_cast<char*>(workspace.Request.Data),
+            workspace.Request.Length,
+            &redirectUrlLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        const char* redirectUrl = reinterpret_cast<const char*>(workspace.Request.Data);
+
+        if (IsHttpsDowngradeRedirect(request, { redirectUrl, redirectUrlLength })) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        status = KhHttpRequestSetUrl(&request, redirectUrl, redirectUrlLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (IsCrossOriginRedirect(
+            oldScheme,
+            oldSchemeLength,
+            oldHost,
+            oldHostLength,
+            oldPort,
+            request)) {
+            RemoveRedirectSensitiveHeaders(request);
         }
 
         if (ShouldRewriteRedirectToGet(statusCode, request.Method)) {
@@ -1720,7 +2203,7 @@ namespace engine
             }
         }
 
-        return KhHttpRequestSetUrl(&request, redirectUrl, redirectUrlLength);
+        return STATUS_SUCCESS;
     }
 
     _Must_inspect_result_
@@ -1807,9 +2290,8 @@ namespace engine
         const bool shouldRetryWithFreshConnection =
             !NT_SUCCESS(status) &&
             request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate &&
-            (reusedConnection ||
-                (IsSafeFreshConnectionRetryMethod(request.Method) &&
-                    IsFreshConnectionRetryStatus(status)));
+            IsSafeFreshConnectionRetryMethod(request.Method) &&
+            IsFreshConnectionRetryStatus(status);
 
         if (shouldRetryWithFreshConnection) {
             KhConnectionPoolClose(&session->ConnectionPool, pooledConnection);

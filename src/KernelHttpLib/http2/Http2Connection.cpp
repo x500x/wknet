@@ -40,6 +40,38 @@ namespace http2
             }
             return code;
         }
+
+        bool TextContainsUppercase(const char* data, SIZE_T len) noexcept
+        {
+            if (data == nullptr && len != 0) return true;
+            for (SIZE_T i = 0; i < len; ++i) {
+                if (data[i] >= 'A' && data[i] <= 'Z') return true;
+            }
+            return false;
+        }
+
+        bool TextEqualsAsciiInsensitive(const char* a, SIZE_T aLen, const char* b, SIZE_T bLen) noexcept
+        {
+            if (aLen != bLen) return false;
+            if ((a == nullptr && aLen != 0) || (b == nullptr && bLen != 0)) return false;
+            for (SIZE_T i = 0; i < aLen; ++i) {
+                char ca = a[i];
+                char cb = b[i];
+                if (ca >= 'A' && ca <= 'Z') ca = static_cast<char>(ca + 32);
+                if (cb >= 'A' && cb <= 'Z') cb = static_cast<char>(cb + 32);
+                if (ca != cb) return false;
+            }
+            return true;
+        }
+
+        bool IsConnectionSpecificHeaderName(const char* name, SIZE_T nameLen) noexcept
+        {
+            return TextEquals(name, nameLen, "connection", 10) ||
+                TextEquals(name, nameLen, "keep-alive", 10) ||
+                TextEquals(name, nameLen, "proxy-connection", 16) ||
+                TextEquals(name, nameLen, "transfer-encoding", 17) ||
+                TextEquals(name, nameLen, "upgrade", 7);
+        }
     }
 
     Http2Connection::~Http2Connection() noexcept
@@ -118,11 +150,28 @@ namespace http2
         if (frameHeader.Type != Http2FrameType::Settings ||
             (frameHeader.Flags & Http2FrameFlags::Ack) != 0 ||
             frameHeader.StreamId != 0) {
+            const ULONG errorCode =
+                frameHeader.Type == Http2FrameType::Settings &&
+                (frameHeader.Flags & Http2FrameFlags::Ack) != 0 &&
+                payloadLen != 0
+                    ? static_cast<ULONG>(Http2ErrorCode::FrameSizeError)
+                    : static_cast<ULONG>(Http2ErrorCode::ProtocolError);
+            const NTSTATUS goAwayStatus = SendGoAway(transport, errorCode);
+            UNREFERENCED_PARAMETER(goAwayStatus);
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
         status = Http2FrameCodec::DecodeSettingsPayload(framePayload, payloadLen, &peerSettings_);
-        if (!NT_SUCCESS(status)) return status;
+        if (!NT_SUCCESS(status)) {
+            const ULONG errorCode = (payloadLen % 6) != 0
+                ? static_cast<ULONG>(Http2ErrorCode::FrameSizeError)
+                : static_cast<ULONG>(Http2ErrorCode::ProtocolError);
+            const NTSTATUS goAwayStatus = SendGoAway(transport, errorCode);
+            UNREFERENCED_PARAMETER(goAwayStatus);
+            return status;
+        }
+
+        encoder_.UpdateMaxTableSize(peerSettings_.HeaderTableSize);
 
         // Update send window based on peer's initial window size
         connectionSendWindow_ = static_cast<LONG>(peerSettings_.InitialWindowSize);
@@ -288,7 +337,7 @@ namespace http2
                         if (!NT_SUCCESS(status)) return status;
                     }
                     else {
-                        status = HandleConnectionFrame(transport, fh, fp, fpLen);
+                        status = HandleConnectionFrame(transport, fh, fp, fpLen, &stream);
                         if (!NT_SUCCESS(status)) return status;
                     }
                     continue;
@@ -442,6 +491,7 @@ namespace http2
 
         bool streamClosed = false;
         bool responseHeadersReceived = false;
+        bool responseDataReceived = false;
         bool expectingContinuation = false;
         bool pendingHeaderEndStream = false;
         ULONG continuationStreamId = 0;
@@ -495,7 +545,7 @@ namespace http2
 
             // Connection-level frame
             if (fh.StreamId == 0) {
-                status = HandleConnectionFrame(transport, fh, fp, fpLen);
+                status = HandleConnectionFrame(transport, fh, fp, fpLen, &stream);
                 if (!NT_SUCCESS(status)) return status;
                 if (goAwayReceived_) {
                     kprintf("Http2Connection GOAWAY received lastStream=%u target=%u\r\n",
@@ -504,6 +554,24 @@ namespace http2
                     return STATUS_CONNECTION_DISCONNECTED;
                 }
                 continue;
+            }
+
+            if (fh.Type == Http2FrameType::Settings ||
+                fh.Type == Http2FrameType::Ping ||
+                fh.Type == Http2FrameType::GoAway) {
+                const NTSTATUS goAwayStatus = SendGoAway(
+                    transport,
+                    static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+                UNREFERENCED_PARAMETER(goAwayStatus);
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            if (fh.Type == Http2FrameType::PushPromise) {
+                const NTSTATUS goAwayStatus = SendGoAway(
+                    transport,
+                    static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+                UNREFERENCED_PARAMETER(goAwayStatus);
+                return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
             // Stream-level frame
@@ -550,23 +618,66 @@ namespace http2
                         UNREFERENCED_PARAMETER(rstStatus);
                         return status;
                     }
-                    // Decode HPACK
+                    const bool trailers = responseHeadersReceived;
+                    if (trailers && (!responseDataReceived || !pendingHeaderEndStream)) {
+                        const NTSTATUS rstStatus = SendRstStream(
+                            transport,
+                            fh.StreamId,
+                            static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+                        UNREFERENCED_PARAMETER(rstStatus);
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+
+                    http::HttpHeader trailerHeaders[16] = {};
+                    http::HttpHeader* decodedHeaders = trailers ? trailerHeaders : responseHeaders;
+                    const SIZE_T decodedHeaderCapacity = trailers ? 16 : responseHeaderCapacity;
+                    char* decodedNameValueBuffer = trailers ?
+                        reinterpret_cast<char*>(headerBlock_) :
+                        nameValueBuffer;
+                    const SIZE_T decodedNameValueCapacity = trailers ?
+                        HeaderBlockCapacity :
+                        nameValueCapacity;
+                    SIZE_T decodedHeaderCount = 0;
                     SIZE_T nvUsed = 0;
                     status = decoder_.Decode(
                         responseHeaderBlock, responseHeaderBlockLen,
-                        responseHeaders, responseHeaderCapacity,
-                        responseHeaderCount,
-                        nameValueBuffer, nameValueCapacity, &nvUsed);
+                        decodedHeaders, decodedHeaderCapacity,
+                        &decodedHeaderCount,
+                        decodedNameValueBuffer, decodedNameValueCapacity, &nvUsed,
+                        localSettings_.MaxHeaderListSize);
                     if (!NT_SUCCESS(status)) {
                         kprintf("Http2Connection HPACK decode failed: 0x%08X block=%Iu stream=%u\r\n",
                             static_cast<ULONG>(status),
                             responseHeaderBlockLen,
                             stream.StreamId());
+                        const NTSTATUS rstStatus = SendRstStream(
+                            transport,
+                            fh.StreamId,
+                            static_cast<ULONG>(Http2ErrorCode::CompressionError));
+                        UNREFERENCED_PARAMETER(rstStatus);
                         return status;
                     }
 
-                    *statusCode = ExtractStatusCode(responseHeaders, *responseHeaderCount);
-                    responseHeadersReceived = *statusCode != 0;
+                    USHORT decodedStatusCode = 0;
+                    status = ValidateResponseHeaderBlock(
+                        decodedHeaders,
+                        decodedHeaderCount,
+                        trailers,
+                        &decodedStatusCode);
+                    if (!NT_SUCCESS(status)) {
+                        const NTSTATUS rstStatus = SendRstStream(
+                            transport,
+                            fh.StreamId,
+                            static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+                        UNREFERENCED_PARAMETER(rstStatus);
+                        return status;
+                    }
+
+                    if (!trailers) {
+                        *responseHeaderCount = decodedHeaderCount;
+                        *statusCode = decodedStatusCode;
+                        responseHeadersReceived = true;
+                    }
                     responseHeaderBlockLen = 0;
                     if (pendingHeaderEndStream) {
                         streamClosed = true;
@@ -622,6 +733,7 @@ namespace http2
                 }
                 MemCopy(responseBody + bodyLen, content, contentLen);
                 bodyLen += contentLen;
+                responseDataReceived = true;
 
                 // Update flow control
                 connectionRecvConsumed_ += static_cast<ULONG>(fpLen);
@@ -787,18 +899,48 @@ namespace http2
         Http2Transport& transport,
         const Http2FrameHeader& header,
         const UCHAR* payload,
-        SIZE_T payloadLen) noexcept
+        SIZE_T payloadLen,
+        Http2Stream* activeStream) noexcept
     {
         switch (header.Type) {
         case Http2FrameType::Settings:
         {
             if ((header.Flags & Http2FrameFlags::Ack) != 0) {
+                if (payloadLen != 0) {
+                    const NTSTATUS goAwayStatus = SendGoAway(
+                        transport,
+                        static_cast<ULONG>(Http2ErrorCode::FrameSizeError));
+                    UNREFERENCED_PARAMETER(goAwayStatus);
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
                 settingsAckReceived_ = true;
                 return STATUS_SUCCESS;
             }
             // Peer sent new SETTINGS
+            const Http2Settings previousSettings = peerSettings_;
+            if ((payloadLen % 6) != 0) {
+                const NTSTATUS goAwayStatus = SendGoAway(
+                    transport,
+                    static_cast<ULONG>(Http2ErrorCode::FrameSizeError));
+                UNREFERENCED_PARAMETER(goAwayStatus);
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
             NTSTATUS status = Http2FrameCodec::DecodeSettingsPayload(payload, payloadLen, &peerSettings_);
-            if (!NT_SUCCESS(status)) return status;
+            if (!NT_SUCCESS(status)) {
+                const NTSTATUS goAwayStatus = SendGoAway(
+                    transport,
+                    static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+                UNREFERENCED_PARAMETER(goAwayStatus);
+                return status;
+            }
+
+            encoder_.UpdateMaxTableSize(peerSettings_.HeaderTableSize);
+            if (activeStream != nullptr &&
+                peerSettings_.InitialWindowSize > previousSettings.InitialWindowSize) {
+                const ULONG delta = peerSettings_.InitialWindowSize - previousSettings.InitialWindowSize;
+                status = activeStream->IncreaseRemoteWindow(delta);
+                if (!NT_SUCCESS(status)) return status;
+            }
 
             // ACK
             UCHAR* ackBuf = sendBuffer_;
@@ -810,10 +952,16 @@ namespace http2
 
         case Http2FrameType::Ping:
         {
+            if (payloadLen != 8) {
+                const NTSTATUS goAwayStatus = SendGoAway(
+                    transport,
+                    static_cast<ULONG>(Http2ErrorCode::FrameSizeError));
+                UNREFERENCED_PARAMETER(goAwayStatus);
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
             if ((header.Flags & Http2FrameFlags::Ack) != 0) {
                 return STATUS_SUCCESS; // PING ACK, ignore
             }
-            if (payloadLen != 8) return STATUS_INVALID_NETWORK_RESPONSE;
             // Send PING ACK
             UCHAR* pingBuf = sendBuffer_;
             SIZE_T written = 0;
@@ -966,6 +1114,66 @@ namespace http2
         ULONG id = nextStreamId_;
         nextStreamId_ += 2; // Client uses odd stream IDs
         return id;
+    }
+
+    NTSTATUS Http2Connection::ValidateResponseHeaderBlock(
+        const http::HttpHeader* headers,
+        SIZE_T headerCount,
+        bool trailers,
+        USHORT* statusCode) noexcept
+    {
+        if (headers == nullptr && headerCount != 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        bool regularHeaderSeen = false;
+        bool statusSeen = false;
+        USHORT parsedStatus = 0;
+
+        for (SIZE_T i = 0; i < headerCount; ++i) {
+            const http::HttpHeader& header = headers[i];
+            if (header.Name.Data == nullptr || header.Name.Length == 0 ||
+                (header.Value.Data == nullptr && header.Value.Length != 0)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            if (TextContainsUppercase(header.Name.Data, header.Name.Length)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            if (header.Name.Data[0] == ':') {
+                if (trailers || regularHeaderSeen ||
+                    !TextEquals(header.Name.Data, header.Name.Length, ":status", 7) ||
+                    statusSeen) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
+                parsedStatus = ParseStatusCode(header.Value.Data, header.Value.Length);
+                if (parsedStatus == 0) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                statusSeen = true;
+                continue;
+            }
+
+            regularHeaderSeen = true;
+            if (IsConnectionSpecificHeaderName(header.Name.Data, header.Name.Length)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            if (TextEquals(header.Name.Data, header.Name.Length, "te", 2) &&
+                !TextEqualsAsciiInsensitive(header.Value.Data, header.Value.Length, "trailers", 8)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+        }
+
+        if (!trailers && !statusSeen) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        if (statusCode != nullptr) {
+            *statusCode = trailers ? 0 : parsedStatus;
+        }
+        return STATUS_SUCCESS;
     }
 
     USHORT Http2Connection::ExtractStatusCode(

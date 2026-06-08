@@ -273,6 +273,31 @@ namespace
         return AppendResponseHeadersForStream(1, endStream, endHeaders, script, capacity, length);
     }
 
+    bool AppendResponseHeaderBlock(
+        const UCHAR* headerBlock,
+        SIZE_T headerBlockLength,
+        bool endStream,
+        UCHAR* script,
+        SIZE_T capacity,
+        SIZE_T* length)
+    {
+        SIZE_T written = 0;
+        const NTSTATUS status = Http2FrameCodec::EncodeHeaders(
+            1,
+            headerBlock,
+            headerBlockLength,
+            endStream,
+            true,
+            script + *length,
+            capacity - *length,
+            &written);
+        if (!NT_SUCCESS(status)) {
+            return false;
+        }
+        *length += written;
+        return true;
+    }
+
     bool AppendResponseContinuation(UCHAR* script, SIZE_T capacity, SIZE_T* length)
     {
         const UCHAR status200[] = { 0x88 };
@@ -1124,6 +1149,226 @@ namespace
         const NTSTATUS status = SendScriptedHttp2Request(script, scriptLength);
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 connection rejects stream zero RST_STREAM");
     }
+
+    void TestConnectionRejectsSettingsAckWithPayload()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR payload[] = { 0 };
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
+        Expect(AppendRawFrame(
+            KernelHttp::http2::Http2FrameType::Settings,
+            Http2FrameFlags::Ack,
+            0,
+            payload,
+            sizeof(payload),
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 invalid SETTINGS ACK fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        const NTSTATUS status = SendDefaultRequest(transport, connection);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 rejects SETTINGS ACK with payload");
+        Expect(
+            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::GoAway, 0) == 1,
+            "HTTP/2 invalid SETTINGS ACK sends GOAWAY");
+    }
+
+    void TestConnectionRejectsInvalidPingLengths()
+    {
+        const UCHAR flagsList[] = { static_cast<UCHAR>(0), Http2FrameFlags::Ack };
+        for (SIZE_T i = 0; i < sizeof(flagsList) / sizeof(flagsList[0]); ++i) {
+            const UCHAR flags = flagsList[i];
+            UCHAR script[256] = {};
+            SIZE_T scriptLength = 0;
+            const UCHAR payload[] = { 1, 2, 3, 4, 5, 6, 7 };
+            Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
+            Expect(AppendRawFrame(
+                KernelHttp::http2::Http2FrameType::Ping,
+                flags,
+                0,
+                payload,
+                sizeof(payload),
+                script,
+                sizeof(script),
+                &scriptLength), "HTTP/2 invalid PING fixture builds");
+
+            ScriptedHttp2Transport transport(script, scriptLength);
+            Http2Connection connection;
+            const NTSTATUS status = SendDefaultRequest(transport, connection);
+            Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 rejects invalid PING payload length");
+            Expect(
+                CountSentFrames(transport, KernelHttp::http2::Http2FrameType::GoAway, 0) == 1,
+                "HTTP/2 invalid PING sends GOAWAY");
+        }
+    }
+
+    void TestConnectionRejectsPushPromiseWhenPushDisabled()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR promisedStream[] = { 0, 0, 0, 2 };
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
+        Expect(AppendRawFrame(
+            KernelHttp::http2::Http2FrameType::PushPromise,
+            Http2FrameFlags::EndHeaders,
+            1,
+            promisedStream,
+            sizeof(promisedStream),
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 PUSH_PROMISE fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        const NTSTATUS status = SendDefaultRequest(transport, connection);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 rejects PUSH_PROMISE when ENABLE_PUSH is 0");
+        Expect(
+            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::GoAway, 0) == 1,
+            "HTTP/2 PUSH_PROMISE protocol error sends GOAWAY");
+    }
+
+    void ExpectResponseHeaderBlockRejected(
+        const UCHAR* headerBlock,
+        SIZE_T headerBlockLength,
+        const char* message)
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
+        Expect(AppendResponseHeaderBlock(
+            headerBlock,
+            headerBlockLength,
+            true,
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 response header fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        const NTSTATUS status = SendDefaultRequest(transport, connection);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, message);
+        Expect(
+            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::RstStream, 1) == 1,
+            "HTTP/2 malformed response headers send RST_STREAM");
+    }
+
+    void TestConnectionRejectsMalformedResponseHeaders()
+    {
+        const UCHAR duplicateStatus[] = { 0x88, 0x88 };
+        ExpectResponseHeaderBlockRejected(
+            duplicateStatus,
+            sizeof(duplicateStatus),
+            "HTTP/2 rejects duplicate :status");
+
+        const UCHAR missingStatus[] = { 0xb6 };
+        ExpectResponseHeaderBlockRejected(
+            missingStatus,
+            sizeof(missingStatus),
+            "HTTP/2 rejects missing :status");
+
+        const UCHAR pseudoAfterRegular[] = { 0xb6, 0x88 };
+        ExpectResponseHeaderBlockRejected(
+            pseudoAfterRegular,
+            sizeof(pseudoAfterRegular),
+            "HTTP/2 rejects pseudo-header after regular header");
+
+        const UCHAR uppercaseName[] = {
+            0x88, 0x00, 0x06, 'S', 'e', 'r', 'v', 'e', 'r', 0x00
+        };
+        ExpectResponseHeaderBlockRejected(
+            uppercaseName,
+            sizeof(uppercaseName),
+            "HTTP/2 rejects uppercase response field name");
+
+        const UCHAR connectionHeader[] = {
+            0x88, 0x00, 0x0a,
+            'c', 'o', 'n', 'n', 'e', 'c', 't', 'i', 'o', 'n',
+            0x05, 'c', 'l', 'o', 's', 'e'
+        };
+        ExpectResponseHeaderBlockRejected(
+            connectionHeader,
+            sizeof(connectionHeader),
+            "HTTP/2 rejects connection-specific response field");
+
+        const UCHAR upgradeHeader[] = {
+            0x88, 0x00, 0x07, 'u', 'p', 'g', 'r', 'a', 'd', 'e',
+            0x03, 'h', '2', 'c'
+        };
+        ExpectResponseHeaderBlockRejected(
+            upgradeHeader,
+            sizeof(upgradeHeader),
+            "HTTP/2 rejects upgrade response field");
+
+        const UCHAR invalidTe[] = {
+            0x88, 0x00, 0x02, 't', 'e', 0x04, 'g', 'z', 'i', 'p'
+        };
+        ExpectResponseHeaderBlockRejected(
+            invalidTe,
+            sizeof(invalidTe),
+            "HTTP/2 rejects TE value other than trailers");
+    }
+
+    void TestConnectionAcceptsResponseTrailers()
+    {
+        UCHAR script[512] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR status200[] = { 0x88 };
+        const UCHAR data[] = { 'o', 'k' };
+        const UCHAR trailerBlock[] = {
+            0x00, 0x08, 'c', 'h', 'e', 'c', 'k', 's', 'u', 'm',
+            0x02, 'o', 'k'
+        };
+
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
+        Expect(AppendResponseHeaderBlock(status200, sizeof(status200), false, script, sizeof(script), &scriptLength),
+            "HTTP/2 initial response headers fixture builds");
+        Expect(AppendData(data, sizeof(data), false, script, sizeof(script), &scriptLength),
+            "HTTP/2 response data fixture builds");
+        Expect(AppendResponseHeaderBlock(trailerBlock, sizeof(trailerBlock), true, script, sizeof(script), &scriptLength),
+            "HTTP/2 response trailers fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 connection initializes for trailer test");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_SUCCESS, "HTTP/2 accepts response trailers after DATA with END_STREAM");
+        Expect(statusCode == 200, "HTTP/2 trailer response preserves status");
+        Expect(responseHeaderCount == 1, "HTTP/2 trailer response preserves initial header count");
+        Expect(responseBodyLength == sizeof(data), "HTTP/2 trailer response body length");
+        Expect(memcmp(responseBody, data, sizeof(data)) == 0, "HTTP/2 trailer response body bytes");
+    }
 }
 
 int main()
@@ -1144,6 +1389,11 @@ int main()
     TestStreamErrorSendsRstStream();
     TestConnectionRejectsStreamZeroHeaders();
     TestConnectionRejectsStreamZeroRstStream();
+    TestConnectionRejectsSettingsAckWithPayload();
+    TestConnectionRejectsInvalidPingLengths();
+    TestConnectionRejectsPushPromiseWhenPushDisabled();
+    TestConnectionRejectsMalformedResponseHeaders();
+    TestConnectionAcceptsResponseTrailers();
 
     if (g_failed) {
         printf("HTTP2 CLIENT TESTS FAILED\n");

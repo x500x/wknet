@@ -302,6 +302,7 @@ NTSTATUS KhHttpSendSync(
 struct KhHttpSendOptions final {
     SIZE_T MaxResponseBytes = 0;  // 0 表示不限制；options == nullptr 时也不限制
     ULONG Flags = KhHttpSendFlagNone;  // 发送标志
+    ULONG MaxRedirects = 0;  // 0 表示使用默认 redirect 上限
     KhHeaderCallback HeaderCallback = nullptr;  // 响应头回调
     KhBodyCallback BodyCallback = nullptr;  // 响应体回调
     void* CallbackContext = nullptr;  // 回调上下文
@@ -314,9 +315,12 @@ struct KhHttpSendOptions final {
 ```cpp
 enum KhHttpSendFlags : ULONG {
     KhHttpSendFlagNone = 0,
-    KhHttpSendFlagAggregateWithCallbacks = 0x00000001  // 使用回调时仍聚合响应
+    KhHttpSendFlagAggregateWithCallbacks = 0x00000001,  // 使用回调时仍聚合响应
+    KhHttpSendFlagDisableAutoRedirect = 0x00000002      // 关闭自动 redirect
 };
 ```
+
+`BodyCallback` 当前在响应读取、HTTP/1.1 Transfer-Encoding 解码和 Content-Encoding 解码完成后，以完整 body 调用一次，`finalChunk == true`；它不是边收边回调的网络流式接口。
 
 ### 6.2 异步发送
 
@@ -519,9 +523,12 @@ struct KhWebSocketMessage final {
 `KhWebSocketMessageType` 枚举：
 ```cpp
 enum class KhWebSocketMessageType : ULONG {
-    Text = 0,    // 文本消息
-    Binary = 1,  // 二进制消息
-    Close = 2    // 关闭消息
+    Text = 0,          // 文本消息
+    Binary = 1,        // 二进制消息
+    Close = 2,         // 关闭消息
+    Continuation = 3,  // continuation 分片
+    Ping = 4,          // Ping 控制帧
+    Pong = 5           // Pong 控制帧
 };
 ```
 
@@ -614,6 +621,7 @@ bool KhTestSessionHasProviderCache(KH_SESSION session) noexcept;
 ### 11.5 WebSocket
 
 - 使用 `AutoReplyPing = true` 自动响应 Ping 消息
+- `AutoReplyPing = false` 时，Ping/Pong 控制帧会以 `KhWebSocketMessageType::Ping` / `Pong` 返回给调用方
 - 设置合理的 `MaxMessageBytes` 防止内存耗尽
 - 始终调用 `KhWebSocketCloseSync` 关闭连接
 

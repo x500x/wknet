@@ -1671,6 +1671,7 @@ namespace
         status = KhConnectionPoolInitialize(
             &newSession->ConnectionPool,
             effectiveOptions.ConnectionPoolCapacity,
+            effectiveOptions.MaxConnectionsPerHost,
             effectiveOptions.IdleTimeoutMilliseconds);
         if (!NT_SUCCESS(status)) {
             newSession->ProviderCache->Shutdown();

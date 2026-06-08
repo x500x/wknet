@@ -38,22 +38,26 @@ KernelHttp implements protocol behavior on the Windows kernel path: transport us
 
 | Protocol | Supported | Current Boundary |
 |----------|-----------|------------------|
-| HTTP/1.1 | `Content-Length`, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping | Request bodies use `Content-Length`; user-supplied request `Transfer-Encoding` is rejected; chunked upload and response trailer exposure are not supported; `br` is supported only as `Content-Encoding` |
-| HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS, HEADERS/CONTINUATION, DATA, PING, GOAWAY, WINDOW_UPDATE, HPACK | Server push, priority, and complex concurrent stream scheduling are not supported; responses must end with `END_STREAM`, `RST_STREAM`, or `GOAWAY` |
-| WebSocket | ws/wss handshake, text/binary send, control-frame validation, Ping/Pong/Close, complete-message receive by default | Extension negotiation and receive-fragment callbacks are not supported; the default API aggregates complete messages |
-| TLS | TLS 1.2/1.3, ECDHE + AES-GCM main path, TLS 1.3 downgrade protection, certificate chain, dNSName/iPAddress SAN, and pin validation | TLS client certificates, CBC, ChaCha20-Poly1305, and OCSP/CRL revocation checks are not supported |
+| HTTP/1.1 | `Content-Length`, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer syntax/forbidden-field validation, RFC 3986 relative redirect resolution | Request bodies use `Content-Length`; user-supplied request `Transfer-Encoding` is rejected; chunked upload and response trailer exposure are not supported; `br` is supported only as `Content-Encoding` |
+| HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS, HEADERS/CONTINUATION, DATA, PING, GOAWAY, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits | Server push, priority, and complex concurrent stream scheduling are not supported; disabled `PUSH_PROMISE` is a protocol error; responses must end with `END_STREAM`, `RST_STREAM`, or `GOAWAY` |
+| WebSocket | ws/wss handshake, text/binary send, empty messages, control-frame validation, Ping/Pong/Close, complete-message receive by default | Extension negotiation and receive-fragment callbacks are not supported; the default API aggregates complete messages |
+| TLS | TLS 1.2/1.3, ECDHE + AES-GCM main path, TLS 1.3 downgrade protection, PSK ticket binding, HRR binder recomputation, certificate chain, dNSName/iPAddress SAN, and pin validation | TLS client certificates, CBC, ChaCha20-Poly1305, OCSP/CRL revocation checks, and IDNA are not supported; Name Constraints return unsupported |
 
 | Unsupported Optional Capability | Current Handling |
 |---------------------------------|------------------|
 | WebSocket extensions such as permessage-deflate | Out of scope; unexpected server extensions are rejected |
 | WebSocket receive-fragment callback | Receive aggregates complete messages; fragment callback exposure is not supported |
+| HTTP proxy / CONNECT / TRACE | Outside the current kernel client main path |
+| HTTP response trailer exposure | The parser validates and consumes trailers, but the API does not expose them |
 | HTTP/2 server push | Push is disabled; forbidden PUSH_PROMISE is a protocol error |
 | TLS client certificates | Client certificate authentication is not supported |
 | TLS CBC / ChaCha20-Poly1305 | Not in the current cipher-suite subset |
 | OCSP / CRL revocation checks | Requiring revocation returns `STATUS_NOT_SUPPORTED` |
 | IDNA host processing | Certificate dNSName/CN matching currently uses ASCII host names |
 
-Close-delimited HTTP/1.x responses and `101 Switching Protocols` upgrade responses are not returned to the normal HTTP connection pool. Synchronous HTTP, WebSocket, TLS, and certificate validation paths require `PASSIVE_LEVEL`. TLS ALPN results must come from the client's offered list. TLS1.2 selection after a TLS1.3 attempt is allowed only after verified version-negotiation evidence; certificate errors, ALPN mismatch, network timeout, or record decryption failure are not TLS1.2-only evidence.
+Automatic redirects reject HTTPS-to-HTTP downgrades by default. Cross scheme/host/port redirects strip `Authorization`, `Cookie`, and `Proxy-Authorization`. 301/302 rewrite POST to GET by default, 303 rewrites every method except HEAD to GET, and 307/308 preserve method and body. Reused stale-connection failures are retried fresh only for safe/idempotent requests such as `GET`, `HEAD`, and `OPTIONS`; POST/PUT/PATCH/DELETE are not replayed automatically.
+
+Close-delimited HTTP/1.x responses and `101 Switching Protocols` upgrade responses are not returned to the normal HTTP connection pool. Synchronous HTTP, WebSocket, TLS, and certificate validation paths require `PASSIVE_LEVEL`. TLS ALPN results must come from the client's offered list. TLS1.2 selection after a TLS1.3 attempt is allowed only after verified version-negotiation evidence; certificate errors, ALPN mismatch, network timeout, or record decryption failure are not TLS1.2-only evidence. TLS 1.3 0-RTT is off by default; even when enabled, callers must explicitly mark the request as replay-safe, otherwise the connection returns `STATUS_NOT_SUPPORTED` without sending early data.
 For certificate host validation, IP literals match only iPAddress SAN entries and do not fall back to dNSName or CN.
 
 ---
@@ -623,6 +627,8 @@ The project implements the following TLS 1.3 security hardening:
 
 - **Signature Scheme Validation**: Strictly validates server certificate signature algorithms, rejecting weak schemes
 - **Downgrade Protection**: Prevents protocol downgrade attacks from TLS 1.3 to TLS 1.2
+- **PSK/HRR Validation**: TLS 1.3 tickets bind issue time, SNI, ALPN, cipher, and version; PSK binders are recomputed after HelloRetryRequest
+- **0-RTT Policy**: Disabled by default; enabling it requires the caller to mark the request replay-safe
 - **Key Zeroization**: Securely zeros all key materials after session termination
 - **Trust Anchor Validation**: Validates certificate chain integrity to trusted roots
 

@@ -60,6 +60,7 @@ namespace engine
         KhPooledConnection* Entries = nullptr;
         ULONG Capacity = 0;
         ULONG ActiveCount = 0;
+        ULONG MaxConnectionsPerHost = 0;
         ULONG NextConnectionId = 1;
         ULONG IdleTimeoutMilliseconds = 0;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -71,6 +72,7 @@ namespace engine
     NTSTATUS KhConnectionPoolInitialize(
         _Inout_ KhConnectionPool* pool,
         ULONG capacity,
+        ULONG maxConnectionsPerHost,
         ULONG idleTimeoutMilliseconds) noexcept;
 
     void KhConnectionPoolShutdown(_Inout_ KhConnectionPool* pool) noexcept;

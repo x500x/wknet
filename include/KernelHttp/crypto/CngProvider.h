@@ -190,7 +190,7 @@ namespace crypto
         UCHAR* hashObject_ = nullptr;
         ULONG hashObjectLength_ = 0;
 #else
-        UCHAR state_[64] = {};
+        UCHAR state_[32768] = {};
         SIZE_T stateLength_ = 0;
 #endif
     };

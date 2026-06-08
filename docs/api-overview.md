@@ -29,17 +29,19 @@ KernelHttp 提供了两层 API 供开发者使用：**高层 API** 和 **底层 
 ## 协议能力边界
 
 KernelHttp 支持的是内核客户端主路径上的现代协议子集，而不是所有 RFC optional 扩展。同步 HTTP、WebSocket、TLS 和证书验证路径必须在 `PASSIVE_LEVEL` 调用。
+正式支持的公共入口是 `khttp` 高层 API 和 `engine` 底层句柄 API；`client`、`tls`、`http2`、`websocket` 下的类是实现构件或测试构件，直接调用时需遵守相同的 `PASSIVE_LEVEL`、scratch/workspace 和传输所有权约束。
 
 | 协议 | 已支持能力 | 当前不支持或受限能力 |
 |------|------------|----------------------|
-| HTTP/1.1 | `Content-Length`、响应 `Transfer-Encoding` 链（`chunked`/`gzip`/`deflate`/`compress`）、close-delimited 响应、HEAD/101/无 body 状态码、中间 1xx 跳过 | chunked 上传、响应 trailer 暴露；用户设置请求 `Transfer-Encoding` 会返回 `STATUS_NOT_SUPPORTED`；`br` 仅作为 `Content-Encoding` 支持 |
-| HTTP/2 | ALPN、h2c prior knowledge / Upgrade、SETTINGS、HEADERS/CONTINUATION、DATA、PING、GOAWAY、WINDOW_UPDATE、HPACK | server push、priority、复杂多流调度、未以 `END_STREAM`/`RST_STREAM`/`GOAWAY` 结束的半截响应 |
-| WebSocket | ws/wss 握手、文本/二进制发送、控制帧校验、Ping/Pong/Close、默认完整消息接收 | extensions、接收分片回调、permessage-deflate |
-| TLS/证书 | TLS 1.2/1.3、ECDHE + AES-GCM 主路径、TLS 1.3 降级保护、dNSName/iPAddress SAN、CN/EKU/KeyUsage/BasicConstraints/链签名/信任锚/SPKI pin | TLS 客户端证书、CBC、ChaCha20-Poly1305、OCSP/CRL 撤销检查、IDNA |
+| HTTP/1.1 | `Content-Length`、响应 `Transfer-Encoding` 链（`chunked`/`gzip`/`deflate`/`compress`）、close-delimited 响应、HEAD/101/无 body 状态码、中间 1xx 跳过、chunked trailer 语法和禁止字段校验、RFC 3986 相对 redirect 解析 | chunked 上传、响应 trailer 暴露、HTTP proxy/CONNECT/TRACE；用户设置请求 `Transfer-Encoding` 会返回 `STATUS_NOT_SUPPORTED`；`br` 仅作为 `Content-Encoding` 支持 |
+| HTTP/2 | ALPN、h2c prior knowledge / Upgrade、SETTINGS、HEADERS/CONTINUATION、DATA、PING、GOAWAY、WINDOW_UPDATE、HPACK、header block 语义校验、HPACK header-list/table-size 限制 | server push、priority、复杂多流调度、未以 `END_STREAM`/`RST_STREAM`/`GOAWAY` 结束的半截响应 |
+| WebSocket | ws/wss 握手、文本/二进制/空消息发送、控制帧校验、Ping/Pong/Close、默认完整消息接收 | extensions、接收分片回调、permessage-deflate |
+| TLS/证书 | TLS 1.2/1.3、ECDHE + AES-GCM 主路径、TLS 1.3 降级保护、PSK ticket 绑定、HRR binder 重算、dNSName/iPAddress SAN、CN/EKU/KeyUsage/BasicConstraints/链签名/信任锚/SPKI pin | TLS 客户端证书、CBC、ChaCha20-Poly1305、OCSP/CRL 撤销检查、IDNA、Name Constraints |
 
 close-delimited HTTP/1.x 响应和 `101 Switching Protocols` 升级响应不会进入普通 HTTP 连接池。TLS ALPN 结果必须严格匹配客户端 offer 列表。TLS1.2 选择必须来自可验证的版本协商结果。证书错误、ALPN mismatch、TCP/WSK timeout、record 解密失败或 Finished 验证失败都不能被归类为 TLS1.2-only。
 证书主机校验中，URL host 为 IP literal 时只匹配 iPAddress SAN，不回退到 dNSName 或 CN。
-证书策略当前为硬策略：叶子证书默认要求 ServerAuth EKU、KeyUsage digitalSignature，且不能是 CA；中间/根证书要求 BasicConstraints CA 和 KeyUsage keyCertSign。OCSP/CRL 撤销检查未实现，调用方要求撤销检查时返回 `STATUS_NOT_SUPPORTED`。
+证书策略当前为硬策略：叶子证书默认要求 ServerAuth EKU、KeyUsage digitalSignature，且不能是 CA；中间/根证书要求 BasicConstraints CA 和 KeyUsage keyCertSign。OCSP/CRL 撤销检查、Name Constraints 和 IDNA 未实现为完整策略，调用方要求或输入触发时返回 `STATUS_NOT_SUPPORTED` 或拒绝非 ASCII 主机名。
+自动 redirect 默认拒绝 HTTPS 到 HTTP 降级；跨 scheme/host/port redirect 会清理 `Authorization`、`Cookie`、`Proxy-Authorization`。reused stale 连接失败只对 `GET`、`HEAD`、`OPTIONS` 等安全/幂等请求自动 fresh retry，不会自动重放 POST/PUT/PATCH/DELETE。TLS 1.3 0-RTT 默认关闭；启用时仍必须由调用方声明 replay-safe。
 
 ### 核心抽象层说明
 

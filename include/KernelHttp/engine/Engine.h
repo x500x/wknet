@@ -104,7 +104,8 @@ namespace engine
         Binary = 1,
         Close = 2,
         Continuation = 3,
-        Ping = 4
+        Ping = 4,
+        Pong = 5
     };
 
     typedef NTSTATUS (*KhHeaderCallback)(

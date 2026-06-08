@@ -1096,6 +1096,23 @@ namespace tls
         return status;
     }
 
+    NTSTATUS TlsHandshake13::ValidateSelectedPskIdentity(
+        const Tls13ServerHelloView& serverHello,
+        SIZE_T offeredPskIdentityCount) noexcept
+    {
+        if (serverHello.SelectedPskIdentity == 0xffff) {
+            return STATUS_SUCCESS;
+        }
+
+        if (offeredPskIdentityCount == 0 ||
+            offeredPskIdentityCount > 0xffff ||
+            static_cast<SIZE_T>(serverHello.SelectedPskIdentity) >= offeredPskIdentityCount) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS TlsHandshake13::ComputePskBinder(
         const TlsContext& context,
         const UCHAR* resumptionSecret,

@@ -172,7 +172,8 @@ namespace http2
             _Inout_ Http2Transport& transport,
             _In_ const Http2FrameHeader& header,
             _In_reads_bytes_(payloadLen) const UCHAR* payload,
-            SIZE_T payloadLen) noexcept;
+            SIZE_T payloadLen,
+            _Inout_opt_ Http2Stream* activeStream) noexcept;
 
         // Send WINDOW_UPDATE for connection and/or stream
         NTSTATUS SendWindowUpdateIfNeeded(
@@ -208,6 +209,12 @@ namespace http2
         static USHORT ExtractStatusCode(
             _In_reads_(headerCount) const http::HttpHeader* headers,
             SIZE_T headerCount) noexcept;
+
+        static NTSTATUS ValidateResponseHeaderBlock(
+            _In_reads_(headerCount) const http::HttpHeader* headers,
+            SIZE_T headerCount,
+            bool trailers,
+            _Out_opt_ USHORT* statusCode) noexcept;
 
         _Must_inspect_result_
         NTSTATUS EnsureBuffers() noexcept;

@@ -156,14 +156,120 @@ namespace net
             UNREFERENCED_PARAMETER(status);
             WskSyncReleaseContext(context);
         }
+
+        void CloseNativeSocketDetachedIfPresent(_In_opt_ PWSK_SOCKET socket) noexcept
+        {
+            if (socket == nullptr || socket->Dispatch == nullptr) {
+                return;
+            }
+
+            const auto* dispatch = static_cast<const WSK_PROVIDER_CONNECTION_DISPATCH*>(socket->Dispatch);
+            if (dispatch->Basic.WskCloseSocket == nullptr) {
+                return;
+            }
+
+            WskSyncIrpContext* context = nullptr;
+            NTSTATUS status = WskSyncAllocateIrp(&context);
+            if (!NT_SUCCESS(status)) {
+                kprintf("Unable to allocate detached WSK close IRP: 0x%08X\r\n",
+                    static_cast<ULONG>(status));
+                return;
+            }
+
+            status = dispatch->Basic.WskCloseSocket(socket, context->Irp);
+            WskSyncDetachSubmittedIrp(status, context);
+        }
+
+        void CloseLateConnectedSocket(
+            _In_opt_ void* context,
+            NTSTATUS status,
+            SIZE_T information) noexcept
+        {
+            UNREFERENCED_PARAMETER(context);
+            UNREFERENCED_PARAMETER(status);
+
+            if (information == 0) {
+                return;
+            }
+
+            CloseNativeSocketDetachedIfPresent(reinterpret_cast<PWSK_SOCKET>(information));
+        }
     }
 
     WskSocket::~WskSocket() noexcept
     {
-        if (socket_ != nullptr) {
+        if (socket_ != nullptr || ownershipState_ != OwnershipState::Closed) {
             const NTSTATUS status = Close();
             UNREFERENCED_PARAMETER(status);
         }
+    }
+
+    NTSTATUS WskSocket::CloseOwnedSocket(ULONG timeoutMilliseconds) noexcept
+    {
+        if (socket_ == nullptr) {
+            dispatch_ = nullptr;
+            if (ownershipState_ != OwnershipState::CompletionOwnedCleanup) {
+                ownershipState_ = OwnershipState::Closed;
+                InterlockedExchange(&closeIssued_, 0);
+            }
+            return STATUS_SUCCESS;
+        }
+
+        if (dispatch_ == nullptr || dispatch_->Basic.WskCloseSocket == nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        WskSyncIrpContext* context = nullptr;
+        NTSTATUS status = WskSyncAllocateIrp(&context);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (InterlockedCompareExchange(&closeIssued_, 1, 0) != 0) {
+            WskSyncReleaseUnsubmittedContext(context);
+            return STATUS_SUCCESS;
+        }
+
+        PWSK_SOCKET socketToClose = socket_;
+        const auto* dispatch = dispatch_;
+        ownershipState_ = OwnershipState::ClosePending;
+
+        status = dispatch->Basic.WskCloseSocket(socketToClose, context->Irp);
+        socket_ = nullptr;
+        dispatch_ = nullptr;
+
+        WskSyncCompletionResult completion = {};
+        status = WskSyncCompleteIrp(
+            status,
+            context,
+            timeoutMilliseconds,
+            nullptr,
+            nullptr,
+            &completion);
+
+        ownershipState_ = completion.CompletionOwnedCleanup
+            ? OwnershipState::CompletionOwnedCleanup
+            : OwnershipState::Closed;
+
+        WskSyncReleaseContext(context);
+        return status;
+    }
+
+    NTSTATUS WskSocket::CloseAfterCancelledOperation(bool completionOwnedCleanup) noexcept
+    {
+        if (socket_ == nullptr) {
+            dispatch_ = nullptr;
+            ownershipState_ = completionOwnedCleanup
+                ? OwnershipState::CompletionOwnedCleanup
+                : OwnershipState::Closed;
+            return STATUS_SUCCESS;
+        }
+
+        ownershipState_ = completionOwnedCleanup
+            ? OwnershipState::CompletionOwnedCleanup
+            : OwnershipState::CancelPending;
+
+        return CloseOwnedSocket(WskCloseTimeoutMilliseconds);
     }
 
     NTSTATUS WskSocket::Connect(
@@ -202,6 +308,7 @@ namespace net
         }
         context->CleanupRoutine = DeleteConnectStorage;
         context->CleanupContext = addressStorage;
+        context->CompletionCleanupRoutine = CloseLateConnectedSocket;
 
         status = CopySocketAddress(remoteAddress, &addressStorage->RemoteAddress);
         if (!NT_SUCCESS(status)) {
@@ -231,6 +338,7 @@ namespace net
         }
 
         SIZE_T information = 0;
+        WskSyncCompletionResult completion = {};
         status = providerDispatch->WskSocketConnect(
             providerClient,
             SOCK_STREAM,
@@ -245,7 +353,13 @@ namespace net
             nullptr,
             context->Irp);
 
-        status = WskSyncCompleteIrp(status, context, WskOperationTimeoutMilliseconds, &information, cancellation);
+        status = WskSyncCompleteIrp(
+            status,
+            context,
+            WskOperationTimeoutMilliseconds,
+            &information,
+            cancellation,
+            &completion);
 
         if (!NT_SUCCESS(status)) {
             kprintf("WskSocketConnect failed: 0x%08X family=%u information=%Iu\r\n",
@@ -267,6 +381,8 @@ namespace net
             }
             else {
                 dispatch_ = static_cast<const WSK_PROVIDER_CONNECTION_DISPATCH*>(socket_->Dispatch);
+                ownershipState_ = OwnershipState::Active;
+                InterlockedExchange(&closeIssued_, 0);
             }
         }
 
@@ -285,7 +401,10 @@ namespace net
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        if (socket_ == nullptr || dispatch_ == nullptr || dispatch_->WskSend == nullptr) {
+        if (socket_ == nullptr ||
+            dispatch_ == nullptr ||
+            ownershipState_ != OwnershipState::Active ||
+            dispatch_->WskSend == nullptr) {
             return STATUS_INVALID_CONNECTION;
         }
 
@@ -319,11 +438,21 @@ namespace net
         }
 
         SIZE_T information = 0;
+        WskSyncCompletionResult completion = {};
         status = dispatch_->WskSend(socket_, operationBuffer->WskBuf(), flags, context->Irp);
-        status = WskSyncCompleteIrp(status, context, WskOperationTimeoutMilliseconds, &information, cancellation);
+        status = WskSyncCompleteIrp(
+            status,
+            context,
+            WskOperationTimeoutMilliseconds,
+            &information,
+            cancellation,
+            &completion);
         if (status == STATUS_IO_TIMEOUT || status == STATUS_CANCELLED) {
-            socket_ = nullptr;
-            dispatch_ = nullptr;
+            const NTSTATUS closeStatus = CloseAfterCancelledOperation(completion.CompletionOwnedCleanup);
+            if (!NT_SUCCESS(closeStatus)) {
+                kprintf("WskSend cancellation close failed: 0x%08X\r\n",
+                    static_cast<ULONG>(closeStatus));
+            }
         }
 
         if (NT_SUCCESS(status) && bytesSent != nullptr) {
@@ -379,7 +508,10 @@ namespace net
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        if (socket_ == nullptr || dispatch_ == nullptr || dispatch_->WskReceive == nullptr) {
+        if (socket_ == nullptr ||
+            dispatch_ == nullptr ||
+            ownershipState_ != OwnershipState::Active ||
+            dispatch_->WskReceive == nullptr) {
             return STATUS_INVALID_CONNECTION;
         }
 
@@ -410,11 +542,21 @@ namespace net
         }
 
         SIZE_T information = 0;
+        WskSyncCompletionResult completion = {};
         status = dispatch_->WskReceive(socket_, operationBuffer->WskBuf(), flags, context->Irp);
-        status = WskSyncCompleteIrp(status, context, timeoutMilliseconds, &information, cancellation);
+        status = WskSyncCompleteIrp(
+            status,
+            context,
+            timeoutMilliseconds,
+            &information,
+            cancellation,
+            &completion);
         if (status == STATUS_IO_TIMEOUT || status == STATUS_CANCELLED) {
-            socket_ = nullptr;
-            dispatch_ = nullptr;
+            const NTSTATUS closeStatus = CloseAfterCancelledOperation(completion.CompletionOwnedCleanup);
+            if (!NT_SUCCESS(closeStatus)) {
+                kprintf("WskReceive cancellation close failed: 0x%08X\r\n",
+                    static_cast<ULONG>(closeStatus));
+            }
         }
 
         if (bytesReceived != nullptr) {
@@ -507,7 +649,10 @@ namespace net
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        if (socket_ == nullptr || dispatch_ == nullptr || dispatch_->WskDisconnect == nullptr) {
+        if (socket_ == nullptr ||
+            dispatch_ == nullptr ||
+            ownershipState_ != OwnershipState::Active ||
+            dispatch_->WskDisconnect == nullptr) {
             return STATUS_INVALID_CONNECTION;
         }
 
@@ -518,10 +663,20 @@ namespace net
         }
 
         status = dispatch_->WskDisconnect(socket_, nullptr, flags, context->Irp);
-        status = WskSyncCompleteIrp(status, context, WskCloseTimeoutMilliseconds, nullptr);
+        WskSyncCompletionResult completion = {};
+        status = WskSyncCompleteIrp(
+            status,
+            context,
+            WskCloseTimeoutMilliseconds,
+            nullptr,
+            nullptr,
+            &completion);
         if (status == STATUS_IO_TIMEOUT) {
-            socket_ = nullptr;
-            dispatch_ = nullptr;
+            const NTSTATUS closeStatus = CloseAfterCancelledOperation(completion.CompletionOwnedCleanup);
+            if (!NT_SUCCESS(closeStatus)) {
+                kprintf("WskDisconnect timeout close failed: 0x%08X\r\n",
+                    static_cast<ULONG>(closeStatus));
+            }
         }
 
         WskSyncReleaseContext(context);
@@ -534,36 +689,12 @@ namespace net
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        if (socket_ == nullptr) {
-            return STATUS_SUCCESS;
-        }
-
-        if (dispatch_ == nullptr || dispatch_->Basic.WskCloseSocket == nullptr) {
-            return STATUS_INVALID_DEVICE_STATE;
-        }
-
-        WskSyncIrpContext* context = nullptr;
-        NTSTATUS status = WskSyncAllocateIrp(&context);
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        PWSK_SOCKET socketToClose = socket_;
-        const auto* dispatch = dispatch_;
-
-        status = dispatch->Basic.WskCloseSocket(socketToClose, context->Irp);
-        socket_ = nullptr;
-        dispatch_ = nullptr;
-
-        status = WskSyncCompleteIrp(status, context, WskCloseTimeoutMilliseconds, nullptr);
-
-        WskSyncReleaseContext(context);
-        return status;
+        return CloseOwnedSocket(WskCloseTimeoutMilliseconds);
     }
 
     bool WskSocket::IsConnected() const noexcept
     {
-        return socket_ != nullptr;
+        return socket_ != nullptr && ownershipState_ == OwnershipState::Active;
     }
 
     PWSK_SOCKET WskSocket::NativeSocket() const noexcept

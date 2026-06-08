@@ -95,6 +95,55 @@ namespace http
             return true;
         }
 
+        HttpText TrimOptionalWhitespace(HttpText text) noexcept;
+
+        bool IsForbiddenTrailerField(HttpText name) noexcept
+        {
+            return TextEqualsIgnoreCase(name, MakeText("Content-Length")) ||
+                TextEqualsIgnoreCase(name, MakeText("Transfer-Encoding")) ||
+                TextEqualsIgnoreCase(name, MakeText("Host")) ||
+                TextEqualsIgnoreCase(name, MakeText("Authorization")) ||
+                TextEqualsIgnoreCase(name, MakeText("Proxy-Authorization")) ||
+                TextEqualsIgnoreCase(name, MakeText("Cookie")) ||
+                TextEqualsIgnoreCase(name, MakeText("Set-Cookie"));
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ValidateTrailerFieldLine(const char* data, SIZE_T lineStart, SIZE_T lineEnd) noexcept
+        {
+            if (data == nullptr || lineEnd <= lineStart) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (data[lineStart] == ' ' || data[lineStart] == '\t') {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            SIZE_T colon = InvalidOffset;
+            for (SIZE_T index = lineStart; index < lineEnd; ++index) {
+                if (data[index] == ':') {
+                    colon = index;
+                    break;
+                }
+            }
+
+            if (colon == InvalidOffset || colon == lineStart) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            const HttpText name = { data + lineStart, colon - lineStart };
+            HttpText value = { data + colon + 1, lineEnd - colon - 1 };
+            value = TrimOptionalWhitespace(value);
+
+            if (!IsValidHeaderName(name) ||
+                !IsValidHeaderValue(value) ||
+                IsForbiddenTrailerField(name)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            return STATUS_SUCCESS;
+        }
+
         HttpText TrimOptionalWhitespace(HttpText text) noexcept
         {
             while (text.Length > 0 && IsOptionalWhitespace(text.Data[0])) {
@@ -700,6 +749,11 @@ namespace http
                     if (trailerLineEnd == cursor) {
                         *bytesConsumed = cursor + 2;
                         return STATUS_SUCCESS;
+                    }
+
+                    const NTSTATUS trailerStatus = ValidateTrailerFieldLine(data, cursor, trailerLineEnd);
+                    if (!NT_SUCCESS(trailerStatus)) {
+                        return trailerStatus;
                     }
 
                     cursor = trailerLineEnd + 2;

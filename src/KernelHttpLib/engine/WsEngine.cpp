@@ -704,7 +704,9 @@ namespace engine
 
         const bool finalFragment = options == nullptr ? true : options->FinalFragment;
         KhWebSocketOperationScope operation(websocket);
-        if (!operation.IsActive() || !websocket->Connected || text == nullptr || textLength == 0) {
+        if (!operation.IsActive() ||
+            !websocket->Connected ||
+            (text == nullptr && textLength != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -771,7 +773,9 @@ namespace engine
 
         const bool finalFragment = options == nullptr ? true : options->FinalFragment;
         KhWebSocketOperationScope operation(websocket);
-        if (!operation.IsActive() || !websocket->Connected || data == nullptr || dataLength == 0) {
+        if (!operation.IsActive() ||
+            !websocket->Connected ||
+            (data == nullptr && dataLength != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -838,7 +842,9 @@ namespace engine
 
         const bool finalFragment = options == nullptr ? true : options->FinalFragment;
         KhWebSocketOperationScope operation(websocket);
-        if (!operation.IsActive() || !websocket->Connected || data == nullptr || dataLength == 0) {
+        if (!operation.IsActive() ||
+            !websocket->Connected ||
+            (data == nullptr && dataLength != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -1017,6 +1023,9 @@ namespace engine
         }
         else if (opcode == KernelHttp::websocket::WebSocketOpcode::Ping) {
             type = KhWebSocketMessageType::Ping;
+        }
+        else if (opcode == KernelHttp::websocket::WebSocketOpcode::Pong) {
+            type = KhWebSocketMessageType::Pong;
         }
 
         const UCHAR* data = payloadBuffer.Get();

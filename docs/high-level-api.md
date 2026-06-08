@@ -6,8 +6,8 @@
 
 > **并发安全**：内部实现已对连接池、句柄释放、异步完成等关键路径加锁保护。异步路径使用独立的 Workspace 避免数据竞争。调用方仍需保证同一 `Request` 不被多个 `Send` 并发使用。
 
-> **协议与 IRQL 边界**：同步 HTTP、WebSocket、TLS 和证书验证路径要求 `PASSIVE_LEVEL`。HTTP/1.1 请求体使用 `Content-Length`；用户设置请求 `Transfer-Encoding` 会返回 `STATUS_NOT_SUPPORTED`，暂不支持 chunked 上传或向调用方暴露 trailer。响应 `Transfer-Encoding` 支持 `chunked/gzip/deflate/compress` 链式解码，`br` 仅作为 `Content-Encoding` 支持；close-delimited 响应和 `101 Switching Protocols` 升级响应不会进入普通 HTTP 连接池。HTTP/2 不支持 server push、priority 或复杂多流调度。WebSocket 默认接收完整消息，不暴露接收分片回调，也不协商扩展。TLS ALPN 结果必须来自客户端 offer 列表；TLS1.2 只能在获得可验证版本协商证据后选择；证书错误、ALPN mismatch、网络超时或 record 解密失败都不是 TLS1.2-only 证据。证书主机为 IP literal 时只匹配 iPAddress SAN，不回退到 dNSName 或 CN。
-> **证书策略**：当前不实现 OCSP/CRL 撤销检查；叶子证书默认硬性要求 ServerAuth EKU、KeyUsage digitalSignature 且不能是 CA；中间/根证书要求 BasicConstraints CA 和 KeyUsage keyCertSign。
+> **协议与 IRQL 边界**：同步 HTTP、WebSocket、TLS 和证书验证路径要求 `PASSIVE_LEVEL`。HTTP/1.1 请求体使用 `Content-Length`；用户设置请求 `Transfer-Encoding` 会返回 `STATUS_NOT_SUPPORTED`，暂不支持 chunked 上传或向调用方暴露 trailer。响应 `Transfer-Encoding` 支持 `chunked/gzip/deflate/compress` 链式解码，`br` 仅作为 `Content-Encoding` 支持；chunked trailer 会被校验并消费，但不会暴露给 API。close-delimited 响应和 `101 Switching Protocols` 升级响应不会进入普通 HTTP 连接池。HTTP/2 不支持 server push、priority 或复杂多流调度，收到禁用的 `PUSH_PROMISE` 视为协议错误。WebSocket 默认接收完整消息，不暴露接收分片回调，也不协商扩展。TLS ALPN 结果必须来自客户端 offer 列表；TLS1.2 只能在获得可验证版本协商证据后选择；证书错误、ALPN mismatch、网络超时或 record 解密失败都不是 TLS1.2-only 证据。证书主机为 IP literal 时只匹配 iPAddress SAN，不回退到 dNSName 或 CN。
+> **安全策略**：自动 redirect 默认拒绝 HTTPS 到 HTTP 降级；跨源 redirect 清理 `Authorization`、`Cookie`、`Proxy-Authorization`；reused stale 连接失败只对 `GET`、`HEAD`、`OPTIONS` 等安全/幂等请求自动 fresh retry。TLS 1.3 0-RTT 默认关闭，启用时仍要求调用方显式标记 replay-safe。当前不实现 OCSP/CRL 撤销检查、Name Constraints 或 IDNA 完整策略；触发这些要求时返回 `STATUS_NOT_SUPPORTED` 或拒绝非 ASCII 主机名。叶子证书默认硬性要求 ServerAuth EKU、KeyUsage digitalSignature 且不能是 CA；中间/根证书要求 BasicConstraints CA 和 KeyUsage keyCertSign。
 
 ## 1. 模块组成与依赖关系
 
@@ -52,7 +52,7 @@
   - `CompletionCallback(context, status) -> void`
   - `WsMessageCallback(context, type, data, dataLen, finalFragment) -> NTSTATUS`
 - 头/体回调返回非成功 NTSTATUS 会被视为失败，导致整个请求失败（参考样例中的 `HeaderCallback`、`BodyCallback`）。
-- `OnBody` 在最后一次回调时 `finalChunk == true`；当请求被聚合发送时（见 `SendFlagAggregateWithCallbacks`），仍能依次产生分块回调。
+- `OnBody` 当前不是边收边回调；实现会先完成响应读取、HTTP/1.1 Transfer-Encoding 解码和 Content-Encoding 解码，再以一次完整 body 回调返回，且 `finalChunk == true`。需要同时保留 `Response*` 时使用 `SendFlagAggregateWithCallbacks`。
 
 ## 4. Session：连接池与全局策略容器
 
@@ -155,7 +155,9 @@ NTSTATUS SendEx(Session*, Request*, const SendOptions* options, Response** respo
 ```
 
 - `SendOptions::MaxResponseBytes`：覆盖响应上限；`0` 表示不限制。`options == nullptr` 时同样不限制。
-- `SendOptions::OnHeader / OnBody`：在解析过程中触发。要在使用回调的同时仍获得完整聚合响应，需要在 `Flags` 中加入 `SendFlagAggregateWithCallbacks`（参考 `RunSendWithOptions` 中的写法）。
+- `SendOptions::OnHeader / OnBody`：响应聚合并解析完成后触发；`OnBody` 接收完整解码 body，不是网络流式分块。要在使用回调的同时仍获得完整聚合响应，需要在 `Flags` 中加入 `SendFlagAggregateWithCallbacks`（参考 `RunSendWithOptions` 中的写法）。
+- `SendOptions::Flags`：`SendFlagDisableAutoRedirect` 可关闭自动 redirect；默认 redirect 上限为 `DefaultMaxRedirects`，可用 `MaxRedirects` 覆盖。
+- `SendOptions::MaxRedirects`：`0` 表示使用默认 redirect 上限。
 - `SendEx` 与 `Send(带选项)` 当前对外语义等价，前者通常用于驱动选择 `ConnPolicy::ForceNew` 等更精细的策略组合（见样例对比）。
 - `OnComplete / CompletionContext` 仅在异步路径上生效，同步发送时这两个字段被忽略。
 
@@ -277,9 +279,10 @@ NTSTATUS WsClose     (WebSocket*);
 
 - `WsSendOptions::FinalFragment = false` 用于发送分片消息（默认 `true`）。
 - `WsReceiveOptions::AutoAllocate = true` 时由实现分配存储并写入 `WsMessage::Data`，调用方在 `WsClose` 后不再持有该指针；`AutoAllocate = false` 时需要传入 `OnMessage` 回调消费数据。
-- `WsMessage::Type` 取自 `WsMsgType { Text, Binary, Ping, Close }`。
+- `WsMessage::Type` 取自 `WsMsgType { Text, Binary, Close, Continuation, Ping, Pong }`。
 - 接收路径默认返回完整消息；服务端分片消息会被聚合，Ping 控制帧默认自动回复。
-- `AutoReplyPing = false` 时，收到 Ping 会以 `WsMsgType::Ping` 控制事件返回，不会自动发送 Pong。
+- `AutoReplyPing = false` 时，收到 Ping 会以 `WsMsgType::Ping` 控制事件返回，不会自动发送 Pong；收到 Pong 会以 `WsMsgType::Pong` 返回。默认自动处理控制帧时 Pong 不会作为消息返回。
+- 文本发送会校验 UTF-8，空文本、空二进制和空 continuation 分片是允许的。
 - 发送二进制 echo 服务端时，注意服务端类型差异：示例代码区分了 `WebSocketSecureEchoUrl` 与 `WebSocketBinaryEchoUrl`。
 
 异步连接通过 `AsyncGetWebSocket(op, &ws)` 获取连接成功后的句柄；连接失败则该函数返回 NTSTATUS，`ws` 保持为空。
@@ -292,7 +295,7 @@ NTSTATUS WsClose     (WebSocket*);
 `CertPolicy`：`Verify / NoVerify`
 `AddressFamily`：`Any / Ipv4 / Ipv6`
 `ConnPolicy`：`ReuseOrCreate / ForceNew / NoPool`
-`WsMsgType`：`Text / Binary / Ping / Close`
+`WsMsgType`：`Text / Binary / Close / Continuation / Ping / Pong`
 `BodyPartKind`：`Field / FileBytes / FilePath`
 `SendFlags`：`SendFlagNone (0)`、`SendFlagAggregateWithCallbacks (0x1)`
 

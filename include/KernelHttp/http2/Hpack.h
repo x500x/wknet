@@ -82,6 +82,9 @@ namespace http2
 
     private:
         void Evict() noexcept;
+        void CompactData(
+            _Inout_opt_ SIZE_T* firstOffset = nullptr,
+            _Inout_opt_ SIZE_T* secondOffset = nullptr) noexcept;
 
         struct Entry
         {
@@ -116,6 +119,8 @@ namespace http2
 
         void Reset() noexcept;
 
+        void UpdateMaxTableSize(SIZE_T maxTableSize) noexcept;
+
         // Decode a complete header block fragment into headers array
         _Must_inspect_result_
         NTSTATUS Decode(
@@ -127,6 +132,18 @@ namespace http2
             _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,
             SIZE_T nameValueCapacity,
             _Out_ SIZE_T* nameValueUsed) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS Decode(
+            _In_reads_bytes_(blockLen) const UCHAR* block,
+            SIZE_T blockLen,
+            _Out_writes_(headerCapacity) http::HttpHeader* headers,
+            SIZE_T headerCapacity,
+            _Out_ SIZE_T* headerCount,
+            _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,
+            SIZE_T nameValueCapacity,
+            _Out_ SIZE_T* nameValueUsed,
+            SIZE_T maxHeaderListSize) noexcept;
 
     private:
         HpackDynamicTable table_;
@@ -144,6 +161,8 @@ namespace http2
         NTSTATUS Initialize(SIZE_T maxTableSize = 4096) noexcept;
 
         void Reset() noexcept;
+
+        void UpdateMaxTableSize(SIZE_T maxTableSize) noexcept;
 
         // Encode headers into a header block fragment
         // Uses indexed representation for static table matches,
@@ -166,6 +185,9 @@ namespace http2
             _Out_ bool* nameOnly) const noexcept;
 
         HpackDynamicTable table_;
+        SIZE_T maxTableSize_ = 4096;
+        SIZE_T pendingTableSize_ = 4096;
+        bool tableSizeUpdatePending_ = false;
     };
 }
 }

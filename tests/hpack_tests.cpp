@@ -419,6 +419,84 @@ namespace
         Expect(s == STATUS_INVALID_NETWORK_RESPONSE, "Decoder rejects dynamic table update above configured max");
     }
 
+    void TestDecoderRejectsDynamicTableUpdateAfterHeader()
+    {
+        const unsigned char block[] = { 0x82, 0x20 };
+
+        HpackDecoder decoder;
+        NTSTATUS s = decoder.Initialize(4096);
+        Expect(NT_SUCCESS(s), "Decoder init for late table update");
+
+        HttpHeader headers[2] = {};
+        size_t headerCount = 0;
+        char nvBuffer[64] = {};
+        size_t nvUsed = 0;
+        s = decoder.Decode(block, sizeof(block), headers, 2, &headerCount,
+            nvBuffer, sizeof(nvBuffer), &nvUsed);
+        Expect(s == STATUS_INVALID_NETWORK_RESPONSE, "Decoder rejects table size update after a header field");
+    }
+
+    void TestDecoderEnforcesHeaderListSize()
+    {
+        const unsigned char block[] = {
+            0x40, 0x0a, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d,
+            0x2d, 0x6b, 0x65, 0x79, 0x0d, 0x63, 0x75, 0x73,
+            0x74, 0x6f, 0x6d, 0x2d, 0x68, 0x65, 0x61, 0x64,
+            0x65, 0x72
+        };
+
+        HpackDecoder decoder;
+        NTSTATUS s = decoder.Initialize(4096);
+        Expect(NT_SUCCESS(s), "Decoder init for header-list limit");
+
+        HttpHeader headers[2] = {};
+        size_t headerCount = 0;
+        char nvBuffer[128] = {};
+        size_t nvUsed = 0;
+        s = decoder.Decode(block, sizeof(block), headers, 2, &headerCount,
+            nvBuffer, sizeof(nvBuffer), &nvUsed, 54);
+        Expect(s == STATUS_INVALID_NETWORK_RESPONSE, "Decoder rejects header list above configured limit");
+    }
+
+    void TestEncoderUsesNeverIndexedForSensitiveHeaders()
+    {
+        const char* names[] = {
+            "authorization",
+            "cookie",
+            "proxy-authorization"
+        };
+
+        for (const char* name : names) {
+            HpackEncoder encoder;
+            HpackDecoder decoder;
+            NTSTATUS s = encoder.Initialize(4096);
+            Expect(NT_SUCCESS(s), "Encoder init for sensitive header");
+            s = decoder.Initialize(4096);
+            Expect(NT_SUCCESS(s), "Decoder init for sensitive header");
+
+            HttpHeader input[] = {
+                { MakeText(name), MakeText("secret") }
+            };
+            unsigned char block[128] = {};
+            size_t blockLen = 0;
+            s = encoder.Encode(input, 1, block, sizeof(block), &blockLen);
+            Expect(NT_SUCCESS(s), "Encode sensitive header");
+            Expect(blockLen > 0, "Sensitive header encoded bytes exist");
+            Expect((block[0] & 0xf0) == 0x10, "Sensitive header uses never-indexed literal");
+
+            HttpHeader output[1] = {};
+            size_t outputCount = 0;
+            char nvBuffer[128] = {};
+            size_t nvUsed = 0;
+            s = decoder.Decode(block, blockLen, output, 1, &outputCount,
+                nvBuffer, sizeof(nvBuffer), &nvUsed);
+            Expect(NT_SUCCESS(s), "Decode never-indexed sensitive header");
+            Expect(outputCount == 1, "Sensitive header decode count");
+            Expect(TextEqualsLiteral(output[0].Name, name), "Sensitive header name round-trips");
+            Expect(TextEqualsLiteral(output[0].Value, "secret"), "Sensitive header value round-trips");
+        }
+    }
+
     void TestDecodeDynamicNameInsertAcrossReallocation()
     {
         constexpr size_t NameLen = 80;
@@ -506,6 +584,9 @@ int main()
     TestDecodeFirstRequestHuffman();
     TestEncoderDecoderRoundTrip();
     TestDecoderRejectsOversizedDynamicTableUpdate();
+    TestDecoderRejectsDynamicTableUpdateAfterHeader();
+    TestDecoderEnforcesHeaderListSize();
+    TestEncoderUsesNeverIndexedForSensitiveHeaders();
     TestDecodeDynamicNameInsertAcrossReallocation();
 
     if (g_failed) {

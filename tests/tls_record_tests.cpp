@@ -12,6 +12,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 using KernelHttp::crypto::HashAlgorithm;
 using KernelHttp::HeapArray;
@@ -26,6 +27,7 @@ using KernelHttp::tls::CertificateValidationResult;
 using KernelHttp::tls::CertificateValidator;
 using KernelHttp::tls::ParsedCertificate;
 using KernelHttp::tls::TlsAeadCipherState;
+using KernelHttp::tls::TlsAlpnProtocol;
 using KernelHttp::tls::TlsAlert;
 using KernelHttp::tls::TlsAlertDescription;
 using KernelHttp::tls::TlsAlertLevel;
@@ -54,6 +56,8 @@ using KernelHttp::tls::Tls13EncryptedExtensionsView;
 using KernelHttp::tls::Tls13KeyShareEntry;
 using KernelHttp::tls::Tls13MaxTicketIdentityLength;
 using KernelHttp::tls::Tls13NewSessionTicketView;
+using KernelHttp::tls::Tls13SessionCache;
+using KernelHttp::tls::Tls13SessionTicket;
 using KernelHttp::tls::Tls13ServerHelloView;
 using KernelHttp::tls::TlsClientConnectionOptions;
 using KernelHttp::tls::TlsConnection;
@@ -88,6 +92,18 @@ namespace
         if (!condition) {
             g_failed = true;
             printf("FAIL: %s\n", message);
+        }
+    }
+
+    void ExpectStatus(NTSTATUS actual, NTSTATUS expected, const char* message)
+    {
+        if (actual != expected) {
+            g_failed = true;
+            printf(
+                "FAIL: %s (actual=0x%08X expected=0x%08X)\n",
+                message,
+                static_cast<unsigned int>(actual),
+                static_cast<unsigned int>(expected));
         }
     }
 
@@ -161,6 +177,37 @@ namespace
 
         for (SIZE_T index = start; index <= dataLength - textLength; ++index) {
             if (MatchAscii(data + index, textLength, text, textLength)) {
+                *foundAt = index;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool FindBytes(
+        const UCHAR* data,
+        SIZE_T dataLength,
+        const UCHAR* pattern,
+        SIZE_T patternLength,
+        SIZE_T start,
+        SIZE_T* foundAt)
+    {
+        if (foundAt != nullptr) {
+            *foundAt = 0;
+        }
+
+        if (data == nullptr ||
+            pattern == nullptr ||
+            foundAt == nullptr ||
+            patternLength == 0 ||
+            start > dataLength ||
+            patternLength > dataLength - start) {
+            return false;
+        }
+
+        for (SIZE_T index = start; index <= dataLength - patternLength; ++index) {
+            if (memcmp(data + index, pattern, patternLength) == 0) {
                 *foundAt = index;
                 return true;
             }
@@ -414,6 +461,10 @@ namespace
                 return STATUS_INVALID_PARAMETER;
             }
 
+            if (sendCalls_ < 2 && length <= sizeof(sentRecords_[0])) {
+                memcpy(sentRecords_[sendCalls_], data, length);
+                sentRecordLengths_[sendCalls_] = length;
+            }
             ++sendCalls_;
             if (bytesSent != nullptr) {
                 *bytesSent = length;
@@ -457,11 +508,23 @@ namespace
             return sendCalls_;
         }
 
+        const UCHAR* SentRecord(SIZE_T index) const noexcept
+        {
+            return index < 2 && sentRecordLengths_[index] != 0 ? sentRecords_[index] : nullptr;
+        }
+
+        SIZE_T SentRecordLength(SIZE_T index) const noexcept
+        {
+            return index < 2 ? sentRecordLengths_[index] : 0;
+        }
+
     private:
         const UCHAR* receiveBytes_ = nullptr;
         SIZE_T receiveLength_ = 0;
         SIZE_T receiveOffset_ = 0;
         SIZE_T sendCalls_ = 0;
+        UCHAR sentRecords_[2][4096] = {};
+        SIZE_T sentRecordLengths_[2] = {};
     };
 
     void TestTlsHandshakeFailureRecordsLocalPolicy()
@@ -1371,6 +1434,218 @@ namespace
         return false;
     }
 
+    ULONGLONG TestCurrentMilliseconds()
+    {
+        return static_cast<ULONGLONG>(time(nullptr)) * 1000ULL;
+    }
+
+    void FillMatchingTls13Ticket(Tls13SessionTicket& ticket, ULONGLONG issueTimeMilliseconds)
+    {
+        ticket = {};
+        const UCHAR identity[] = { 't', 'i', 'c', 'k', 'e', 't' };
+        memcpy(ticket.Identity, identity, sizeof(identity));
+        ticket.IdentityLength = sizeof(identity);
+        ticket.LifetimeSeconds = 60;
+        ticket.AgeAdd = 7;
+        ticket.IssueTimeMilliseconds = issueTimeMilliseconds;
+        ticket.Version = { 3, 4 };
+        const char serverName[] = "example.com";
+        memcpy(ticket.ServerName, serverName, sizeof(serverName) - 1);
+        ticket.ServerNameLength = sizeof(serverName) - 1;
+        const char alpn[] = "h2";
+        memcpy(ticket.Alpn, alpn, sizeof(alpn) - 1);
+        ticket.AlpnLength = sizeof(alpn) - 1;
+        ticket.CipherSuite = TlsCipherSuite::TlsAes128GcmSha256;
+        for (SIZE_T index = 0; index < 32; ++index) {
+            ticket.ResumptionSecret[index] = static_cast<UCHAR>(0x44 + index);
+        }
+        ticket.ResumptionSecretLength = 32;
+        ticket.MaxEarlyDataSize = 0;
+    }
+
+    bool ParseSentClientHello(
+        const ScriptedTlsTransport& transport,
+        SIZE_T sendIndex,
+        TlsHandshakeMessageView& message)
+    {
+        message = {};
+        const UCHAR* recordBytes = transport.SentRecord(sendIndex);
+        const SIZE_T recordLength = transport.SentRecordLength(sendIndex);
+        if (recordBytes == nullptr || recordLength == 0) {
+            return false;
+        }
+
+        TlsRecordView record = {};
+        NTSTATUS status = TlsRecordLayer::Parse(recordBytes, recordLength, record);
+        if (!NT_SUCCESS(status) ||
+            record.ContentType != TlsContentType::Handshake ||
+            record.BytesConsumed != recordLength) {
+            return false;
+        }
+
+        status = TlsHandshake12::ParseMessage(record.Fragment, record.FragmentLength, message);
+        return NT_SUCCESS(status) &&
+            message.Type == TlsHandshakeType::ClientHello &&
+            message.BytesConsumed == record.FragmentLength;
+    }
+
+    bool SentClientHelloHasExtension(
+        const ScriptedTlsTransport& transport,
+        SIZE_T sendIndex,
+        USHORT extensionType)
+    {
+        TlsHandshakeMessageView message = {};
+        return ParseSentClientHello(transport, sendIndex, message) &&
+            ClientHelloHasExtension(message.Body, message.BodyLength, extensionType);
+    }
+
+    bool ReadFirstPskIdentityAge(const UCHAR* extension, SIZE_T extensionLength, ULONG* age)
+    {
+        if (age != nullptr) {
+            *age = 0;
+        }
+        if (extension == nullptr || age == nullptr || extensionLength < 8) {
+            return false;
+        }
+
+        SIZE_T offset = 0;
+        const SIZE_T identitiesLength =
+            (static_cast<SIZE_T>(extension[offset]) << 8) | extension[offset + 1];
+        offset += 2;
+        if (identitiesLength == 0 || identitiesLength > extensionLength - offset) {
+            return false;
+        }
+
+        const SIZE_T identitiesEnd = offset + identitiesLength;
+        if (identitiesEnd - offset < 6) {
+            return false;
+        }
+
+        const SIZE_T identityLength =
+            (static_cast<SIZE_T>(extension[offset]) << 8) | extension[offset + 1];
+        offset += 2;
+        if (identityLength > identitiesEnd - offset || identitiesEnd - offset - identityLength < 4) {
+            return false;
+        }
+
+        offset += identityLength;
+        *age = (static_cast<ULONG>(extension[offset]) << 24) |
+            (static_cast<ULONG>(extension[offset + 1]) << 16) |
+            (static_cast<ULONG>(extension[offset + 2]) << 8) |
+            extension[offset + 3];
+        return true;
+    }
+
+    bool ReadFirstPskBinder(
+        const UCHAR* extension,
+        SIZE_T extensionLength,
+        const UCHAR** binder,
+        SIZE_T* binderLength)
+    {
+        if (binder != nullptr) {
+            *binder = nullptr;
+        }
+        if (binderLength != nullptr) {
+            *binderLength = 0;
+        }
+        if (extension == nullptr || binder == nullptr || binderLength == nullptr || extensionLength < 6) {
+            return false;
+        }
+
+        SIZE_T offset = 0;
+        const SIZE_T identitiesLength =
+            (static_cast<SIZE_T>(extension[offset]) << 8) | extension[offset + 1];
+        offset += 2;
+        if (identitiesLength == 0 || identitiesLength > extensionLength - offset) {
+            return false;
+        }
+        offset += identitiesLength;
+        if (extensionLength - offset < 3) {
+            return false;
+        }
+
+        const SIZE_T bindersLength =
+            (static_cast<SIZE_T>(extension[offset]) << 8) | extension[offset + 1];
+        offset += 2;
+        if (bindersLength == 0 || bindersLength != extensionLength - offset) {
+            return false;
+        }
+
+        const SIZE_T firstBinderLength = extension[offset++];
+        if (firstBinderLength == 0 || firstBinderLength > extensionLength - offset) {
+            return false;
+        }
+
+        *binder = extension + offset;
+        *binderLength = firstBinderLength;
+        return true;
+    }
+
+    void WriteUint16ForTest(UCHAR* destination, SIZE_T* offset, USHORT value)
+    {
+        destination[(*offset)++] = static_cast<UCHAR>((value >> 8) & 0xff);
+        destination[(*offset)++] = static_cast<UCHAR>(value & 0xff);
+    }
+
+    bool BuildHelloRetryRequestRecord(UCHAR* record, SIZE_T recordCapacity, SIZE_T* recordLength)
+    {
+        if (recordLength != nullptr) {
+            *recordLength = 0;
+        }
+        if (record == nullptr || recordLength == nullptr || recordCapacity == 0) {
+            return false;
+        }
+
+        const UCHAR hrrRandom[] = {
+            0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11,
+            0xBE, 0x1D, 0x8C, 0x02, 0x1E, 0x65, 0xB8, 0x91,
+            0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB, 0x8C, 0x5E,
+            0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C
+        };
+
+        UCHAR body[128] = {};
+        SIZE_T bodyOffset = 0;
+        WriteUint16ForTest(body, &bodyOffset, 0x0303);
+        memcpy(body + bodyOffset, hrrRandom, sizeof(hrrRandom));
+        bodyOffset += sizeof(hrrRandom);
+        body[bodyOffset++] = 0;
+        WriteUint16ForTest(body, &bodyOffset, static_cast<USHORT>(TlsCipherSuite::TlsAes128GcmSha256));
+        body[bodyOffset++] = 0;
+
+        const SIZE_T extensionsLengthOffset = bodyOffset;
+        WriteUint16ForTest(body, &bodyOffset, 0);
+        WriteUint16ForTest(body, &bodyOffset, 43);
+        WriteUint16ForTest(body, &bodyOffset, 2);
+        WriteUint16ForTest(body, &bodyOffset, 0x0304);
+        WriteUint16ForTest(body, &bodyOffset, 51);
+        WriteUint16ForTest(body, &bodyOffset, 2);
+        WriteUint16ForTest(body, &bodyOffset, static_cast<USHORT>(TlsNamedGroup::Secp384r1));
+        const SIZE_T extensionsLength = bodyOffset - extensionsLengthOffset - 2;
+        body[extensionsLengthOffset] = static_cast<UCHAR>((extensionsLength >> 8) & 0xff);
+        body[extensionsLengthOffset + 1] = static_cast<UCHAR>(extensionsLength & 0xff);
+
+        UCHAR message[sizeof(body) + 4] = {};
+        SIZE_T messageOffset = 0;
+        message[messageOffset++] = static_cast<UCHAR>(TlsHandshakeType::ServerHello);
+        message[messageOffset++] = static_cast<UCHAR>((bodyOffset >> 16) & 0xff);
+        message[messageOffset++] = static_cast<UCHAR>((bodyOffset >> 8) & 0xff);
+        message[messageOffset++] = static_cast<UCHAR>(bodyOffset & 0xff);
+        memcpy(message + messageOffset, body, bodyOffset);
+        messageOffset += bodyOffset;
+
+        TlsPlaintextRecord plain = {};
+        plain.ContentType = TlsContentType::Handshake;
+        plain.Version = { 3, 3 };
+        plain.Fragment = message;
+        plain.FragmentLength = messageOffset;
+        const NTSTATUS status = TlsRecordLayer::EncodePlaintext(
+            plain,
+            record,
+            recordCapacity,
+            recordLength);
+        return NT_SUCCESS(status);
+    }
+
     void TestClientHelloAdvertisesSessionTicket()
     {
         TlsContext context;
@@ -1907,6 +2182,241 @@ namespace
         Expect(status == STATUS_INVALID_PARAMETER, "TLS 1.3 PSK binder rejects non-digest transcript hash length");
     }
 
+    void TestTls13SelectedPskIdentityValidation()
+    {
+        Tls13ServerHelloView serverHello = {};
+        serverHello.SelectedPskIdentity = 0xffff;
+        NTSTATUS status = TlsHandshake13::ValidateSelectedPskIdentity(serverHello, 0);
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 accepts absent selected_psk_identity without offered PSK");
+
+        serverHello.SelectedPskIdentity = 0;
+        status = TlsHandshake13::ValidateSelectedPskIdentity(serverHello, 0);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "TLS 1.3 rejects selected_psk_identity when no PSK was offered");
+
+        serverHello.SelectedPskIdentity = 1;
+        status = TlsHandshake13::ValidateSelectedPskIdentity(serverHello, 1);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "TLS 1.3 rejects out-of-range selected_psk_identity");
+
+        serverHello.SelectedPskIdentity = 0;
+        status = TlsHandshake13::ValidateSelectedPskIdentity(serverHello, 1);
+        Expect(status == STATUS_SUCCESS, "TLS 1.3 accepts in-range selected_psk_identity");
+    }
+
+    void TestTls13TicketSelectionBindsContextAndAge()
+    {
+        Tls13SessionCache cache = {};
+        FillMatchingTls13Ticket(cache.Tickets[0], TestCurrentMilliseconds() - 2000ULL);
+        cache.TicketCount = 1;
+
+        const TlsAlpnProtocol alpn[] = {
+            { "h2", 2 }
+        };
+
+        ScriptedTlsTransport transport(nullptr, 0);
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+        options.MinimumProtocol = TlsProtocol::Tls13;
+        options.MaximumProtocol = TlsProtocol::Tls13;
+        options.AlpnProtocols = alpn;
+        options.AlpnProtocolCount = 1;
+        options.SessionCache = &cache;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 ticket test stops after ClientHello when peer disconnects");
+        Expect(transport.SendCalls() == 1, "TLS 1.3 ticket test sends one ClientHello");
+
+        TlsHandshakeMessageView clientHello = {};
+        const bool parsed = ParseSentClientHello(transport, 0, clientHello);
+        Expect(parsed, "TLS 1.3 ticket ClientHello parses from sent record");
+        if (!parsed) {
+            return;
+        }
+
+        const UCHAR* extension = nullptr;
+        SIZE_T extensionLength = 0;
+        const bool found = FindClientHelloExtension(clientHello.Body, clientHello.BodyLength, 41, &extension, &extensionLength);
+        Expect(found, "TLS 1.3 matching ticket offers PSK extension");
+        if (!found) {
+            return;
+        }
+
+        ULONG obfuscatedAge = 0;
+        Expect(ReadFirstPskIdentityAge(extension, extensionLength, &obfuscatedAge), "TLS 1.3 PSK identity age parses");
+        Expect(obfuscatedAge >= 2007 && obfuscatedAge <= 6007, "TLS 1.3 PSK obfuscated age includes issue time delta and age_add");
+        Expect(!ClientHelloHasExtension(clientHello.Body, clientHello.BodyLength, 42), "TLS 1.3 early_data is not offered by default");
+    }
+
+    void TestTls13TicketSelectionSkipsMismatches()
+    {
+        const TlsAlpnProtocol h2[] = {
+            { "h2", 2 }
+        };
+        const TlsAlpnProtocol http11[] = {
+            { "http/1.1", 8 }
+        };
+
+        Tls13SessionTicket ticket = {};
+        FillMatchingTls13Ticket(ticket, TestCurrentMilliseconds() - 10000ULL);
+        ticket.LifetimeSeconds = 1;
+        Tls13SessionCache cache = {};
+        cache.Tickets[0] = ticket;
+        cache.TicketCount = 1;
+        ScriptedTlsTransport expiredTransport(nullptr, 0);
+        TlsConnection expiredConnection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+        options.MinimumProtocol = TlsProtocol::Tls13;
+        options.MaximumProtocol = TlsProtocol::Tls13;
+        options.AlpnProtocols = h2;
+        options.AlpnProtocolCount = 1;
+        options.SessionCache = &cache;
+        NTSTATUS status = expiredConnection.Connect(expiredTransport, options);
+        ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 expired ticket test stops after ClientHello");
+        Expect(!SentClientHelloHasExtension(expiredTransport, 0, 41), "TLS 1.3 expired ticket is not offered");
+
+        FillMatchingTls13Ticket(cache.Tickets[0], TestCurrentMilliseconds() - 1000ULL);
+        memcpy(cache.Tickets[0].ServerName, "other.example", 13);
+        cache.Tickets[0].ServerNameLength = 13;
+        ScriptedTlsTransport sniTransport(nullptr, 0);
+        TlsConnection sniConnection;
+        status = sniConnection.Connect(sniTransport, options);
+        ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 SNI mismatch ticket test stops after ClientHello");
+        Expect(!SentClientHelloHasExtension(sniTransport, 0, 41), "TLS 1.3 SNI-mismatched ticket is not offered");
+
+        FillMatchingTls13Ticket(cache.Tickets[0], TestCurrentMilliseconds() - 1000ULL);
+        options.AlpnProtocols = http11;
+        options.AlpnProtocolCount = 1;
+        ScriptedTlsTransport alpnTransport(nullptr, 0);
+        TlsConnection alpnConnection;
+        status = alpnConnection.Connect(alpnTransport, options);
+        ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 ALPN mismatch ticket test stops after ClientHello");
+        Expect(!SentClientHelloHasExtension(alpnTransport, 0, 41), "TLS 1.3 ALPN-mismatched ticket is not offered");
+
+        FillMatchingTls13Ticket(cache.Tickets[0], TestCurrentMilliseconds() - 1000ULL);
+        cache.Tickets[0].CipherSuite = TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256;
+        options.AlpnProtocols = h2;
+        options.AlpnProtocolCount = 1;
+        ScriptedTlsTransport cipherTransport(nullptr, 0);
+        TlsConnection cipherConnection;
+        status = cipherConnection.Connect(cipherTransport, options);
+        ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 cipher mismatch ticket test stops after ClientHello");
+        Expect(!SentClientHelloHasExtension(cipherTransport, 0, 41), "TLS 1.3 non-TLS1.3-cipher ticket is not offered");
+    }
+
+    void TestTls13HelloRetryRequestRecomputesPskBinder()
+    {
+        UCHAR hrrRecord[256] = {};
+        SIZE_T hrrRecordLength = 0;
+        Expect(BuildHelloRetryRequestRecord(hrrRecord, sizeof(hrrRecord), &hrrRecordLength), "TLS 1.3 HRR record fixture builds");
+        if (hrrRecordLength == 0) {
+            return;
+        }
+
+        Tls13SessionCache cache = {};
+        FillMatchingTls13Ticket(cache.Tickets[0], TestCurrentMilliseconds() - 1000ULL);
+        cache.TicketCount = 1;
+
+        const TlsAlpnProtocol alpn[] = {
+            { "h2", 2 }
+        };
+
+        ScriptedTlsTransport transport(hrrRecord, hrrRecordLength);
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+        options.MinimumProtocol = TlsProtocol::Tls13;
+        options.MaximumProtocol = TlsProtocol::Tls13;
+        options.AlpnProtocols = alpn;
+        options.AlpnProtocolCount = 1;
+        options.SessionCache = &cache;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 HRR test stops after second ClientHello when peer disconnects");
+        Expect(transport.SendCalls() == 2, "TLS 1.3 HRR sends a second ClientHello");
+
+        TlsHandshakeMessageView firstClientHello = {};
+        TlsHandshakeMessageView secondClientHello = {};
+        const bool firstParsed = ParseSentClientHello(transport, 0, firstClientHello);
+        const bool secondParsed = ParseSentClientHello(transport, 1, secondClientHello);
+        Expect(firstParsed && secondParsed, "TLS 1.3 HRR ClientHellos parse from sent records");
+        if (!firstParsed || !secondParsed) {
+            return;
+        }
+
+        const UCHAR* firstExtension = nullptr;
+        const UCHAR* secondExtension = nullptr;
+        SIZE_T firstExtensionLength = 0;
+        SIZE_T secondExtensionLength = 0;
+        Expect(
+            FindClientHelloExtension(firstClientHello.Body, firstClientHello.BodyLength, 41, &firstExtension, &firstExtensionLength),
+            "TLS 1.3 first HRR ClientHello has PSK extension");
+        Expect(
+            FindClientHelloExtension(secondClientHello.Body, secondClientHello.BodyLength, 41, &secondExtension, &secondExtensionLength),
+            "TLS 1.3 second HRR ClientHello has PSK extension");
+        if (firstExtension == nullptr || secondExtension == nullptr) {
+            return;
+        }
+
+        const UCHAR* firstBinder = nullptr;
+        const UCHAR* secondBinder = nullptr;
+        SIZE_T firstBinderLength = 0;
+        SIZE_T secondBinderLength = 0;
+        Expect(ReadFirstPskBinder(firstExtension, firstExtensionLength, &firstBinder, &firstBinderLength), "TLS 1.3 first HRR binder parses");
+        Expect(ReadFirstPskBinder(secondExtension, secondExtensionLength, &secondBinder, &secondBinderLength), "TLS 1.3 second HRR binder parses");
+        if (firstBinder == nullptr || secondBinder == nullptr || firstBinderLength != secondBinderLength) {
+            return;
+        }
+
+        Expect(
+            memcmp(firstBinder, secondBinder, firstBinderLength) != 0,
+            "TLS 1.3 HRR second ClientHello recomputes PSK binder");
+    }
+
+    void TestTls13EarlyDataRequiresReplaySafe()
+    {
+        Tls13SessionCache cache = {};
+        FillMatchingTls13Ticket(cache.Tickets[0], TestCurrentMilliseconds() - 1000ULL);
+        cache.Tickets[0].MaxEarlyDataSize = 32;
+        cache.TicketCount = 1;
+
+        const TlsAlpnProtocol alpn[] = {
+            { "h2", 2 }
+        };
+        const UCHAR earlyData[] = { 'G', 'E', 'T' };
+        SIZE_T earlyDataBytesSent = 99;
+        bool earlyDataAccepted = true;
+
+        ScriptedTlsTransport transport(nullptr, 0);
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+        options.MinimumProtocol = TlsProtocol::Tls13;
+        options.MaximumProtocol = TlsProtocol::Tls13;
+        options.AlpnProtocols = alpn;
+        options.AlpnProtocolCount = 1;
+        options.SessionCache = &cache;
+        options.EnableEarlyData = true;
+        options.EarlyData = earlyData;
+        options.EarlyDataLength = sizeof(earlyData);
+        options.EarlyDataBytesSent = &earlyDataBytesSent;
+        options.EarlyDataAccepted = &earlyDataAccepted;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(status, STATUS_NOT_SUPPORTED, "TLS 1.3 rejects 0-RTT without replay-safe opt-in");
+        Expect(transport.SendCalls() == 0, "TLS 1.3 non replay-safe 0-RTT sends no data");
+        Expect(earlyDataBytesSent == 0, "TLS 1.3 non replay-safe 0-RTT reports zero bytes sent");
+        Expect(!earlyDataAccepted, "TLS 1.3 non replay-safe 0-RTT reports not accepted");
+    }
+
     void TestParseNewSessionTicketMessage()
     {
         const UCHAR message[] = {
@@ -2384,6 +2894,157 @@ namespace
         Expect(status == STATUS_TRUST_FAILURE, "certificate validation rejects mismatched IP literal without CN fallback");
     }
 
+    void TestCertificateValidationRejectsRequiredRevocation()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost certificate fixture loads for revocation-required test");
+        if (!loaded) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "localhost";
+        options.HostNameLength = strlen(options.HostName);
+        options.RequireRevocationCheck = true;
+
+        const NTSTATUS status = CertificateValidator::ValidateChain(chain, options);
+        Expect(status == STATUS_NOT_SUPPORTED, "certificate validation rejects required revocation when OCSP/CRL is unsupported");
+    }
+
+    void TestCertificateValidationRejectsIdnaHost()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost certificate fixture loads for IDNA test");
+        if (!loaded) {
+            return;
+        }
+
+        CertificateAuthorityBundle bundle = {};
+        bundle.Data = pem;
+        bundle.DataLength = pemLength;
+
+        CertificateStoreOptions storeOptions = {};
+        storeOptions.AuthorityBundles = &bundle;
+        storeOptions.AuthorityBundleCount = 1;
+
+        CertificateStore store;
+        NTSTATUS status = store.Initialize(storeOptions);
+        Expect(status == STATUS_SUCCESS, "certificate store accepts PEM bundle for IDNA test");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        const char idnaHost[] = {
+            'l', 'o', 'c', 'a', 'l',
+            static_cast<char>(0xc3),
+            static_cast<char>(0xb6),
+            'h', 'o', 's', 't',
+            '\0'
+        };
+
+        CertificateValidationOptions options = {};
+        options.HostName = idnaHost;
+        options.HostNameLength = sizeof(idnaHost) - 1;
+        options.Store = &store;
+
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_NOT_SUPPORTED, "certificate validation rejects non-ASCII IDNA host without normalization");
+    }
+
+    void TestCertificateValidationRejectsNameConstraintsExtension()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost certificate fixture loads for Name Constraints test");
+        if (!loaded) {
+            return;
+        }
+
+        const UCHAR subjectAltNameOid[] = { 0x55, 0x1d, 0x11 };
+        SIZE_T oidOffset = 0;
+        const bool foundOid = FindBytes(der, derLength, subjectAltNameOid, sizeof(subjectAltNameOid), 0, &oidOffset);
+        Expect(foundOid, "localhost certificate SAN OID is found for Name Constraints test");
+        if (!foundOid) {
+            return;
+        }
+
+        der[oidOffset + 2] = 0x1e;
+        certificateList[0] = static_cast<UCHAR>((derLength >> 16) & 0xff);
+        certificateList[1] = static_cast<UCHAR>((derLength >> 8) & 0xff);
+        certificateList[2] = static_cast<UCHAR>(derLength & 0xff);
+        memcpy(certificateList + 3, der, derLength);
+        certificateListLength = derLength + 3;
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "localhost";
+        options.HostNameLength = strlen(options.HostName);
+
+        const NTSTATUS status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_NOT_SUPPORTED, "certificate validation rejects unsupported Name Constraints instead of ignoring them");
+    }
+
     void TestEncodeClientKeyExchange()
     {
         const UCHAR publicKey[] = { 4, 1, 2, 3, 4 };
@@ -2516,6 +3177,11 @@ int main()
     TestTls13PskBinderComputes();
     TestTls13ClientHelloPskBinderTranscriptLength();
     TestTls13PskBinderRejectsWrongHashLength();
+    TestTls13SelectedPskIdentityValidation();
+    TestTls13TicketSelectionBindsContextAndAge();
+    TestTls13TicketSelectionSkipsMismatches();
+    TestTls13HelloRetryRequestRecomputesPskBinder();
+    TestTls13EarlyDataRequiresReplaySafe();
     TestParseNewSessionTicketMessage();
     TestParseNewSessionTicketRejectsUnexpectedType();
     TestParseNewSessionTicketRejectsBadLength();
@@ -2530,6 +3196,9 @@ int main()
     TestCertificateValidationRequiresTrustMaterial();
     TestCertificateValidationAcceptsExternalPemBundle();
     TestCertificateValidationMatchesIpAddressSan();
+    TestCertificateValidationRejectsRequiredRevocation();
+    TestCertificateValidationRejectsIdnaHost();
+    TestCertificateValidationRejectsNameConstraintsExtension();
     TestEncodeClientKeyExchange();
     TestFinishedVerifyData();
     TestTranscriptHash();

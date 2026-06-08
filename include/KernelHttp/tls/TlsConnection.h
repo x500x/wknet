@@ -70,6 +70,7 @@ namespace tls
         const crypto::CngProviderCache* ProviderCache = nullptr;
         bool EnableSessionResumption = true;
         bool EnableEarlyData = false;
+        bool EarlyDataReplaySafe = false;
     };
 
     class TlsConnection final
@@ -209,7 +210,8 @@ namespace tls
             _Out_ Tls13PskIdentity& identity,
             _Outptr_result_bytebuffer_(*resumptionSecretLength) const UCHAR** resumptionSecret,
             _Out_ SIZE_T* resumptionSecretLength,
-            _Out_ bool* earlyDataAllowed) noexcept;
+            _Out_ bool* earlyDataAllowed,
+            _Outptr_result_maybenull_ const Tls13SessionTicket** selectedTicket) noexcept;
 
         _Must_inspect_result_
         NTSTATUS ReadServerChangeCipherSpec(
@@ -286,6 +288,9 @@ namespace tls
         TlsReceiveDeadline handshakeReceiveDeadline_ = {};
         bool encrypted_ = false;
         bool tls13RecordProtection_ = false;
+        char tls13TicketServerName_[Tls13MaxTicketServerNameLength + 1] = {};
+        SIZE_T tls13TicketServerNameLength_ = 0;
+        bool tls13TicketServerNameCacheable_ = false;
         char* negotiatedAlpn_ = nullptr;
         SIZE_T negotiatedAlpnLength_ = 0;
         TlsHandshakeFailure lastHandshakeFailure_ = {};
