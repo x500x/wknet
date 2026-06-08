@@ -454,6 +454,11 @@ namespace websocket
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
+        const http::HttpHeader* extensions = nullptr;
+        if (response.FindHeader(http::MakeText("Sec-WebSocket-Extensions"), &extensions)) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
         HeapArray<char> expected(WebSocketAcceptValueLength);
         if (!expected.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;

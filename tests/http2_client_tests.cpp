@@ -34,27 +34,27 @@ namespace net
 {
     WskSocket::~WskSocket() noexcept = default;
 
-    NTSTATUS WskSocket::Connect(WskClient&, const SOCKADDR*, const SOCKADDR*) noexcept
+    NTSTATUS WskSocket::Connect(WskClient&, const SOCKADDR*, const SOCKADDR*, const WskCancellationToken*) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS WskSocket::Send(WskBuffer&, SIZE_T, SIZE_T*, ULONG) noexcept
+    NTSTATUS WskSocket::Send(WskBuffer&, SIZE_T, SIZE_T*, ULONG, const WskCancellationToken*) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS WskSocket::Send(const void*, SIZE_T, SIZE_T*, ULONG) noexcept
+    NTSTATUS WskSocket::Send(const void*, SIZE_T, SIZE_T*, ULONG, const WskCancellationToken*) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS WskSocket::Receive(WskBuffer&, SIZE_T, SIZE_T*, ULONG, ULONG) noexcept
+    NTSTATUS WskSocket::Receive(WskBuffer&, SIZE_T, SIZE_T*, ULONG, ULONG, const WskCancellationToken*) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS WskSocket::Receive(void*, SIZE_T, SIZE_T*, ULONG, ULONG) noexcept
+    NTSTATUS WskSocket::Receive(void*, SIZE_T, SIZE_T*, ULONG, ULONG, const WskCancellationToken*) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }
@@ -155,9 +155,13 @@ namespace
     class ScriptedHttp2Transport final : public Http2Transport
     {
     public:
-        ScriptedHttp2Transport(const UCHAR* receiveBytes, SIZE_T receiveLength) noexcept
+        ScriptedHttp2Transport(
+            const UCHAR* receiveBytes,
+            SIZE_T receiveLength,
+            bool timeoutAtEnd = false) noexcept
             : receiveBytes_(receiveBytes),
-              receiveLength_(receiveLength)
+              receiveLength_(receiveLength),
+              timeoutAtEnd_(timeoutAtEnd)
         {
         }
 
@@ -185,7 +189,7 @@ namespace
                 return STATUS_INVALID_PARAMETER;
             }
             if (receiveOffset_ >= receiveLength_) {
-                return STATUS_CONNECTION_DISCONNECTED;
+                return timeoutAtEnd_ ? STATUS_IO_TIMEOUT : STATUS_CONNECTION_DISCONNECTED;
             }
 
             SIZE_T available = receiveLength_ - receiveOffset_;
@@ -212,6 +216,7 @@ namespace
         const UCHAR* receiveBytes_ = nullptr;
         SIZE_T receiveLength_ = 0;
         SIZE_T receiveOffset_ = 0;
+        bool timeoutAtEnd_ = false;
         UCHAR sentBytes_[4096] = {};
         SIZE_T sentLength_ = 0;
     };
@@ -295,6 +300,30 @@ namespace
             nullptr,
             0,
             false,
+            script + *length,
+            capacity - *length,
+            &written);
+        if (!NT_SUCCESS(status)) {
+            return false;
+        }
+        *length += written;
+        return true;
+    }
+
+    bool AppendData(
+        const UCHAR* data,
+        SIZE_T dataLength,
+        bool endStream,
+        UCHAR* script,
+        SIZE_T capacity,
+        SIZE_T* length)
+    {
+        SIZE_T written = 0;
+        const NTSTATUS status = Http2FrameCodec::EncodeData(
+            1,
+            data,
+            dataLength,
+            endStream,
             script + *length,
             capacity - *length,
             &written);
@@ -517,6 +546,56 @@ namespace
             &statusCode,
             nameValueBuffer,
             sizeof(nameValueBuffer));
+    }
+
+    NTSTATUS SendDefaultRequest(
+        ScriptedHttp2Transport& transport,
+        Http2Connection& connection,
+        SIZE_T* responseBodyLength = nullptr) noexcept
+    {
+        if (responseBodyLength != nullptr) {
+            *responseBodyLength = 0;
+        }
+
+        NTSTATUS status = connection.Initialize(transport);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T bodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &bodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        if (responseBodyLength != nullptr) {
+            *responseBodyLength = bodyLength;
+        }
+        return status;
     }
 
     void TestPromotedAcceptEncodingIsNotDuplicated()
@@ -749,6 +828,57 @@ namespace
             "closed stream does not receive WINDOW_UPDATE");
     }
 
+    void TestTimeoutBeforeEndStreamFailsResponse()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR body[] = { 'p', 'a', 'r', 't' };
+
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 timeout server settings fixture builds");
+        Expect(AppendResponseHeaders(false, true, script, sizeof(script), &scriptLength),
+            "HTTP/2 timeout response headers fixture builds");
+        Expect(AppendData(body, sizeof(body), false, script, sizeof(script), &scriptLength),
+            "HTTP/2 timeout partial DATA fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength, true);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 timeout connection initializes");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_IO_TIMEOUT, "HTTP/2 timeout before END_STREAM fails response");
+        Expect(responseBodyLength == 0, "HTTP/2 incomplete timeout does not mark body complete");
+    }
+
     void TestDeleteWithBodySendsDataEndStream()
     {
         UCHAR script[256] = {};
@@ -905,6 +1035,56 @@ namespace
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 connection rejects stream zero DATA");
     }
 
+    void TestConnectionErrorSendsGoAway()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR payload[] = { 0 };
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 GOAWAY server settings fixture builds");
+        Expect(AppendRawFrame(
+            KernelHttp::http2::Http2FrameType::Data,
+            0,
+            0,
+            payload,
+            sizeof(payload),
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 stream zero DATA fixture builds for GOAWAY");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        const NTSTATUS status = SendDefaultRequest(transport, connection);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 stream zero DATA still fails request");
+        Expect(
+            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::GoAway, 0) == 1,
+            "HTTP/2 connection-level protocol error sends GOAWAY");
+    }
+
+    void TestStreamErrorSendsRstStream()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR payload[] = { 'x' };
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 RST server settings fixture builds");
+        Expect(AppendRawFrame(
+            KernelHttp::http2::Http2FrameType::Data,
+            Http2FrameFlags::EndStream,
+            1,
+            payload,
+            sizeof(payload),
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 DATA before headers fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        const NTSTATUS status = SendDefaultRequest(transport, connection);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 DATA before headers fails request");
+        Expect(
+            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::RstStream, 1) == 1,
+            "HTTP/2 stream-local protocol error sends RST_STREAM");
+    }
+
     void TestConnectionRejectsStreamZeroHeaders()
     {
         UCHAR script[256] = {};
@@ -953,12 +1133,15 @@ int main()
     TestUpgradeReceivesResponseOnStreamOne();
     TestUpgradeReservesStreamOneForInitiatingRequest();
     TestEndStreamDataSkipsStreamWindowUpdate();
+    TestTimeoutBeforeEndStreamFailsResponse();
     TestDeleteWithBodySendsDataEndStream();
     TestConnectionRejectsOrphanContinuation();
     TestConnectionRejectsInterleavedFrameDuringContinuation();
     TestConnectionRejectsWindowUpdateOverflow();
     TestConnectionRejectsEmptyContinuationFlood();
     TestConnectionRejectsStreamZeroData();
+    TestConnectionErrorSendsGoAway();
+    TestStreamErrorSendsRstStream();
     TestConnectionRejectsStreamZeroHeaders();
     TestConnectionRejectsStreamZeroRstStream();
 

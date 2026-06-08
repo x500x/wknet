@@ -56,23 +56,52 @@ namespace
         size_t payloadLength,
         bool fin = true)
     {
-        if (payloadLength > 125 ||
-            destination == nullptr ||
+        if (destination == nullptr ||
             destinationLength == nullptr ||
             (payload == nullptr && payloadLength != 0) ||
-            destinationCapacity - *destinationLength < payloadLength + 2) {
+            payloadLength > static_cast<size_t>(0x7fffffffffffffffULL)) {
             g_failed = true;
             printf("FAIL: append websocket server frame\n");
             return;
         }
 
+        size_t headerLength = 2;
+        if (payloadLength > 0xffff) {
+            headerLength = 10;
+        }
+        else if (payloadLength > 125) {
+            headerLength = 4;
+        }
+        if (destinationCapacity - *destinationLength < payloadLength + headerLength) {
+            g_failed = true;
+            printf("FAIL: append websocket server frame capacity\n");
+            return;
+        }
+
         unsigned char* cursor = destination + *destinationLength;
         cursor[0] = static_cast<unsigned char>((fin ? 0x80 : 0x00) | static_cast<unsigned char>(opcode));
-        cursor[1] = static_cast<unsigned char>(payloadLength);
-        if (payloadLength != 0) {
-            memcpy(cursor + 2, payload, payloadLength);
+        size_t payloadOffset = 2;
+        if (payloadLength <= 125) {
+            cursor[1] = static_cast<unsigned char>(payloadLength);
         }
-        *destinationLength += payloadLength + 2;
+        else if (payloadLength <= 0xffff) {
+            cursor[1] = 126;
+            cursor[2] = static_cast<unsigned char>((payloadLength >> 8) & 0xff);
+            cursor[3] = static_cast<unsigned char>(payloadLength & 0xff);
+            payloadOffset = 4;
+        }
+        else {
+            cursor[1] = 127;
+            unsigned long long length64 = static_cast<unsigned long long>(payloadLength);
+            for (size_t index = 0; index < 8; ++index) {
+                cursor[2 + index] = static_cast<unsigned char>((length64 >> (56 - (index * 8))) & 0xff);
+            }
+            payloadOffset = 10;
+        }
+        if (payloadLength != 0) {
+            memcpy(cursor + payloadOffset, payload, payloadLength);
+        }
+        *destinationLength += payloadLength + headerLength;
     }
 
     NTSTATUS DecodeClientFramePayload(
@@ -180,13 +209,17 @@ namespace
 
     struct FakeWebSocketServer
     {
-        unsigned char ReceiveBytes[4096] = {};
+        unsigned char ReceiveBytes[65536] = {};
         size_t ReceiveLength = 0;
         size_t ReceiveOffset = 0;
-        unsigned char InitialFrames[512] = {};
+        unsigned char InitialFrames[32768] = {};
         size_t InitialFrameLength = 0;
+        char LastHandshakeRequest[1024] = {};
+        size_t LastHandshakeRequestLength = 0;
         unsigned char LastClientPayload[256] = {};
         size_t LastClientPayloadLength = 0;
+        unsigned char LastClosePayload[125] = {};
+        size_t LastClosePayloadLength = 0;
         unsigned char FragmentPayload[256] = {};
         size_t FragmentPayloadLength = 0;
         WebSocketOpcode FragmentOpcode = WebSocketOpcode::Continuation;
@@ -197,9 +230,12 @@ namespace
         size_t FailConnectAttempts = 0;
         const char* SelectedSubprotocol = nullptr;
         size_t SelectedSubprotocolLength = 0;
+        const char* ResponseExtensions = nullptr;
+        size_t ResponseExtensionsLength = 0;
         bool EchoAfterPing = false;
         bool Connected = false;
         NTSTATUS CloseStatus = STATUS_SUCCESS;
+        size_t CloseCount = 0;
 
         void Reset()
         {
@@ -236,6 +272,9 @@ namespace
                 char request[1024] = {};
                 const size_t copyLength = dataLength < sizeof(request) - 1 ? dataLength : sizeof(request) - 1;
                 memcpy(request, data, copyLength);
+                memcpy(LastHandshakeRequest, request, copyLength);
+                LastHandshakeRequest[copyLength] = '\0';
+                LastHandshakeRequestLength = copyLength;
 
                 size_t clientKeyLength = 0;
                 const char* clientKey = FindHeaderValue(request, "Sec-WebSocket-Key", &clientKeyLength);
@@ -256,6 +295,15 @@ namespace
                 }
 
                 char response[512] = {};
+                const char* extensions = ResponseExtensions != nullptr ? ResponseExtensions : "";
+                const int extensionsLength = static_cast<int>(
+                    ResponseExtensions != nullptr ? ResponseExtensionsLength : 0);
+                const char* extensionsPrefix = ResponseExtensions != nullptr ?
+                    "Sec-WebSocket-Extensions: " :
+                    "";
+                const char* extensionsSuffix = ResponseExtensions != nullptr ?
+                    "\r\n" :
+                    "";
                 const int written = SelectedSubprotocol != nullptr ?
                     snprintf(
                         response,
@@ -265,11 +313,16 @@ namespace
                         "Connection: Upgrade\r\n"
                         "Sec-WebSocket-Accept: %.*s\r\n"
                         "Sec-WebSocket-Protocol: %.*s\r\n"
+                        "%s%.*s%s"
                         "\r\n",
                         static_cast<int>(acceptLength),
                         accept,
                         static_cast<int>(SelectedSubprotocolLength),
-                        SelectedSubprotocol) :
+                        SelectedSubprotocol,
+                        extensionsPrefix,
+                        extensionsLength,
+                        extensions,
+                        extensionsSuffix) :
                     snprintf(
                         response,
                         sizeof(response),
@@ -277,9 +330,14 @@ namespace
                         "Upgrade: websocket\r\n"
                         "Connection: Upgrade\r\n"
                         "Sec-WebSocket-Accept: %.*s\r\n"
+                        "%s%.*s%s"
                         "\r\n",
                         static_cast<int>(acceptLength),
-                        accept);
+                        accept,
+                        extensionsPrefix,
+                        extensionsLength,
+                        extensions,
+                        extensionsSuffix);
                 if (written <= 0 || static_cast<size_t>(written) >= sizeof(response)) {
                     return STATUS_BUFFER_TOO_SMALL;
                 }
@@ -310,6 +368,20 @@ namespace
 
             if (opcode == WebSocketOpcode::Pong) {
                 ++PongCount;
+                if (bytesSent != nullptr) {
+                    *bytesSent = dataLength;
+                }
+                return STATUS_SUCCESS;
+            }
+
+            if (opcode == WebSocketOpcode::Close) {
+                ++CloseCount;
+                LastClosePayloadLength = LastClientPayloadLength < sizeof(LastClosePayload) ?
+                    LastClientPayloadLength :
+                    sizeof(LastClosePayload);
+                if (LastClosePayloadLength != 0) {
+                    memcpy(LastClosePayload, LastClientPayload, LastClosePayloadLength);
+                }
                 if (bytesSent != nullptr) {
                     *bytesSent = dataLength;
                 }
@@ -456,6 +528,62 @@ namespace
         options.UseTls = false;
         options.VerifyCertificate = false;
         return options;
+    }
+
+    void ExpectHandshakeHost(const char* host, USHORT port, const wchar_t* serviceName, const char* expectedHost)
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.Host = host;
+        options.HostLength = strlen(host);
+        options.Port = port;
+        options.ServiceName = serviceName;
+
+        NTSTATUS status = client.Connect(wskClient, options, buffers);
+        Expect(NT_SUCCESS(status), "websocket connect succeeds for Host header formatting");
+
+        size_t hostLength = 0;
+        const char* hostValue = FindHeaderValue(server.LastHandshakeRequest, "Host", &hostLength);
+        Expect(hostValue != nullptr, "websocket handshake contains Host header");
+        Expect(
+            hostValue != nullptr &&
+            hostLength == strlen(expectedHost) &&
+            memcmp(hostValue, expectedHost, hostLength) == 0,
+            "websocket Host header matches expected authority");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestHandshakeHostHeaderFormatting()
+    {
+        ExpectHandshakeHost("example.test", 0, L"80", "example.test");
+        ExpectHandshakeHost("example.test", 80, L"80", "example.test");
+        ExpectHandshakeHost("example.test", 8080, L"8080", "example.test:8080");
+        ExpectHandshakeHost("::1", 80, L"80", "[::1]");
+        ExpectHandshakeHost("::1", 8080, L"8080", "[::1]:8080");
     }
 
     void TestHandshakeBufferedFrameSurvivesSendScratchReuse()
@@ -1044,6 +1172,37 @@ namespace
         g_server = nullptr;
     }
 
+    void TestConnectRejectsUnrequestedExtensions()
+    {
+        FakeWebSocketServer server;
+        server.ResponseExtensions = "permessage-deflate";
+        server.ResponseExtensionsLength = strlen(server.ResponseExtensions);
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        const NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "websocket connect rejects unrequested extensions");
+        g_server = nullptr;
+    }
+
     void TestReceiveHonorsOutputCapacity()
     {
         FakeWebSocketServer server;
@@ -1085,6 +1244,181 @@ namespace
         status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
         Expect(status == STATUS_BUFFER_TOO_SMALL, "websocket receive rejects undersized output buffer");
         Expect(bytesReceived == sizeof(banner) - 1, "undersized receive reports required payload length");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestReceiveMessageLargerThanFrameScratch()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        static unsigned char largeMessage[20000] = {};
+        for (size_t index = 0; index < sizeof(largeMessage); ++index) {
+            largeMessage[index] = static_cast<unsigned char>('a' + (index % 26));
+        }
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Text,
+            largeMessage,
+            sizeof(largeMessage));
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        static unsigned char payload[21000] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for large message test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(NT_SUCCESS(status), "websocket receive accepts message larger than frame scratch");
+        Expect(opcode == WebSocketOpcode::Text, "large receive opcode is text");
+        Expect(bytesReceived == sizeof(largeMessage), "large receive length matches");
+        Expect(memcmp(payload, largeMessage, sizeof(largeMessage)) == 0, "large receive payload matches");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestReceivePingWithoutAutoReplyReturnsControlEvent()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        const unsigned char ping[] = "hb";
+        const unsigned char text[] = "after-ping";
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Ping,
+            ping,
+            sizeof(ping) - 1);
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Text,
+            text,
+            sizeof(text) - 1);
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for manual ping test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived, false);
+        Expect(NT_SUCCESS(status), "manual ping receive succeeds");
+        Expect(opcode == WebSocketOpcode::Ping, "manual ping returns ping opcode");
+        Expect(bytesReceived == sizeof(ping) - 1, "manual ping payload length matches");
+        Expect(memcmp(payload, ping, sizeof(ping) - 1) == 0, "manual ping payload matches");
+        Expect(server.PongCount == 0, "manual ping receive does not auto-reply");
+
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(NT_SUCCESS(status), "data after manual ping is received");
+        Expect(opcode == WebSocketOpcode::Text, "data after manual ping opcode is text");
+        Expect(bytesReceived == sizeof(text) - 1, "data after manual ping length matches");
+        Expect(memcmp(payload, text, sizeof(text) - 1) == 0, "data after manual ping payload matches");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestReceiveCloseEchoesAndBlocksData()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        const unsigned char closePayload[] = { 0x03, 0xe8, 'b', 'y', 'e' };
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Close,
+            closePayload,
+            sizeof(closePayload));
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for close echo test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(NT_SUCCESS(status), "websocket receive close succeeds");
+        Expect(opcode == WebSocketOpcode::Close, "close receive returns close opcode");
+        Expect(bytesReceived == sizeof(closePayload), "close receive payload length matches");
+        Expect(memcmp(payload, closePayload, sizeof(closePayload)) == 0, "close receive payload matches");
+        Expect(server.CloseCount == 1, "client echoes close exactly once");
+        Expect(server.LastClosePayloadLength == sizeof(closePayload), "close echo payload length matches");
+        Expect(memcmp(server.LastClosePayload, closePayload, sizeof(closePayload)) == 0, "close echo payload matches");
+
+        const char text[] = "should-not-send";
+        status = client.SendText(text, sizeof(text) - 1, buffers);
+        Expect(status == STATUS_INVALID_DEVICE_STATE, "send after close receive is rejected");
+
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(status == STATUS_CONNECTION_DISCONNECTED, "receive after close state is disconnected");
 
         const NTSTATUS closeStatus = client.Close(buffers);
         UNREFERENCED_PARAMETER(closeStatus);
@@ -1378,7 +1712,7 @@ namespace net
 
     WskSocket::~WskSocket() noexcept = default;
 
-    NTSTATUS WskSocket::Connect(WskClient&, const SOCKADDR*, const SOCKADDR*) noexcept
+    NTSTATUS WskSocket::Connect(WskClient&, const SOCKADDR*, const SOCKADDR*, const WskCancellationToken*) noexcept
     {
         if (g_server == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
@@ -1388,12 +1722,17 @@ namespace net
         return g_server->Connect();
     }
 
-    NTSTATUS WskSocket::Send(WskBuffer&, SIZE_T, SIZE_T*, ULONG) noexcept
+    NTSTATUS WskSocket::Send(WskBuffer&, SIZE_T, SIZE_T*, ULONG, const WskCancellationToken*) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS WskSocket::Send(const void* data, SIZE_T length, SIZE_T* bytesSent, ULONG) noexcept
+    NTSTATUS WskSocket::Send(
+        const void* data,
+        SIZE_T length,
+        SIZE_T* bytesSent,
+        ULONG,
+        const WskCancellationToken*) noexcept
     {
         if (g_server == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
@@ -1402,12 +1741,18 @@ namespace net
         return g_server->Send(data, length, bytesSent);
     }
 
-    NTSTATUS WskSocket::Receive(WskBuffer&, SIZE_T, SIZE_T*, ULONG, ULONG) noexcept
+    NTSTATUS WskSocket::Receive(WskBuffer&, SIZE_T, SIZE_T*, ULONG, ULONG, const WskCancellationToken*) noexcept
     {
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS WskSocket::Receive(void* data, SIZE_T length, SIZE_T* bytesReceived, ULONG, ULONG) noexcept
+    NTSTATUS WskSocket::Receive(
+        void* data,
+        SIZE_T length,
+        SIZE_T* bytesReceived,
+        ULONG,
+        ULONG,
+        const WskCancellationToken*) noexcept
     {
         if (g_server == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
@@ -1447,6 +1792,7 @@ namespace net
 
 int main()
 {
+    TestHandshakeHostHeaderFormatting();
     TestHandshakeBufferedFrameSurvivesSendScratchReuse();
     TestSendTextCanEmitNonFinalFrame();
     TestContinuationCompletesFragmentedText();
@@ -1459,7 +1805,11 @@ int main()
     TestConnectAcceptsMatchingSubprotocol();
     TestConnectRejectsSubprotocolMismatch();
     TestConnectRejectsUnexpectedSubprotocol();
+    TestConnectRejectsUnrequestedExtensions();
     TestReceiveHonorsOutputCapacity();
+    TestReceiveMessageLargerThanFrameScratch();
+    TestReceivePingWithoutAutoReplyReturnsControlEvent();
+    TestReceiveCloseEchoesAndBlocksData();
     TestReceiveRejectsInvalidTextUtf8();
     TestReceiveRejectsMalformedCloseFrames();
     TestCloseTreatsConnectionResetAsClosed();

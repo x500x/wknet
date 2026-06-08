@@ -25,7 +25,8 @@ namespace
     volatile LONG g_asyncDrainState = 0;
     KEVENT g_asyncDrainEvent = {};
     constexpr ULONG KhMaxAsyncThreads = 256;
-    volatile LONG g_asyncThreadTableLock = 0;
+    FAST_MUTEX g_asyncThreadTableLock = {};
+    volatile LONG g_asyncThreadTableLockState = 0;
     PETHREAD g_asyncThreads[KhMaxAsyncThreads] = {};
     bool g_asyncThreadReservations[KhMaxAsyncThreads] = {};
 #endif
@@ -128,15 +129,34 @@ namespace
     }
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    void EnsureAsyncThreadTableLockInitialized() noexcept
+    {
+        if (InterlockedCompareExchange(&g_asyncThreadTableLockState, 0, 0) == 2) {
+            return;
+        }
+
+        if (InterlockedCompareExchange(&g_asyncThreadTableLockState, 1, 0) == 0) {
+            ExInitializeFastMutex(&g_asyncThreadTableLock);
+            InterlockedExchange(&g_asyncThreadTableLockState, 2);
+            return;
+        }
+
+        LARGE_INTEGER delay = {};
+        delay.QuadPart = -10 * 1000;
+        while (InterlockedCompareExchange(&g_asyncThreadTableLockState, 0, 0) != 2) {
+            KeDelayExecutionThread(KernelMode, FALSE, &delay);
+        }
+    }
+
     void AcquireAsyncThreadTableLock() noexcept
     {
-        while (InterlockedCompareExchange(&g_asyncThreadTableLock, 1, 0) != 0) {
-        }
+        EnsureAsyncThreadTableLockInitialized();
+        ExAcquireFastMutex(&g_asyncThreadTableLock);
     }
 
     void ReleaseAsyncThreadTableLock() noexcept
     {
-        InterlockedExchange(&g_asyncThreadTableLock, 0);
+        ExReleaseFastMutex(&g_asyncThreadTableLock);
     }
 
     void ReclaimCompletedAsyncThreadsLocked() noexcept

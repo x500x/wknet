@@ -1,6 +1,7 @@
 #pragma once
 
 #include <KernelHttp/KernelHttpConfig.h>
+#include <KernelHttp/net/WskSocket.h>
 
 #include <wsk.h>
 
@@ -9,10 +10,19 @@ namespace KernelHttp
 namespace net
 {
     constexpr ULONG WskCancelCompletionTimeoutMilliseconds = 60000;
+    constexpr ULONG WskCancellationPollMilliseconds = 50;
     static volatile LONG g_wskAbandonedIrpCount = 0;
 
     typedef void (*WskSyncCleanupRoutine)(_In_opt_ void* context);
 
+    // Synchronous WSK operation ownership:
+    // - pending: caller and completion routine each own one context reference.
+    // - completed: completion stores IoStatus, signals Event, and releases its reference.
+    // - timed out: caller requests IoCancelIrp and waits for the completion routine.
+    // - caller canceled: async cancellation uses the same IoCancelIrp path and reports STATUS_CANCELLED.
+    // - cancel completed: STATUS_CANCELLED caused by timeout is reported as STATUS_IO_TIMEOUT.
+    // - late cleanup: if a canceled IRP does not complete within the bounded cancel wait,
+    //   the completion reference intentionally owns IRP/buffer cleanup when it eventually arrives.
     struct WskSyncIrpContext final
     {
         KEVENT Event = {};
@@ -126,11 +136,84 @@ namespace net
     }
 
     _Must_inspect_result_
+    inline bool WskSyncIsCancellationRequested(_In_opt_ const WskCancellationToken* cancellation) noexcept
+    {
+        return cancellation != nullptr &&
+            cancellation->IsCancellationRequested != nullptr &&
+            cancellation->IsCancellationRequested(cancellation->Context);
+    }
+
+    inline void WskSyncMakeRelativeTimeout(ULONG milliseconds, _Out_ LARGE_INTEGER* timeout) noexcept
+    {
+        if (timeout == nullptr) {
+            return;
+        }
+
+        timeout->QuadPart = -static_cast<LONGLONG>(milliseconds) * 10000LL;
+    }
+
+    _Must_inspect_result_
+    inline NTSTATUS WskSyncWaitForCompletion(
+        _In_ WskSyncIrpContext* context,
+        ULONG timeoutMilliseconds,
+        _In_opt_ const WskCancellationToken* cancellation) noexcept
+    {
+        if (context == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (cancellation == nullptr || cancellation->IsCancellationRequested == nullptr) {
+            LARGE_INTEGER timeout = {};
+            WskSyncMakeRelativeTimeout(timeoutMilliseconds, &timeout);
+            return KeWaitForSingleObject(
+                &context->Event,
+                Executive,
+                KernelMode,
+                FALSE,
+                timeoutMilliseconds == 0xffffffffUL ? nullptr : &timeout);
+        }
+
+        ULONG elapsedMilliseconds = 0;
+        for (;;) {
+            if (WskSyncIsCancellationRequested(cancellation)) {
+                return STATUS_CANCELLED;
+            }
+
+            ULONG waitMilliseconds = WskCancellationPollMilliseconds;
+            if (timeoutMilliseconds != 0xffffffffUL) {
+                if (elapsedMilliseconds >= timeoutMilliseconds) {
+                    return STATUS_TIMEOUT;
+                }
+
+                const ULONG remainingMilliseconds = timeoutMilliseconds - elapsedMilliseconds;
+                waitMilliseconds = remainingMilliseconds < waitMilliseconds ? remainingMilliseconds : waitMilliseconds;
+            }
+
+            LARGE_INTEGER timeout = {};
+            WskSyncMakeRelativeTimeout(waitMilliseconds, &timeout);
+            const NTSTATUS waitStatus = KeWaitForSingleObject(
+                &context->Event,
+                Executive,
+                KernelMode,
+                FALSE,
+                &timeout);
+            if (waitStatus != STATUS_TIMEOUT) {
+                return waitStatus;
+            }
+
+            if (timeoutMilliseconds != 0xffffffffUL) {
+                elapsedMilliseconds += waitMilliseconds;
+            }
+        }
+    }
+
+    _Must_inspect_result_
     inline NTSTATUS WskSyncCompleteIrp(
         NTSTATUS requestStatus,
         _In_ WskSyncIrpContext* context,
         ULONG timeoutMilliseconds,
-        _Out_opt_ SIZE_T* information) noexcept
+        _Out_opt_ SIZE_T* information,
+        _In_opt_ const WskCancellationToken* cancellation = nullptr) noexcept
     {
         if (information != nullptr) {
             *information = 0;
@@ -142,18 +225,13 @@ namespace net
 
         if (requestStatus == STATUS_PENDING) {
             bool cancelIssuedForTimeout = false;
-            LARGE_INTEGER timeout = {};
-            timeout.QuadPart = -static_cast<LONGLONG>(timeoutMilliseconds) * 10000LL;
+            bool cancelIssuedForCaller = false;
 
-            NTSTATUS waitStatus = KeWaitForSingleObject(
-                &context->Event,
-                Executive,
-                KernelMode,
-                FALSE,
-                &timeout);
+            NTSTATUS waitStatus = WskSyncWaitForCompletion(context, timeoutMilliseconds, cancellation);
 
-            if (waitStatus == STATUS_TIMEOUT) {
-                cancelIssuedForTimeout = true;
+            if (waitStatus == STATUS_TIMEOUT || waitStatus == STATUS_CANCELLED) {
+                cancelIssuedForTimeout = waitStatus == STATUS_TIMEOUT;
+                cancelIssuedForCaller = waitStatus == STATUS_CANCELLED;
                 IoCancelIrp(context->Irp);
 
                 LARGE_INTEGER cancelTimeout = {};
@@ -182,6 +260,9 @@ namespace net
             requestStatus = context->Status;
             if (cancelIssuedForTimeout && requestStatus == STATUS_CANCELLED) {
                 requestStatus = STATUS_IO_TIMEOUT;
+            }
+            else if (cancelIssuedForCaller) {
+                requestStatus = STATUS_CANCELLED;
             }
         }
         else {

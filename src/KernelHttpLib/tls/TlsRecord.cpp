@@ -224,6 +224,28 @@ namespace tls
         return EncodePlaintext(record, destination, destinationCapacity, bytesWritten);
     }
 
+    NTSTATUS TlsRecordLayer::DecodeAlert(
+        const UCHAR* fragment,
+        SIZE_T fragmentLength,
+        TlsAlert& alert) noexcept
+    {
+        alert = {};
+
+        if (fragment == nullptr || fragmentLength != 2) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        const TlsAlertLevel level = static_cast<TlsAlertLevel>(fragment[0]);
+        if (level != TlsAlertLevel::Warning && level != TlsAlertLevel::Fatal) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        alert.Level = level;
+        alert.Description = static_cast<TlsAlertDescription>(fragment[1]);
+        alert.CloseNotify = alert.Description == TlsAlertDescription::CloseNotify;
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS TlsRecordLayer::ProtectAesGcm(
         const TlsPlaintextRecord& plaintext,
         TlsAeadCipherState& writeState,

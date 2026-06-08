@@ -280,6 +280,7 @@ namespace
         case khttp::WsMsgType::Binary: return "二进制";
         case khttp::WsMsgType::Close: return "关闭";
         case khttp::WsMsgType::Continuation: return "延续";
+        case khttp::WsMsgType::Ping: return "Ping";
         default: return "未知消息";
         }
     }

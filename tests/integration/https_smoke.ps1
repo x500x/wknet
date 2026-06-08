@@ -162,6 +162,7 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\crypto\CngProviderCache.cpp',
             'src\KernelHttpLib\tls\CertificateStore.cpp',
             'src\KernelHttpLib\tls\CertificateValidator.cpp',
+            'src\KernelHttpLib\tls\TlsConnection.cpp',
             'src\KernelHttpLib\tls\TlsContext.cpp',
             'src\KernelHttpLib\tls\TlsHandshake12.cpp',
             'src\KernelHttpLib\tls\TlsHandshake13.cpp',

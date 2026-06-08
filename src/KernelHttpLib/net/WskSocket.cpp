@@ -133,6 +133,29 @@ namespace net
                 status == STATUS_CONNECTION_ABORTED ||
                 status == STATUS_DEVICE_NOT_CONNECTED;
         }
+
+        void CloseNativeSocketIfPresent(_In_opt_ PWSK_SOCKET socket) noexcept
+        {
+            if (socket == nullptr || socket->Dispatch == nullptr) {
+                return;
+            }
+
+            const auto* dispatch = static_cast<const WSK_PROVIDER_CONNECTION_DISPATCH*>(socket->Dispatch);
+            if (dispatch->Basic.WskCloseSocket == nullptr) {
+                return;
+            }
+
+            WskSyncIrpContext* context = nullptr;
+            NTSTATUS status = WskSyncAllocateIrp(&context);
+            if (!NT_SUCCESS(status)) {
+                return;
+            }
+
+            status = dispatch->Basic.WskCloseSocket(socket, context->Irp);
+            status = WskSyncCompleteIrp(status, context, WskCloseTimeoutMilliseconds, nullptr);
+            UNREFERENCED_PARAMETER(status);
+            WskSyncReleaseContext(context);
+        }
     }
 
     WskSocket::~WskSocket() noexcept
@@ -146,7 +169,8 @@ namespace net
     NTSTATUS WskSocket::Connect(
         WskClient& client,
         const SOCKADDR* remoteAddress,
-        const SOCKADDR* localAddress) noexcept
+        const SOCKADDR* localAddress,
+        const WskCancellationToken* cancellation) noexcept
     {
         if (!CanBlockNow()) {
             return STATUS_INVALID_DEVICE_STATE;
@@ -221,7 +245,7 @@ namespace net
             nullptr,
             context->Irp);
 
-        status = WskSyncCompleteIrp(status, context, WskOperationTimeoutMilliseconds, &information);
+        status = WskSyncCompleteIrp(status, context, WskOperationTimeoutMilliseconds, &information, cancellation);
 
         if (!NT_SUCCESS(status)) {
             kprintf("WskSocketConnect failed: 0x%08X family=%u information=%Iu\r\n",
@@ -230,9 +254,14 @@ namespace net
                 information);
         }
 
+        if (!NT_SUCCESS(status) && information != 0) {
+            CloseNativeSocketIfPresent(reinterpret_cast<PWSK_SOCKET>(information));
+        }
+
         if (NT_SUCCESS(status)) {
             socket_ = reinterpret_cast<PWSK_SOCKET>(information);
             if (socket_ == nullptr || socket_->Dispatch == nullptr) {
+                CloseNativeSocketIfPresent(socket_);
                 socket_ = nullptr;
                 status = STATUS_INVALID_DEVICE_STATE;
             }
@@ -249,7 +278,8 @@ namespace net
         WskBuffer& buffer,
         SIZE_T length,
         SIZE_T* bytesSent,
-        ULONG flags) noexcept
+        ULONG flags,
+        const WskCancellationToken* cancellation) noexcept
     {
         if (!CanBlockNow()) {
             return STATUS_INVALID_DEVICE_STATE;
@@ -290,8 +320,8 @@ namespace net
 
         SIZE_T information = 0;
         status = dispatch_->WskSend(socket_, operationBuffer->WskBuf(), flags, context->Irp);
-        status = WskSyncCompleteIrp(status, context, WskOperationTimeoutMilliseconds, &information);
-        if (status == STATUS_IO_TIMEOUT) {
+        status = WskSyncCompleteIrp(status, context, WskOperationTimeoutMilliseconds, &information, cancellation);
+        if (status == STATUS_IO_TIMEOUT || status == STATUS_CANCELLED) {
             socket_ = nullptr;
             dispatch_ = nullptr;
         }
@@ -308,7 +338,8 @@ namespace net
         const void* data,
         SIZE_T length,
         SIZE_T* bytesSent,
-        ULONG flags) noexcept
+        ULONG flags,
+        const WskCancellationToken* cancellation) noexcept
     {
         if (bytesSent != nullptr) {
             *bytesSent = 0;
@@ -333,7 +364,7 @@ namespace net
             return status;
         }
 
-        return Send(buffer, length, bytesSent, flags);
+        return Send(buffer, length, bytesSent, flags, cancellation);
     }
 
     NTSTATUS WskSocket::Receive(
@@ -341,7 +372,8 @@ namespace net
         SIZE_T length,
         SIZE_T* bytesReceived,
         ULONG flags,
-        ULONG timeoutMilliseconds) noexcept
+        ULONG timeoutMilliseconds,
+        const WskCancellationToken* cancellation) noexcept
     {
         if (!CanBlockNow()) {
             return STATUS_INVALID_DEVICE_STATE;
@@ -379,8 +411,8 @@ namespace net
 
         SIZE_T information = 0;
         status = dispatch_->WskReceive(socket_, operationBuffer->WskBuf(), flags, context->Irp);
-        status = WskSyncCompleteIrp(status, context, timeoutMilliseconds, &information);
-        if (status == STATUS_IO_TIMEOUT) {
+        status = WskSyncCompleteIrp(status, context, timeoutMilliseconds, &information, cancellation);
+        if (status == STATUS_IO_TIMEOUT || status == STATUS_CANCELLED) {
             socket_ = nullptr;
             dispatch_ = nullptr;
         }
@@ -415,7 +447,8 @@ namespace net
         SIZE_T length,
         SIZE_T* bytesReceived,
         ULONG flags,
-        ULONG timeoutMilliseconds) noexcept
+        ULONG timeoutMilliseconds,
+        const WskCancellationToken* cancellation) noexcept
     {
         if (bytesReceived != nullptr) {
             *bytesReceived = 0;
@@ -436,7 +469,7 @@ namespace net
         }
 
         SIZE_T received = 0;
-        status = Receive(buffer, length, &received, flags, timeoutMilliseconds);
+        status = Receive(buffer, length, &received, flags, timeoutMilliseconds, cancellation);
         if (!NT_SUCCESS(status)) {
             if (received != 0 && IsConnectionTerminalStatus(status)) {
                 status = buffer.CopyTo(data, received);

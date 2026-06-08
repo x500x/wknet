@@ -11,7 +11,8 @@ namespace engine
         _In_ KH_SESSION session,
         _In_ KH_REQUEST request,
         _In_opt_ const KhHttpSendOptions* options,
-        _Out_opt_ KH_RESPONSE* response) noexcept;
+        _Out_opt_ KH_RESPONSE* response,
+        _In_opt_ KH_ASYNC_OPERATION cancellationOperation = nullptr) noexcept;
 
     _Must_inspect_result_
     NTSTATUS KhHttpSendAsyncImpl(

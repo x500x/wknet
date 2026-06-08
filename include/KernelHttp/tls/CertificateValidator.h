@@ -58,6 +58,9 @@ namespace tls
         const char* DnsNames[8] = {};
         SIZE_T DnsNameLengths[8] = {};
         SIZE_T DnsNameCount = 0;
+        UCHAR IpAddresses[8][16] = {};
+        SIZE_T IpAddressLengths[8] = {};
+        SIZE_T IpAddressCount = 0;
         CertificatePublicKeyAlgorithm PublicKeyAlgorithm = CertificatePublicKeyAlgorithm::Unknown;
         CertificateSignatureAlgorithm SignatureAlgorithm = CertificateSignatureAlgorithm::Unknown;
         long long NotBefore = 0;

@@ -3,6 +3,8 @@
 #endif
 
 #include <KernelHttp/khttp/Test.h>
+#include <KernelHttp/khttp/Session.h>
+#include <KernelHttp/khttp/WebSocket.h>
 
 #include "samples/AdvancedScenarioSamples.h"
 #include "samples/HighLevelApiSamples.h"
@@ -682,6 +684,53 @@ namespace
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
+
+    void TestWebSocketReceiveHonorsPerCallMessageLimit() noexcept
+    {
+        SampleCapture capture = {};
+        static const char echo[] = "message-limit";
+        capture.WebSocketEchoLength = sizeof(echo) - 1;
+        for (SIZE_T index = 0; index < capture.WebSocketEchoLength; ++index) {
+            capture.WebSocketEcho[index] = static_cast<UCHAR>(echo[index]);
+        }
+
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(HttpTransport, &capture);
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WebSocketConnect,
+            WebSocketSend,
+            WebSocketReceive,
+            WebSocketClose,
+            &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for websocket receive limit test");
+
+        KernelHttp::khttp::WebSocket* ws = nullptr;
+        KernelHttp::khttp::WsConnectConfig wsConfig = KernelHttp::khttp::DefaultWsConnectConfig();
+        wsConfig.Url = "wss://ws.postman-echo.com/raw";
+        wsConfig.UrlLength = strlen(wsConfig.Url);
+        status = KernelHttp::khttp::WsConnect(session, &wsConfig, &ws);
+        Expect(NT_SUCCESS(status), "WsConnect succeeds for websocket receive limit test");
+
+        status = KernelHttp::khttp::WsSendText(ws, echo, sizeof(echo) - 1);
+        Expect(NT_SUCCESS(status), "WsSendText succeeds for websocket receive limit test");
+
+        KernelHttp::khttp::WsMessage message = {};
+        KernelHttp::khttp::WsReceiveOptions receiveOptions = {};
+        receiveOptions.MaxMessageBytes = 4;
+        status = KernelHttp::khttp::WsReceiveEx(ws, &receiveOptions, &message);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "WsReceiveEx rejects message above per-call MaxMessageBytes");
+
+        KernelHttp::khttp::WsClose(ws);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
 }
 
 int main() noexcept
@@ -692,6 +741,7 @@ int main() noexcept
     TestLoadTimeSamplesIgnoreIpv6EnvironmentFailure();
     TestLoadTimeSamplesIgnoreRepeatedPublicWebSocketConnectFailures();
     TestAdvancedScenarioSamplesCoverMissingSurface();
+    TestWebSocketReceiveHonorsPerCallMessageLimit();
 
     if (g_failed) {
         printf("high-level API tests FAILED\n");

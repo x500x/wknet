@@ -1066,11 +1066,16 @@ namespace engine
         return version == KhTlsVersion::Tls13 ? tls::TlsProtocol::Tls13 : tls::TlsProtocol::Tls12;
     }
 
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    static bool IsHttpAsyncCancellationRequested(_In_opt_ void* context) noexcept;
+#endif
+
     _Must_inspect_result_
     NTSTATUS EnsureSocketConnected(
         _In_ KH_SESSION session,
         const KhRequest& request,
-        _Inout_ KhPooledConnection& connection) noexcept
+        _Inout_ KhPooledConnection& connection,
+        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
     {
         if (session == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -1133,9 +1138,17 @@ namespace engine
                     return STATUS_INSUFFICIENT_RESOURCES;
                 }
 
+                net::WskCancellationToken cancellation = {};
+                if (cancellationOperation != nullptr) {
+                    cancellation.IsCancellationRequested = IsHttpAsyncCancellationRequested;
+                    cancellation.Context = cancellationOperation;
+                }
+
                 status = socket->Connect(
                     *session->WskClient,
-                    reinterpret_cast<const SOCKADDR*>(&remoteAddresses[addressIndex]));
+                    reinterpret_cast<const SOCKADDR*>(&remoteAddresses[addressIndex]),
+                    nullptr,
+                    cancellation.IsCancellationRequested != nullptr ? &cancellation : nullptr);
                 if (NT_SUCCESS(status)) {
                     connection.Socket = socket;
                     connection.RawTransport = new core::WskTransport(*connection.Socket);
@@ -1258,6 +1271,40 @@ namespace engine
     }
 #endif
 
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    class WskCancellationScope final
+    {
+    public:
+        WskCancellationScope(
+            _In_opt_ core::WskTransport* transport,
+            _In_opt_ KH_ASYNC_OPERATION operation) noexcept :
+            transport_(transport)
+        {
+            if (transport_ == nullptr || operation == nullptr) {
+                return;
+            }
+
+            token_.IsCancellationRequested = IsHttpAsyncCancellationRequested;
+            token_.Context = operation;
+            transport_->SetCancellation(&token_);
+        }
+
+        ~WskCancellationScope() noexcept
+        {
+            if (transport_ != nullptr) {
+                transport_->SetCancellation(nullptr);
+            }
+        }
+
+        WskCancellationScope(const WskCancellationScope&) = delete;
+        WskCancellationScope& operator=(const WskCancellationScope&) = delete;
+
+    private:
+        core::WskTransport* transport_ = nullptr;
+        net::WskCancellationToken token_ = {};
+    };
+#endif
+
     _Must_inspect_result_
     NTSTATUS SendViaTransport(
         KH_SESSION session,
@@ -1272,7 +1319,8 @@ namespace engine
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
         _Out_ SIZE_T* rawResponseLength,
-        _Out_ bool* connectionReusable) noexcept
+        _Out_ bool* connectionReusable,
+        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
     {
         if (rawResponseLength != nullptr) {
             *rawResponseLength = 0;
@@ -1299,6 +1347,7 @@ namespace engine
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         UNREFERENCED_PARAMETER(requestHeaders);
         UNREFERENCED_PARAMETER(requestHeaderCount);
+        UNREFERENCED_PARAMETER(cancellationOperation);
 
         if (g_testHttpTransport == nullptr) {
             return STATUS_NOT_SUPPORTED;
@@ -1367,10 +1416,16 @@ namespace engine
             return STATUS_NOT_SUPPORTED;
         }
 
-        NTSTATUS status = EnsureSocketConnected(session, request, *pooledConnection);
+        NTSTATUS status = EnsureSocketConnected(session, request, *pooledConnection, cancellationOperation);
         if (!NT_SUCCESS(status)) {
             return status;
         }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        WskCancellationScope cancellationScope(pooledConnection->RawTransport, cancellationOperation);
+#else
+        UNREFERENCED_PARAMETER(cancellationOperation);
+#endif
 
         tls::TlsConnection* tlsConnection = nullptr;
         if (TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https")) {
@@ -1507,6 +1562,14 @@ namespace engine
 
         return statusCode == 301 || statusCode == 302 || statusCode == 303;
     }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    static bool IsHttpAsyncCancellationRequested(_In_opt_ void* context) noexcept
+    {
+        return context != nullptr &&
+            KhAsyncOperationIsCanceled(static_cast<KH_ASYNC_OPERATION>(context));
+    }
+#endif
 
     bool RedirectsEnabled(const KhHttpSendOptions& options) noexcept
     {
@@ -1667,7 +1730,8 @@ namespace engine
         _Inout_ KhWorkspace& workspace,
         _Inout_ ApiHttpHeaderScratch& headerScratch,
         _Out_ http::HttpResponse* parsed,
-        _Out_ SIZE_T* rawResponseLength) noexcept
+        _Out_ SIZE_T* rawResponseLength,
+        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
     {
         if (parsed != nullptr) {
             *parsed = {};
@@ -1737,7 +1801,8 @@ namespace engine
             headerScratch.ResponseHeaders,
             KhMaxHeadersPerResponse,
             rawResponseLength,
-            &connectionReusable);
+            &connectionReusable,
+            cancellationOperation);
 
         const bool shouldRetryWithFreshConnection =
             !NT_SUCCESS(status) &&
@@ -1793,7 +1858,8 @@ namespace engine
                     headerScratch.ResponseHeaders,
                     KhMaxHeadersPerResponse,
                     rawResponseLength,
-                    &connectionReusable);
+                    &connectionReusable,
+                    cancellationOperation);
 
                 if (!NT_SUCCESS(status)) {
                     KhConnectionPoolRelease(&session->ConnectionPool, retryConnection, false);
@@ -1905,6 +1971,13 @@ namespace engine
         FreeAsyncHttpContext(httpContext);
     }
 
+    _Must_inspect_result_
+    NTSTATUS KhHttpSendSyncImpl(
+        _In_ KH_SESSION session,
+        _In_ KH_REQUEST request,
+        _In_opt_ const KhHttpSendOptions* options,
+        KH_RESPONSE* response,
+        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept;
 
     NTSTATUS RunHttpAsyncOperation(KH_ASYNC_OPERATION operation, void* context) noexcept
     {
@@ -1929,11 +2002,12 @@ namespace engine
             responseOutput = &response;
         }
 
-        status = KhHttpSendSync(
+        status = KhHttpSendSyncImpl(
             httpContext->Session,
             httpContext->Request,
             &httpContext->Options,
-            responseOutput);
+            responseOutput,
+            operation);
         if (NT_SUCCESS(status)) {
             httpContext->Response = response;
         }
@@ -1954,7 +2028,8 @@ namespace engine
         KH_SESSION session,
         KH_REQUEST request,
         const KhHttpSendOptions* options,
-        KH_RESPONSE* response) noexcept
+        KH_RESPONSE* response,
+        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2031,13 +2106,19 @@ namespace engine
         ULONG redirectCount = 0;
 
         for (;;) {
+            if (cancellationOperation != nullptr && KhAsyncOperationIsCanceled(cancellationOperation)) {
+                status = STATUS_CANCELLED;
+                break;
+            }
+
             status = SendSingleHttpRequest(
                 session,
                 *currentRequest,
                 workspace,
                 *headerScratch.Get(),
                 &parsed,
-                &rawResponseLength);
+                &rawResponseLength,
+                cancellationOperation);
             if (!NT_SUCCESS(status)) {
                 break;
             }
@@ -2212,7 +2293,7 @@ NTSTATUS KhHttpSendSync(
     const KhHttpSendOptions* options,
     KH_RESPONSE* response) noexcept
 {
-    return KhHttpSendSyncImpl(session, request, options, response);
+    return KhHttpSendSyncImpl(session, request, options, response, nullptr);
 }
 
 NTSTATUS KhHttpSendAsync(

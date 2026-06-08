@@ -111,6 +111,42 @@ namespace tls
         }
 
         _Must_inspect_result_
+        TlsHandshakeFailureCategory CategoryForPeerAlert(const TlsAlert& alert) noexcept
+        {
+            switch (alert.Description) {
+            case TlsAlertDescription::ProtocolVersion:
+                return TlsHandshakeFailureCategory::VersionNegotiation;
+            case TlsAlertDescription::BadCertificate:
+                return TlsHandshakeFailureCategory::CertificateValidation;
+            default:
+                return TlsHandshakeFailureCategory::PeerAlert;
+            }
+        }
+
+        _Must_inspect_result_
+        TlsHandshakeFailureCategory CategoryForStatus(NTSTATUS status) noexcept
+        {
+            switch (status) {
+            case STATUS_TRUST_FAILURE:
+            case STATUS_INVALID_SIGNATURE:
+                return TlsHandshakeFailureCategory::CertificateValidation;
+            case STATUS_IO_TIMEOUT:
+            case STATUS_CONNECTION_ABORTED:
+            case STATUS_CONNECTION_DISCONNECTED:
+            case STATUS_CONNECTION_RESET:
+                return TlsHandshakeFailureCategory::NetworkIo;
+            case STATUS_INVALID_NETWORK_RESPONSE:
+                return TlsHandshakeFailureCategory::DecodeError;
+            case STATUS_NOT_SUPPORTED:
+                return TlsHandshakeFailureCategory::LocalPolicy;
+            case STATUS_INVALID_PARAMETER:
+                return TlsHandshakeFailureCategory::LocalPolicy;
+            default:
+                return TlsHandshakeFailureCategory::CryptoError;
+            }
+        }
+
+        _Must_inspect_result_
         ULONGLONG CurrentMilliseconds() noexcept
         {
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -321,6 +357,36 @@ namespace tls
             }
 
             return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        bool IsOfferedAlpn(
+            _In_ const TlsClientConnectionOptions& options,
+            _In_reads_bytes_opt_(alpnLength) const char* alpn,
+            SIZE_T alpnLength) noexcept
+        {
+            if (alpn == nullptr || alpnLength == 0) {
+                return true;
+            }
+
+            if (options.AlpnProtocols == nullptr || options.AlpnProtocolCount == 0) {
+                return false;
+            }
+
+            for (SIZE_T index = 0; index < options.AlpnProtocolCount; ++index) {
+                const TlsAlpnProtocol& offered = options.AlpnProtocols[index];
+                if (offered.Name == nullptr ||
+                    offered.NameLength == 0 ||
+                    offered.NameLength != alpnLength) {
+                    continue;
+                }
+
+                if (RtlCompareMemory(offered.Name, alpn, alpnLength) == alpnLength) {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         _Must_inspect_result_
@@ -557,6 +623,7 @@ namespace tls
             RtlSecureZeroMemory(negotiatedAlpn_, 16);
         }
         negotiatedAlpnLength_ = 0;
+        ClearHandshakeFailure();
     }
 
     NTSTATUS TlsConnection::EnsureBuffers() noexcept
@@ -701,15 +768,18 @@ namespace tls
         core::ITransport& transport,
         const TlsClientConnectionOptions& options) noexcept
     {
+        ClearHandshakeFailure();
         if (options.ServerName == nullptr ||
             options.ServerNameLength == 0 ||
             options.HandshakeReceiveTimeoutMilliseconds == 0 ||
             (options.VerifyCertificate && options.CertificateStore == nullptr) ||
             static_cast<UCHAR>(options.MinimumProtocol) > static_cast<UCHAR>(options.MaximumProtocol)) {
+            RecordHandshakeFailure(TlsHandshakeFailureCategory::LocalPolicy, STATUS_INVALID_PARAMETER);
             return STATUS_INVALID_PARAMETER;
         }
 
         Reset();
+        ClearHandshakeFailure();
         handshakeReceiveTimeoutMilliseconds_ = options.HandshakeReceiveTimeoutMilliseconds;
         handshakeReceiveDeadline_ = MakeReceiveDeadline(handshakeReceiveTimeoutMilliseconds_);
 
@@ -735,6 +805,10 @@ namespace tls
 
         ReleaseHandshakeScratch();
         certificateScratchAllocator_ = nullptr;
+        if (!NT_SUCCESS(status) &&
+            lastHandshakeFailure_.Category == TlsHandshakeFailureCategory::None) {
+            RecordHandshakeFailure(CategoryForStatus(status), status);
+        }
         return status;
     }
 
@@ -847,6 +921,11 @@ namespace tls
         if (negotiatedAlpnLength_ > 0) {
             kprintf("TlsConnection ALPN negotiated: %.*s\r\n",
                 static_cast<int>(negotiatedAlpnLength_), negotiatedAlpn_);
+            if (!IsOfferedAlpn(options, negotiatedAlpn_, negotiatedAlpnLength_)) {
+                kprintf("TlsConnection ALPN was not offered by client\r\n");
+                RecordHandshakeFailure(TlsHandshakeFailureCategory::AlpnMismatch, STATUS_NOT_SUPPORTED);
+                return STATUS_NOT_SUPPORTED;
+            }
         }
 
         status = transcript_.Initialize(TlsHandshake12::PrfHashForCipherSuite(context_.CipherSuite()));
@@ -1393,6 +1472,9 @@ namespace tls
         Tls13ServerHelloView serverHello = {};
         status = TlsHandshake13::ParseServerHello(context_, handshake, serverHello);
         if (!NT_SUCCESS(status)) {
+            if (status == STATUS_NOT_SUPPORTED) {
+                RecordHandshakeFailure(TlsHandshakeFailureCategory::VersionNegotiation, status);
+            }
             return LogTls13Failure("ParseFirstServerHello", status);
         }
         // TLS 1.3 parsing requires supported_versions == 0x0304. This client
@@ -1480,6 +1562,9 @@ namespace tls
 
             status = TlsHandshake13::ParseServerHello(context_, handshake, serverHello);
             if (!NT_SUCCESS(status)) {
+                if (status == STATUS_NOT_SUPPORTED) {
+                    RecordHandshakeFailure(TlsHandshakeFailureCategory::VersionNegotiation, status);
+                }
                 return LogTls13Failure("ParseRetryServerHello", status);
             }
             if (serverHello.IsHelloRetryRequest) {
@@ -1632,6 +1717,10 @@ namespace tls
             RtlCopyMemory(negotiatedAlpn_, encryptedExtensions.Alpn, encryptedExtensions.AlpnLength);
             negotiatedAlpn_[encryptedExtensions.AlpnLength] = '\0';
             negotiatedAlpnLength_ = encryptedExtensions.AlpnLength;
+            if (!IsOfferedAlpn(options, negotiatedAlpn_, negotiatedAlpnLength_)) {
+                RecordHandshakeFailure(TlsHandshakeFailureCategory::AlpnMismatch, STATUS_NOT_SUPPORTED);
+                return LogTls13Failure("ValidateNegotiatedAlpn", STATUS_NOT_SUPPORTED);
+            }
         }
         if (options.EarlyDataAccepted != nullptr) {
             *options.EarlyDataAccepted = encryptedExtensions.EarlyDataAccepted;
@@ -1943,6 +2032,45 @@ namespace tls
         return negotiatedAlpnLength_;
     }
 
+    const TlsHandshakeFailure& TlsConnection::LastHandshakeFailure() const noexcept
+    {
+        return lastHandshakeFailure_;
+    }
+
+    void TlsConnection::ClearHandshakeFailure() noexcept
+    {
+        lastHandshakeFailure_ = {};
+    }
+
+    void TlsConnection::RecordHandshakeFailure(
+        TlsHandshakeFailureCategory category,
+        NTSTATUS status) noexcept
+    {
+        if (category == TlsHandshakeFailureCategory::None) {
+            return;
+        }
+
+        lastHandshakeFailure_.Category = category;
+        lastHandshakeFailure_.Status = status;
+        lastHandshakeFailure_.PeerAlert = {};
+        lastHandshakeFailure_.HasPeerAlert = false;
+    }
+
+    void TlsConnection::RecordPeerAlertFailure(const TlsMutablePlaintextRecord& record) noexcept
+    {
+        TlsAlert alert = {};
+        const NTSTATUS status = TlsRecordLayer::DecodeAlert(record.Fragment, record.FragmentLength, alert);
+        if (!NT_SUCCESS(status)) {
+            RecordHandshakeFailure(TlsHandshakeFailureCategory::DecodeError, status);
+            return;
+        }
+
+        lastHandshakeFailure_.Category = CategoryForPeerAlert(alert);
+        lastHandshakeFailure_.Status = STATUS_INVALID_NETWORK_RESPONSE;
+        lastHandshakeFailure_.PeerAlert = alert;
+        lastHandshakeFailure_.HasPeerAlert = true;
+    }
+
     NTSTATUS TlsConnection::SendPlainRecord(
         core::ITransport& transport,
         TlsContentType contentType,
@@ -2141,6 +2269,9 @@ namespace tls
             }
 
             inputLength_ -= consumed;
+            if (record.ContentType == TlsContentType::Alert) {
+                RecordPeerAlertFailure(record);
+            }
             return STATUS_SUCCESS;
         }
     }

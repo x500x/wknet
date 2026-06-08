@@ -463,9 +463,6 @@ namespace http2
                     stream.StreamId(),
                     responseHeadersReceived ? 1u : 0u,
                     bodyLen);
-                if (status == STATUS_IO_TIMEOUT && responseHeadersReceived && bodyLen > 0) {
-                    break;
-                }
                 return status;
             }
 
@@ -545,7 +542,14 @@ namespace http2
                     continuationFrames = 0;
                     emptyContinuationFrames = 0;
                     status = stream.ReceiveHeaders(pendingHeaderEndStream);
-                    if (!NT_SUCCESS(status)) return status;
+                    if (!NT_SUCCESS(status)) {
+                        const NTSTATUS rstStatus = SendRstStream(
+                            transport,
+                            fh.StreamId,
+                            static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+                        UNREFERENCED_PARAMETER(rstStatus);
+                        return status;
+                    }
                     // Decode HPACK
                     SIZE_T nvUsed = 0;
                     status = decoder_.Decode(
@@ -580,6 +584,15 @@ namespace http2
 
             case Http2FrameType::Data:
             {
+                if (!responseHeadersReceived) {
+                    const NTSTATUS rstStatus = SendRstStream(
+                        transport,
+                        fh.StreamId,
+                        static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+                    UNREFERENCED_PARAMETER(rstStatus);
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
                 const UCHAR* content = fp;
                 SIZE_T contentLen = fpLen;
 
@@ -589,7 +602,14 @@ namespace http2
 
                 const bool dataEndsStream = (fh.Flags & Http2FrameFlags::EndStream) != 0;
                 status = stream.ReceiveData(fpLen, dataEndsStream);
-                if (!NT_SUCCESS(status)) return status;
+                if (!NT_SUCCESS(status)) {
+                    const NTSTATUS rstStatus = SendRstStream(
+                        transport,
+                        fh.StreamId,
+                        static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+                    UNREFERENCED_PARAMETER(rstStatus);
+                    return status;
+                }
 
                 if (connectionRecvWindow_ < 0 ||
                     fpLen > static_cast<SIZE_T>(connectionRecvWindow_)) {
@@ -823,6 +843,10 @@ namespace http2
             if (!NT_SUCCESS(status)) return status;
             if (connectionSendWindow_ >
                 static_cast<LONG>(Http2MaxWindowSize) - static_cast<LONG>(increment)) {
+                const NTSTATUS goAwayStatus = SendGoAway(
+                    transport,
+                    static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+                UNREFERENCED_PARAMETER(goAwayStatus);
                 return STATUS_INVALID_NETWORK_RESPONSE; // Flow control error
             }
             connectionSendWindow_ += static_cast<LONG>(increment);
@@ -831,12 +855,24 @@ namespace http2
 
         case Http2FrameType::PushPromise:
             // We set ENABLE_PUSH=0, receiving PUSH_PROMISE is a protocol error
+            {
+                const NTSTATUS goAwayStatus = SendGoAway(
+                    transport,
+                    static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+                UNREFERENCED_PARAMETER(goAwayStatus);
+            }
             return STATUS_INVALID_NETWORK_RESPONSE;
 
         case Http2FrameType::Data:
         case Http2FrameType::Headers:
         case Http2FrameType::RstStream:
+        {
+            const NTSTATUS goAwayStatus = SendGoAway(
+                transport,
+                static_cast<ULONG>(Http2ErrorCode::ProtocolError));
+            UNREFERENCED_PARAMETER(goAwayStatus);
             return STATUS_INVALID_NETWORK_RESPONSE;
+        }
 
         default:
             // Unknown frame types on stream 0 must be ignored
@@ -873,6 +909,56 @@ namespace http2
         }
 
         return STATUS_SUCCESS;
+    }
+
+    NTSTATUS Http2Connection::SendGoAway(Http2Transport& transport, ULONG errorCode) noexcept
+    {
+        if (goAwaySent_) {
+            return STATUS_SUCCESS;
+        }
+
+        const ULONG lastStreamId = nextStreamId_ > 2 ? nextStreamId_ - 2 : 0;
+        UCHAR* buf = sendBuffer_;
+        SIZE_T written = 0;
+        NTSTATUS status = Http2FrameCodec::EncodeGoAway(
+            lastStreamId,
+            errorCode,
+            buf,
+            Http2FrameHeaderLength + 8,
+            &written);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = SendRaw(transport, buf, written);
+        if (NT_SUCCESS(status)) {
+            goAwaySent_ = true;
+        }
+        return status;
+    }
+
+    NTSTATUS Http2Connection::SendRstStream(
+        Http2Transport& transport,
+        ULONG streamId,
+        ULONG errorCode) noexcept
+    {
+        if (streamId == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        UCHAR* buf = sendBuffer_;
+        SIZE_T written = 0;
+        NTSTATUS status = Http2FrameCodec::EncodeRstStream(
+            streamId,
+            errorCode,
+            buf,
+            Http2FrameHeaderLength + 4,
+            &written);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        return SendRaw(transport, buf, written);
     }
 
     ULONG Http2Connection::AllocateStreamId() noexcept

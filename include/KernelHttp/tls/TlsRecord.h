@@ -38,7 +38,15 @@ namespace tls
         DecodeError = 50,
         DecryptError = 51,
         ProtocolVersion = 70,
+        BadCertificate = 42,
         InternalError = 80
+    };
+
+    struct TlsAlert final
+    {
+        TlsAlertLevel Level = TlsAlertLevel::Fatal;
+        TlsAlertDescription Description = TlsAlertDescription::InternalError;
+        bool CloseNotify = false;
     };
 
     struct TlsProtocolVersion final
@@ -114,6 +122,12 @@ namespace tls
             _Out_writes_bytes_(destinationCapacity) UCHAR* destination,
             SIZE_T destinationCapacity,
             _Out_opt_ SIZE_T* bytesWritten) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS DecodeAlert(
+            _In_reads_bytes_(fragmentLength) const UCHAR* fragment,
+            SIZE_T fragmentLength,
+            _Out_ TlsAlert& alert) noexcept;
 
         _Must_inspect_result_
         static NTSTATUS ProtectAesGcm(

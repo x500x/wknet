@@ -180,6 +180,15 @@ namespace http2
             ULONG streamId,
             ULONG consumed) noexcept;
 
+        NTSTATUS SendGoAway(
+            _Inout_ Http2Transport& transport,
+            ULONG errorCode) noexcept;
+
+        NTSTATUS SendRstStream(
+            _Inout_ Http2Transport& transport,
+            ULONG streamId,
+            ULONG errorCode) noexcept;
+
         NTSTATUS ReceiveResponseFrames(
             _Inout_ Http2Transport& transport,
             _Inout_ Http2Stream& stream,

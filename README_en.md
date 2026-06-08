@@ -41,7 +41,7 @@ KernelHttp implements protocol behavior on the Windows kernel path: transport us
 | HTTP/1.1 | `Content-Length`, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping | Request bodies use `Content-Length`; user-supplied request `Transfer-Encoding` is rejected; chunked upload and response trailer exposure are not supported; `br` is supported only as `Content-Encoding` |
 | HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS, HEADERS/CONTINUATION, DATA, PING, GOAWAY, WINDOW_UPDATE, HPACK | Server push, priority, and complex concurrent stream scheduling are not supported; responses must end with `END_STREAM`, `RST_STREAM`, or `GOAWAY` |
 | WebSocket | ws/wss handshake, text/binary send, control-frame validation, Ping/Pong/Close, complete-message receive by default | Extension negotiation and receive-fragment callbacks are not supported; the default API aggregates complete messages |
-| TLS | TLS 1.2/1.3, ECDHE + AES-GCM main path, TLS 1.3 downgrade protection, certificate chain and pin validation | TLS client certificates, CBC, ChaCha20-Poly1305, and OCSP/CRL revocation checks are not supported |
+| TLS | TLS 1.2/1.3, ECDHE + AES-GCM main path, TLS 1.3 downgrade protection, certificate chain, dNSName/iPAddress SAN, and pin validation | TLS client certificates, CBC, ChaCha20-Poly1305, and OCSP/CRL revocation checks are not supported |
 
 | Unsupported Optional Capability | Current Handling |
 |---------------------------------|------------------|
@@ -53,7 +53,8 @@ KernelHttp implements protocol behavior on the Windows kernel path: transport us
 | OCSP / CRL revocation checks | Requiring revocation returns `STATUS_NOT_SUPPORTED` |
 | IDNA host processing | Certificate dNSName/CN matching currently uses ASCII host names |
 
-Synchronous HTTP, WebSocket, TLS, and certificate validation paths require `PASSIVE_LEVEL`. TLS1.2 selection after a TLS1.3 attempt is allowed only after verified version-negotiation evidence; certificate errors, ALPN mismatch, network timeout, or record decryption failure are not TLS1.2-only evidence.
+Close-delimited HTTP/1.x responses and `101 Switching Protocols` upgrade responses are not returned to the normal HTTP connection pool. Synchronous HTTP, WebSocket, TLS, and certificate validation paths require `PASSIVE_LEVEL`. TLS ALPN results must come from the client's offered list. TLS1.2 selection after a TLS1.3 attempt is allowed only after verified version-negotiation evidence; certificate errors, ALPN mismatch, network timeout, or record decryption failure are not TLS1.2-only evidence.
+For certificate host validation, IP literals match only iPAddress SAN entries and do not fall back to dNSName or CN.
 
 ---
 

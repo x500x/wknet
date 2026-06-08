@@ -40,6 +40,14 @@ namespace
         return provider.Open(algorithm, flags);
     }
 
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    _Must_inspect_result_
+    NTSTATUS RequirePassiveLevel() noexcept
+    {
+        return KeGetCurrentIrql() == PASSIVE_LEVEL ? STATUS_SUCCESS : STATUS_INVALID_DEVICE_STATE;
+    }
+#endif
+
     _Ret_maybenull_
     const CngAlgorithmProvider* ProviderIfOpen(const CngAlgorithmProvider& provider) noexcept
     {
@@ -74,9 +82,18 @@ namespace
 
     NTSTATUS CngProviderCache::Initialize() noexcept
     {
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+#else
+        NTSTATUS status = STATUS_SUCCESS;
+#endif
+
         Shutdown();
 
-        NTSTATUS status = OpenProvider(aes_, KhBcryptAesAlgorithm);
+        status = OpenProvider(aes_, KhBcryptAesAlgorithm);
         if (NT_SUCCESS(status)) {
             status = SetCachedAesGcmMode(aes_);
         }

@@ -9,6 +9,14 @@ namespace KernelHttp
 {
 namespace engine
 {
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    static bool IsWebSocketAsyncCancellationRequested(_In_opt_ void* context) noexcept
+    {
+        return context != nullptr &&
+            KhAsyncOperationIsCanceled(static_cast<KH_ASYNC_OPERATION>(context));
+    }
+#endif
+
     _Must_inspect_result_
     NTSTATUS BuildWebSocketHandshakeRequest(
         const KhWebSocket& websocket,
@@ -316,7 +324,8 @@ namespace engine
     NTSTATUS CompleteWebSocketConnect(
         KH_SESSION session,
         const KhWebSocketConnectOptions& options,
-        _Out_ KH_WEBSOCKET* websocket) noexcept
+        _Out_ KH_WEBSOCKET* websocket,
+        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
     {
         if (websocket != nullptr) {
             *websocket = nullptr;
@@ -511,6 +520,7 @@ namespace engine
             newWebSocket->HostLength;
         connectOptions.Host = newWebSocket->Host;
         connectOptions.HostLength = newWebSocket->HostLength;
+        connectOptions.Port = newWebSocket->Port;
         connectOptions.Path = newWebSocket->Path;
         connectOptions.PathLength = newWebSocket->PathLength;
         connectOptions.Subprotocol = newWebSocket->Subprotocol;
@@ -522,6 +532,12 @@ namespace engine
         connectOptions.MinimumTlsProtocol = ToTlsProtocol(effectiveTls.MinVersion);
         connectOptions.MaximumTlsProtocol = ToTlsProtocol(effectiveTls.MaxVersion);
         connectOptions.HandshakeReceiveTimeoutMilliseconds = effectiveTls.HandshakeReceiveTimeoutMilliseconds;
+        net::WskCancellationToken cancellation = {};
+        if (cancellationOperation != nullptr) {
+            cancellation.IsCancellationRequested = IsWebSocketAsyncCancellationRequested;
+            cancellation.Context = cancellationOperation;
+            connectOptions.Cancellation = &cancellation;
+        }
         connectOptions.UseTls = TextEqualsLiteralIgnoreCase(newWebSocket->Scheme, newWebSocket->SchemeLength, "wss");
         connectOptions.VerifyCertificate = effectiveTls.CertificatePolicy == KhCertificatePolicy::Verify;
 
@@ -562,7 +578,7 @@ namespace engine
         }
 
         KH_WEBSOCKET websocket = nullptr;
-        status = CompleteWebSocketConnect(connectContext->Session, connectContext->Options, &websocket);
+        status = CompleteWebSocketConnect(connectContext->Session, connectContext->Options, &websocket, operation);
         if (NT_SUCCESS(status)) {
             connectContext->WebSocket = websocket;
         }
@@ -602,7 +618,7 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
-        return CompleteWebSocketConnect(session, *options, websocket);
+        return CompleteWebSocketConnect(session, *options, websocket, nullptr);
     }
 
     NTSTATUS KhWebSocketConnectAsyncImpl(
@@ -983,7 +999,8 @@ namespace engine
             &opcode,
             payloadBuffer.Get(),
             payloadBuffer.Count(),
-            &bytesReceived);
+            &bytesReceived,
+            websocket->AutoReplyPing);
         if (!NT_SUCCESS(status)) {
             kprintf("KhWebSocketReceiveSync Client->ReceiveMessage failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
@@ -997,6 +1014,9 @@ namespace engine
         else if (opcode == KernelHttp::websocket::WebSocketOpcode::Close) {
             type = KhWebSocketMessageType::Close;
             websocket->Connected = false;
+        }
+        else if (opcode == KernelHttp::websocket::WebSocketOpcode::Ping) {
+            type = KhWebSocketMessageType::Ping;
         }
 
         const UCHAR* data = payloadBuffer.Get();

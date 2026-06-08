@@ -16,7 +16,7 @@
 
 ## 验证基线
 
-本次审计前后的测试基线如下，后续修复应保持已通过项不回退，并针对失败和缺口补充测试。
+本次审计输入时的测试基线如下，后续修复应保持已通过项不回退，并针对失败和缺口补充测试。
 
 - 已通过：`http_parser_tests.exe`
 - 已通过：`websocket_frame_tests.exe`
@@ -29,6 +29,22 @@
 - 已失败：`khttp_tests.exe`
 
 `khttp_tests.exe` 失败集中在 WebSocket round-trip 相关用例，例如 `WsConnect succeeds`、`connect called once`、`WsSendText succeeds`、`WsReceive succeeds`。后续修复 WebSocket 高层路径时，应把该失败作为必须收敛的验证目标之一。
+
+## 本轮整改验证结果
+
+截至 2026-06-08 本轮整改完成后，以下 focused tests 已通过：
+
+- 已通过：`http_parser_tests.exe`
+- 已通过：`websocket_frame_tests.exe`
+- 已通过：`websocket_client_tests.exe`
+- 已通过：`http2_client_tests.exe`
+- 已通过：`tls_record_tests.exe`
+- 已通过：`hpack_tests.exe`
+- 已通过：`http2_frame_tests.exe`
+- 已通过：`high_level_api_tests.exe`
+- 已通过：`khttp_tests.exe`
+
+Debug x64 `KernelHttpLib` 构建已通过，保持 `/Wall /WX`，结果为 0 warning、0 error。未运行禁止的 `tests\integration\https_smoke.ps1 -SkipDriverBuild` smoke 命令。
 
 ## 总体风险分级
 

@@ -4,6 +4,7 @@
 #include <KernelHttp/core/ITransport.h>
 #include <KernelHttp/tls/CertificateValidator.h>
 #include <KernelHttp/tls/TlsHandshake13.h>
+#include <KernelHttp/tls/TlsRecord.h>
 
 namespace KernelHttp
 {
@@ -25,6 +26,27 @@ namespace tls
     {
         bool Enabled = false;
         ULONGLONG DeadlineMilliseconds = 0;
+    };
+
+    enum class TlsHandshakeFailureCategory : ULONG
+    {
+        None = 0,
+        VersionNegotiation = 1,
+        CertificateValidation = 2,
+        AlpnMismatch = 3,
+        NetworkIo = 4,
+        DecodeError = 5,
+        CryptoError = 6,
+        PeerAlert = 7,
+        LocalPolicy = 8
+    };
+
+    struct TlsHandshakeFailure final
+    {
+        TlsHandshakeFailureCategory Category = TlsHandshakeFailureCategory::None;
+        NTSTATUS Status = STATUS_SUCCESS;
+        TlsAlert PeerAlert = {};
+        bool HasPeerAlert = false;
     };
 
     struct TlsClientConnectionOptions final
@@ -89,6 +111,7 @@ namespace tls
         // ALPN negotiation result (valid after Connect succeeds)
         const char* NegotiatedAlpn() const noexcept;
         SIZE_T NegotiatedAlpnLength() const noexcept;
+        const TlsHandshakeFailure& LastHandshakeFailure() const noexcept;
 
     private:
         _Must_inspect_result_
@@ -233,6 +256,10 @@ namespace tls
             SIZE_T destinationCapacity,
             _Out_ SIZE_T* bytesWritten) noexcept;
 
+        void ClearHandshakeFailure() noexcept;
+        void RecordHandshakeFailure(TlsHandshakeFailureCategory category, NTSTATUS status) noexcept;
+        void RecordPeerAlertFailure(_In_ const TlsMutablePlaintextRecord& record) noexcept;
+
         TlsContext context_ = {};
         TlsAeadCipherState clientWriteState_ = {};
         TlsAeadCipherState serverWriteState_ = {};
@@ -261,6 +288,7 @@ namespace tls
         bool tls13RecordProtection_ = false;
         char* negotiatedAlpn_ = nullptr;
         SIZE_T negotiatedAlpnLength_ = 0;
+        TlsHandshakeFailure lastHandshakeFailure_ = {};
     };
 }
 }

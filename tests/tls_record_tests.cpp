@@ -26,6 +26,9 @@ using KernelHttp::tls::CertificateValidationResult;
 using KernelHttp::tls::CertificateValidator;
 using KernelHttp::tls::ParsedCertificate;
 using KernelHttp::tls::TlsAeadCipherState;
+using KernelHttp::tls::TlsAlert;
+using KernelHttp::tls::TlsAlertDescription;
+using KernelHttp::tls::TlsAlertLevel;
 using KernelHttp::tls::CertificateSha256ThumbprintLength;
 using KernelHttp::tls::TlsCipherSuite;
 using KernelHttp::tls::TlsCertificateListView;
@@ -52,9 +55,13 @@ using KernelHttp::tls::Tls13KeyShareEntry;
 using KernelHttp::tls::Tls13MaxTicketIdentityLength;
 using KernelHttp::tls::Tls13NewSessionTicketView;
 using KernelHttp::tls::Tls13ServerHelloView;
+using KernelHttp::tls::TlsClientConnectionOptions;
+using KernelHttp::tls::TlsConnection;
+using KernelHttp::tls::TlsHandshakeFailureCategory;
 using KernelHttp::tls::TlsMutablePlaintextRecord;
 using KernelHttp::tls::TlsNamedGroup;
 using KernelHttp::tls::TlsPlaintextRecord;
+using KernelHttp::tls::TlsProtocol;
 using KernelHttp::tls::TlsProtocolVersion;
 using KernelHttp::tls::TlsRecordLayer;
 using KernelHttp::tls::TlsRecordView;
@@ -345,6 +352,133 @@ namespace
         Expect(parsed.ContentType == TlsContentType::Handshake, "content type parses");
         Expect(parsed.FragmentLength == sizeof(body), "fragment length parses");
         Expect(memcmp(parsed.Fragment, body, sizeof(body)) == 0, "fragment bytes parse");
+    }
+
+    void TestAlertParsing()
+    {
+        const UCHAR closeNotifyBytes[] = {
+            static_cast<UCHAR>(TlsAlertLevel::Warning),
+            static_cast<UCHAR>(TlsAlertDescription::CloseNotify)
+        };
+        TlsAlert alert = {};
+        NTSTATUS status = TlsRecordLayer::DecodeAlert(closeNotifyBytes, sizeof(closeNotifyBytes), alert);
+        Expect(status == STATUS_SUCCESS, "close_notify alert parses");
+        Expect(alert.Level == TlsAlertLevel::Warning, "close_notify level is warning");
+        Expect(alert.Description == TlsAlertDescription::CloseNotify, "close_notify description parses");
+        Expect(alert.CloseNotify, "close_notify is marked clean close");
+
+        const UCHAR protocolVersionBytes[] = {
+            static_cast<UCHAR>(TlsAlertLevel::Fatal),
+            static_cast<UCHAR>(TlsAlertDescription::ProtocolVersion)
+        };
+        status = TlsRecordLayer::DecodeAlert(protocolVersionBytes, sizeof(protocolVersionBytes), alert);
+        Expect(status == STATUS_SUCCESS, "protocol_version alert parses");
+        Expect(alert.Level == TlsAlertLevel::Fatal, "protocol_version level is fatal");
+        Expect(alert.Description == TlsAlertDescription::ProtocolVersion, "protocol_version description parses");
+        Expect(!alert.CloseNotify, "fatal protocol_version is not clean close");
+
+        const UCHAR badCertificateBytes[] = {
+            static_cast<UCHAR>(TlsAlertLevel::Fatal),
+            static_cast<UCHAR>(TlsAlertDescription::BadCertificate)
+        };
+        status = TlsRecordLayer::DecodeAlert(badCertificateBytes, sizeof(badCertificateBytes), alert);
+        Expect(status == STATUS_SUCCESS, "bad_certificate alert parses");
+        Expect(alert.Description == TlsAlertDescription::BadCertificate, "bad_certificate description parses");
+
+        const UCHAR unknownFatalBytes[] = {
+            static_cast<UCHAR>(TlsAlertLevel::Fatal),
+            255
+        };
+        status = TlsRecordLayer::DecodeAlert(unknownFatalBytes, sizeof(unknownFatalBytes), alert);
+        Expect(status == STATUS_SUCCESS, "unknown fatal alert parses");
+        Expect(alert.Level == TlsAlertLevel::Fatal, "unknown fatal level parses");
+        Expect(static_cast<UCHAR>(alert.Description) == 255, "unknown fatal description is preserved");
+
+        const UCHAR invalidLevelBytes[] = { 3, 0 };
+        status = TlsRecordLayer::DecodeAlert(invalidLevelBytes, sizeof(invalidLevelBytes), alert);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "invalid alert level is rejected");
+    }
+
+    class ScriptedTlsTransport final : public KernelHttp::core::ITransport
+    {
+    public:
+        ScriptedTlsTransport(const UCHAR* receiveBytes, SIZE_T receiveLength) noexcept :
+            receiveBytes_(receiveBytes),
+            receiveLength_(receiveLength)
+        {
+        }
+
+        NTSTATUS Send(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept override
+        {
+            if (data == nullptr && length != 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            ++sendCalls_;
+            if (bytesSent != nullptr) {
+                *bytesSent = length;
+            }
+            return STATUS_SUCCESS;
+        }
+
+        NTSTATUS Receive(void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept override
+        {
+            return ReceiveWithTimeout(buffer, length, bytesReceived, 0);
+        }
+
+        NTSTATUS ReceiveWithTimeout(
+            void* buffer,
+            SIZE_T length,
+            SIZE_T* bytesReceived,
+            ULONG timeoutMilliseconds) noexcept override
+        {
+            UNREFERENCED_PARAMETER(timeoutMilliseconds);
+            if ((buffer == nullptr && length != 0) || bytesReceived == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            *bytesReceived = 0;
+            if (receiveOffset_ >= receiveLength_) {
+                return STATUS_CONNECTION_DISCONNECTED;
+            }
+
+            const SIZE_T available = receiveLength_ - receiveOffset_;
+            const SIZE_T copyLength = length < available ? length : available;
+            if (copyLength != 0) {
+                memcpy(buffer, receiveBytes_ + receiveOffset_, copyLength);
+            }
+            receiveOffset_ += copyLength;
+            *bytesReceived = copyLength;
+            return STATUS_SUCCESS;
+        }
+
+        SIZE_T SendCalls() const noexcept
+        {
+            return sendCalls_;
+        }
+
+    private:
+        const UCHAR* receiveBytes_ = nullptr;
+        SIZE_T receiveLength_ = 0;
+        SIZE_T receiveOffset_ = 0;
+        SIZE_T sendCalls_ = 0;
+    };
+
+    void TestTlsHandshakeFailureRecordsLocalPolicy()
+    {
+        ScriptedTlsTransport transport(nullptr, 0);
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.HandshakeReceiveTimeoutMilliseconds = 1000;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        Expect(status == STATUS_INVALID_PARAMETER, "TLS connect rejects invalid local policy options");
+        const auto& failure = connection.LastHandshakeFailure();
+        Expect(
+            failure.Category == TlsHandshakeFailureCategory::LocalPolicy,
+            "TLS failure category records local policy failure");
+        Expect(failure.Status == STATUS_INVALID_PARAMETER, "TLS failure records local policy NTSTATUS");
+        Expect(!failure.HasPeerAlert, "TLS local policy failure has no peer alert");
     }
 
     void TestRecordNeedsMoreData()
@@ -2027,7 +2161,7 @@ namespace
             return;
         }
 
-        const char notBefore[] = "260521022604Z";
+        const char notBefore[] = "260608144411Z";
         SIZE_T timeOffset = 0;
         const bool foundTime = FindAscii(der, derLength, notBefore, sizeof(notBefore) - 1, 0, &timeOffset);
         Expect(foundTime, "localhost certificate notBefore time is found");
@@ -2180,6 +2314,76 @@ namespace
         Expect(result.Leaf.Der != nullptr && memcmp(result.Leaf.Der, der, derLength) == 0, "external bundle validation returns the leaf certificate");
     }
 
+    void TestCertificateValidationMatchesIpAddressSan()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost certificate fixture loads for IP SAN test");
+        if (!loaded) {
+            return;
+        }
+
+        ParsedCertificate parsed = {};
+        NTSTATUS status = CertificateValidator::ParseCertificate(der, derLength, parsed);
+        Expect(status == STATUS_SUCCESS, "localhost certificate parses for IP SAN test");
+        Expect(parsed.IpAddressCount >= 2, "localhost certificate exposes IPv4 and IPv6 SANs");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateAuthorityBundle bundle = {};
+        bundle.Data = pem;
+        bundle.DataLength = pemLength;
+
+        CertificateStoreOptions storeOptions = {};
+        storeOptions.AuthorityBundles = &bundle;
+        storeOptions.AuthorityBundleCount = 1;
+
+        CertificateStore store;
+        status = store.Initialize(storeOptions);
+        Expect(status == STATUS_SUCCESS, "certificate store accepts PEM bundle for IP SAN test");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "127.0.0.1";
+        options.HostNameLength = strlen(options.HostName);
+        options.Store = &store;
+        status = CertificateValidator::ValidateChain(chain, options);
+        Expect(status == STATUS_SUCCESS, "certificate validation matches IPv4 iPAddress SAN");
+
+        options.HostName = "::1";
+        options.HostNameLength = strlen(options.HostName);
+        status = CertificateValidator::ValidateChain(chain, options);
+        Expect(status == STATUS_SUCCESS, "certificate validation matches IPv6 iPAddress SAN");
+
+        options.HostName = "127.0.0.2";
+        options.HostNameLength = strlen(options.HostName);
+        status = CertificateValidator::ValidateChain(chain, options);
+        Expect(status == STATUS_TRUST_FAILURE, "certificate validation rejects mismatched IP literal without CN fallback");
+    }
+
     void TestEncodeClientKeyExchange()
     {
         const UCHAR publicKey[] = { 4, 1, 2, 3, 4 };
@@ -2278,6 +2482,8 @@ namespace
 int main()
 {
     TestPlainRecordRoundTrip();
+    TestAlertParsing();
+    TestTlsHandshakeFailureRecordsLocalPolicy();
     TestRecordNeedsMoreData();
     TestRecordRejectsInvalidHeader();
     TestPlainRecordSizeProbe();
@@ -2323,6 +2529,7 @@ int main()
     TestCertificateValidationCanSkipVerification();
     TestCertificateValidationRequiresTrustMaterial();
     TestCertificateValidationAcceptsExternalPemBundle();
+    TestCertificateValidationMatchesIpAddressSan();
     TestEncodeClientKeyExchange();
     TestFinishedVerifyData();
     TestTranscriptHash();

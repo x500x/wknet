@@ -34,6 +34,7 @@ namespace client
         SIZE_T TlsServerNameLength = 0;
         const char* Host = nullptr;
         SIZE_T HostLength = 0;
+        USHORT Port = 0;
         const char* Path = "/";
         SIZE_T PathLength = 1;
         const char* Subprotocol = nullptr;
@@ -45,6 +46,7 @@ namespace client
         tls::TlsProtocol MinimumTlsProtocol = tls::TlsProtocol::Tls12;
         tls::TlsProtocol MaximumTlsProtocol = tls::TlsProtocol::Tls13;
         ULONG HandshakeReceiveTimeoutMilliseconds = TlsHandshakeReceiveTimeoutMilliseconds;
+        const net::WskCancellationToken* Cancellation = nullptr;
         bool UseTls = false;
         bool VerifyCertificate = true;
     };
@@ -113,7 +115,8 @@ namespace client
             _Out_ websocket::WebSocketOpcode* opcode,
             _Out_writes_bytes_(outputCapacity) UCHAR* output,
             SIZE_T outputCapacity,
-            _Out_ SIZE_T* bytesReceived) noexcept;
+            _Out_ SIZE_T* bytesReceived,
+            bool autoReplyPing = true) noexcept;
 
         _Must_inspect_result_
         NTSTATUS Close(_In_ const WebSocketIoBuffers& buffers) noexcept;
@@ -139,8 +142,6 @@ namespace client
             _Out_opt_ SIZE_T* bytesReceived = nullptr) noexcept;
 
         _Must_inspect_result_
-        NTSTATUS EnsureMaskingKeyScratch() noexcept;
-
         _Must_inspect_result_
         NTSTATUS EnsureBufferedFrameCapacity(SIZE_T capacity) noexcept;
 
@@ -149,6 +150,12 @@ namespace client
         _Must_inspect_result_
         NTSTATUS SendCloseStatus(
             USHORT statusCode,
+            _In_ const WebSocketIoBuffers& buffers) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS SendCloseFrame(
+            _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
+            SIZE_T payloadLength,
             _In_ const WebSocketIoBuffers& buffers) noexcept;
 
         _Must_inspect_result_
@@ -182,13 +189,14 @@ namespace client
         net::WskSocket socket_ = {};
         core::WskTransport* rawTransport_ = nullptr;
         tls::TlsConnection* tls_ = nullptr;
-        UCHAR* maskingKey_ = nullptr;
         UCHAR* bufferedFrame_ = nullptr;
         SIZE_T bufferedFrameCapacity_ = 0;
         SIZE_T bufferedFrameLength_ = 0;
         bool useTls_ = false;
         bool connected_ = false;
         bool sendFragmentOpen_ = false;
+        bool closeSent_ = false;
+        bool closeReceived_ = false;
         bool receiveFragmentOpen_ = false;
         websocket::WebSocketOpcode receiveFragmentOpcode_ = websocket::WebSocketOpcode::Continuation;
         SIZE_T receiveFragmentLength_ = 0;

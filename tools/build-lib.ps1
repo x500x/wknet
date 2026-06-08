@@ -102,6 +102,7 @@ foreach ($configurationToBuild in $configurationsToBuild) {
         $arguments = @(
             $script:Solution,
             '/m',
+            '/nr:false',
             "/t:$script:LibTarget",
             "/p:Configuration=$configurationToBuild",
             "/p:Platform=$platformToBuild"

@@ -232,6 +232,12 @@ namespace crypto
             return length == 0 || data != nullptr;
         }
 
+        _Must_inspect_result_
+        NTSTATUS RequirePassiveLevel() noexcept
+        {
+            return KeGetCurrentIrql() == PASSIVE_LEVEL ? STATUS_SUCCESS : STATUS_INVALID_DEVICE_STATE;
+        }
+
         _Ret_z_
         LPCWSTR HashAlgorithmName(HashAlgorithm algorithm) noexcept
         {
@@ -560,6 +566,11 @@ namespace crypto
             return STATUS_INVALID_PARAMETER;
         }
 
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         Close();
         return BCryptOpenAlgorithmProvider(
             &handle_,
@@ -604,7 +615,11 @@ namespace crypto
             return STATUS_INVALID_PARAMETER;
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         ULONG blobSize = ToUlong(blobLength, &status);
         if (!NT_SUCCESS(status)) {
             return status;
@@ -636,7 +651,11 @@ namespace crypto
             return STATUS_INVALID_PARAMETER;
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         ULONG destinationSize = ToUlong(destinationCapacity, &status);
         if (!NT_SUCCESS(status)) {
             return status;
@@ -690,6 +709,11 @@ namespace crypto
 
     NTSTATUS CngHashContext::Initialize(HashAlgorithm algorithm) noexcept
     {
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         Reset();
 
         LPCWSTR algorithmName = HashAlgorithmName(algorithm);
@@ -697,7 +721,7 @@ namespace crypto
             return STATUS_NOT_SUPPORTED;
         }
 
-        NTSTATUS status = provider_.Open(algorithmName);
+        status = provider_.Open(algorithmName);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -737,7 +761,11 @@ namespace crypto
             return STATUS_INVALID_PARAMETER;
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         ULONG dataSize = ToUlong(dataLength, &status);
         if (!NT_SUCCESS(status)) {
             return status;
@@ -756,8 +784,13 @@ namespace crypto
             return STATUS_INVALID_PARAMETER;
         }
 
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         ULONG hashLength = 0;
-        NTSTATUS status = GetDwordProperty(provider_.Handle(), BCRYPT_HASH_LENGTH, &hashLength);
+        status = GetDwordProperty(provider_.Handle(), BCRYPT_HASH_LENGTH, &hashLength);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -806,7 +839,11 @@ namespace crypto
             return STATUS_INVALID_PARAMETER;
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         ULONG outputSize = ToUlong(outputLength, &status);
         if (!NT_SUCCESS(status)) {
             return status;
@@ -834,6 +871,11 @@ namespace crypto
             return STATUS_INVALID_PARAMETER;
         }
 
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         LPCWSTR algorithmName = HashAlgorithmName(algorithm);
         if (algorithmName == nullptr) {
             return STATUS_NOT_SUPPORTED;
@@ -849,7 +891,7 @@ namespace crypto
             cache->MarkProviderUsed();
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        status = STATUS_SUCCESS;
         if (providerToUse == nullptr) {
             status = provider->Open(algorithmName);
             if (!NT_SUCCESS(status)) {
@@ -920,6 +962,11 @@ namespace crypto
             return STATUS_INVALID_PARAMETER;
         }
 
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         LPCWSTR algorithmName = HashAlgorithmName(algorithm);
         if (algorithmName == nullptr) {
             return STATUS_NOT_SUPPORTED;
@@ -935,7 +982,7 @@ namespace crypto
             cache->MarkProviderUsed();
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        status = STATUS_SUCCESS;
         if (providerToUse == nullptr) {
             status = provider->Open(algorithmName, BCRYPT_ALG_HANDLE_HMAC_FLAG);
             if (!NT_SUCCESS(status)) {
@@ -1003,6 +1050,11 @@ namespace crypto
             *bytesWritten = 0;
         }
 
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         const SIZE_T digestLength = HashDigestLength(algorithm);
         if (digestLength == 0) {
             return STATUS_NOT_SUPPORTED;
@@ -1027,7 +1079,7 @@ namespace crypto
             actualSaltLength = digestLength;
         }
 
-        NTSTATUS status = Hmac(
+        status = Hmac(
             cache,
             algorithm,
             actualSalt,
@@ -1052,6 +1104,11 @@ namespace crypto
         UCHAR* output,
         SIZE_T outputLength) noexcept
     {
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         const SIZE_T digestLength = HashDigestLength(algorithm);
         if (digestLength == 0) {
             return STATUS_NOT_SUPPORTED;
@@ -1095,7 +1152,7 @@ namespace crypto
             ++inputLength;
 
             SIZE_T blockLength = 0;
-            NTSTATUS status = Hmac(
+            status = Hmac(
                 cache,
                 algorithm,
                 prk,
@@ -1142,6 +1199,11 @@ namespace crypto
             *bytesWritten = 0;
         }
 
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         if (!IsValidBuffer(plaintext, plaintextLength) ||
             !IsValidMutableBuffer(ciphertext, ciphertextLength) ||
             !IsValidMutableBuffer(tag, tagLength) ||
@@ -1164,7 +1226,7 @@ namespace crypto
             cache->MarkProviderUsed();
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        status = STATUS_SUCCESS;
         if (providerToUse == nullptr) {
             status = provider->Open(BCRYPT_AES_ALGORITHM);
             if (!NT_SUCCESS(status)) {
@@ -1234,6 +1296,11 @@ namespace crypto
             *bytesWritten = 0;
         }
 
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         if (!IsValidBuffer(ciphertext, ciphertextLength) ||
             !IsValidMutableBuffer(plaintext, plaintextLength) ||
             !IsValidBuffer(parameters.Nonce.Data, parameters.Nonce.Length) ||
@@ -1255,7 +1322,7 @@ namespace crypto
             cache->MarkProviderUsed();
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        status = STATUS_SUCCESS;
         if (providerToUse == nullptr) {
             status = provider->Open(BCRYPT_AES_ALGORITHM);
             if (!NT_SUCCESS(status)) {
@@ -1320,6 +1387,11 @@ namespace crypto
         const UCHAR* signature,
         SIZE_T signatureLength) noexcept
     {
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         if (!publicKey.IsOpen() ||
             !IsValidBuffer(hash, hashLength) ||
             !IsValidBuffer(signature, signatureLength) ||
@@ -1332,7 +1404,7 @@ namespace crypto
             cache->MarkProviderUsed();
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        status = STATUS_SUCCESS;
         ULONG hashSize = ToUlong(hashLength, &status);
         if (!NT_SUCCESS(status)) {
             return status;
@@ -1399,6 +1471,11 @@ namespace crypto
         EcCurve curve,
         CngKey& privateKey) noexcept
     {
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         LPCWSTR algorithmName = EcdhAlgorithmName(curve);
         if (algorithmName == nullptr) {
             return STATUS_NOT_SUPPORTED;
@@ -1414,7 +1491,7 @@ namespace crypto
             cache->MarkProviderUsed();
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        status = STATUS_SUCCESS;
         if (providerToUse == nullptr) {
             status = provider->Open(algorithmName);
             if (!NT_SUCCESS(status)) {
@@ -1452,6 +1529,11 @@ namespace crypto
         SIZE_T pointLength,
         CngKey& publicKey) noexcept
     {
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         return ImportEcPublicKey(
             cache,
             curve,
@@ -1469,6 +1551,11 @@ namespace crypto
         SIZE_T pointLength,
         CngKey& publicKey) noexcept
     {
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         return ImportEcPublicKey(
             cache,
             curve,
@@ -1487,6 +1574,11 @@ namespace crypto
         SIZE_T modulusLength,
         CngKey& publicKey) noexcept
     {
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         if (exponent == nullptr ||
             exponentLength == 0 ||
             modulus == nullptr ||
@@ -1506,7 +1598,7 @@ namespace crypto
             cache->MarkProviderUsed();
         }
 
-        NTSTATUS status = STATUS_SUCCESS;
+        status = STATUS_SUCCESS;
         if (providerToUse == nullptr) {
             status = provider->Open(BCRYPT_RSA_ALGORITHM);
             if (!NT_SUCCESS(status)) {
@@ -1555,6 +1647,11 @@ namespace crypto
             *bytesWritten = 0;
         }
 
+        NTSTATUS status = RequirePassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         if (!privateKey.IsOpen() ||
             !peerPublicKey.IsOpen() ||
             !IsValidMutableBuffer(secret, secretLength) ||
@@ -1567,7 +1664,7 @@ namespace crypto
         }
 
         BCRYPT_SECRET_HANDLE agreement = nullptr;
-        NTSTATUS status = BCryptSecretAgreement(privateKey.Handle(), peerPublicKey.Handle(), &agreement, 0);
+        status = BCryptSecretAgreement(privateKey.Handle(), peerPublicKey.Handle(), &agreement, 0);
         if (!NT_SUCCESS(status)) {
             return status;
         }

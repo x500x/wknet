@@ -29,6 +29,7 @@ namespace tls
         constexpr UCHAR TagTbsVersion = 0xa0;
         constexpr UCHAR TagExtensions = 0xa3;
         constexpr UCHAR TagDnsName = 0x82;
+        constexpr UCHAR TagIpAddress = 0x87;
 
         const UCHAR OidCommonName[] = { 0x55, 0x04, 0x03 };
         const UCHAR OidRsaEncryption[] = { 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01 };
@@ -706,6 +707,19 @@ namespace tls
                     certificate.DnsNameLengths[index] = name.ValueLength;
                     ++certificate.DnsNameCount;
                 }
+                else if (name.Tag == TagIpAddress) {
+                    if (name.Value == nullptr ||
+                        (name.ValueLength != 4 && name.ValueLength != 16)) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+
+                    if (certificate.IpAddressCount < (sizeof(certificate.IpAddresses) / sizeof(certificate.IpAddresses[0]))) {
+                        const SIZE_T index = certificate.IpAddressCount;
+                        RtlCopyMemory(certificate.IpAddresses[index], name.Value, name.ValueLength);
+                        certificate.IpAddressLengths[index] = name.ValueLength;
+                        ++certificate.IpAddressCount;
+                    }
+                }
             }
 
             return STATUS_SUCCESS;
@@ -938,10 +952,244 @@ namespace tls
         }
 
         _Must_inspect_result_
+        bool IsDecimalDigit(char value) noexcept
+        {
+            return value >= '0' && value <= '9';
+        }
+
+        _Must_inspect_result_
+        bool ParseIpv4Literal(
+            _In_reads_(hostLength) const char* host,
+            SIZE_T hostLength,
+            _Out_writes_bytes_(4) UCHAR* address) noexcept
+        {
+            if (host == nullptr || hostLength == 0 || address == nullptr) {
+                return false;
+            }
+
+            SIZE_T index = 0;
+            for (SIZE_T part = 0; part < 4; ++part) {
+                if (index >= hostLength || !IsDecimalDigit(host[index])) {
+                    return false;
+                }
+
+                ULONG value = 0;
+                SIZE_T digits = 0;
+                while (index < hostLength && IsDecimalDigit(host[index])) {
+                    value = (value * 10) + static_cast<ULONG>(host[index] - '0');
+                    if (value > 255) {
+                        return false;
+                    }
+                    ++index;
+                    ++digits;
+                }
+
+                if (digits == 0) {
+                    return false;
+                }
+
+                address[part] = static_cast<UCHAR>(value);
+                if (part == 3) {
+                    return index == hostLength;
+                }
+
+                if (index >= hostLength || host[index] != '.') {
+                    return false;
+                }
+                ++index;
+            }
+
+            return false;
+        }
+
+        _Must_inspect_result_
+        bool HexValue(char value, _Out_ USHORT* digit) noexcept
+        {
+            if (digit == nullptr) {
+                return false;
+            }
+
+            if (value >= '0' && value <= '9') {
+                *digit = static_cast<USHORT>(value - '0');
+                return true;
+            }
+            if (value >= 'a' && value <= 'f') {
+                *digit = static_cast<USHORT>(10 + value - 'a');
+                return true;
+            }
+            if (value >= 'A' && value <= 'F') {
+                *digit = static_cast<USHORT>(10 + value - 'A');
+                return true;
+            }
+
+            return false;
+        }
+
+        _Must_inspect_result_
+        bool ParseIpv6Literal(
+            _In_reads_(hostLength) const char* host,
+            SIZE_T hostLength,
+            _Out_writes_bytes_(16) UCHAR* address) noexcept
+        {
+            if (host == nullptr || hostLength == 0 || address == nullptr) {
+                return false;
+            }
+
+            SIZE_T start = 0;
+            SIZE_T length = hostLength;
+            if (hostLength >= 2 && host[0] == '[' && host[hostLength - 1] == ']') {
+                start = 1;
+                length = hostLength - 2;
+            }
+            if (length == 0) {
+                return false;
+            }
+
+            HeapArray<USHORT> groups(8);
+            if (!groups.IsValid()) {
+                return false;
+            }
+
+            SIZE_T groupCount = 0;
+            SIZE_T compressIndex = static_cast<SIZE_T>(-1);
+            SIZE_T index = start;
+            const SIZE_T end = start + length;
+
+            while (index < end) {
+                if (host[index] == ':') {
+                    if (index + 1 >= end || host[index + 1] != ':' || compressIndex != static_cast<SIZE_T>(-1)) {
+                        return false;
+                    }
+                    compressIndex = groupCount;
+                    index += 2;
+                    if (index == end) {
+                        break;
+                    }
+                    continue;
+                }
+
+                if (groupCount >= 8) {
+                    return false;
+                }
+
+                USHORT value = 0;
+                SIZE_T digits = 0;
+                while (index < end) {
+                    USHORT digit = 0;
+                    if (!HexValue(host[index], &digit)) {
+                        break;
+                    }
+                    if (digits == 4) {
+                        return false;
+                    }
+                    value = static_cast<USHORT>((value << 4) | digit);
+                    ++digits;
+                    ++index;
+                }
+                if (digits == 0) {
+                    return false;
+                }
+
+                groups[groupCount++] = value;
+                if (index == end) {
+                    break;
+                }
+                if (host[index] != ':') {
+                    return false;
+                }
+                if (index + 1 < end && host[index + 1] == ':') {
+                    if (compressIndex != static_cast<SIZE_T>(-1)) {
+                        return false;
+                    }
+                    compressIndex = groupCount;
+                    index += 2;
+                    if (index == end) {
+                        break;
+                    }
+                }
+                else {
+                    ++index;
+                    if (index == end) {
+                        return false;
+                    }
+                }
+            }
+
+            if (compressIndex == static_cast<SIZE_T>(-1)) {
+                if (groupCount != 8) {
+                    return false;
+                }
+            }
+            else {
+                if (groupCount >= 8) {
+                    return false;
+                }
+                const SIZE_T zeros = 8 - groupCount;
+                for (SIZE_T move = groupCount; move > compressIndex; --move) {
+                    groups[move + zeros - 1] = groups[move - 1];
+                }
+                for (SIZE_T fill = 0; fill < zeros; ++fill) {
+                    groups[compressIndex + fill] = 0;
+                }
+                groupCount = 8;
+            }
+
+            for (SIZE_T group = 0; group < 8; ++group) {
+                address[group * 2] = static_cast<UCHAR>((groups[group] >> 8) & 0xff);
+                address[(group * 2) + 1] = static_cast<UCHAR>(groups[group] & 0xff);
+            }
+
+            return true;
+        }
+
+        _Must_inspect_result_
+        bool ParseIpLiteral(
+            _In_reads_(hostLength) const char* host,
+            SIZE_T hostLength,
+            _Out_writes_bytes_(16) UCHAR* address,
+            _Out_ SIZE_T* addressLength) noexcept
+        {
+            if (addressLength != nullptr) {
+                *addressLength = 0;
+            }
+            if (host == nullptr || hostLength == 0 || address == nullptr || addressLength == nullptr) {
+                return false;
+            }
+
+            if (ParseIpv4Literal(host, hostLength, address)) {
+                *addressLength = 4;
+                return true;
+            }
+            if (ParseIpv6Literal(host, hostLength, address)) {
+                *addressLength = 16;
+                return true;
+            }
+
+            return false;
+        }
+
+        _Must_inspect_result_
         NTSTATUS ValidateHostName(_In_ const ParsedCertificate& leaf, _In_ const CertificateValidationOptions& options) noexcept
         {
             if (options.HostName == nullptr || options.HostNameLength == 0) {
                 return STATUS_INVALID_PARAMETER;
+            }
+
+            HeapArray<UCHAR> hostAddress(16);
+            if (!hostAddress.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            SIZE_T hostAddressLength = 0;
+            if (ParseIpLiteral(options.HostName, options.HostNameLength, hostAddress.Get(), &hostAddressLength)) {
+                for (SIZE_T index = 0; index < leaf.IpAddressCount; ++index) {
+                    if (leaf.IpAddressLengths[index] == hostAddressLength &&
+                        RtlCompareMemory(leaf.IpAddresses[index], hostAddress.Get(), hostAddressLength) == hostAddressLength) {
+                        return STATUS_SUCCESS;
+                    }
+                }
+
+                return STATUS_TRUST_FAILURE;
             }
 
             if (leaf.DnsNameCount != 0) {

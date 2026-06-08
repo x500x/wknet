@@ -113,7 +113,8 @@ namespace khttp
         Text = 0,
         Binary = 1,
         Close = 2,
-        Continuation = 3
+        Continuation = 3,
+        Ping = 4
     };
 
     enum class BodyPartKind : ULONG
