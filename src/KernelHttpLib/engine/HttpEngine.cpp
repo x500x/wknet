@@ -580,6 +580,25 @@ namespace engine
             *parsed);
     }
 
+    bool IsHttpConnectionReusable(
+        _In_ const http::HttpResponse& parsed,
+        SIZE_T rawResponseLength) noexcept
+    {
+        if (parsed.StatusCode == 101 ||
+            parsed.BodyEndsOnConnectionClose ||
+            parsed.HasConnectionClose() ||
+            parsed.BytesConsumed != rawResponseLength ||
+            parsed.MajorVersion != 1) {
+            return false;
+        }
+
+        if (parsed.MinorVersion == 0) {
+            return parsed.HasConnectionKeepAlive();
+        }
+
+        return parsed.MinorVersion == 1;
+    }
+
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
     _Must_inspect_result_
     NTSTATUS BuildHttp2OptionsFromRequest(
@@ -1327,7 +1346,9 @@ namespace engine
         }
 
         *rawResponseLength = workspace.ResponseLength;
-        *connectionReusable = testResponse.ConnectionReusable && !parsed->HasConnectionClose();
+        *connectionReusable =
+            testResponse.ConnectionReusable &&
+            IsHttpConnectionReusable(*parsed, *rawResponseLength);
         return STATUS_SUCCESS;
 #else
         UNREFERENCED_PARAMETER(reusedConnection);
@@ -1426,9 +1447,7 @@ namespace engine
             return status;
         }
 
-        *connectionReusable =
-            !parsed->HasConnectionClose() &&
-            parsed->BytesConsumed == *rawResponseLength;
+        *connectionReusable = IsHttpConnectionReusable(*parsed, *rawResponseLength);
         return STATUS_SUCCESS;
 #endif
     }

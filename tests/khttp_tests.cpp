@@ -156,6 +156,16 @@ namespace
         ULONG RetryConnectionId = 0;
     };
 
+    struct ReuseDecisionCapture
+    {
+        const char* FirstResponse = nullptr;
+        SIZE_T FirstResponseLength = 0;
+        const char* SecondResponse = nullptr;
+        SIZE_T SecondResponseLength = 0;
+        SIZE_T CallCount = 0;
+        SIZE_T ReusedCallCount = 0;
+    };
+
     struct CompletionCapture
     {
         SIZE_T CallCount = 0;
@@ -364,6 +374,33 @@ namespace
         response->RawResponse = responseBytes;
         response->RawResponseLength = sizeof(responseBytes) - 1;
         response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS ReuseDecisionTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<ReuseDecisionCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->CallCount;
+        if (request->ReusedConnection) {
+            ++capture->ReusedCallCount;
+        }
+
+        if (capture->CallCount == 1) {
+            response->RawResponse = capture->FirstResponse;
+            response->RawResponseLength = capture->FirstResponseLength;
+        }
+        else {
+            response->RawResponse = capture->SecondResponse;
+            response->RawResponseLength = capture->SecondResponseLength;
+        }
+        response->ConnectionReusable = true;
         return STATUS_SUCCESS;
     }
 
@@ -694,6 +731,17 @@ namespace
         status = KernelHttp::khttp::RequestSetUrl(request, spacedUrl, Length(spacedUrl));
         Expect(status == STATUS_INVALID_PARAMETER, "RequestSetUrl rejects spaces in request target");
 
+        const char* userInfoUrl = "http://user@example.com/path";
+        status = KernelHttp::khttp::RequestSetUrl(request, userInfoUrl, Length(userInfoUrl));
+        Expect(status == STATUS_NOT_SUPPORTED, "RequestSetUrl rejects userinfo authority");
+
+        const char* unsupportedAuthorityUrl = "http://example.com:80:90/path";
+        status = KernelHttp::khttp::RequestSetUrl(
+            request,
+            unsupportedAuthorityUrl,
+            Length(unsupportedAuthorityUrl));
+        Expect(status == STATUS_NOT_SUPPORTED, "RequestSetUrl rejects unsupported authority form");
+
         const char* badContentType = "text/plain\r\nX-Test: yes";
         status = KernelHttp::khttp::RequestSetTextBody(
             request,
@@ -782,6 +830,170 @@ namespace
         Expect(capture.FirstConnectionId != 0, "first idle connection id captured");
         Expect(capture.RetryConnectionId != 0, "second idle connection id captured");
         Expect(capture.RetryConnectionId != capture.FirstConnectionId, "idle timeout uses a different connection id");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestCloseDelimitedResponseDoesNotEnterPool() noexcept
+    {
+        static const char closeDelimitedResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "\r\n"
+            "close-body";
+        static const char secondResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "ok";
+
+        ReuseDecisionCapture capture = {};
+        capture.FirstResponse = closeDelimitedResponse;
+        capture.FirstResponseLength = Length(closeDelimitedResponse);
+        capture.SecondResponse = secondResponse;
+        capture.SecondResponseLength = Length(secondResponse);
+        KernelHttp::khttp::test::SetHttpTransport(ReuseDecisionTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for close-delimited reuse test");
+
+        const char* url = "http://example.com/close-delimited";
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "close-delimited Get succeeds");
+        Expect(KernelHttp::khttp::ResponseBodyLength(resp) == Length("close-body"), "close-delimited body is returned");
+        KernelHttp::khttp::ResponseRelease(resp);
+        resp = nullptr;
+
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "second Get after close-delimited response succeeds");
+        Expect(capture.CallCount == 2, "close-delimited test sends two requests");
+        Expect(capture.ReusedCallCount == 0, "close-delimited response is not returned to the pool");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttp10ConnectionReuseRules() noexcept
+    {
+        static const char http10NoDirective[] =
+            "HTTP/1.0 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "ok";
+        static const char http10KeepAlive[] =
+            "HTTP/1.0 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: keep-alive\r\n"
+            "\r\n"
+            "ok";
+        static const char secondResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "ok";
+
+        ReuseDecisionCapture capture = {};
+        capture.FirstResponse = http10NoDirective;
+        capture.FirstResponseLength = Length(http10NoDirective);
+        capture.SecondResponse = secondResponse;
+        capture.SecondResponseLength = Length(secondResponse);
+        KernelHttp::khttp::test::SetHttpTransport(ReuseDecisionTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for HTTP/1.0 reuse test");
+
+        const char* url = "http://example.com/http10";
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "HTTP/1.0 default-close Get succeeds");
+        KernelHttp::khttp::ResponseRelease(resp);
+        resp = nullptr;
+
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "second Get after HTTP/1.0 default-close succeeds");
+        Expect(capture.ReusedCallCount == 0, "HTTP/1.0 without keep-alive is not reused");
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+
+        capture = {};
+        capture.FirstResponse = http10KeepAlive;
+        capture.FirstResponseLength = Length(http10KeepAlive);
+        capture.SecondResponse = secondResponse;
+        capture.SecondResponseLength = Length(secondResponse);
+        KernelHttp::khttp::test::SetHttpTransport(ReuseDecisionTransport, &capture);
+
+        session = nullptr;
+        status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for HTTP/1.0 keep-alive reuse test");
+
+        resp = nullptr;
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "HTTP/1.0 keep-alive Get succeeds");
+        KernelHttp::khttp::ResponseRelease(resp);
+        resp = nullptr;
+
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "second Get after HTTP/1.0 keep-alive succeeds");
+        Expect(capture.ReusedCallCount == 1, "HTTP/1.0 keep-alive response is reusable");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestSwitchingProtocolsDoesNotEnterHttpPool() noexcept
+    {
+        static const char switchingResponse[] =
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "\r\n";
+        static const char secondResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "ok";
+
+        ReuseDecisionCapture capture = {};
+        capture.FirstResponse = switchingResponse;
+        capture.FirstResponseLength = Length(switchingResponse);
+        capture.SecondResponse = secondResponse;
+        capture.SecondResponseLength = Length(secondResponse);
+        KernelHttp::khttp::test::SetHttpTransport(ReuseDecisionTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for 101 reuse test");
+
+        const char* url = "http://example.com/upgrade";
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "101 response Get succeeds");
+        Expect(KernelHttp::khttp::ResponseStatusCode(resp) == 101, "101 status reaches caller");
+        KernelHttp::khttp::ResponseRelease(resp);
+        resp = nullptr;
+
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "second Get after 101 response succeeds");
+        Expect(capture.CallCount == 2, "101 test sends two requests");
+        Expect(capture.ReusedCallCount == 0, "101 response is not returned to the HTTP pool");
 
         KernelHttp::khttp::ResponseRelease(resp);
         KernelHttp::khttp::SessionClose(session);
@@ -1504,6 +1716,9 @@ int main() noexcept
     TestRequestRejectsHeaderAndUrlInjection();
     TestReusedConnectionFailureRetriesWithFreshConnection();
     TestIdleTimeoutSkipsExpiredConnection();
+    TestCloseDelimitedResponseDoesNotEnterPool();
+    TestHttp10ConnectionReuseRules();
+    TestSwitchingProtocolsDoesNotEnterHttpPool();
     TestFreshSafeConnectionTimeoutRetriesWithFreshConnection();
     TestFreshPostTimeoutDoesNotRetry();
     TestPostWithBody();

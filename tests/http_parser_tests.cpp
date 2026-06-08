@@ -1465,10 +1465,88 @@ namespace
         Expect(response.HeaderCount == 0, "parser clears response on header storage failure");
     }
 
+    void TestResponseRejectsInvalidHeaders()
+    {
+        const char whitespaceBeforeColon[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length : 5\r\n"
+            "\r\n"
+            "hello";
+        const char invalidFieldName[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Bad(Header): value\r\n"
+            "\r\n";
+        const char invalidFieldValue[] =
+            "HTTP/1.1 200 OK\r\n"
+            "X-Test: bad\001value\r\n"
+            "\r\n";
+
+        const char* cases[] = {
+            whitespaceBeforeColon,
+            invalidFieldName,
+            invalidFieldValue
+        };
+
+        for (SIZE_T index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+            HttpHeader headers[4] = {};
+            HttpParseOptions options = {};
+            options.Headers = headers;
+            options.HeaderCapacity = 4;
+            options.MessageCompleteOnConnectionClose = true;
+
+            HttpResponse response = {};
+            const NTSTATUS status = HttpParser::ParseResponse(
+                cases[index],
+                strlen(cases[index]),
+                options,
+                response);
+
+            Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "response parser rejects invalid header syntax");
+        }
+    }
+
+    void TestResponseRejectsInvalidStatusLines()
+    {
+        const char unsupportedVersion[] =
+            "HTTP/2.0 200 OK\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+        const char zeroStatus[] =
+            "HTTP/1.1 000 Invalid\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+        const char unsupportedStatus[] =
+            "HTTP/1.1 999 Invalid\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        const char* cases[] = {
+            unsupportedVersion,
+            zeroStatus,
+            unsupportedStatus
+        };
+
+        for (SIZE_T index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+            HttpHeader headers[4] = {};
+            HttpParseOptions options = {};
+            options.Headers = headers;
+            options.HeaderCapacity = 4;
+
+            HttpResponse response = {};
+            const NTSTATUS status = HttpParser::ParseResponse(
+                cases[index],
+                strlen(cases[index]),
+                options,
+                response);
+
+            Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "response parser rejects unsupported status line");
+        }
+    }
+
     void TestParseCloseDelimitedResponse()
     {
         const char responseBytes[] =
-            "HTTP/1.0 200 OK\r\n"
+            "HTTP/1.1 200 OK\r\n"
             "\r\n"
             "close-body";
 
@@ -1487,8 +1565,75 @@ namespace
 
         Expect(status == STATUS_SUCCESS, "close-delimited response parses when marked complete");
         Expect(response.BodyKind == HttpBodyKind::CloseDelimited, "body kind is CloseDelimited");
+        Expect(response.BodyEndsOnConnectionClose, "response records close-delimited completion");
         Expect(MemoryEqualsLiteral(response.Body, response.BodyLength, "close-body"), "close-delimited body is exposed");
     }
+
+    void TestParseEmptyCloseDelimitedResponse()
+    {
+        const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "\r\n";
+
+        HttpHeader headers[2] = {};
+        HttpParseOptions options = {};
+        options.Headers = headers;
+        options.HeaderCapacity = 2;
+        options.MessageCompleteOnConnectionClose = true;
+
+        HttpResponse response = {};
+        const NTSTATUS status = HttpParser::ParseResponse(
+            responseBytes,
+            strlen(responseBytes),
+            options,
+            response);
+
+        Expect(status == STATUS_SUCCESS, "empty close-delimited response parses when EOF completes it");
+        Expect(response.BodyKind == HttpBodyKind::None, "empty close-delimited response has no body bytes");
+        Expect(response.BodyEndsOnConnectionClose, "empty EOF-delimited response still records close ownership");
+    }
+
+    void TestParseHttp10ConnectionDirectives()
+    {
+        const char keepAliveResponse[] =
+            "HTTP/1.0 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: keep-alive\r\n"
+            "\r\n"
+            "ok";
+        const char closeResponse[] =
+            "HTTP/1.0 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "ok";
+
+        HttpHeader headers[4] = {};
+        HttpParseOptions options = {};
+        options.Headers = headers;
+        options.HeaderCapacity = 4;
+
+        HttpResponse response = {};
+        NTSTATUS status = HttpParser::ParseResponse(
+            keepAliveResponse,
+            strlen(keepAliveResponse),
+            options,
+            response);
+        Expect(status == STATUS_SUCCESS, "HTTP/1.0 keep-alive response parses");
+        Expect(response.MajorVersion == 1 && response.MinorVersion == 0, "HTTP/1.0 version is recorded");
+        Expect(response.HasConnectionKeepAlive(), "HTTP/1.0 keep-alive token is recorded");
+
+        memset(headers, 0, sizeof(headers));
+        response = {};
+        status = HttpParser::ParseResponse(
+            closeResponse,
+            strlen(closeResponse),
+            options,
+            response);
+        Expect(status == STATUS_SUCCESS, "HTTP/1.0 close response parses");
+        Expect(response.HasConnectionClose(), "HTTP/1.0 close token is recorded");
+    }
+
 
     void TestIncompleteResponseNeedsMoreData()
     {
@@ -1706,7 +1851,11 @@ int main()
     TestTransferEncodingRejectsIdentity();
     TestTransferEncodingRejectsOnlyEmptyList();
     TestHeaderCapacityFailure();
+    TestResponseRejectsInvalidHeaders();
+    TestResponseRejectsInvalidStatusLines();
     TestParseCloseDelimitedResponse();
+    TestParseEmptyCloseDelimitedResponse();
+    TestParseHttp10ConnectionDirectives();
     TestIncompleteResponseNeedsMoreData();
     TestIncompleteChunkedResponseNeedsMoreData();
     TestEmptyResponseNeedsMoreData();

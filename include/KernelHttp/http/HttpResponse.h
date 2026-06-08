@@ -25,6 +25,7 @@ namespace http
         const char* Body = nullptr;
         SIZE_T BodyLength = 0;
         HttpBodyKind BodyKind = HttpBodyKind::None;
+        bool BodyEndsOnConnectionClose = false;
         SIZE_T BytesConsumed = 0;
 
         _Must_inspect_result_
@@ -35,6 +36,9 @@ namespace http
 
         _Must_inspect_result_
         bool HasConnectionClose() const noexcept;
+
+        _Must_inspect_result_
+        bool HasConnectionKeepAlive() const noexcept;
 
         _Must_inspect_result_
         bool HasChunkedTransferEncoding() const noexcept;

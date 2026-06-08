@@ -48,6 +48,11 @@ namespace http
         return HasHeaderValueToken(MakeText("Connection"), MakeText("close"));
     }
 
+    bool HttpResponse::HasConnectionKeepAlive() const noexcept
+    {
+        return HasHeaderValueToken(MakeText("Connection"), MakeText("keep-alive"));
+    }
+
     bool HttpResponse::HasChunkedTransferEncoding() const noexcept
     {
         return HasHeaderValueToken(MakeText("Transfer-Encoding"), MakeText("chunked"));

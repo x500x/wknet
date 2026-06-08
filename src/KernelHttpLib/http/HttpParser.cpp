@@ -41,6 +41,60 @@ namespace http
             return value == ' ' || value == '\t';
         }
 
+        bool IsTchar(char value) noexcept
+        {
+            const unsigned char ch = static_cast<unsigned char>(value);
+            return (ch >= '0' && ch <= '9') ||
+                (ch >= 'A' && ch <= 'Z') ||
+                (ch >= 'a' && ch <= 'z') ||
+                value == '!' ||
+                value == '#' ||
+                value == '$' ||
+                value == '%' ||
+                value == '&' ||
+                value == '\'' ||
+                value == '*' ||
+                value == '+' ||
+                value == '-' ||
+                value == '.' ||
+                value == '^' ||
+                value == '_' ||
+                value == '`' ||
+                value == '|' ||
+                value == '~';
+        }
+
+        bool IsValidHeaderName(HttpText text) noexcept
+        {
+            if (text.Data == nullptr || text.Length == 0) {
+                return false;
+            }
+
+            for (SIZE_T index = 0; index < text.Length; ++index) {
+                if (!IsTchar(text.Data[index])) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        bool IsValidHeaderValue(HttpText text) noexcept
+        {
+            if (text.Data == nullptr && text.Length != 0) {
+                return false;
+            }
+
+            for (SIZE_T index = 0; index < text.Length; ++index) {
+                const unsigned char ch = static_cast<unsigned char>(text.Data[index]);
+                if (text.Data[index] != '\t' && (ch < 0x20 || ch == 0x7f)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         HttpText TrimOptionalWhitespace(HttpText text) noexcept
         {
             while (text.Length > 0 && IsOptionalWhitespace(text.Data[0])) {
@@ -221,6 +275,10 @@ namespace http
                 return status;
             }
 
+            if (response.MajorVersion != 1 || response.MinorVersion > 1) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
             while (index < line.Length && line.Data[index] == ' ') {
                 ++index;
             }
@@ -235,6 +293,10 @@ namespace http
             status = ParseUInt16({ line.Data + index, 3 }, &response.StatusCode);
             if (!NT_SUCCESS(status)) {
                 return status;
+            }
+
+            if (response.StatusCode < 100 || response.StatusCode > 599) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
             index += 3;
@@ -304,6 +366,10 @@ namespace http
                 HttpText name = { data + cursor, colon - cursor };
                 HttpText value = { data + colon + 1, lineEnd - colon - 1 };
                 value = TrimOptionalWhitespace(value);
+
+                if (!IsValidHeaderName(name) || !IsValidHeaderValue(value)) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
 
                 headers[*headerCount] = { name, value };
                 ++(*headerCount);
@@ -518,6 +584,10 @@ namespace http
             }
 
             response.BodyKind = decoded.BodyKind;
+            response.BodyEndsOnConnectionClose =
+                transferInfo.HasTransferEncoding &&
+                !transferInfo.FinalCodingIsChunked &&
+                options.MessageCompleteOnConnectionClose;
             response.BytesConsumed = headerEnd + decoded.BytesConsumed;
             status = ApplyContentEncoding(options, response, decoded.Body, decoded.BodyLength);
             if (!NT_SUCCESS(status)) {
@@ -551,6 +621,7 @@ namespace http
 
         if (options.MessageCompleteOnConnectionClose) {
             response.BodyKind = (dataLength == headerEnd) ? HttpBodyKind::None : HttpBodyKind::CloseDelimited;
+            response.BodyEndsOnConnectionClose = true;
             response.BytesConsumed = dataLength;
             status = ApplyContentEncoding(
                 options,

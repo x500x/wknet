@@ -88,6 +88,11 @@ namespace
         return false;
     }
 
+    bool AuthorityContainsUserInfo(const char* authority, SIZE_T authorityLength) noexcept
+    {
+        return UrlTextContainsChar(authority, authorityLength, '@');
+    }
+
     _Must_inspect_result_
     NTSTATUS CopyLowerText(
         const char* source,
@@ -185,6 +190,10 @@ NTSTATUS ParseUrlIntoRequest(
 
     if (authorityEnd == authorityStart) {
         return STATUS_INVALID_PARAMETER;
+    }
+
+    if (AuthorityContainsUserInfo(url + authorityStart, authorityEnd - authorityStart)) {
+        return STATUS_NOT_SUPPORTED;
     }
 
     SIZE_T hostStart = authorityStart;
@@ -374,6 +383,10 @@ NTSTATUS ParseUrlParts(
 
     if (authorityEnd == authorityStart) {
         return STATUS_INVALID_PARAMETER;
+    }
+
+    if (AuthorityContainsUserInfo(url + authorityStart, authorityEnd - authorityStart)) {
+        return STATUS_NOT_SUPPORTED;
     }
 
     SIZE_T parsedHostStart = authorityStart;
