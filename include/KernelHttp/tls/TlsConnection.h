@@ -16,7 +16,7 @@ namespace tls
 {
     constexpr SIZE_T TlsIoBufferLength = TlsRecordHeaderLength + TlsMaxPlaintextLength + 2048;
     constexpr SIZE_T TlsHandshakeBufferLength = 8192;
-    constexpr SIZE_T TlsApplicationBufferLength = TlsMaxPlaintextLength;
+    constexpr SIZE_T TlsApplicationBufferLength = TlsMaxPlaintextLength + 1;
     constexpr ULONG TlsApplicationMaxEmptyRecords = 16;
     constexpr ULONG TlsApplicationMaxPostHandshakeRecords = 16;
     constexpr ULONG TlsHandshakeMaxRecords = 64;

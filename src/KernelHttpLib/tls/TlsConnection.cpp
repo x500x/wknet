@@ -2115,6 +2115,10 @@ namespace tls
                 plaintextLength_ = 0;
             }
             else {
+                if (view.FragmentLength > TlsMaxPlaintextLength) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
                 if (view.FragmentLength > TlsApplicationBufferLength) {
                     return STATUS_BUFFER_TOO_SMALL;
                 }

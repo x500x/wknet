@@ -7,6 +7,7 @@
 #include <KernelHttp/tls/CertificateValidator.h>
 #include <KernelHttp/tls/TlsHandshake12.h>
 #include <KernelHttp/tls/TlsHandshake13.h>
+#include <KernelHttp/tls/TlsConnection.h>
 #include <KernelHttp/tls/TlsRecord.h>
 
 #include <stdio.h>
@@ -32,6 +33,7 @@ using KernelHttp::tls::TlsAesGcmExplicitNonceLength;
 using KernelHttp::tls::TlsAesGcmFixedIvLength;
 using KernelHttp::tls::TlsAesGcmTls13IvLength;
 using KernelHttp::tls::TlsAesGcmTagLength;
+using KernelHttp::tls::TlsApplicationBufferLength;
 using KernelHttp::tls::Tls12NewSessionTicketView;
 using KernelHttp::tls::TlsClientHelloOptions;
 using KernelHttp::tls::TlsRecordHeaderLength;
@@ -868,6 +870,7 @@ namespace
         Expect(output.ContentType == TlsContentType::ApplicationData, "TLS 1.3 AES-GCM max record content type recovers");
         Expect(output.FragmentLength == sizeof(body), "TLS 1.3 AES-GCM max record plaintext length matches");
         Expect(memcmp(output.Fragment, body, sizeof(body)) == 0, "TLS 1.3 AES-GCM max record plaintext bytes match");
+        Expect(TlsApplicationBufferLength >= TlsMaxPlaintextLength + 1, "TLS connection receive buffer fits max TLS 1.3 inner plaintext");
     }
 
     void TestTls13AesGcmProtectsWithHeapScratch()
