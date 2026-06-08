@@ -614,7 +614,8 @@ namespace
             &results);
 
         Expect(NT_SUCCESS(status), "advanced scenario samples succeed under test transport");
-        Expect(results.HttpRedirect.StatusCode == 302, "redirect sample observes 302");
+        Expect(results.HttpRedirect.StatusCode == 200, "redirect sample follows to 200");
+        Expect(results.HttpRedirectDisabled.StatusCode == 302, "disabled redirect sample observes 302");
         Expect(results.HttpNotFound.StatusCode == 404, "404 sample observes 404");
         Expect(results.HttpServerError.StatusCode == 500, "500 sample observes 500");
         Expect(results.HttpLargeResponse.BodyLength == 96, "large response sample records body");

@@ -126,7 +126,8 @@ namespace khttp
     enum SendFlags : ULONG
     {
         SendFlagNone = 0,
-        SendFlagAggregateWithCallbacks = 0x00000001
+        SendFlagAggregateWithCallbacks = 0x00000001,
+        SendFlagDisableAutoRedirect = 0x00000002
     };
 
     constexpr SIZE_T DefaultRequestBufferBytes = 16 * 1024;
@@ -135,6 +136,7 @@ namespace khttp
     constexpr ULONG DefaultMaxConnsPerHost = 2;
     constexpr ULONG DefaultIdleTimeoutMs = 30000;
     constexpr ULONG DefaultTlsHandshakeTimeoutMs = TlsHandshakeReceiveTimeoutMilliseconds;
+    constexpr ULONG DefaultMaxRedirects = 10;
 
     typedef NTSTATUS (*HeaderCallback)(
         void* context,
@@ -190,6 +192,8 @@ namespace khttp
         // 0 means no response-size limit. Passing nullptr options is also unlimited.
         SIZE_T MaxResponseBytes = 0;
         ULONG Flags = SendFlagNone;
+        // 0 means use the default redirect limit.
+        ULONG MaxRedirects = 0;
         HeaderCallback OnHeader = nullptr;
         BodyCallback OnBody = nullptr;
         void* CallbackContext = nullptr;

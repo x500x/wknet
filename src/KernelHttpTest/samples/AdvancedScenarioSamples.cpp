@@ -91,6 +91,43 @@ namespace samples
             return status;
         }
 
+        NTSTATUS RunDisabledRedirectSample(
+            khttp::Session* session,
+            _Out_ HighLevelApiSampleResult& result) noexcept
+        {
+            khttp::Request* request = nullptr;
+            NTSTATUS status = khttp::RequestCreate(session, &request);
+            if (NT_SUCCESS(status)) {
+                status = khttp::RequestSetUrl(request, RedirectUrl, LiteralLength(RedirectUrl));
+            }
+            if (NT_SUCCESS(status)) {
+                status = khttp::RequestSetMethod(request, khttp::Method::Get);
+            }
+
+            khttp::SendOptions options = khttp::DefaultSendOptions();
+            options.Flags = khttp::SendFlagDisableAutoRedirect;
+
+            khttp::Response* response = nullptr;
+            if (NT_SUCCESS(status)) {
+                status = khttp::Send(session, request, &options, &response);
+            }
+
+            ULONG statusCode = 0;
+            SIZE_T bodyLength = 0;
+            if (response != nullptr) {
+                statusCode = khttp::ResponseStatusCode(response);
+                bodyLength = khttp::ResponseBodyLength(response);
+            }
+            if (NT_SUCCESS(status) && statusCode != 302) {
+                status = STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            CaptureStatus(result, status, statusCode, bodyLength);
+            khttp::ResponseRelease(response);
+            khttp::RequestRelease(request);
+            return status;
+        }
+
         NTSTATUS RunLargeResponseSample(
             khttp::Session* session,
             _Out_ HighLevelApiSampleResult& result) noexcept
@@ -417,8 +454,10 @@ namespace samples
             return status;
         }
 
-        status = ValidateStatusCode(session, RedirectUrl, 302, results->HttpRedirect);
-        MergeSampleStatus(aggregate, "HTTP Redirect 302", status);
+        status = ValidateStatusCode(session, RedirectUrl, 200, results->HttpRedirect);
+        MergeSampleStatus(aggregate, "HTTP Redirect 200", status);
+        status = RunDisabledRedirectSample(session, results->HttpRedirectDisabled);
+        MergeSampleStatus(aggregate, "HTTP RedirectDisabled 302", status);
         status = ValidateStatusCode(session, NotFoundUrl, 404, results->HttpNotFound);
         MergeSampleStatus(aggregate, "HTTP NotFound 404", status);
         status = ValidateStatusCode(session, ServerErrorUrl, 500, results->HttpServerError);

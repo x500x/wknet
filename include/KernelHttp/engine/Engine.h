@@ -39,6 +39,7 @@ namespace engine
     constexpr ULONG KhDefaultConnectionsPerHost = 2;
     constexpr ULONG KhDefaultIdleTimeoutMilliseconds = 30000;
     constexpr ULONG KhDefaultTlsHandshakeReceiveTimeoutMilliseconds = TlsHandshakeReceiveTimeoutMilliseconds;
+    constexpr ULONG KhDefaultMaxRedirects = 10;
 
     enum class KhPoolType : ULONG
     {
@@ -93,7 +94,8 @@ namespace engine
     enum KhHttpSendFlags : ULONG
     {
         KhHttpSendFlagNone = 0,
-        KhHttpSendFlagAggregateWithCallbacks = 0x00000001
+        KhHttpSendFlagAggregateWithCallbacks = 0x00000001,
+        KhHttpSendFlagDisableAutoRedirect = 0x00000002
     };
 
     enum class KhWebSocketMessageType : ULONG
@@ -158,6 +160,8 @@ namespace engine
         // 0 means no response-size limit. Passing nullptr options is also unlimited.
         SIZE_T MaxResponseBytes = 0;
         ULONG Flags = KhHttpSendFlagNone;
+        // 0 means use the default redirect limit.
+        ULONG MaxRedirects = 0;
         KhHeaderCallback HeaderCallback = nullptr;
         KhBodyCallback BodyCallback = nullptr;
         void* CallbackContext = nullptr;

@@ -30,6 +30,7 @@ namespace engine
         KhHttpRequestHeaderScratchBytes +
         KhHttpResponseHeaderScratchBytes +
         KhHttpHostHeaderScratchBytes;
+    constexpr char KhDefaultAcceptEncoding[] = "gzip, deflate, br, identity";
 
     constexpr SIZE_T KhHttp2HeaderScratchBytes =
         sizeof(http::HttpHeader) * client::Http2MaxRequestHeaders;
@@ -295,6 +296,7 @@ namespace engine
         }
 
         SIZE_T extraHeaderCount = 0;
+        bool hasAcceptEncoding = false;
         for (SIZE_T index = 0; index < request.HeaderCount; ++index) {
             const KhStoredHeader& header = request.Headers[index];
             if (HeaderNameEquals(header, "Host") ||
@@ -303,12 +305,26 @@ namespace engine
                 continue;
             }
 
+            if (HeaderNameEquals(header, "Accept-Encoding")) {
+                hasAcceptEncoding = true;
+            }
+
             if (extraHeaderCount >= headerCapacity) {
                 return STATUS_BUFFER_TOO_SMALL;
             }
 
             headers[extraHeaderCount].Name = { header.Name, header.NameLength };
             headers[extraHeaderCount].Value = { header.Value, header.ValueLength };
+            ++extraHeaderCount;
+        }
+
+        if (!hasAcceptEncoding) {
+            if (extraHeaderCount >= headerCapacity) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            headers[extraHeaderCount].Name = http::MakeText("Accept-Encoding");
+            headers[extraHeaderCount].Value = http::MakeText(KhDefaultAcceptEncoding);
             ++extraHeaderCount;
         }
 
@@ -1400,6 +1416,361 @@ namespace engine
 #endif
     }
 
+    SIZE_T LiteralLength(_In_z_ const char* text) noexcept
+    {
+        SIZE_T length = 0;
+        if (text == nullptr) {
+            return 0;
+        }
+
+        while (text[length] != '\0') {
+            ++length;
+        }
+        return length;
+    }
+
+    char HttpRedirectToLowerAscii(char value) noexcept
+    {
+        return value >= 'A' && value <= 'Z' ?
+            static_cast<char>(value - 'A' + 'a') :
+            value;
+    }
+
+    bool StartsWithLiteralIgnoreCase(
+        const char* value,
+        SIZE_T valueLength,
+        _In_z_ const char* literal) noexcept
+    {
+        const SIZE_T literalLength = LiteralLength(literal);
+        if (value == nullptr || literal == nullptr || literalLength > valueLength) {
+            return false;
+        }
+
+        for (SIZE_T index = 0; index < literalLength; ++index) {
+            if (HttpRedirectToLowerAscii(value[index]) != HttpRedirectToLowerAscii(literal[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool IsRedirectStatus(USHORT statusCode) noexcept
+    {
+        return statusCode == 301 ||
+            statusCode == 302 ||
+            statusCode == 303 ||
+            statusCode == 307 ||
+            statusCode == 308;
+    }
+
+    bool ShouldRewriteRedirectToGet(USHORT statusCode, KhHttpMethod method) noexcept
+    {
+        if (method == KhHttpMethod::Get || method == KhHttpMethod::Head) {
+            return false;
+        }
+
+        return statusCode == 301 || statusCode == 302 || statusCode == 303;
+    }
+
+    bool RedirectsEnabled(const KhHttpSendOptions& options) noexcept
+    {
+        return (options.Flags & KhHttpSendFlagDisableAutoRedirect) == 0;
+    }
+
+    ULONG EffectiveMaxRedirects(const KhHttpSendOptions& options) noexcept
+    {
+        return options.MaxRedirects != 0 ? options.MaxRedirects : KhDefaultMaxRedirects;
+    }
+
+    http::HttpText FindLocationHeader(const http::HttpResponse& response) noexcept
+    {
+        const http::HttpHeader* header = nullptr;
+        if (response.FindHeader(http::MakeText("Location"), &header) && header != nullptr) {
+            return header->Value;
+        }
+
+        return {};
+    }
+
+    bool IsAbsoluteHttpLocation(http::HttpText location) noexcept
+    {
+        return StartsWithLiteralIgnoreCase(location.Data, location.Length, "http://") ||
+            StartsWithLiteralIgnoreCase(location.Data, location.Length, "https://");
+    }
+
+    bool IsSchemeRelativeLocation(http::HttpText location) noexcept
+    {
+        return location.Data != nullptr &&
+            location.Length >= 2 &&
+            location.Data[0] == '/' &&
+            location.Data[1] == '/';
+    }
+
+    bool IsPathAbsoluteLocation(http::HttpText location) noexcept
+    {
+        return location.Data != nullptr &&
+            location.Length >= 1 &&
+            location.Data[0] == '/';
+    }
+
+    _Must_inspect_result_
+    NTSTATUS BuildRedirectUrl(
+        const KhRequest& request,
+        http::HttpText location,
+        _Out_writes_bytes_(destinationCapacity) char* destination,
+        SIZE_T destinationCapacity,
+        _Out_ SIZE_T* destinationLength) noexcept
+    {
+        if (destinationLength != nullptr) {
+            *destinationLength = 0;
+        }
+
+        if (location.Data == nullptr ||
+            location.Length == 0 ||
+            destination == nullptr ||
+            destinationLength == nullptr ||
+            request.SchemeLength == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (IsAbsoluteHttpLocation(location)) {
+            *destinationLength = location.Length;
+            return STATUS_SUCCESS;
+        }
+
+        if (!IsPathAbsoluteLocation(location)) {
+            return STATUS_NOT_FOUND;
+        }
+
+        SIZE_T offset = 0;
+        if (request.SchemeLength > destinationCapacity) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        RtlCopyMemory(destination, request.Scheme, request.SchemeLength);
+        offset += request.SchemeLength;
+
+        if (IsSchemeRelativeLocation(location)) {
+            if (offset + 1 > destinationCapacity) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            destination[offset++] = ':';
+        }
+        else {
+            if (offset + 3 > destinationCapacity) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            destination[offset++] = ':';
+            destination[offset++] = '/';
+            destination[offset++] = '/';
+
+            SIZE_T authorityLength = 0;
+            NTSTATUS status = BuildHostHeaderValue(
+                request,
+                destination + offset,
+                destinationCapacity - offset,
+                &authorityLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            offset += authorityLength;
+        }
+
+        if (location.Length > destinationCapacity - offset) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        RtlCopyMemory(destination + offset, location.Data, location.Length);
+        offset += location.Length;
+        *destinationLength = offset;
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS ApplyRedirectToRequest(
+        _Inout_ KhRequest& request,
+        USHORT statusCode,
+        http::HttpText location,
+        _Inout_ KhWorkspace& workspace) noexcept
+    {
+        const char* redirectUrl = location.Data;
+        SIZE_T redirectUrlLength = location.Length;
+        NTSTATUS status = STATUS_SUCCESS;
+
+        if (!IsAbsoluteHttpLocation(location)) {
+            status = BuildRedirectUrl(
+                request,
+                location,
+                reinterpret_cast<char*>(workspace.Request.Data),
+                workspace.Request.Length,
+                &redirectUrlLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            redirectUrl = reinterpret_cast<const char*>(workspace.Request.Data);
+        }
+
+        if (ShouldRewriteRedirectToGet(statusCode, request.Method)) {
+            status = KhHttpRequestSetMethod(&request, KhHttpMethod::Get);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            status = KhHttpRequestClearBody(&request);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        return KhHttpRequestSetUrl(&request, redirectUrl, redirectUrlLength);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS SendSingleHttpRequest(
+        KH_SESSION session,
+        const KhRequest& request,
+        _Inout_ KhWorkspace& workspace,
+        _Inout_ ApiHttpHeaderScratch& headerScratch,
+        _Out_ http::HttpResponse* parsed,
+        _Out_ SIZE_T* rawResponseLength) noexcept
+    {
+        if (parsed != nullptr) {
+            *parsed = {};
+        }
+        if (rawResponseLength != nullptr) {
+            *rawResponseLength = 0;
+        }
+        if (session == nullptr || parsed == nullptr || rawResponseLength == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        KhWorkspaceReset(&workspace);
+
+        NTSTATUS status = PrepareApiHttpHeaderScratch(workspace, &headerScratch);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        SIZE_T builtRequestLength = 0;
+        SIZE_T requestHeaderCount = 0;
+        status = BuildRequestBytes(
+            request,
+            workspace,
+            headerScratch.HostHeader,
+            headerScratch.HostHeaderCapacity,
+            headerScratch.RequestHeaders,
+            KhMaxHeadersPerRequest,
+            &builtRequestLength,
+            &requestHeaderCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        HeapObject<KhConnectionPoolKey> poolKey;
+        if (!poolKey.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        status = BuildPoolKey(request, poolKey.Get());
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        KhPooledConnection* pooledConnection = nullptr;
+        bool reusedConnection = false;
+        status = KhConnectionPoolAcquire(
+            &session->ConnectionPool,
+            *poolKey.Get(),
+            request.ConnectionPolicy,
+            &pooledConnection,
+            &reusedConnection);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        bool connectionReusable = false;
+        status = SendViaTransport(
+            session,
+            request,
+            workspace,
+            pooledConnection,
+            reusedConnection,
+            builtRequestLength,
+            headerScratch.RequestHeaders,
+            requestHeaderCount,
+            parsed,
+            headerScratch.ResponseHeaders,
+            KhMaxHeadersPerResponse,
+            rawResponseLength,
+            &connectionReusable);
+
+        if (!NT_SUCCESS(status) && reusedConnection &&
+            request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate) {
+            KhConnectionPoolClose(&session->ConnectionPool, pooledConnection);
+            pooledConnection = nullptr;
+
+            KhPooledConnection* retryConnection = nullptr;
+            bool retryReused = false;
+            NTSTATUS retryStatus = KhConnectionPoolAcquire(
+                &session->ConnectionPool,
+                *poolKey.Get(),
+                KhConnectionPolicy::ForceNew,
+                &retryConnection,
+                &retryReused);
+            if (NT_SUCCESS(retryStatus) && !retryReused) {
+                KhWorkspaceReset(&workspace);
+                retryStatus = PrepareApiHttpHeaderScratch(workspace, &headerScratch);
+                if (NT_SUCCESS(retryStatus)) {
+                    retryStatus = BuildRequestBytes(
+                        request,
+                        workspace,
+                        headerScratch.HostHeader,
+                        headerScratch.HostHeaderCapacity,
+                        headerScratch.RequestHeaders,
+                        KhMaxHeadersPerRequest,
+                        &builtRequestLength,
+                        &requestHeaderCount);
+                }
+                if (!NT_SUCCESS(retryStatus)) {
+                    KhConnectionPoolRelease(&session->ConnectionPool, retryConnection, false);
+                    return retryStatus;
+                }
+
+                *parsed = {};
+                *rawResponseLength = 0;
+                connectionReusable = false;
+                status = SendViaTransport(
+                    session,
+                    request,
+                    workspace,
+                    retryConnection,
+                    retryReused,
+                    builtRequestLength,
+                    headerScratch.RequestHeaders,
+                    requestHeaderCount,
+                    parsed,
+                    headerScratch.ResponseHeaders,
+                    KhMaxHeadersPerResponse,
+                    rawResponseLength,
+                    &connectionReusable);
+
+                if (!NT_SUCCESS(status)) {
+                    KhConnectionPoolRelease(&session->ConnectionPool, retryConnection, false);
+                    retryConnection = nullptr;
+                }
+                else {
+                    pooledConnection = retryConnection;
+                }
+            }
+        }
+
+        const bool canReturnToPool =
+            NT_SUCCESS(status) &&
+            connectionReusable &&
+            request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate;
+        KhConnectionPoolRelease(&session->ConnectionPool, pooledConnection, canReturnToPool);
+        return status;
+    }
+
 
     struct KhAsyncHttpContext final
     {
@@ -1603,130 +1974,61 @@ namespace engine
             return !NT_SUCCESS(status) ? status : STATUS_INSUFFICIENT_RESOURCES;
         }
         KhWorkspace& workspace = *requestWorkspace.Get();
-        KhWorkspaceReset(&workspace);
 
         HeapObject<ApiHttpHeaderScratch> headerScratch;
         if (!headerScratch.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        status = PrepareApiHttpHeaderScratch(workspace, headerScratch.Get());
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        SIZE_T builtRequestLength = 0;
-        SIZE_T requestHeaderCount = 0;
-        status = BuildRequestBytes(
-            *request,
-            workspace,
-            headerScratch->HostHeader,
-            headerScratch->HostHeaderCapacity,
-            headerScratch->RequestHeaders,
-            KhMaxHeadersPerRequest,
-            &builtRequestLength,
-            &requestHeaderCount);
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        HeapObject<KhConnectionPoolKey> poolKey;
-        if (!poolKey.IsValid()) {
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
-
-        status = BuildPoolKey(*request, poolKey.Get());
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        KhPooledConnection* pooledConnection = nullptr;
-        bool reusedConnection = false;
-        status = KhConnectionPoolAcquire(
-            &session->ConnectionPool,
-            *poolKey.Get(),
-            request->ConnectionPolicy,
-            &pooledConnection,
-            &reusedConnection);
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
         http::HttpResponse parsed = {};
         SIZE_T rawResponseLength = 0;
-        bool connectionReusable = false;
+        KH_REQUEST redirectRequest = nullptr;
+        KhRequest* currentRequest = request;
+        const bool followRedirects = RedirectsEnabled(effectiveOptions);
+        const ULONG maxRedirects = EffectiveMaxRedirects(effectiveOptions);
+        ULONG redirectCount = 0;
 
-        status = SendViaTransport(
-            session,
-            *request,
-            workspace,
-            pooledConnection,
-            reusedConnection,
-            builtRequestLength,
-            headerScratch->RequestHeaders,
-            requestHeaderCount,
-            &parsed,
-            headerScratch->ResponseHeaders,
-            KhMaxHeadersPerResponse,
-            &rawResponseLength,
-            &connectionReusable);
-
-        if (!NT_SUCCESS(status) && reusedConnection &&
-            request->ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate) {
-            KhConnectionPoolClose(&session->ConnectionPool, pooledConnection);
-
-            KhPooledConnection* retryConnection = nullptr;
-            bool retryReused = false;
-            NTSTATUS retryStatus = KhConnectionPoolAcquire(
-                &session->ConnectionPool,
-                *poolKey.Get(),
-                KhConnectionPolicy::ForceNew,
-                &retryConnection,
-                &retryReused);
-            if (NT_SUCCESS(retryStatus) && !retryReused) {
-                KhWorkspaceReset(&workspace);
-                retryStatus = PrepareApiHttpHeaderScratch(workspace, headerScratch.Get());
-                if (NT_SUCCESS(retryStatus)) {
-                    retryStatus = BuildRequestBytes(
-                        *request,
-                        workspace,
-                        headerScratch->HostHeader,
-                        headerScratch->HostHeaderCapacity,
-                        headerScratch->RequestHeaders,
-                        KhMaxHeadersPerRequest,
-                        &builtRequestLength,
-                        &requestHeaderCount);
-                }
-                if (!NT_SUCCESS(retryStatus)) {
-                    KhConnectionPoolRelease(&session->ConnectionPool, retryConnection, false);
-                    return retryStatus;
-                }
-
-                parsed = {};
-                rawResponseLength = 0;
-                connectionReusable = false;
-                status = SendViaTransport(
-                    session,
-                    *request,
-                    workspace,
-                    retryConnection,
-                    retryReused,
-                    builtRequestLength,
-                    headerScratch->RequestHeaders,
-                    requestHeaderCount,
-                    &parsed,
-                    headerScratch->ResponseHeaders,
-                    KhMaxHeadersPerResponse,
-                    &rawResponseLength,
-                    &connectionReusable);
-
-                if (!NT_SUCCESS(status)) {
-                    KhConnectionPoolRelease(&session->ConnectionPool, retryConnection, false);
-                }
-                else {
-                    pooledConnection = retryConnection;
-                }
+        for (;;) {
+            status = SendSingleHttpRequest(
+                session,
+                *currentRequest,
+                workspace,
+                *headerScratch.Get(),
+                &parsed,
+                &rawResponseLength);
+            if (!NT_SUCCESS(status)) {
+                break;
             }
+
+            if (!followRedirects ||
+                !IsRedirectStatus(parsed.StatusCode) ||
+                redirectCount >= maxRedirects) {
+                break;
+            }
+
+            const http::HttpText location = FindLocationHeader(parsed);
+            if (location.Data == nullptr || location.Length == 0) {
+                break;
+            }
+
+            if (redirectRequest == nullptr) {
+                status = CloneRequestForAsync(*currentRequest, &redirectRequest);
+                if (!NT_SUCCESS(status)) {
+                    break;
+                }
+                currentRequest = redirectRequest;
+            }
+
+            status = ApplyRedirectToRequest(*currentRequest, parsed.StatusCode, location, workspace);
+            if (status == STATUS_NOT_FOUND || status == STATUS_INVALID_PARAMETER) {
+                status = STATUS_SUCCESS;
+                break;
+            }
+            if (!NT_SUCCESS(status)) {
+                break;
+            }
+
+            ++redirectCount;
         }
 
         if (NT_SUCCESS(status)) {
@@ -1741,11 +2043,9 @@ namespace engine
                 response);
         }
 
-        const bool canReturnToPool =
-            NT_SUCCESS(status) &&
-            connectionReusable &&
-            request->ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate;
-        KhConnectionPoolRelease(&session->ConnectionPool, pooledConnection, canReturnToPool);
+        if (redirectRequest != nullptr) {
+            KhHttpRequestRelease(redirectRequest);
+        }
         return status;
     }
 

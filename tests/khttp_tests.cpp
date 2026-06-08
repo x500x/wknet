@@ -29,6 +29,25 @@ namespace
         return length;
     }
 
+    bool BufferContainsLiteral(const char* value, SIZE_T valueLength, const char* literal) noexcept
+    {
+        if (value == nullptr || literal == nullptr) {
+            return false;
+        }
+
+        const SIZE_T literalLength = Length(literal);
+        if (literalLength == 0 || literalLength > valueLength) {
+            return false;
+        }
+
+        for (SIZE_T offset = 0; offset + literalLength <= valueLength; ++offset) {
+            if (memcmp(value + offset, literal, literalLength) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     SIZE_T BuildLargeHttpResponse(char* buffer, SIZE_T capacity) noexcept
     {
         const char* header =
@@ -58,9 +77,18 @@ namespace
         char Body[256] = {};
         SIZE_T BodyLength = 0;
         SIZE_T ObservedBodyLength = 0;
+        char BuiltRequest[1024] = {};
+        SIZE_T BuiltRequestLength = 0;
         SIZE_T CallCount = 0;
         const char* RawResponse = nullptr;
         SIZE_T RawResponseLength = 0;
+    };
+
+    struct RedirectCapture
+    {
+        SIZE_T CallCount = 0;
+        char Requests[4][512] = {};
+        SIZE_T RequestLengths[4] = {};
     };
 
     struct ReusedFailureCapture
@@ -114,6 +142,12 @@ namespace
 
         const char* requestBytes = request->BuiltRequest;
         SIZE_T requestLength = request->BuiltRequestLength;
+        captured->BuiltRequestLength = requestLength < sizeof(captured->BuiltRequest) - 1
+            ? requestLength
+            : sizeof(captured->BuiltRequest) - 1;
+        memcpy(captured->BuiltRequest, requestBytes, captured->BuiltRequestLength);
+        captured->BuiltRequest[captured->BuiltRequestLength] = '\0';
+
         const char* bodyMarker = "\r\n\r\n";
         const SIZE_T markerLength = 4;
         for (SIZE_T index = 0; index + markerLength <= requestLength; ++index) {
@@ -133,6 +167,75 @@ namespace
 
         response->RawResponse = captured->RawResponse;
         response->RawResponseLength = captured->RawResponseLength;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    void CaptureRedirectRequest(
+        RedirectCapture& capture,
+        const KernelHttp::engine::KhTestHttpTransportRequest& request) noexcept
+    {
+        if (capture.CallCount >= sizeof(capture.Requests) / sizeof(capture.Requests[0])) {
+            return;
+        }
+
+        const SIZE_T index = capture.CallCount;
+        const SIZE_T copy = request.BuiltRequestLength < sizeof(capture.Requests[index]) - 1
+            ? request.BuiltRequestLength
+            : sizeof(capture.Requests[index]) - 1;
+        memcpy(capture.Requests[index], request.BuiltRequest, copy);
+        capture.Requests[index][copy] = '\0';
+        capture.RequestLengths[index] = copy;
+    }
+
+    NTSTATUS RedirectTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<RedirectCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        CaptureRedirectRequest(*capture, *request);
+        ++capture->CallCount;
+
+        static const char redirectToSecond[] =
+            "HTTP/1.1 302 Found\r\n"
+            "Location: /redirect/2\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        static const char redirectToFinal[] =
+            "HTTP/1.1 302 Found\r\n"
+            "Location: /final\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        static const char finalResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 4\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "done";
+
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, " /redirect/1 ")) {
+            response->RawResponse = redirectToSecond;
+            response->RawResponseLength = sizeof(redirectToSecond) - 1;
+        }
+        else if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, " /redirect/2 ")) {
+            response->RawResponse = redirectToFinal;
+            response->RawResponseLength = sizeof(redirectToFinal) - 1;
+        }
+        else if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, " /final ")) {
+            response->RawResponse = finalResponse;
+            response->RawResponseLength = sizeof(finalResponse) - 1;
+        }
+        else {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
         response->ConnectionReusable = false;
         return STATUS_SUCCESS;
     }
@@ -308,6 +411,12 @@ namespace
         Expect(captured.CallCount == 1, "transport called once");
         Expect(strcmp(captured.Host, "example.com") == 0, "host captured");
         Expect(captured.Port == 80, "port is 80");
+        Expect(
+            BufferContainsLiteral(
+                captured.BuiltRequest,
+                captured.BuiltRequestLength,
+                "Accept-Encoding: gzip, deflate, br, identity\r\n"),
+            "default Accept-Encoding is added");
 
         Expect(KernelHttp::khttp::ResponseStatusCode(resp) == 200, "status code is 200");
         Expect(KernelHttp::khttp::ResponseBodyLength(resp) == 5, "body length is 5");
@@ -698,6 +807,14 @@ namespace
             hdrValue, Length(hdrValue));
         Expect(NT_SUCCESS(status), "RequestSetHeader succeeds");
 
+        const char* encodingName = "Accept-Encoding";
+        const char* encodingValue = "identity";
+        status = KernelHttp::khttp::RequestSetHeader(
+            request,
+            encodingName, Length(encodingName),
+            encodingValue, Length(encodingValue));
+        Expect(NT_SUCCESS(status), "custom Accept-Encoding header succeeds");
+
         KernelHttp::khttp::Response* resp = nullptr;
         KernelHttp::khttp::SendOptions sendOptions = KernelHttp::khttp::DefaultSendOptions();
         status = KernelHttp::khttp::Send(session, request, &sendOptions, &resp);
@@ -705,6 +822,176 @@ namespace
         Expect(KernelHttp::khttp::ResponseStatusCode(resp) == 200, "status code is 200");
         Expect(captured.BodyLength == Length(json), "json body length");
         Expect(memcmp(captured.Body, json, Length(json)) == 0, "json body content");
+        Expect(
+            BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "Accept-Encoding: identity\r\n"),
+            "custom Accept-Encoding is preserved");
+        Expect(
+            !BufferContainsLiteral(
+                captured.BuiltRequest,
+                captured.BuiltRequestLength,
+                "Accept-Encoding: gzip, deflate, br, identity\r\n"),
+            "default Accept-Encoding is not duplicated over custom value");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::RequestRelease(request);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestAutoRedirectFollowsToFinalResponse() noexcept
+    {
+        RedirectCapture capture = {};
+        KernelHttp::khttp::test::SetHttpTransport(RedirectTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for redirect");
+
+        KernelHttp::khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/redirect/1";
+        status = KernelHttp::khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "default redirect succeeds");
+        Expect(capture.CallCount == 3, "default redirect follows two hops");
+        Expect(
+            BufferContainsLiteral(capture.Requests[0], capture.RequestLengths[0], "GET /redirect/1 "),
+            "first redirect request path is captured");
+        Expect(
+            BufferContainsLiteral(capture.Requests[1], capture.RequestLengths[1], "GET /redirect/2 "),
+            "second redirect request path is captured");
+        Expect(
+            BufferContainsLiteral(capture.Requests[2], capture.RequestLengths[2], "GET /final "),
+            "final redirect request path is captured");
+        Expect(KernelHttp::khttp::ResponseStatusCode(resp) == 200, "redirect final status is 200");
+        Expect(KernelHttp::khttp::ResponseBodyLength(resp) == 4, "redirect final body length");
+        const UCHAR* body = KernelHttp::khttp::ResponseBody(resp);
+        Expect(body != nullptr && memcmp(body, "done", 4) == 0, "redirect final body");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestAutoRedirectCanBeDisabled() noexcept
+    {
+        RedirectCapture capture = {};
+        KernelHttp::khttp::test::SetHttpTransport(RedirectTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for disabled redirect");
+
+        KernelHttp::khttp::Request* request = nullptr;
+        status = KernelHttp::khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for disabled redirect");
+
+        const char* url = "http://example.com/redirect/1";
+        status = KernelHttp::khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for disabled redirect");
+
+        KernelHttp::khttp::SendOptions options = KernelHttp::khttp::DefaultSendOptions();
+        options.Flags = KernelHttp::khttp::SendFlagDisableAutoRedirect;
+
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Send(session, request, &options, &resp);
+        Expect(NT_SUCCESS(status), "disabled redirect send succeeds");
+        Expect(capture.CallCount == 1, "disabled redirect does not follow Location");
+        Expect(KernelHttp::khttp::ResponseStatusCode(resp) == 302, "disabled redirect returns 302");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::RequestRelease(request);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestAutoRedirectHonorsCustomMaximum() noexcept
+    {
+        RedirectCapture capture = {};
+        KernelHttp::khttp::test::SetHttpTransport(RedirectTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for redirect limit");
+
+        KernelHttp::khttp::Request* request = nullptr;
+        status = KernelHttp::khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for redirect limit");
+
+        const char* url = "http://example.com/redirect/1";
+        status = KernelHttp::khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for redirect limit");
+
+        KernelHttp::khttp::SendOptions options = KernelHttp::khttp::DefaultSendOptions();
+        options.MaxRedirects = 1;
+
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Send(session, request, &options, &resp);
+        Expect(NT_SUCCESS(status), "limited redirect send succeeds");
+        Expect(capture.CallCount == 2, "custom redirect limit follows once");
+        Expect(
+            BufferContainsLiteral(capture.Requests[1], capture.RequestLengths[1], "GET /redirect/2 "),
+            "custom redirect limit stops after first follow");
+        Expect(KernelHttp::khttp::ResponseStatusCode(resp) == 302, "custom redirect limit returns last 302");
+
+        KernelHttp::khttp::ResponseRelease(resp);
+        KernelHttp::khttp::RequestRelease(request);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestPostRedirectRewritesToGet() noexcept
+    {
+        RedirectCapture capture = {};
+        KernelHttp::khttp::test::SetHttpTransport(RedirectTransport, &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for POST redirect");
+
+        KernelHttp::khttp::Request* request = nullptr;
+        status = KernelHttp::khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for POST redirect");
+
+        const char* url = "http://example.com/redirect/1";
+        status = KernelHttp::khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for POST redirect");
+        status = KernelHttp::khttp::RequestSetMethod(request, KernelHttp::khttp::Method::Post);
+        Expect(NT_SUCCESS(status), "RequestSetMethod POST succeeds for redirect");
+
+        const char* payload = "payload";
+        status = KernelHttp::khttp::RequestSetBody(
+            request,
+            reinterpret_cast<const UCHAR*>(payload),
+            Length(payload));
+        Expect(NT_SUCCESS(status), "RequestSetBody succeeds for POST redirect");
+
+        KernelHttp::khttp::SendOptions options = KernelHttp::khttp::DefaultSendOptions();
+        options.MaxRedirects = 1;
+
+        KernelHttp::khttp::Response* resp = nullptr;
+        status = KernelHttp::khttp::Send(session, request, &options, &resp);
+        Expect(NT_SUCCESS(status), "POST redirect send succeeds");
+        Expect(capture.CallCount == 2, "POST redirect follows once");
+        Expect(
+            BufferContainsLiteral(capture.Requests[0], capture.RequestLengths[0], "POST /redirect/1 "),
+            "first POST redirect request uses POST");
+        Expect(
+            BufferContainsLiteral(capture.Requests[1], capture.RequestLengths[1], "GET /redirect/2 "),
+            "302 POST redirect rewrites to GET");
+        Expect(
+            !BufferContainsLiteral(capture.Requests[1], capture.RequestLengths[1], payload),
+            "302 POST redirect clears body");
 
         KernelHttp::khttp::ResponseRelease(resp);
         KernelHttp::khttp::RequestRelease(request);
@@ -972,6 +1259,10 @@ int main() noexcept
     TestPostWithBody();
     TestSessionRequestBufferBytesLimitsRequestBody();
     TestRequestBuilder();
+    TestAutoRedirectFollowsToFinalResponse();
+    TestAutoRedirectCanBeDisabled();
+    TestAutoRedirectHonorsCustomMaximum();
+    TestPostRedirectRewritesToGet();
     TestAsyncGet();
     TestAsyncRequestIsCopied();
     TestAsyncCancelCompletionOnce();

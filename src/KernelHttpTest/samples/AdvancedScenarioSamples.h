@@ -14,6 +14,7 @@ namespace samples
     struct AdvancedScenarioSampleResults final
     {
         HighLevelApiSampleResult HttpRedirect = {};
+        HighLevelApiSampleResult HttpRedirectDisabled = {};
         HighLevelApiSampleResult HttpNotFound = {};
         HighLevelApiSampleResult HttpServerError = {};
         HighLevelApiSampleResult HttpLargeResponse = {};

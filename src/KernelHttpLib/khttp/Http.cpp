@@ -14,6 +14,7 @@ namespace
     {
         dst.MaxResponseBytes = src.MaxResponseBytes;
         dst.Flags = src.Flags;
+        dst.MaxRedirects = src.MaxRedirects;
         dst.HeaderCallback = reinterpret_cast<engine::KhHeaderCallback>(src.OnHeader);
         dst.BodyCallback = reinterpret_cast<engine::KhBodyCallback>(src.OnBody);
         dst.CallbackContext = src.CallbackContext;
