@@ -578,6 +578,136 @@ namespace
             "TLS protocol_version failure preserves alert description");
     }
 
+    void TestTlsHandshakeFailureRecordsTls13HandshakeFailureAsVersionCandidate()
+    {
+        const UCHAR handshakeFailureAlertRecord[] = {
+            static_cast<UCHAR>(TlsContentType::Alert),
+            3,
+            3,
+            0,
+            2,
+            static_cast<UCHAR>(TlsAlertLevel::Fatal),
+            static_cast<UCHAR>(TlsAlertDescription::HandshakeFailure)
+        };
+
+        ScriptedTlsTransport transport(handshakeFailureAlertRecord, sizeof(handshakeFailureAlertRecord));
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(
+            status,
+            STATUS_INVALID_NETWORK_RESPONSE,
+            "TLS connect returns the alert decode status for early handshake_failure");
+        const auto& failure = connection.LastHandshakeFailure();
+        Expect(
+            failure.Category == TlsHandshakeFailureCategory::VersionNegotiation,
+            "TLS early handshake_failure is a TLS1.2 confirmation candidate when both versions are allowed");
+        Expect(failure.HasPeerAlert, "TLS early handshake_failure preserves peer alert metadata");
+        Expect(
+            failure.PeerAlert.Description == TlsAlertDescription::HandshakeFailure,
+            "TLS early handshake_failure preserves alert description");
+    }
+
+    void TestTlsHandshakeFailureDoesNotClassifyTls13OnlyHandshakeFailure()
+    {
+        const UCHAR handshakeFailureAlertRecord[] = {
+            static_cast<UCHAR>(TlsContentType::Alert),
+            3,
+            3,
+            0,
+            2,
+            static_cast<UCHAR>(TlsAlertLevel::Fatal),
+            static_cast<UCHAR>(TlsAlertDescription::HandshakeFailure)
+        };
+
+        ScriptedTlsTransport transport(handshakeFailureAlertRecord, sizeof(handshakeFailureAlertRecord));
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+        options.MinimumProtocol = TlsProtocol::Tls13;
+        options.MaximumProtocol = TlsProtocol::Tls13;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(
+            status,
+            STATUS_INVALID_NETWORK_RESPONSE,
+            "TLS1.3-only connect returns the alert decode status for handshake_failure");
+        const auto& failure = connection.LastHandshakeFailure();
+        Expect(
+            failure.Category == TlsHandshakeFailureCategory::PeerAlert,
+            "TLS1.3-only handshake_failure remains a peer alert");
+    }
+
+    void TestTlsHandshakeFailureRecordsTls13CloseNotifyAsVersionCandidate()
+    {
+        const UCHAR closeNotifyAlertRecord[] = {
+            static_cast<UCHAR>(TlsContentType::Alert),
+            3,
+            3,
+            0,
+            2,
+            static_cast<UCHAR>(TlsAlertLevel::Warning),
+            static_cast<UCHAR>(TlsAlertDescription::CloseNotify)
+        };
+
+        ScriptedTlsTransport transport(closeNotifyAlertRecord, sizeof(closeNotifyAlertRecord));
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(
+            status,
+            STATUS_INVALID_NETWORK_RESPONSE,
+            "TLS connect returns the alert decode status for early close_notify");
+        const auto& failure = connection.LastHandshakeFailure();
+        Expect(
+            failure.Category == TlsHandshakeFailureCategory::VersionNegotiation,
+            "TLS early close_notify is a TLS1.2 confirmation candidate when both versions are allowed");
+        Expect(failure.HasPeerAlert, "TLS early close_notify preserves peer alert metadata");
+        Expect(failure.PeerAlert.CloseNotify, "TLS early close_notify preserves close_notify marker");
+    }
+
+    void TestTlsHandshakeFailureDoesNotClassifyTls13OnlyCloseNotify()
+    {
+        const UCHAR closeNotifyAlertRecord[] = {
+            static_cast<UCHAR>(TlsContentType::Alert),
+            3,
+            3,
+            0,
+            2,
+            static_cast<UCHAR>(TlsAlertLevel::Warning),
+            static_cast<UCHAR>(TlsAlertDescription::CloseNotify)
+        };
+
+        ScriptedTlsTransport transport(closeNotifyAlertRecord, sizeof(closeNotifyAlertRecord));
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+        options.MinimumProtocol = TlsProtocol::Tls13;
+        options.MaximumProtocol = TlsProtocol::Tls13;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(
+            status,
+            STATUS_INVALID_NETWORK_RESPONSE,
+            "TLS1.3-only connect returns the alert decode status for close_notify");
+        const auto& failure = connection.LastHandshakeFailure();
+        Expect(
+            failure.Category == TlsHandshakeFailureCategory::PeerAlert,
+            "TLS1.3-only close_notify remains a peer alert");
+    }
+
     void TestRecordNeedsMoreData()
     {
         const UCHAR partial[] = { 22, 3, 3, 0 };
@@ -1678,6 +1808,115 @@ namespace
             recordCapacity,
             recordLength);
         return NT_SUCCESS(status);
+    }
+
+    bool BuildTls12ServerHelloRecord(
+        bool includeTls13DowngradeSentinel,
+        UCHAR* record,
+        SIZE_T recordCapacity,
+        SIZE_T* recordLength)
+    {
+        if (recordLength != nullptr) {
+            *recordLength = 0;
+        }
+        if (record == nullptr || recordLength == nullptr || recordCapacity == 0) {
+            return false;
+        }
+
+        const UCHAR tls12DowngradeSentinel[] = {
+            'D', 'O', 'W', 'N', 'G', 'R', 'D', 0x01
+        };
+
+        UCHAR body[96] = {};
+        SIZE_T bodyOffset = 0;
+        WriteUint16ForTest(body, &bodyOffset, 0x0303);
+        for (SIZE_T index = 0; index < 32; ++index) {
+            body[bodyOffset++] = static_cast<UCHAR>(0x40 + index);
+        }
+        if (includeTls13DowngradeSentinel) {
+            memcpy(body + bodyOffset - sizeof(tls12DowngradeSentinel), tls12DowngradeSentinel, sizeof(tls12DowngradeSentinel));
+        }
+        body[bodyOffset++] = 0;
+        WriteUint16ForTest(body, &bodyOffset, static_cast<USHORT>(TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256));
+        body[bodyOffset++] = 0;
+        WriteUint16ForTest(body, &bodyOffset, 0);
+
+        UCHAR message[sizeof(body) + 4] = {};
+        SIZE_T messageOffset = 0;
+        message[messageOffset++] = static_cast<UCHAR>(TlsHandshakeType::ServerHello);
+        message[messageOffset++] = static_cast<UCHAR>((bodyOffset >> 16) & 0xff);
+        message[messageOffset++] = static_cast<UCHAR>((bodyOffset >> 8) & 0xff);
+        message[messageOffset++] = static_cast<UCHAR>(bodyOffset & 0xff);
+        memcpy(message + messageOffset, body, bodyOffset);
+        messageOffset += bodyOffset;
+
+        TlsPlaintextRecord plain = {};
+        plain.ContentType = TlsContentType::Handshake;
+        plain.Version = { 3, 3 };
+        plain.Fragment = message;
+        plain.FragmentLength = messageOffset;
+        const NTSTATUS status = TlsRecordLayer::EncodePlaintext(
+            plain,
+            record,
+            recordCapacity,
+            recordLength);
+        return NT_SUCCESS(status);
+    }
+
+    void TestTls13AttemptClassifiesTls12ServerHello()
+    {
+        UCHAR record[256] = {};
+        SIZE_T recordLength = 0;
+        const bool built = BuildTls12ServerHelloRecord(false, record, sizeof(record), &recordLength);
+        Expect(built, "TLS 1.2 ServerHello fixture builds");
+        if (!built) {
+            return;
+        }
+
+        ScriptedTlsTransport transport(record, recordLength);
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(
+            status,
+            STATUS_NOT_SUPPORTED,
+            "TLS1.3 attempt returns parser status for TLS1.2 ServerHello cipher selection");
+        const auto& failure = connection.LastHandshakeFailure();
+        Expect(
+            failure.Category == TlsHandshakeFailureCategory::VersionNegotiation,
+            "TLS1.2 ServerHello during TLS1.3 attempt is classified as version negotiation");
+    }
+
+    void TestTls13AttemptRejectsTls12DowngradeSentinel()
+    {
+        UCHAR record[256] = {};
+        SIZE_T recordLength = 0;
+        const bool built = BuildTls12ServerHelloRecord(true, record, sizeof(record), &recordLength);
+        Expect(built, "TLS 1.2 downgrade ServerHello fixture builds");
+        if (!built) {
+            return;
+        }
+
+        ScriptedTlsTransport transport(record, recordLength);
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(
+            status,
+            STATUS_INVALID_NETWORK_RESPONSE,
+            "TLS1.3 attempt rejects TLS1.2 ServerHello with TLS1.3 downgrade sentinel");
+        const auto& failure = connection.LastHandshakeFailure();
+        Expect(
+            failure.Category == TlsHandshakeFailureCategory::DecodeError,
+            "TLS1.2 ServerHello with TLS1.3 downgrade sentinel is not a confirmation candidate");
     }
 
     void TestClientHelloAdvertisesSessionTicket()
@@ -3180,6 +3419,10 @@ int main()
     TestAlertParsing();
     TestTlsHandshakeFailureRecordsLocalPolicy();
     TestTlsHandshakeFailureRecordsProtocolVersionAlert();
+    TestTlsHandshakeFailureRecordsTls13HandshakeFailureAsVersionCandidate();
+    TestTlsHandshakeFailureDoesNotClassifyTls13OnlyHandshakeFailure();
+    TestTlsHandshakeFailureRecordsTls13CloseNotifyAsVersionCandidate();
+    TestTlsHandshakeFailureDoesNotClassifyTls13OnlyCloseNotify();
     TestRecordNeedsMoreData();
     TestRecordRejectsInvalidHeader();
     TestPlainRecordSizeProbe();
@@ -3213,6 +3456,8 @@ int main()
     TestTls13ClientHelloPskBinderTranscriptLength();
     TestTls13PskBinderRejectsWrongHashLength();
     TestTls13SelectedPskIdentityValidation();
+    TestTls13AttemptClassifiesTls12ServerHello();
+    TestTls13AttemptRejectsTls12DowngradeSentinel();
     TestTls13TicketSelectionBindsContextAndAge();
     TestTls13TicketSelectionSkipsMismatches();
     TestTls13HelloRetryRequestRecomputesPskBinder();

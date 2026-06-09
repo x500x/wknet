@@ -115,6 +115,10 @@ namespace tls
         const TlsHandshakeFailure& LastHandshakeFailure() const noexcept;
 
     private:
+        void RecordTls13FirstServerHelloFailure(
+            _In_ const TlsClientConnectionOptions& options,
+            NTSTATUS status) noexcept;
+
         _Must_inspect_result_
         NTSTATUS PrepareScratch(
             _In_ const TlsClientConnectionOptions& options) noexcept;

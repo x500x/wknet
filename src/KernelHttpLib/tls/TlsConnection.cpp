@@ -238,11 +238,71 @@ namespace tls
 
         constexpr USHORT TlsExtensionSessionTicket = 35;
         constexpr USHORT TlsExtensionAlpn = 16;
+        constexpr UCHAR Tls13DowngradeSentinelTls12[8] = {
+            'D', 'O', 'W', 'N', 'G', 'R', 'D', 0x01
+        };
+
+        enum class Tls13ServerHelloVersionSelection : ULONG
+        {
+            NotTls12 = 0,
+            Tls12Selected = 1,
+            RejectedDowngrade = 2
+        };
+
         _Must_inspect_result_
         bool ProtocolAllowed(const TlsClientConnectionOptions& options, TlsProtocol protocol) noexcept
         {
             return static_cast<UCHAR>(options.MinimumProtocol) <= static_cast<UCHAR>(protocol) &&
                 static_cast<UCHAR>(protocol) <= static_cast<UCHAR>(options.MaximumProtocol);
+        }
+
+        _Must_inspect_result_
+        bool CanConfirmTls12FromTls13Attempt(const TlsClientConnectionOptions& options) noexcept
+        {
+            return ProtocolAllowed(options, TlsProtocol::Tls12) &&
+                ProtocolAllowed(options, TlsProtocol::Tls13) &&
+                (!options.EnableEarlyData ||
+                    options.EarlyData == nullptr ||
+                    options.EarlyDataLength == 0);
+        }
+
+        _Must_inspect_result_
+        bool HasTls13Tls12DowngradeSentinel(const TlsServerHelloView& serverHello) noexcept
+        {
+            return serverHello.Random != nullptr &&
+                serverHello.RandomLength >= sizeof(Tls13DowngradeSentinelTls12) &&
+                RtlCompareMemory(
+                    serverHello.Random + serverHello.RandomLength - sizeof(Tls13DowngradeSentinelTls12),
+                    Tls13DowngradeSentinelTls12,
+                    sizeof(Tls13DowngradeSentinelTls12)) == sizeof(Tls13DowngradeSentinelTls12);
+        }
+
+        _Must_inspect_result_
+        Tls13ServerHelloVersionSelection ClassifyTls12ServerHelloFromTls13Attempt(
+            const TlsClientConnectionOptions& options,
+            const TlsHandshakeMessageView& handshake) noexcept
+        {
+            if (!CanConfirmTls12FromTls13Attempt(options)) {
+                return Tls13ServerHelloVersionSelection::NotTls12;
+            }
+
+            TlsContext tls12Context;
+            NTSTATUS status = tls12Context.InitializeClient({ 3, 3 });
+            if (!NT_SUCCESS(status)) {
+                return Tls13ServerHelloVersionSelection::NotTls12;
+            }
+
+            TlsServerHelloView tls12ServerHello = {};
+            status = TlsHandshake12::ParseServerHello(tls12Context, handshake, tls12ServerHello);
+            if (!NT_SUCCESS(status)) {
+                return Tls13ServerHelloVersionSelection::NotTls12;
+            }
+
+            if (HasTls13Tls12DowngradeSentinel(tls12ServerHello)) {
+                return Tls13ServerHelloVersionSelection::RejectedDowngrade;
+            }
+
+            return Tls13ServerHelloVersionSelection::Tls12Selected;
         }
 
         _Must_inspect_result_
@@ -1707,13 +1767,23 @@ namespace tls
         TlsHandshakeMessageView handshake = {};
         status = ReadHandshakeMessage13(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
+            RecordTls13FirstServerHelloFailure(options, status);
             return LogTls13Failure("ReadFirstServerHello", status);
         }
 
         Tls13ServerHelloView serverHello = {};
         status = TlsHandshake13::ParseServerHello(context_, handshake, serverHello);
         if (!NT_SUCCESS(status)) {
-            if (status == STATUS_NOT_SUPPORTED) {
+            const Tls13ServerHelloVersionSelection selection =
+                ClassifyTls12ServerHelloFromTls13Attempt(options, handshake);
+            if (selection == Tls13ServerHelloVersionSelection::Tls12Selected) {
+                RecordHandshakeFailure(TlsHandshakeFailureCategory::VersionNegotiation, status);
+            }
+            else if (selection == Tls13ServerHelloVersionSelection::RejectedDowngrade) {
+                RecordHandshakeFailure(TlsHandshakeFailureCategory::DecodeError, STATUS_INVALID_NETWORK_RESPONSE);
+                status = STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            else if (status == STATUS_NOT_SUPPORTED) {
                 RecordHandshakeFailure(TlsHandshakeFailureCategory::VersionNegotiation, status);
             }
             return LogTls13Failure("ParseFirstServerHello", status);
@@ -1845,7 +1915,16 @@ namespace tls
 
             status = TlsHandshake13::ParseServerHello(context_, handshake, serverHello);
             if (!NT_SUCCESS(status)) {
-                if (status == STATUS_NOT_SUPPORTED) {
+                const Tls13ServerHelloVersionSelection selection =
+                    ClassifyTls12ServerHelloFromTls13Attempt(options, handshake);
+                if (selection == Tls13ServerHelloVersionSelection::Tls12Selected) {
+                    RecordHandshakeFailure(TlsHandshakeFailureCategory::VersionNegotiation, status);
+                }
+                else if (selection == Tls13ServerHelloVersionSelection::RejectedDowngrade) {
+                    RecordHandshakeFailure(TlsHandshakeFailureCategory::DecodeError, STATUS_INVALID_NETWORK_RESPONSE);
+                    status = STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                else if (status == STATUS_NOT_SUPPORTED) {
                     RecordHandshakeFailure(TlsHandshakeFailureCategory::VersionNegotiation, status);
                 }
                 return LogTls13Failure("ParseRetryServerHello", status);
@@ -2340,6 +2419,22 @@ namespace tls
     const TlsHandshakeFailure& TlsConnection::LastHandshakeFailure() const noexcept
     {
         return lastHandshakeFailure_;
+    }
+
+    void TlsConnection::RecordTls13FirstServerHelloFailure(
+        const TlsClientConnectionOptions& options,
+        NTSTATUS status) noexcept
+    {
+        if (!CanConfirmTls12FromTls13Attempt(options) ||
+            status != STATUS_INVALID_NETWORK_RESPONSE ||
+            !lastHandshakeFailure_.HasPeerAlert ||
+            (lastHandshakeFailure_.PeerAlert.Description != TlsAlertDescription::HandshakeFailure &&
+                !lastHandshakeFailure_.PeerAlert.CloseNotify)) {
+            return;
+        }
+
+        lastHandshakeFailure_.Category = TlsHandshakeFailureCategory::VersionNegotiation;
+        lastHandshakeFailure_.Status = status;
     }
 
     void TlsConnection::ClearHandshakeFailure() noexcept
