@@ -139,7 +139,13 @@ namespace engine
         SIZE_T MaxMessageBytes = KhDefaultMaxResponseBytes;
         bool AutoReplyPing = true;
         bool Connected = false;
+        bool TransportClosed = true;
         bool SendFragmentOpen = false;
+        KhWebSocketMessageType SendFragmentType = KhWebSocketMessageType::Binary;
+        SIZE_T SendFragmentLength = 0;
+        ULONG SendTextUtf8CodePoint = 0;
+        UCHAR SendTextUtf8Remaining = 0;
+        UCHAR SendTextUtf8Expected = 0;
         volatile LONG InFlight = 0;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         FAST_MUTEX OperationLock = {};

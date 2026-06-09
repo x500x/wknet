@@ -167,6 +167,9 @@ namespace client
         NTSTATUS EnsureBufferedFrameCapacity(SIZE_T capacity) noexcept;
 
         _Must_inspect_result_
+        NTSTATUS CloseTransport() noexcept;
+
+        _Must_inspect_result_
         NTSTATUS StoreSelectedSubprotocol(_In_ const http::HttpText& subprotocol) noexcept;
 
         void ResetReceiveFragment() noexcept;
@@ -189,6 +192,14 @@ namespace client
             _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
             SIZE_T payloadLength,
             _In_ const WebSocketIoBuffers& buffers) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS EncodeAndSendFrame(
+            websocket::WebSocketOpcode opcode,
+            _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
+            SIZE_T payloadLength,
+            _In_ const WebSocketIoBuffers& buffers,
+            bool finalFragment) noexcept;
 
         NTSTATUS FailConnectionWithClose(
             USHORT statusCode,
@@ -234,6 +245,7 @@ namespace client
         SIZE_T selectedSubprotocolLength_ = 0;
         bool useTls_ = false;
         bool connected_ = false;
+        bool transportClosed_ = true;
         bool sendFragmentOpen_ = false;
         websocket::WebSocketOpcode sendFragmentOpcode_ = websocket::WebSocketOpcode::Continuation;
         ULONG sendTextUtf8CodePoint_ = 0;

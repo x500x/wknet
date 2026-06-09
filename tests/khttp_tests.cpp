@@ -591,6 +591,8 @@ namespace
         KernelHttp::engine::KhWebSocketMessageType NextType = KernelHttp::engine::KhWebSocketMessageType::Text;
         UCHAR NextData[64] = {};
         SIZE_T NextLength = 0;
+        NTSTATUS SendStatus = STATUS_SUCCESS;
+        NTSTATUS ReceiveStatus = STATUS_SUCCESS;
     };
 
     NTSTATUS WsConnectCallback(
@@ -635,6 +637,9 @@ namespace
         if (capture == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
+        if (!NT_SUCCESS(capture->SendStatus)) {
+            return capture->SendStatus;
+        }
         ++capture->SendCount;
         capture->LastSendType = type;
         capture->LastSendFinalFragment = finalFragment;
@@ -664,6 +669,9 @@ namespace
         auto* capture = static_cast<WsCapture*>(context);
         if (capture == nullptr || message == nullptr) {
             return STATUS_INVALID_PARAMETER;
+        }
+        if (!NT_SUCCESS(capture->ReceiveStatus)) {
+            return capture->ReceiveStatus;
         }
         ++capture->ReceiveCount;
         message->Type = capture->NextType;
@@ -2604,6 +2612,170 @@ namespace
         KernelHttp::khttp::SessionClose(session);
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
+
+    void TestWebSocketFragmentedSendEnforcesTotalLimit() noexcept
+    {
+        WsCapture capture = {};
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WsConnectCallback,
+            WsSendCallback,
+            WsReceiveCallback,
+            WsCloseCallback,
+            &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for ws fragmented limit");
+
+        const char* url = "ws://example.com/socket";
+        KernelHttp::khttp::WebSocket* ws = nullptr;
+        KernelHttp::khttp::WsConnectConfig wsConfig = KernelHttp::khttp::DefaultWsConnectConfig();
+        wsConfig.Url = url;
+        wsConfig.UrlLength = Length(url);
+        wsConfig.MaxMessageBytes = 5;
+        status = KernelHttp::khttp::WsConnect(session, &wsConfig, &ws);
+        Expect(NT_SUCCESS(status), "WsConnect succeeds for fragmented limit");
+
+        KernelHttp::khttp::WsSendOptions nonFinal = {};
+        nonFinal.FinalFragment = false;
+        const UCHAR first[] = { 'a', 'b', 'c' };
+        status = KernelHttp::khttp::WsSendBinaryEx(ws, first, sizeof(first), &nonFinal);
+        Expect(NT_SUCCESS(status), "first non-final binary fragment succeeds");
+        Expect(capture.SendCount == 1, "first fragment reaches test transport");
+
+        const UCHAR tooLarge[] = { 'd', 'e', 'f' };
+        status = KernelHttp::khttp::WsSendContinuation(ws, tooLarge, sizeof(tooLarge));
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "continuation exceeding MaxMessageBytes is rejected");
+        Expect(capture.SendCount == 1, "oversized continuation is not sent");
+
+        const UCHAR final[] = { 'd', 'e' };
+        status = KernelHttp::khttp::WsSendContinuation(ws, final, sizeof(final));
+        Expect(NT_SUCCESS(status), "smaller final continuation still succeeds");
+        Expect(capture.SendCount == 2, "final continuation reaches test transport");
+        Expect(capture.LastSendType == KernelHttp::engine::KhWebSocketMessageType::Continuation,
+            "final continuation type captured");
+        Expect(capture.LastSendFinalFragment, "final continuation closes fragmented send");
+
+        KernelHttp::khttp::WsClose(ws);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
+
+    void TestWebSocketPublicValidationMatchesRealPath() noexcept
+    {
+        WsCapture capture = {};
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WsConnectCallback,
+            WsSendCallback,
+            WsReceiveCallback,
+            WsCloseCallback,
+            &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for ws public validation");
+
+        const char* url = "ws://example.com/socket";
+        KernelHttp::khttp::WebSocket* ws = nullptr;
+        KernelHttp::khttp::WsConnectConfig invalidConfig = KernelHttp::khttp::DefaultWsConnectConfig();
+        invalidConfig.Url = url;
+        invalidConfig.UrlLength = Length(url);
+        invalidConfig.Subprotocol = "bad token";
+        invalidConfig.SubprotocolLength = Length(invalidConfig.Subprotocol);
+        status = KernelHttp::khttp::WsConnect(session, &invalidConfig, &ws);
+        Expect(status == STATUS_INVALID_PARAMETER, "WsConnect rejects invalid subprotocol token");
+        Expect(ws == nullptr, "invalid subprotocol does not allocate websocket");
+        Expect(capture.ConnectCount == 0, "invalid subprotocol does not reach test transport");
+
+        KernelHttp::khttp::WsConnectConfig validConfig = KernelHttp::khttp::DefaultWsConnectConfig();
+        validConfig.Url = url;
+        validConfig.UrlLength = Length(url);
+        status = KernelHttp::khttp::WsConnect(session, &validConfig, &ws);
+        Expect(NT_SUCCESS(status), "WsConnect succeeds for public validation");
+
+        const unsigned char invalidText[] = { 0xc3, 0x28 };
+        status = KernelHttp::khttp::WsSendText(
+            ws,
+            reinterpret_cast<const char*>(invalidText),
+            sizeof(invalidText));
+        Expect(status == STATUS_INVALID_PARAMETER, "WsSendText rejects invalid UTF-8 before test transport");
+        Expect(capture.SendCount == 0, "invalid text send does not reach test transport");
+
+        const UCHAR invalidReason[] = { 0xc3, 0x28 };
+        status = KernelHttp::khttp::WsCloseEx(ws, 1000, invalidReason, sizeof(invalidReason));
+        Expect(status == STATUS_INVALID_PARAMETER, "WsCloseEx rejects invalid UTF-8 reason");
+        Expect(capture.CloseCount == 0, "invalid close reason does not close websocket");
+
+        KernelHttp::khttp::WsClose(ws);
+        Expect(capture.CloseCount == 1, "valid cleanup close reaches test transport once");
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
+
+    void TestWebSocketTerminalTransportStatusDisconnectsHandle() noexcept
+    {
+        WsCapture capture = {};
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WsConnectCallback,
+            WsSendCallback,
+            WsReceiveCallback,
+            WsCloseCallback,
+            &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for ws terminal status");
+
+        const char* url = "ws://example.com/socket";
+        KernelHttp::khttp::WebSocket* ws = nullptr;
+        KernelHttp::khttp::WsConnectConfig wsConfig = KernelHttp::khttp::DefaultWsConnectConfig();
+        wsConfig.Url = url;
+        wsConfig.UrlLength = Length(url);
+        status = KernelHttp::khttp::WsConnect(session, &wsConfig, &ws);
+        Expect(NT_SUCCESS(status), "WsConnect succeeds for send terminal status");
+
+        capture.SendStatus = STATUS_IO_TIMEOUT;
+        const char* text = "timeout";
+        status = KernelHttp::khttp::WsSendText(ws, text, Length(text));
+        Expect(status == STATUS_IO_TIMEOUT, "terminal send status is returned");
+        Expect(capture.CloseCount == 1, "terminal send status closes test transport");
+        capture.SendStatus = STATUS_SUCCESS;
+
+        status = KernelHttp::khttp::WsSendText(ws, text, Length(text));
+        Expect(status == STATUS_CONNECTION_DISCONNECTED, "send after terminal send status is disconnected");
+        Expect(capture.SendCount == 0, "send after terminal status does not reach test transport again");
+
+        KernelHttp::khttp::WsClose(ws);
+        Expect(capture.CloseCount == 1, "WsClose after terminal send status is idempotent");
+
+        ws = nullptr;
+        status = KernelHttp::khttp::WsConnect(session, &wsConfig, &ws);
+        Expect(NT_SUCCESS(status), "WsConnect succeeds for receive terminal status");
+        capture.ReceiveStatus = STATUS_CANCELLED;
+        KernelHttp::khttp::WsMessage message = {};
+        status = KernelHttp::khttp::WsReceive(ws, &message);
+        Expect(status == STATUS_CANCELLED, "terminal receive status is returned");
+        Expect(capture.CloseCount == 2, "terminal receive status closes test transport");
+        capture.ReceiveStatus = STATUS_SUCCESS;
+
+        status = KernelHttp::khttp::WsReceive(ws, &message);
+        Expect(status == STATUS_CONNECTION_DISCONNECTED, "receive after terminal status is disconnected");
+
+        KernelHttp::khttp::WsClose(ws);
+        Expect(capture.CloseCount == 2, "WsClose after terminal receive status is idempotent");
+
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
 }
 
 int main() noexcept
@@ -2649,6 +2821,9 @@ int main() noexcept
     TestIrqlCheck();
     TestWebSocketRoundTrip();
     TestWebSocketControlFramesAndCloseEx();
+    TestWebSocketFragmentedSendEnforcesTotalLimit();
+    TestWebSocketPublicValidationMatchesRealPath();
+    TestWebSocketTerminalTransportStatusDisconnectsHandle();
 
     if (g_failed) {
         printf("khttp tests FAILED\n");

@@ -731,6 +731,62 @@ namespace
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
+
+    void TestHighLevelWebSocketPublicValidation() noexcept
+    {
+        SampleCapture capture = {};
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(HttpTransport, &capture);
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WebSocketConnect,
+            WebSocketSend,
+            WebSocketReceive,
+            WebSocketClose,
+            &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for high-level websocket validation");
+
+        KernelHttp::khttp::WebSocket* ws = nullptr;
+        KernelHttp::khttp::WsConnectConfig invalidConfig = KernelHttp::khttp::DefaultWsConnectConfig();
+        invalidConfig.Url = "wss://ws.postman-echo.com/raw";
+        invalidConfig.UrlLength = strlen(invalidConfig.Url);
+        invalidConfig.Subprotocol = "bad token";
+        invalidConfig.SubprotocolLength = strlen(invalidConfig.Subprotocol);
+        status = KernelHttp::khttp::WsConnect(session, &invalidConfig, &ws);
+        Expect(status == STATUS_INVALID_PARAMETER, "high-level WsConnect rejects invalid subprotocol");
+        Expect(ws == nullptr, "high-level invalid subprotocol leaves websocket null");
+        Expect(capture.WebSocketConnectCalls == 0, "high-level invalid subprotocol does not hit transport");
+
+        KernelHttp::khttp::WsConnectConfig validConfig = KernelHttp::khttp::DefaultWsConnectConfig();
+        validConfig.Url = "wss://ws.postman-echo.com/raw";
+        validConfig.UrlLength = strlen(validConfig.Url);
+        status = KernelHttp::khttp::WsConnect(session, &validConfig, &ws);
+        Expect(NT_SUCCESS(status), "high-level WsConnect succeeds for validation");
+
+        const unsigned char invalidText[] = { 0xc3, 0x28 };
+        status = KernelHttp::khttp::WsSendText(
+            ws,
+            reinterpret_cast<const char*>(invalidText),
+            sizeof(invalidText));
+        Expect(status == STATUS_INVALID_PARAMETER, "high-level WsSendText rejects invalid UTF-8");
+        Expect(capture.WebSocketSendCalls == 0, "high-level invalid text does not hit transport");
+
+        const UCHAR invalidReason[] = { 0xc3, 0x28 };
+        status = KernelHttp::khttp::WsCloseEx(ws, 1000, invalidReason, sizeof(invalidReason));
+        Expect(status == STATUS_INVALID_PARAMETER, "high-level WsCloseEx rejects invalid UTF-8 reason");
+        Expect(capture.WebSocketCloseCalls == 0, "high-level invalid close reason does not close transport");
+
+        KernelHttp::khttp::WsClose(ws);
+        Expect(capture.WebSocketCloseCalls == 1, "high-level cleanup close reaches transport once");
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
 }
 
 int main() noexcept
@@ -742,6 +798,7 @@ int main() noexcept
     TestLoadTimeSamplesIgnoreRepeatedPublicWebSocketConnectFailures();
     TestAdvancedScenarioSamplesCoverMissingSurface();
     TestWebSocketReceiveHonorsPerCallMessageLimit();
+    TestHighLevelWebSocketPublicValidation();
 
     if (g_failed) {
         printf("high-level API tests FAILED\n");

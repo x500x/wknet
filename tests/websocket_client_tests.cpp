@@ -216,16 +216,17 @@ namespace
         size_t InitialFrameLength = 0;
         char LastHandshakeRequest[1024] = {};
         size_t LastHandshakeRequestLength = 0;
-        unsigned char LastClientPayload[256] = {};
+        unsigned char LastClientPayload[32768] = {};
         size_t LastClientPayloadLength = 0;
         WebSocketOpcode LastClientOpcode = WebSocketOpcode::Continuation;
         unsigned char LastClosePayload[125] = {};
         size_t LastClosePayloadLength = 0;
-        unsigned char FragmentPayload[256] = {};
+        unsigned char FragmentPayload[32768] = {};
         size_t FragmentPayloadLength = 0;
         WebSocketOpcode FragmentOpcode = WebSocketOpcode::Continuation;
         bool LastClientFin = false;
         bool FragmentOpen = false;
+        size_t ClientFrameCount = 0;
         size_t PongCount = 0;
         size_t ConnectAttempts = 0;
         size_t FailConnectAttempts = 0;
@@ -235,7 +236,10 @@ namespace
         size_t ResponseExtensionsLength = 0;
         bool EchoAfterPing = false;
         bool Connected = false;
+        NTSTATUS DataSendStatus = STATUS_SUCCESS;
+        NTSTATUS ReceiveStatus = STATUS_IO_TIMEOUT;
         NTSTATUS CloseStatus = STATUS_SUCCESS;
+        size_t TransportCloseCount = 0;
         size_t CloseCount = 0;
 
         void Reset()
@@ -366,6 +370,10 @@ namespace
             if (!NT_SUCCESS(status)) {
                 return status;
             }
+            if (!NT_SUCCESS(DataSendStatus)) {
+                return DataSendStatus;
+            }
+            ++ClientFrameCount;
             LastClientOpcode = opcode;
 
             if (opcode == WebSocketOpcode::Pong) {
@@ -416,6 +424,7 @@ namespace
                 if (LastClientPayloadLength != 0) {
                     memcpy(LastClientPayload, FragmentPayload, LastClientPayloadLength);
                 }
+                LastClientOpcode = opcode;
                 FragmentOpen = false;
                 FragmentPayloadLength = 0;
             }
@@ -471,7 +480,7 @@ namespace
 
             const size_t available = ReceiveLength - ReceiveOffset;
             if (available == 0) {
-                return STATUS_IO_TIMEOUT;
+                return ReceiveStatus;
             }
 
             const size_t toCopy = available < length ? available : length;
@@ -485,6 +494,7 @@ namespace
 
         NTSTATUS Close()
         {
+            ++TransportCloseCount;
             Connected = false;
             return CloseStatus;
         }
@@ -1733,6 +1743,70 @@ namespace
         g_server = nullptr;
     }
 
+    void TestAutoReplyPingUsesControlBufferWhenOutputIsSmall()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        unsigned char ping[125] = {};
+        for (size_t index = 0; index < sizeof(ping); ++index) {
+            ping[index] = static_cast<unsigned char>('A' + (index % 26));
+        }
+        const unsigned char text[] = "ok";
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Ping,
+            ping,
+            sizeof(ping));
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Text,
+            text,
+            sizeof(text) - 1);
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[2] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for small output auto-pong test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(NT_SUCCESS(status), "small output receive skips auto-ponged 125-byte ping");
+        Expect(server.PongCount == 1, "small output receive auto-replies to 125-byte ping");
+        Expect(server.LastClientOpcode == WebSocketOpcode::Pong, "small output auto-reply emits Pong");
+        Expect(server.LastClientPayloadLength == sizeof(ping), "small output Pong payload length matches");
+        Expect(memcmp(server.LastClientPayload, ping, sizeof(ping)) == 0, "small output Pong payload matches");
+        Expect(opcode == WebSocketOpcode::Text, "small output receive returns following text message");
+        Expect(bytesReceived == sizeof(text) - 1, "small output receive text length matches");
+        Expect(memcmp(payload, text, sizeof(text) - 1) == 0, "small output receive text payload matches");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
     void TestSendPingAndPongControlFrames()
     {
         FakeWebSocketServer server;
@@ -1785,6 +1859,60 @@ namespace
         g_server = nullptr;
     }
 
+    void TestSendLargeTextAutomaticallyFragments()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        static char largeMessage[20000] = {};
+        for (size_t index = 0; index < sizeof(largeMessage); ++index) {
+            largeMessage[index] = static_cast<char>('a' + (index % 26));
+        }
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[21000] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for large send test succeeds");
+
+        status = client.SendText(largeMessage, sizeof(largeMessage), buffers);
+        Expect(NT_SUCCESS(status), "websocket SendText auto-fragments large message");
+        Expect(server.ClientFrameCount > 1, "large send emits multiple WebSocket frames");
+        Expect(server.LastClientFin, "large send final frame sets FIN");
+        Expect(server.LastClientOpcode == WebSocketOpcode::Text, "large send reassembles as text");
+        Expect(server.LastClientPayloadLength == sizeof(largeMessage), "large send payload length matches");
+        Expect(memcmp(server.LastClientPayload, largeMessage, sizeof(largeMessage)) == 0,
+            "large send payload matches");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(NT_SUCCESS(status), "large send echo receive succeeds");
+        Expect(opcode == WebSocketOpcode::Text, "large send echo opcode is text");
+        Expect(bytesReceived == sizeof(largeMessage), "large send echo length matches");
+        Expect(memcmp(payload, largeMessage, sizeof(largeMessage)) == 0, "large send echo payload matches");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
     void TestCloseExSendsStatusCodeAndReason()
     {
         FakeWebSocketServer server;
@@ -1819,6 +1947,62 @@ namespace
         Expect(server.LastClosePayloadLength == 2 + sizeof(reason), "CloseEx payload length matches");
         Expect(server.LastClosePayload[0] == 0x03 && server.LastClosePayload[1] == 0xe8, "CloseEx status code matches");
         Expect(memcmp(server.LastClosePayload + 2, reason, sizeof(reason)) == 0, "CloseEx reason matches");
+        g_server = nullptr;
+    }
+
+    void ExpectProtocolErrorClosesTransport(
+        const unsigned char* frame,
+        size_t frameLength,
+        const char* rejectedMessage,
+        const char* closeMessage,
+        const char* transportMessage)
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        AppendBytes(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            frame,
+            frameLength);
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frameBuffer[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frameBuffer,
+            sizeof(frameBuffer),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for protocol error helper succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, rejectedMessage);
+        Expect(server.CloseCount == 1, closeMessage);
+        Expect(server.LastClosePayloadLength == 2, "protocol error close carries status code");
+        Expect(server.LastClosePayload[0] == 0x03 && server.LastClosePayload[1] == 0xea,
+            "protocol error close status is 1002");
+        Expect(!server.Connected, transportMessage);
+        Expect(server.TransportCloseCount == 1, "protocol error closes transport exactly once");
+
+        status = client.Close(buffers);
+        Expect(NT_SUCCESS(status), "websocket Close after protocol error is idempotent");
+        Expect(server.TransportCloseCount == 1, "Close after protocol error does not close transport twice");
         g_server = nullptr;
     }
 
@@ -1867,6 +2051,8 @@ namespace
         Expect(server.LastClosePayloadLength == 2, "protocol header error close carries status code");
         Expect(server.LastClosePayload[0] == 0x03 && server.LastClosePayload[1] == 0xea,
             "protocol header error close status is 1002");
+        Expect(!server.Connected, "protocol header error closes the transport");
+        Expect(server.TransportCloseCount == 1, "protocol header error closes transport exactly once");
 
         status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
         Expect(status == STATUS_CONNECTION_DISCONNECTED, "receive after protocol error is disconnected");
@@ -1877,7 +2063,27 @@ namespace
 
         const NTSTATUS closeStatus = client.Close(buffers);
         UNREFERENCED_PARAMETER(closeStatus);
+        Expect(server.TransportCloseCount == 1, "explicit Close after protocol error does not close transport twice");
         g_server = nullptr;
+    }
+
+    void TestReceiveHeaderDecodeErrorsCloseTransport()
+    {
+        const unsigned char rsvTextFrame[] = { 0xc1, 0x00 };
+        ExpectProtocolErrorClosesTransport(
+            rsvTextFrame,
+            sizeof(rsvTextFrame),
+            "RSV server frame is a protocol error",
+            "RSV server frame sends one close frame",
+            "RSV server frame closes the transport");
+
+        const unsigned char reservedOpcodeFrame[] = { 0x83, 0x00 };
+        ExpectProtocolErrorClosesTransport(
+            reservedOpcodeFrame,
+            sizeof(reservedOpcodeFrame),
+            "reserved opcode server frame is a protocol error",
+            "reserved opcode server frame sends one close frame",
+            "reserved opcode server frame closes the transport");
     }
 
     void TestReceiveCloseEchoesAndBlocksData()
@@ -1926,16 +2132,19 @@ namespace
         Expect(server.CloseCount == 1, "client echoes close exactly once");
         Expect(server.LastClosePayloadLength == sizeof(closePayload), "close echo payload length matches");
         Expect(memcmp(server.LastClosePayload, closePayload, sizeof(closePayload)) == 0, "close echo payload matches");
+        Expect(server.TransportCloseCount == 1, "receive close closes transport after echo");
+        Expect(!server.Connected, "receive close disconnects fake server");
 
         const char text[] = "should-not-send";
         status = client.SendText(text, sizeof(text) - 1, buffers);
-        Expect(status == STATUS_INVALID_DEVICE_STATE, "send after close receive is rejected");
+        Expect(status == STATUS_CONNECTION_DISCONNECTED, "send after close receive is disconnected");
 
         status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
         Expect(status == STATUS_CONNECTION_DISCONNECTED, "receive after close state is disconnected");
 
         const NTSTATUS closeStatus = client.Close(buffers);
         UNREFERENCED_PARAMETER(closeStatus);
+        Expect(server.TransportCloseCount == 1, "Close after received close does not close transport twice");
         g_server = nullptr;
     }
 
@@ -2043,11 +2252,104 @@ namespace
             size_t bytesReceived = 0;
             status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
             Expect(status == STATUS_INVALID_NETWORK_RESPONSE, messages[index]);
+            Expect(server.CloseCount == 1, "malformed close sends one protocol-error close");
+            Expect(server.TransportCloseCount == 1, "malformed close closes transport exactly once");
+            Expect(!server.Connected, "malformed close terminates the transport");
 
             const NTSTATUS closeStatus = client.Close(buffers);
             UNREFERENCED_PARAMETER(closeStatus);
+            Expect(server.TransportCloseCount == 1, "Close after malformed close does not close transport twice");
             g_server = nullptr;
         }
+    }
+
+    void TestReceiveTimeoutTerminatesTransport()
+    {
+        FakeWebSocketServer server;
+        server.ReceiveStatus = STATUS_IO_TIMEOUT;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for receive timeout test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(status == STATUS_IO_TIMEOUT, "websocket receive timeout is returned");
+        Expect(server.TransportCloseCount == 1, "websocket receive timeout closes transport");
+        Expect(!server.Connected, "websocket receive timeout disconnects fake server");
+
+        const char text[] = "after-timeout";
+        status = client.SendText(text, sizeof(text) - 1, buffers);
+        Expect(status == STATUS_CONNECTION_DISCONNECTED, "send after receive timeout is disconnected");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        Expect(server.TransportCloseCount == 1, "Close after receive timeout is idempotent");
+        g_server = nullptr;
+    }
+
+    void TestSendTimeoutTerminatesTransport()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for send timeout test succeeds");
+
+        server.DataSendStatus = STATUS_IO_TIMEOUT;
+        const char text[] = "send-timeout";
+        status = client.SendText(text, sizeof(text) - 1, buffers);
+        Expect(status == STATUS_IO_TIMEOUT, "websocket send timeout is returned");
+        Expect(server.TransportCloseCount == 1, "websocket send timeout closes transport");
+        Expect(!server.Connected, "websocket send timeout disconnects fake server");
+
+        server.DataSendStatus = STATUS_SUCCESS;
+        status = client.SendText(text, sizeof(text) - 1, buffers);
+        Expect(status == STATUS_CONNECTION_DISCONNECTED, "send after send timeout is disconnected");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        Expect(server.TransportCloseCount == 1, "Close after send timeout is idempotent");
+        g_server = nullptr;
     }
 
     void TestCloseTreatsConnectionResetAsClosed()
@@ -2330,12 +2632,17 @@ int main()
     TestReceiveOversizedContinuationFrameHeaderSendsClose1009();
     TestReceivePingWithoutAutoReplyReturnsControlEvent();
     TestReceivePongWithoutAutoReplyReturnsControlEvent();
+    TestAutoReplyPingUsesControlBufferWhenOutputIsSmall();
     TestSendPingAndPongControlFrames();
+    TestSendLargeTextAutomaticallyFragments();
     TestCloseExSendsStatusCodeAndReason();
     TestReceiveProtocolHeaderErrorSendsClose1002AndTerminates();
+    TestReceiveHeaderDecodeErrorsCloseTransport();
     TestReceiveCloseEchoesAndBlocksData();
     TestReceiveRejectsInvalidTextUtf8();
     TestReceiveRejectsMalformedCloseFrames();
+    TestReceiveTimeoutTerminatesTransport();
+    TestSendTimeoutTerminatesTransport();
     TestCloseTreatsConnectionResetAsClosed();
     TestClosePropagatesNonTerminalErrors();
     TestTlsVersionRangeValidation();

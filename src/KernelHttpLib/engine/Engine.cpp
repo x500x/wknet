@@ -205,6 +205,91 @@ namespace
         return value > 0;
     }
 
+    bool IsWebSocketSubprotocolSeparator(char value) noexcept
+    {
+        switch (value) {
+        case '(':
+        case ')':
+        case '<':
+        case '>':
+        case '@':
+        case ',':
+        case ';':
+        case ':':
+        case '\\':
+        case '"':
+        case '/':
+        case '[':
+        case ']':
+        case '?':
+        case '=':
+        case '{':
+        case '}':
+        case ' ':
+        case '\t':
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    bool IsValidWebSocketSubprotocolToken(const char* token, SIZE_T length) noexcept
+    {
+        if (token == nullptr || length == 0) {
+            return false;
+        }
+
+        for (SIZE_T index = 0; index < length; ++index) {
+            const unsigned char value = static_cast<unsigned char>(token[index]);
+            if (value <= 0x20 || value >= 0x7f || IsWebSocketSubprotocolSeparator(token[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool IsValidWebSocketSubprotocolList(const char* value, SIZE_T length) noexcept
+    {
+        if (value == nullptr && length == 0) {
+            return true;
+        }
+        if (value == nullptr || length == 0) {
+            return false;
+        }
+
+        SIZE_T index = 0;
+        for (;;) {
+            while (index < length && (value[index] == ' ' || value[index] == '\t')) {
+                ++index;
+            }
+
+            const SIZE_T tokenStart = index;
+            while (index < length && value[index] != ',') {
+                ++index;
+            }
+
+            SIZE_T tokenEnd = index;
+            while (tokenEnd > tokenStart &&
+                (value[tokenEnd - 1] == ' ' || value[tokenEnd - 1] == '\t')) {
+                --tokenEnd;
+            }
+
+            if (!IsValidWebSocketSubprotocolToken(value + tokenStart, tokenEnd - tokenStart)) {
+                return false;
+            }
+
+            if (index == length) {
+                break;
+            }
+            ++index;
+            if (index == length) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     SIZE_T EffectiveMaxResponseBytes(const KhHttpSendOptions* options, SIZE_T sessionValue) noexcept
     {
         if (options != nullptr && options->MaxResponseBytes != 0) {
@@ -309,7 +394,8 @@ namespace
             return false;
         }
 
-        if (!IsValidMaxMessageBytes(options.MaxMessageBytes)) {
+        if (!IsValidMaxMessageBytes(options.MaxMessageBytes) ||
+            !IsValidWebSocketSubprotocolList(options.Subprotocol, options.SubprotocolLength)) {
             return false;
         }
 
@@ -1620,7 +1706,13 @@ namespace
         websocket.PathLength = 0;
         websocket.Port = 0;
         websocket.Connected = false;
+        websocket.TransportClosed = true;
         websocket.SendFragmentOpen = false;
+        websocket.SendFragmentType = KhWebSocketMessageType::Binary;
+        websocket.SendFragmentLength = 0;
+        websocket.SendTextUtf8CodePoint = 0;
+        websocket.SendTextUtf8Remaining = 0;
+        websocket.SendTextUtf8Expected = 0;
     }
 
     NTSTATUS KhSessionCreate(

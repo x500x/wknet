@@ -336,6 +336,222 @@ namespace engine
             statusCode != 1006;
     }
 
+    bool FinishWebSocketUtf8CodePoint(ULONG codePoint, UCHAR expected) noexcept
+    {
+        return !((expected == 2 && codePoint < 0x800) ||
+            (expected == 3 && codePoint < 0x10000) ||
+            codePoint > 0x10ffff ||
+            (codePoint >= 0xd800 && codePoint <= 0xdfff));
+    }
+
+    NTSTATUS AdvanceWebSocketUtf8State(
+        const UCHAR* data,
+        SIZE_T length,
+        bool finalFragment,
+        ULONG* codePoint,
+        UCHAR* remaining,
+        UCHAR* expected) noexcept
+    {
+        if ((data == nullptr && length != 0) ||
+            codePoint == nullptr ||
+            remaining == nullptr ||
+            expected == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        for (SIZE_T index = 0; index < length; ++index) {
+            const UCHAR ch = data[index];
+            if (*remaining != 0) {
+                if ((ch & 0xc0) != 0x80) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                *codePoint = (*codePoint << 6) | (ch & 0x3f);
+                --(*remaining);
+                if (*remaining == 0) {
+                    if (!FinishWebSocketUtf8CodePoint(*codePoint, *expected)) {
+                        return STATUS_INVALID_PARAMETER;
+                    }
+                    *codePoint = 0;
+                    *expected = 0;
+                }
+                continue;
+            }
+
+            if (ch <= 0x7f) {
+                continue;
+            }
+
+            if (ch >= 0xc2 && ch <= 0xdf) {
+                *codePoint = ch & 0x1f;
+                *remaining = 1;
+                *expected = 1;
+            }
+            else if (ch >= 0xe0 && ch <= 0xef) {
+                *codePoint = ch & 0x0f;
+                *remaining = 2;
+                *expected = 2;
+            }
+            else if (ch >= 0xf0 && ch <= 0xf4) {
+                *codePoint = ch & 0x07;
+                *remaining = 3;
+                *expected = 3;
+            }
+            else {
+                return STATUS_INVALID_PARAMETER;
+            }
+        }
+
+        if (finalFragment && *remaining != 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
+    bool IsValidWebSocketUtf8(const UCHAR* data, SIZE_T length) noexcept
+    {
+        ULONG codePoint = 0;
+        UCHAR remaining = 0;
+        UCHAR expected = 0;
+        return NT_SUCCESS(AdvanceWebSocketUtf8State(
+            data,
+            length,
+            true,
+            &codePoint,
+            &remaining,
+            &expected));
+    }
+
+    void ResetWebSocketSendFragmentState(_Inout_ KhWebSocket& websocket) noexcept
+    {
+        websocket.SendFragmentOpen = false;
+        websocket.SendFragmentType = KhWebSocketMessageType::Binary;
+        websocket.SendFragmentLength = 0;
+        websocket.SendTextUtf8CodePoint = 0;
+        websocket.SendTextUtf8Remaining = 0;
+        websocket.SendTextUtf8Expected = 0;
+    }
+
+    bool IsWebSocketTransportTerminalStatus(NTSTATUS status) noexcept
+    {
+        return status == STATUS_CONNECTION_DISCONNECTED ||
+            status == STATUS_CONNECTION_RESET ||
+            status == STATUS_CONNECTION_ABORTED ||
+            status == STATUS_DEVICE_NOT_CONNECTED ||
+            status == STATUS_IO_TIMEOUT ||
+            status == STATUS_CANCELLED ||
+            status == STATUS_TIMEOUT ||
+            status == STATUS_INVALID_NETWORK_RESPONSE;
+    }
+
+    NTSTATUS CloseWebSocketTransport(_Inout_ KhWebSocket& websocket) noexcept
+    {
+        websocket.Connected = false;
+        ResetWebSocketSendFragmentState(websocket);
+        if (websocket.TransportClosed) {
+            return STATUS_SUCCESS;
+        }
+
+        websocket.TransportClosed = true;
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (g_testWebSocketClose != nullptr) {
+            g_testWebSocketClose(g_testWebSocketTransportContext, &websocket);
+        }
+        return STATUS_SUCCESS;
+#else
+        if (websocket.Client == nullptr) {
+            return STATUS_SUCCESS;
+        }
+
+        HeapArray<UCHAR> frameBuffer(KhWorkspaceWebSocketFrameScratchBytes);
+        client::WebSocketIoBuffers buffers = {};
+        if (frameBuffer.IsValid()) {
+            buffers.FrameBuffer = frameBuffer.Get();
+            buffers.FrameBufferLength = frameBuffer.Count();
+        }
+        return websocket.Client->Close(buffers);
+#endif
+    }
+
+    void DisconnectWebSocketOnTerminalStatus(_Inout_ KhWebSocket& websocket, NTSTATUS status) noexcept
+    {
+        if (IsWebSocketTransportTerminalStatus(status)) {
+            const NTSTATUS closeStatus = CloseWebSocketTransport(websocket);
+            UNREFERENCED_PARAMETER(closeStatus);
+        }
+    }
+
+    NTSTATUS ValidateWebSocketOutgoingText(
+        const KhWebSocket& websocket,
+        KhWebSocketMessageType type,
+        const UCHAR* data,
+        SIZE_T dataLength,
+        bool finalFragment,
+        ULONG* codePoint,
+        UCHAR* remaining,
+        UCHAR* expected) noexcept
+    {
+        if (codePoint == nullptr || remaining == nullptr || expected == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const bool continuation = type == KhWebSocketMessageType::Continuation;
+        const bool textFragment =
+            type == KhWebSocketMessageType::Text ||
+            (continuation && websocket.SendFragmentType == KhWebSocketMessageType::Text);
+        if (!textFragment) {
+            *codePoint = 0;
+            *remaining = 0;
+            *expected = 0;
+            return STATUS_SUCCESS;
+        }
+
+        *codePoint = continuation ? websocket.SendTextUtf8CodePoint : 0;
+        *remaining = continuation ? websocket.SendTextUtf8Remaining : 0;
+        *expected = continuation ? websocket.SendTextUtf8Expected : 0;
+        return AdvanceWebSocketUtf8State(
+            data,
+            dataLength,
+            finalFragment,
+            codePoint,
+            remaining,
+            expected);
+    }
+
+    void CompleteWebSocketSendFragment(
+        _Inout_ KhWebSocket& websocket,
+        KhWebSocketMessageType type,
+        SIZE_T dataLength,
+        bool finalFragment,
+        ULONG codePoint,
+        UCHAR remaining,
+        UCHAR expected) noexcept
+    {
+        if (finalFragment) {
+            ResetWebSocketSendFragmentState(websocket);
+            return;
+        }
+
+        if (!websocket.SendFragmentOpen) {
+            websocket.SendFragmentType = type;
+            websocket.SendFragmentLength = dataLength;
+        }
+        else {
+            websocket.SendFragmentLength += dataLength;
+        }
+        websocket.SendFragmentOpen = true;
+        if (websocket.SendFragmentType == KhWebSocketMessageType::Text) {
+            websocket.SendTextUtf8CodePoint = codePoint;
+            websocket.SendTextUtf8Remaining = remaining;
+            websocket.SendTextUtf8Expected = expected;
+        }
+        else {
+            websocket.SendTextUtf8CodePoint = 0;
+            websocket.SendTextUtf8Remaining = 0;
+            websocket.SendTextUtf8Expected = 0;
+        }
+    }
+
     _Must_inspect_result_
     NTSTATUS StoreWebSocketSubprotocol(
         _Inout_ KhWebSocket& websocket,
@@ -504,6 +720,7 @@ namespace engine
         }
 
         newWebSocket->Connected = true;
+        newWebSocket->TransportClosed = false;
         status = RegisterActiveWebSocketHandle(newWebSocket);
         if (!NT_SUCCESS(status)) {
             ReleaseWebSocketStorage(*newWebSocket);
@@ -605,6 +822,7 @@ namespace engine
         }
 
         newWebSocket->Connected = true;
+        newWebSocket->TransportClosed = false;
         status = RegisterActiveWebSocketHandle(newWebSocket);
         if (!NT_SUCCESS(status)) {
             ReleaseWebSocketStorage(*newWebSocket);
@@ -757,10 +975,11 @@ namespace engine
 
         const bool finalFragment = options == nullptr ? true : options->FinalFragment;
         KhWebSocketOperationScope operation(websocket);
-        if (!operation.IsActive() ||
-            !websocket->Connected ||
-            (text == nullptr && textLength != 0)) {
+        if (!operation.IsActive() || (text == nullptr && textLength != 0)) {
             return STATUS_INVALID_PARAMETER;
+        }
+        if (!websocket->Connected) {
+            return websocket->TransportClosed ? STATUS_CONNECTION_DISCONNECTED : STATUS_INVALID_PARAMETER;
         }
 
         if (websocket->SendFragmentOpen) {
@@ -769,6 +988,22 @@ namespace engine
 
         if (textLength > websocket->MaxMessageBytes) {
             return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        ULONG nextCodePoint = 0;
+        UCHAR nextRemaining = 0;
+        UCHAR nextExpected = 0;
+        status = ValidateWebSocketOutgoingText(
+            *websocket,
+            KhWebSocketMessageType::Text,
+            reinterpret_cast<const UCHAR*>(text),
+            textLength,
+            finalFragment,
+            &nextCodePoint,
+            &nextRemaining,
+            &nextExpected);
+        if (!NT_SUCCESS(status)) {
+            return status;
         }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -784,7 +1019,17 @@ namespace engine
             textLength,
             finalFragment);
         if (NT_SUCCESS(status)) {
-            websocket->SendFragmentOpen = !finalFragment;
+            CompleteWebSocketSendFragment(
+                *websocket,
+                KhWebSocketMessageType::Text,
+                textLength,
+                finalFragment,
+                nextCodePoint,
+                nextRemaining,
+                nextExpected);
+        }
+        else {
+            DisconnectWebSocketOnTerminalStatus(*websocket, status);
         }
         return status;
 #else
@@ -807,7 +1052,17 @@ namespace engine
                 static_cast<ULONG>(status));
         }
         if (NT_SUCCESS(status)) {
-            websocket->SendFragmentOpen = !finalFragment;
+            CompleteWebSocketSendFragment(
+                *websocket,
+                KhWebSocketMessageType::Text,
+                textLength,
+                finalFragment,
+                nextCodePoint,
+                nextRemaining,
+                nextExpected);
+        }
+        else {
+            DisconnectWebSocketOnTerminalStatus(*websocket, status);
         }
         return status;
 #endif
@@ -826,10 +1081,11 @@ namespace engine
 
         const bool finalFragment = options == nullptr ? true : options->FinalFragment;
         KhWebSocketOperationScope operation(websocket);
-        if (!operation.IsActive() ||
-            !websocket->Connected ||
-            (data == nullptr && dataLength != 0)) {
+        if (!operation.IsActive() || (data == nullptr && dataLength != 0)) {
             return STATUS_INVALID_PARAMETER;
+        }
+        if (!websocket->Connected) {
+            return websocket->TransportClosed ? STATUS_CONNECTION_DISCONNECTED : STATUS_INVALID_PARAMETER;
         }
 
         if (websocket->SendFragmentOpen) {
@@ -838,6 +1094,22 @@ namespace engine
 
         if (dataLength > websocket->MaxMessageBytes) {
             return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        ULONG nextCodePoint = 0;
+        UCHAR nextRemaining = 0;
+        UCHAR nextExpected = 0;
+        status = ValidateWebSocketOutgoingText(
+            *websocket,
+            KhWebSocketMessageType::Binary,
+            data,
+            dataLength,
+            finalFragment,
+            &nextCodePoint,
+            &nextRemaining,
+            &nextExpected);
+        if (!NT_SUCCESS(status)) {
+            return status;
         }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -853,7 +1125,17 @@ namespace engine
             dataLength,
             finalFragment);
         if (NT_SUCCESS(status)) {
-            websocket->SendFragmentOpen = !finalFragment;
+            CompleteWebSocketSendFragment(
+                *websocket,
+                KhWebSocketMessageType::Binary,
+                dataLength,
+                finalFragment,
+                nextCodePoint,
+                nextRemaining,
+                nextExpected);
+        }
+        else {
+            DisconnectWebSocketOnTerminalStatus(*websocket, status);
         }
         return status;
 #else
@@ -876,7 +1158,17 @@ namespace engine
                 static_cast<ULONG>(status));
         }
         if (NT_SUCCESS(status)) {
-            websocket->SendFragmentOpen = !finalFragment;
+            CompleteWebSocketSendFragment(
+                *websocket,
+                KhWebSocketMessageType::Binary,
+                dataLength,
+                finalFragment,
+                nextCodePoint,
+                nextRemaining,
+                nextExpected);
+        }
+        else {
+            DisconnectWebSocketOnTerminalStatus(*websocket, status);
         }
         return status;
 #endif
@@ -895,18 +1187,36 @@ namespace engine
 
         const bool finalFragment = options == nullptr ? true : options->FinalFragment;
         KhWebSocketOperationScope operation(websocket);
-        if (!operation.IsActive() ||
-            !websocket->Connected ||
-            (data == nullptr && dataLength != 0)) {
+        if (!operation.IsActive() || (data == nullptr && dataLength != 0)) {
             return STATUS_INVALID_PARAMETER;
+        }
+        if (!websocket->Connected) {
+            return websocket->TransportClosed ? STATUS_CONNECTION_DISCONNECTED : STATUS_INVALID_PARAMETER;
         }
 
         if (!websocket->SendFragmentOpen) {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        if (dataLength > websocket->MaxMessageBytes) {
+        if (websocket->SendFragmentLength > websocket->MaxMessageBytes ||
+            dataLength > websocket->MaxMessageBytes - websocket->SendFragmentLength) {
             return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        ULONG nextCodePoint = 0;
+        UCHAR nextRemaining = 0;
+        UCHAR nextExpected = 0;
+        status = ValidateWebSocketOutgoingText(
+            *websocket,
+            KhWebSocketMessageType::Continuation,
+            data,
+            dataLength,
+            finalFragment,
+            &nextCodePoint,
+            &nextRemaining,
+            &nextExpected);
+        if (!NT_SUCCESS(status)) {
+            return status;
         }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -922,7 +1232,17 @@ namespace engine
             dataLength,
             finalFragment);
         if (NT_SUCCESS(status)) {
-            websocket->SendFragmentOpen = !finalFragment;
+            CompleteWebSocketSendFragment(
+                *websocket,
+                KhWebSocketMessageType::Continuation,
+                dataLength,
+                finalFragment,
+                nextCodePoint,
+                nextRemaining,
+                nextExpected);
+        }
+        else {
+            DisconnectWebSocketOnTerminalStatus(*websocket, status);
         }
         return status;
 #else
@@ -945,7 +1265,17 @@ namespace engine
                 static_cast<ULONG>(status));
         }
         if (NT_SUCCESS(status)) {
-            websocket->SendFragmentOpen = !finalFragment;
+            CompleteWebSocketSendFragment(
+                *websocket,
+                KhWebSocketMessageType::Continuation,
+                dataLength,
+                finalFragment,
+                nextCodePoint,
+                nextRemaining,
+                nextExpected);
+        }
+        else {
+            DisconnectWebSocketOnTerminalStatus(*websocket, status);
         }
         return status;
 #endif
@@ -969,10 +1299,12 @@ namespace engine
 
         KhWebSocketOperationScope operation(websocket);
         if (!operation.IsActive() ||
-            !websocket->Connected ||
             (payload == nullptr && payloadLength != 0) ||
             payloadLength > websocket::WebSocketMaxControlPayloadLength) {
             return STATUS_INVALID_PARAMETER;
+        }
+        if (!websocket->Connected) {
+            return websocket->TransportClosed ? STATUS_CONNECTION_DISCONNECTED : STATUS_INVALID_PARAMETER;
         }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -980,13 +1312,17 @@ namespace engine
             return STATUS_NOT_SUPPORTED;
         }
 
-        return g_testWebSocketSend(
+        status = g_testWebSocketSend(
             g_testWebSocketTransportContext,
             websocket,
             type,
             payload,
             payloadLength,
             true);
+        if (!NT_SUCCESS(status)) {
+            DisconnectWebSocketOnTerminalStatus(*websocket, status);
+        }
+        return status;
 #else
         if (websocket->Client == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
@@ -1010,6 +1346,7 @@ namespace engine
         if (!NT_SUCCESS(status)) {
             kprintf("KhWebSocketSendControlSync Client->SendControl failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
+            DisconnectWebSocketOnTerminalStatus(*websocket, status);
         }
         return status;
 #endif
@@ -1054,8 +1391,11 @@ namespace engine
         }
 
         KhWebSocketOperationScope operation(websocket);
-        if (!operation.IsActive() || !websocket->Connected) {
+        if (!operation.IsActive()) {
             return STATUS_INVALID_PARAMETER;
+        }
+        if (!websocket->Connected) {
+            return websocket->TransportClosed ? STATUS_CONNECTION_DISCONNECTED : STATUS_INVALID_PARAMETER;
         }
 
         KhWebSocketReceiveOptions effectiveOptions = {};
@@ -1080,6 +1420,7 @@ namespace engine
         KhTestWebSocketMessage received = {};
         status = g_testWebSocketReceive(g_testWebSocketTransportContext, websocket, &received);
         if (!NT_SUCCESS(status)) {
+            DisconnectWebSocketOnTerminalStatus(*websocket, status);
             return status;
         }
 
@@ -1090,6 +1431,8 @@ namespace engine
         const SIZE_T maxMessageBytes =
             effectiveOptions.MaxMessageBytes != 0 ? effectiveOptions.MaxMessageBytes : websocket->MaxMessageBytes;
         if (received.DataLength > maxMessageBytes) {
+            const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
+            UNREFERENCED_PARAMETER(closeStatus);
             return STATUS_BUFFER_TOO_SMALL;
         }
 
@@ -1118,7 +1461,8 @@ namespace engine
         }
 
         if (received.Type == KhWebSocketMessageType::Close) {
-            websocket->Connected = false;
+            const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
+            UNREFERENCED_PARAMETER(closeStatus);
         }
 
         return STATUS_SUCCESS;
@@ -1151,6 +1495,10 @@ namespace engine
         if (!NT_SUCCESS(status)) {
             kprintf("KhWebSocketReceiveSync Client->ReceiveMessage failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
+            if (status == STATUS_BUFFER_TOO_SMALL || IsWebSocketTransportTerminalStatus(status)) {
+                const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
+                UNREFERENCED_PARAMETER(closeStatus);
+            }
             return status;
         }
 
@@ -1160,7 +1508,6 @@ namespace engine
         }
         else if (opcode == KernelHttp::websocket::WebSocketOpcode::Close) {
             type = KhWebSocketMessageType::Close;
-            websocket->Connected = false;
         }
         else if (opcode == KernelHttp::websocket::WebSocketOpcode::Ping) {
             type = KhWebSocketMessageType::Ping;
@@ -1194,6 +1541,11 @@ namespace engine
             message->FinalFragment = true;
         }
 
+        if (type == KhWebSocketMessageType::Close) {
+            const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
+            UNREFERENCED_PARAMETER(closeStatus);
+        }
+
         return STATUS_SUCCESS;
 #endif
     }
@@ -1215,24 +1567,8 @@ namespace engine
 
         WaitForWebSocketDrain(websocket);
 
-#if defined(KERNEL_HTTP_USER_MODE_TEST)
-        if (g_testWebSocketClose != nullptr) {
-            g_testWebSocketClose(g_testWebSocketTransportContext, websocket);
-        }
-#endif
-#if !defined(KERNEL_HTTP_USER_MODE_TEST)
-        if (websocket->Client != nullptr) {
-            HeapArray<UCHAR> frameBuffer(KhWorkspaceWebSocketFrameScratchBytes);
-            client::WebSocketIoBuffers buffers = {};
-            if (frameBuffer.IsValid()) {
-                buffers.FrameBuffer = frameBuffer.Get();
-                buffers.FrameBufferLength = frameBuffer.Count();
-            }
-            const NTSTATUS closeStatus = websocket->Client->Close(buffers);
-            UNREFERENCED_PARAMETER(closeStatus);
-        }
-#endif
-        websocket->Connected = false;
+        const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
+        UNREFERENCED_PARAMETER(closeStatus);
         ReleaseWebSocketStorage(*websocket);
         FreeHandle(websocket);
         return STATUS_SUCCESS;
@@ -1251,7 +1587,8 @@ namespace engine
 
         if (!IsValidWebSocketCloseStatus(statusCode) ||
             (reason == nullptr && reasonLength != 0) ||
-            reasonLength > websocket::WebSocketMaxControlPayloadLength - 2) {
+            reasonLength > websocket::WebSocketMaxControlPayloadLength - 2 ||
+            !IsValidWebSocketUtf8(reason, reasonLength)) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -1289,9 +1626,8 @@ namespace engine
                 closePayload.Count(),
                 true);
         }
-        if (g_testWebSocketClose != nullptr) {
-            g_testWebSocketClose(g_testWebSocketTransportContext, websocket);
-        }
+        const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
+        UNREFERENCED_PARAMETER(closeStatus);
 #endif
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         if (websocket->Client != nullptr) {
@@ -1306,8 +1642,11 @@ namespace engine
                 status = websocket->Client->Close(statusCode, reason, reasonLength, buffers);
             }
         }
+        const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
+        if (NT_SUCCESS(status)) {
+            status = closeStatus;
+        }
 #endif
-        websocket->Connected = false;
         ReleaseWebSocketStorage(*websocket);
         FreeHandle(websocket);
         return status;
