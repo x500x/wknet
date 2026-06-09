@@ -544,6 +544,40 @@ namespace
         Expect(!failure.HasPeerAlert, "TLS local policy failure has no peer alert");
     }
 
+    void TestTlsHandshakeFailureRecordsProtocolVersionAlert()
+    {
+        const UCHAR protocolVersionAlertRecord[] = {
+            static_cast<UCHAR>(TlsContentType::Alert),
+            3,
+            3,
+            0,
+            2,
+            static_cast<UCHAR>(TlsAlertLevel::Fatal),
+            static_cast<UCHAR>(TlsAlertDescription::ProtocolVersion)
+        };
+
+        ScriptedTlsTransport transport(protocolVersionAlertRecord, sizeof(protocolVersionAlertRecord));
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(
+            status,
+            STATUS_INVALID_NETWORK_RESPONSE,
+            "TLS connect returns the alert decode status for protocol_version");
+        const auto& failure = connection.LastHandshakeFailure();
+        Expect(
+            failure.Category == TlsHandshakeFailureCategory::VersionNegotiation,
+            "TLS protocol_version alert records version negotiation failure");
+        Expect(failure.HasPeerAlert, "TLS protocol_version failure records the peer alert");
+        Expect(
+            failure.PeerAlert.Description == TlsAlertDescription::ProtocolVersion,
+            "TLS protocol_version failure preserves alert description");
+    }
+
     void TestRecordNeedsMoreData()
     {
         const UCHAR partial[] = { 22, 3, 3, 0 };
@@ -3145,6 +3179,7 @@ int main()
     TestPlainRecordRoundTrip();
     TestAlertParsing();
     TestTlsHandshakeFailureRecordsLocalPolicy();
+    TestTlsHandshakeFailureRecordsProtocolVersionAlert();
     TestRecordNeedsMoreData();
     TestRecordRejectsInvalidHeader();
     TestPlainRecordSizeProbe();

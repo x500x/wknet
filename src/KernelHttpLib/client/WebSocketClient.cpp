@@ -135,6 +135,27 @@ namespace client
         constexpr USHORT WebSocketCloseInvalidPayload = 1007;
 
         _Must_inspect_result_
+        bool IsTlsProtocolAllowed(
+            tls::TlsProtocol minimum,
+            tls::TlsProtocol maximum,
+            tls::TlsProtocol protocol) noexcept
+        {
+            return static_cast<UCHAR>(minimum) <= static_cast<UCHAR>(protocol) &&
+                static_cast<UCHAR>(protocol) <= static_cast<UCHAR>(maximum);
+        }
+
+        _Must_inspect_result_
+        bool IsTls12ConfirmationCandidate(
+            const WebSocketConnectOptions& options,
+            const tls::TlsHandshakeFailure& failure) noexcept
+        {
+            return options.UseTls &&
+                IsTlsProtocolAllowed(options.MinimumTlsProtocol, options.MaximumTlsProtocol, tls::TlsProtocol::Tls12) &&
+                IsTlsProtocolAllowed(options.MinimumTlsProtocol, options.MaximumTlsProtocol, tls::TlsProtocol::Tls13) &&
+                failure.Category == tls::TlsHandshakeFailureCategory::VersionNegotiation;
+        }
+
+        _Must_inspect_result_
         bool TextContainsChar(
             _In_reads_bytes_opt_(length) const char* text,
             SIZE_T length,
@@ -580,6 +601,7 @@ namespace client
 
         NTSTATUS lastStatus = STATUS_NOT_FOUND;
         for (SIZE_T addressIndex = 0; addressIndex < remoteAddressCount; ++addressIndex) {
+            bool tls12ConfirmationCandidate = false;
             status = ConnectAddress(
                 wskClient,
                 reinterpret_cast<const SOCKADDR*>(&remoteAddresses[addressIndex]),
@@ -588,12 +610,44 @@ namespace client
                 clientKey.Get(),
                 clientKeyLength,
                 requestLength,
-                statusCode);
+                statusCode,
+                &tls12ConfirmationCandidate);
             if (NT_SUCCESS(status)) {
                 return STATUS_SUCCESS;
             }
 
             lastStatus = status;
+            if (tls12ConfirmationCandidate) {
+                WebSocketConnectOptions tls12Options = options;
+                tls12Options.MaximumTlsProtocol = tls::TlsProtocol::Tls12;
+                if (statusCode != nullptr) {
+                    *statusCode = 0;
+                }
+
+                bool ignoredConfirmationCandidate = false;
+                const NTSTATUS confirmationStatus = ConnectAddress(
+                    wskClient,
+                    reinterpret_cast<const SOCKADDR*>(&remoteAddresses[addressIndex]),
+                    tls12Options,
+                    buffers,
+                    clientKey.Get(),
+                    clientKeyLength,
+                    requestLength,
+                    statusCode,
+                    &ignoredConfirmationCandidate);
+                if (NT_SUCCESS(confirmationStatus)) {
+                    kprintf(
+                        "WebSocketClient TLS1.2 confirmed after version negotiation index=%Iu\r\n",
+                        addressIndex);
+                    return STATUS_SUCCESS;
+                }
+
+                kprintf(
+                    "WebSocketClient TLS1.2 confirmation failed: 0x%08X original=0x%08X index=%Iu\r\n",
+                    static_cast<ULONG>(confirmationStatus),
+                    static_cast<ULONG>(status),
+                    addressIndex);
+            }
             kprintf("WebSocketClient address attempt failed: 0x%08X index=%Iu family=%u\r\n",
                 static_cast<ULONG>(status),
                 addressIndex,
@@ -611,8 +665,13 @@ namespace client
         const char* clientKey,
         SIZE_T clientKeyLength,
         SIZE_T requestLength,
-        USHORT* statusCode) noexcept
+        USHORT* statusCode,
+        bool* tls12ConfirmationCandidate) noexcept
     {
+        if (tls12ConfirmationCandidate != nullptr) {
+            *tls12ConfirmationCandidate = false;
+        }
+
         if (remoteAddress == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -693,6 +752,10 @@ namespace client
             delete handshakeScratch;
 
             if (!NT_SUCCESS(status)) {
+                if (tls12ConfirmationCandidate != nullptr &&
+                    IsTls12ConfirmationCandidate(options, tls_->LastHandshakeFailure())) {
+                    *tls12ConfirmationCandidate = true;
+                }
                 kprintf("WebSocketClient TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 delete tls_;
                 tls_ = nullptr;

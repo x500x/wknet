@@ -180,7 +180,8 @@ namespace client
             _In_reads_bytes_(clientKeyLength) const char* clientKey,
             SIZE_T clientKeyLength,
             SIZE_T requestLength,
-            _Out_opt_ USHORT* statusCode) noexcept;
+            _Out_opt_ USHORT* statusCode,
+            _Out_opt_ bool* tls12ConfirmationCandidate) noexcept;
 
         _Must_inspect_result_
         NTSTATUS ReadHandshakeResponse(
