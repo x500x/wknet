@@ -7,7 +7,7 @@
 > **并发安全**：内部实现已对连接池、句柄释放、异步完成等关键路径加锁保护。异步路径使用独立的 Workspace 避免数据竞争。调用方仍需保证同一 `Request` 不被多个 `Send` 并发使用。
 
 > **协议与 IRQL 边界**：同步 HTTP、WebSocket、TLS 和证书验证路径要求 `PASSIVE_LEVEL`。HTTP/1.1 请求体默认使用 `Content-Length`，也可通过 `RequestSetBodyMode(Chunked)` 显式发送 chunked 请求体；用户设置请求 `Transfer-Encoding`、`TE`、`Trailer` 会返回 `STATUS_NOT_SUPPORTED`，带请求体的 `Expect: 100-continue` 暂不支持，request trailer 暂不支持。响应 `Transfer-Encoding` 支持 `chunked/gzip/deflate/compress` 链式解码且不接受 transfer-coding 参数；`br` 仅作为 `Content-Encoding` 支持；chunked trailer 会被校验、消费，并可通过 trailer 只读 API 在响应完成后访问。close-delimited 响应和 `101 Switching Protocols` 升级响应不会进入普通 HTTP 连接池。HTTP/2 TLS 主路径要求 ALPN `h2`；h2c prior knowledge / Upgrade 仅保留为显式 legacy/test path，不作为现代内核主路径能力宣传。HTTP/2 不支持 RFC 8441 WebSocket over HTTP/2、server push、priority 或完整多流调度，收到禁用的 `PUSH_PROMISE` 视为协议错误，缺失 SETTINGS ACK 会以 `SETTINGS_TIMEOUT` 关闭，收到 GOAWAY 会终止当前单请求连接语义。WebSocket 主路径是 HTTP/1.1 Upgrade，默认接收完整消息，不暴露接收分片回调、不协商扩展，也不提供自定义 opening handshake headers。TLS ALPN 结果必须来自客户端 offer 列表；TLS1.2 只能在获得可验证版本协商证据后选择；证书错误、ALPN mismatch、网络超时或 record 解密失败都不是 TLS1.2-only 证据。证书主机为 IP literal 时只匹配 iPAddress SAN，不回退到 dNSName 或 CN。
-> **安全策略**：自动 redirect 默认拒绝 HTTPS 到 HTTP 降级；跨源 redirect 清理 `Authorization`、`Cookie`、`Proxy-Authorization`；reused stale 连接失败只对 `GET`、`HEAD`、`OPTIONS` 等安全/幂等请求自动 fresh retry。TLS 1.3 0-RTT 默认关闭，启用时仍要求调用方显式标记 replay-safe。当前不实现 OCSP/CRL 撤销检查、Name Constraints 或 IDNA 完整策略；触发这些要求时返回 `STATUS_NOT_SUPPORTED` 或拒绝非 ASCII 主机名。叶子证书默认硬性要求 ServerAuth EKU、KeyUsage digitalSignature 且不能是 CA；中间/根证书要求 BasicConstraints CA 和 KeyUsage keyCertSign。
+> **安全策略**：自动 redirect 默认拒绝 HTTPS 到 HTTP 降级；跨源 redirect 清理 `Authorization`、`Cookie`、`Proxy-Authorization`；reused stale 连接失败只对 `GET`、`HEAD`、`OPTIONS` 等安全/幂等请求自动 fresh retry。TLS 1.3 0-RTT 默认关闭，启用时仍要求调用方显式标记 replay-safe。非关键 `certificatePolicies` 会做 DER 语法校验后继续正常证书验证；关键 `certificatePolicies`、Name Constraints、OCSP/CRL 撤销检查或 IDNA 完整策略当前不实现，触发这些要求时返回 `STATUS_NOT_SUPPORTED` 或拒绝非 ASCII 主机名。叶子证书默认硬性要求 ServerAuth EKU、KeyUsage digitalSignature 且不能是 CA；中间/根证书要求 BasicConstraints CA 和 KeyUsage keyCertSign。
 
 ## 1. 模块组成与依赖关系
 
@@ -343,7 +343,9 @@ constexpr ULONG  DefaultTlsHandshakeTimeoutMs   = TlsHandshakeReceiveTimeoutMill
 
 `src/KernelHttpTest/samples/HighLevelApiSamples.cpp` 中按场景列出了：会话创建、HTTP 同步快捷函数、Request 构造、各类请求体、Send 选项与回调、响应头读取、各种异步入口、`AsyncCancel`、HTTPS（含 ALPN 切换）、WebSocket 同步与异步连接、文本 / 二进制 / Ex / 回调接收等。可以直接对照阅读，每个样例都打印请求与响应详情，便于调试。
 
-`src/KernelHttpTest/samples/ExternalTrustStore.{h,cpp}` 给出了如何构造会话级证书 `Store`（`tls::CertificateTrustAnchor` + `tls::CertificatePin`）的模板，并被 `RunHighLevelApiSamples` 在创建 Session 时使用。
+驱动加载时的公网矩阵会把强制 IPv4/IPv6 样例的网络不可达、DNS 无匹配、连接超时等环境状态记录到对应 result 字段，但不让这些公网诊断项决定整个样例矩阵成败；公网 WebSocket DNS/connect 环境失败同样只记录，已建连后的协议或验证错误仍按失败处理。
+
+`src/KernelHttpTest/samples/ExternalTrustStore.{h,cpp}` 给出了如何从 PEM bundle 构造会话级证书 `Store` 的模板，并被 `RunHighLevelApiSamples` 在创建 Session 时使用。测试驱动默认从驱动镜像目录读取 `cacert.pem`；也可在服务注册表值 `CertificateBundlePath` 中配置完整路径，例如 `\??\E:\work\kernel_http\certs\cacert.pem`。
 
 ## 15. 相关文档
 

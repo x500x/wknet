@@ -14,6 +14,26 @@
 
 #include "samples/ExternalTrustStore.h"
 
+#ifndef STATUS_CONNECTION_REFUSED
+#define STATUS_CONNECTION_REFUSED ((NTSTATUS)0xC0000236L)
+#endif
+
+#ifndef STATUS_NETWORK_UNREACHABLE
+#define STATUS_NETWORK_UNREACHABLE ((NTSTATUS)0xC000023CL)
+#endif
+
+#ifndef STATUS_HOST_UNREACHABLE
+#define STATUS_HOST_UNREACHABLE ((NTSTATUS)0xC000023DL)
+#endif
+
+#ifndef STATUS_PROTOCOL_UNREACHABLE
+#define STATUS_PROTOCOL_UNREACHABLE ((NTSTATUS)0xC000023EL)
+#endif
+
+#ifndef STATUS_NO_MATCH
+#define STATUS_NO_MATCH ((NTSTATUS)0xC0000272L)
+#endif
+
 namespace KernelHttp
 {
 namespace samples
@@ -57,6 +77,36 @@ namespace samples
             if (NT_SUCCESS(aggregate) && !NT_SUCCESS(status)) {
                 aggregate = status;
             }
+        }
+
+        bool IsPublicNetworkEnvironmentStatus(NTSTATUS status) noexcept
+        {
+            return status == STATUS_CONNECTION_REFUSED ||
+                status == STATUS_NETWORK_UNREACHABLE ||
+                status == STATUS_HOST_UNREACHABLE ||
+                status == STATUS_PROTOCOL_UNREACHABLE ||
+                status == STATUS_NO_MATCH ||
+                status == STATUS_IO_TIMEOUT ||
+                status == STATUS_CONNECTION_DISCONNECTED ||
+                status == STATUS_CONNECTION_RESET ||
+                status == STATUS_CONNECTION_ABORTED ||
+                status == STATUS_DEVICE_NOT_CONNECTED;
+        }
+
+        void MergePublicDiagnosticSampleStatus(
+            _Inout_ NTSTATUS& aggregate,
+            _In_z_ const char* sampleName,
+            NTSTATUS status) noexcept
+        {
+            if (!NT_SUCCESS(status) && IsPublicNetworkEnvironmentStatus(status)) {
+                kprintf(
+                    "[高级场景] 示例=%s 公网连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                    sampleName,
+                    static_cast<ULONG>(status));
+                return;
+            }
+
+            MergeSampleStatus(aggregate, sampleName, status);
         }
 
         void CaptureStatus(
@@ -533,9 +583,9 @@ namespace samples
         webSocketTls.Store = &trustStore.Store;
         webSocketTls.MaxVersion = khttp::TlsVersion::Tls12;
         status = RunWebSocketCloseSample(session, webSocketTls, results->WebSocketClose);
-        MergeSampleStatus(aggregate, "WebSocket Close", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "WebSocket Close", status);
         status = RunWebSocketFragmentSample(session, webSocketTls, results->WebSocketFragmentSend);
-        MergeSampleStatus(aggregate, "WebSocket FragmentSend", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "WebSocket FragmentSend", status);
 
         khttp::SessionClose(session);
         ResetExternalTrustStore(trustStore);

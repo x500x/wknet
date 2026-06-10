@@ -777,6 +777,143 @@ namespace tls
         }
 
         _Must_inspect_result_
+        bool IsValidObjectIdentifierValue(_In_ const DerElement& oid) noexcept
+        {
+            if (oid.Tag != TagOid || oid.Value == nullptr || oid.ValueLength == 0) {
+                return false;
+            }
+
+            bool continuation = false;
+            for (SIZE_T index = 0; index < oid.ValueLength; ++index) {
+                continuation = (oid.Value[index] & 0x80) != 0;
+            }
+
+            return !continuation;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ParsePolicyQualifierInfos(_In_ const DerElement& qualifiers) noexcept
+        {
+            if (qualifiers.Tag != TagSequence || qualifiers.Value == nullptr || qualifiers.ValueLength == 0) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            SIZE_T qualifierOffset = 0;
+            while (qualifierOffset < qualifiers.ValueLength) {
+                DerElement qualifierInfo = {};
+                NTSTATUS status = ReadExpected(
+                    qualifiers.Value,
+                    qualifiers.ValueLength,
+                    &qualifierOffset,
+                    TagSequence,
+                    qualifierInfo);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                SIZE_T itemOffset = 0;
+                DerElement qualifierId = {};
+                status = ReadExpected(
+                    qualifierInfo.Value,
+                    qualifierInfo.ValueLength,
+                    &itemOffset,
+                    TagOid,
+                    qualifierId);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                if (!IsValidObjectIdentifierValue(qualifierId)) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
+                if (itemOffset < qualifierInfo.ValueLength) {
+                    DerElement qualifier = {};
+                    status = ReadElement(
+                        qualifierInfo.Value,
+                        qualifierInfo.ValueLength,
+                        &itemOffset,
+                        qualifier);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                }
+                if (itemOffset != qualifierInfo.ValueLength) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ParseCertificatePolicies(_In_ const DerElement& extensionValue, _Inout_ ParsedCertificate& certificate) noexcept
+        {
+            SIZE_T valueOffset = 0;
+            DerElement policies = {};
+            NTSTATUS status = ReadExpected(extensionValue.Value, extensionValue.ValueLength, &valueOffset, TagSequence, policies);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (valueOffset != extensionValue.ValueLength ||
+                policies.Value == nullptr ||
+                policies.ValueLength == 0) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            SIZE_T policyOffset = 0;
+            while (policyOffset < policies.ValueLength) {
+                DerElement policyInfo = {};
+                status = ReadExpected(
+                    policies.Value,
+                    policies.ValueLength,
+                    &policyOffset,
+                    TagSequence,
+                    policyInfo);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                SIZE_T itemOffset = 0;
+                DerElement policyOid = {};
+                status = ReadExpected(
+                    policyInfo.Value,
+                    policyInfo.ValueLength,
+                    &itemOffset,
+                    TagOid,
+                    policyOid);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                if (!IsValidObjectIdentifierValue(policyOid)) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
+                if (itemOffset < policyInfo.ValueLength) {
+                    DerElement qualifiers = {};
+                    status = ReadExpected(
+                        policyInfo.Value,
+                        policyInfo.ValueLength,
+                        &itemOffset,
+                        TagSequence,
+                        qualifiers);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                    status = ParsePolicyQualifierInfos(qualifiers);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                }
+                if (itemOffset != policyInfo.ValueLength) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+            }
+
+            certificate.HasCertificatePolicies = true;
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
         NTSTATUS ParseExtendedKeyUsage(_In_ const DerElement& extensionValue, _Inout_ ParsedCertificate& certificate) noexcept
         {
             SIZE_T valueOffset = 0;
@@ -888,7 +1025,8 @@ namespace tls
                     status = ParseNameConstraints(value, certificate);
                 }
                 else if (OidEquals(oid, OidCertificatePolicies, sizeof(OidCertificatePolicies))) {
-                    certificate.HasCertificatePolicies = true;
+                    certificate.CertificatePoliciesCritical = criticalExtension;
+                    status = ParseCertificatePolicies(value, certificate);
                 }
                 else if (OidEquals(oid, OidExtendedKeyUsage, sizeof(OidExtendedKeyUsage))) {
                     status = ParseExtendedKeyUsage(value, certificate);
@@ -1775,7 +1913,7 @@ namespace tls
         }
 
         _Must_inspect_result_
-        NTSTATUS RejectUnsupportedCertificatePolicies(
+        NTSTATUS RejectUnsupportedPolicyExtensions(
             _In_reads_(certificateCount) const ParsedCertificate* certificates,
             SIZE_T certificateCount) noexcept
         {
@@ -1785,7 +1923,8 @@ namespace tls
 
             for (SIZE_T index = 0; index < certificateCount; ++index) {
                 if (certificates[index].HasNameConstraints ||
-                    certificates[index].HasCertificatePolicies) {
+                    (certificates[index].HasCertificatePolicies &&
+                        certificates[index].CertificatePoliciesCritical)) {
                     return STATUS_NOT_SUPPORTED;
                 }
             }
@@ -2244,9 +2383,9 @@ namespace tls
             return STATUS_SUCCESS;
         }
 
-        status = RejectUnsupportedCertificatePolicies(parsed, chain.CertificateCount);
+        status = RejectUnsupportedPolicyExtensions(parsed, chain.CertificateCount);
         if (!NT_SUCCESS(status)) {
-            kprintf("CertificateValidator: Unsupported certificate policy failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            kprintf("CertificateValidator: Unsupported certificate extension policy failed: 0x%08X\r\n", static_cast<ULONG>(status));
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return status;

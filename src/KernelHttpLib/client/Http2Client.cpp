@@ -71,9 +71,12 @@ namespace client
                 TextEqualsIgnoreCase(name, "host");
         }
 
-        bool IsValidHttp2FieldName(http::HttpText name) noexcept
+        bool IsValidHttpHeaderInputName(http::HttpText name) noexcept
         {
             if (name.Data == nullptr || name.Length == 0) {
+                return false;
+            }
+            if (name.Length > Http2MaxHeaderNameLength) {
                 return false;
             }
             if (name.Data[0] == ':') {
@@ -82,8 +85,7 @@ namespace client
 
             for (SIZE_T i = 0; i < name.Length; ++i) {
                 const UCHAR c = static_cast<UCHAR>(name.Data[i]);
-                if (c <= 0x20 || c >= 0x7f || c == ':' ||
-                    (c >= static_cast<UCHAR>('A') && c <= static_cast<UCHAR>('Z'))) {
+                if (c <= 0x20 || c >= 0x7f || c == ':') {
                     return false;
                 }
             }
@@ -113,7 +115,7 @@ namespace client
 
         bool LowercaseHeaderName(http::HttpText name, char* output, SIZE_T capacity, http::HttpText& lowered) noexcept
         {
-            if (!IsValidHttp2FieldName(name) || output == nullptr || name.Length > capacity) {
+            if (!IsValidHttpHeaderInputName(name) || output == nullptr || name.Length > capacity) {
                 return false;
             }
 

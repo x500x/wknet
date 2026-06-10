@@ -276,20 +276,137 @@ namespace KernelHttp
             return AppendText(certificatePath, capacity, CertificateBundleFileName);
         }
 
-        NTSTATUS InitializeCertificateBundlePath(_In_ PUNICODE_STRING registryPath) noexcept
+        NTSTATUS QueryConfiguredCertificateBundlePath(
+            _In_ PUNICODE_STRING registryPath,
+            _Out_writes_z_(capacity) char* certificatePath,
+            SIZE_T capacity) noexcept
         {
-            char imagePath[MaxDriverPathChars] = {};
-            NTSTATUS status = QueryDriverImagePath(registryPath, imagePath, sizeof(imagePath));
+            if (registryPath == nullptr || certificatePath == nullptr || capacity == 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            certificatePath[0] = '\0';
+
+            OBJECT_ATTRIBUTES objectAttributes = {};
+            InitializeObjectAttributes(
+                &objectAttributes,
+                registryPath,
+                OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE,
+                nullptr,
+                nullptr);
+
+            HANDLE keyHandle = nullptr;
+            NTSTATUS status = ZwOpenKey(&keyHandle, KEY_QUERY_VALUE, &objectAttributes);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
 
+            UNICODE_STRING valueName = {};
+            RtlInitUnicodeString(&valueName, L"CertificateBundlePath");
+
+            ULONG valueLength = 0;
+            status = ZwQueryValueKey(
+                keyHandle,
+                &valueName,
+                KeyValuePartialInformation,
+                nullptr,
+                0,
+                &valueLength);
+            if (status != STATUS_BUFFER_TOO_SMALL && status != STATUS_BUFFER_OVERFLOW) {
+                ZwClose(keyHandle);
+                return status;
+            }
+
+            auto* valueInfo = static_cast<KEY_VALUE_PARTIAL_INFORMATION*>(
+                ExAllocatePool2(POOL_FLAG_NON_PAGED, valueLength, PoolTag));
+            if (valueInfo == nullptr) {
+                ZwClose(keyHandle);
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            status = ZwQueryValueKey(
+                keyHandle,
+                &valueName,
+                KeyValuePartialInformation,
+                valueInfo,
+                valueLength,
+                &valueLength);
+            ZwClose(keyHandle);
+            if (!NT_SUCCESS(status)) {
+                ExFreePoolWithTag(valueInfo, PoolTag);
+                return status;
+            }
+
+            if ((valueInfo->Type != REG_SZ && valueInfo->Type != REG_EXPAND_SZ) ||
+                valueInfo->DataLength == 0 ||
+                (valueInfo->DataLength % sizeof(WCHAR)) != 0) {
+                ExFreePoolWithTag(valueInfo, PoolTag);
+                return STATUS_OBJECT_TYPE_MISMATCH;
+            }
+
+            ULONG unicodeBytes = valueInfo->DataLength;
+            auto* unicodeData = reinterpret_cast<WCHAR*>(valueInfo->Data);
+            while (unicodeBytes >= sizeof(WCHAR) &&
+                unicodeData[(unicodeBytes / sizeof(WCHAR)) - 1] == L'\0') {
+                unicodeBytes -= sizeof(WCHAR);
+            }
+            if (unicodeBytes == 0 || unicodeBytes > static_cast<ULONG>(MAXUSHORT)) {
+                ExFreePoolWithTag(valueInfo, PoolTag);
+                return STATUS_NAME_TOO_LONG;
+            }
+
+            UNICODE_STRING unicodePath = {};
+            unicodePath.Buffer = unicodeData;
+            unicodePath.Length = static_cast<USHORT>(unicodeBytes);
+            unicodePath.MaximumLength = unicodePath.Length;
+
+            ANSI_STRING ansiPath = {};
+            status = RtlUnicodeStringToAnsiString(&ansiPath, &unicodePath, TRUE);
+            if (!NT_SUCCESS(status)) {
+                ExFreePoolWithTag(valueInfo, PoolTag);
+                return status;
+            }
+
+            char configuredPath[MaxDriverPathChars] = {};
+            if (ansiPath.Length >= sizeof(configuredPath)) {
+                RtlFreeAnsiString(&ansiPath);
+                ExFreePoolWithTag(valueInfo, PoolTag);
+                return STATUS_NAME_TOO_LONG;
+            }
+
+            RtlCopyMemory(configuredPath, ansiPath.Buffer, ansiPath.Length);
+            configuredPath[ansiPath.Length] = '\0';
+            RtlFreeAnsiString(&ansiPath);
+            ExFreePoolWithTag(valueInfo, PoolTag);
+
+            return NormalizeImagePath(configuredPath, certificatePath, capacity);
+        }
+
+        NTSTATUS InitializeCertificateBundlePath(_In_ PUNICODE_STRING registryPath) noexcept
+        {
+            NTSTATUS status = QueryConfiguredCertificateBundlePath(
+                registryPath,
+                g_certificateBundlePath,
+                sizeof(g_certificateBundlePath));
+            if (NT_SUCCESS(status)) {
+                kprintf("证书信任包路径: %s\r\n", g_certificateBundlePath);
+                return STATUS_SUCCESS;
+            }
+            if (status != STATUS_OBJECT_NAME_NOT_FOUND && status != STATUS_OBJECT_PATH_NOT_FOUND) {
+                return status;
+            }
+
+            char imagePath[MaxDriverPathChars] = {};
+            status = QueryDriverImagePath(registryPath, imagePath, sizeof(imagePath));
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
             status = BuildCertificateBundlePath(
                 imagePath,
                 g_certificateBundlePath,
                 sizeof(g_certificateBundlePath));
             if (NT_SUCCESS(status)) {
-                kprintf("证书信任包路径: %s\r\n", g_certificateBundlePath);
+                kprintf("证书信任包路径: %s (默认驱动目录同名文件)\r\n", g_certificateBundlePath);
             }
             return status;
         }

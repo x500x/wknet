@@ -434,6 +434,141 @@ namespace
         data[offset + 1] = static_cast<UCHAR>(value & 0xff);
     }
 
+    bool IncreaseBigEndian16(UCHAR* data, SIZE_T dataLength, SIZE_T offset, USHORT delta)
+    {
+        if (data == nullptr || offset + 1 >= dataLength) {
+            return false;
+        }
+
+        const USHORT value = ReadBigEndian16(data, offset);
+        if (value > static_cast<USHORT>(0xffffU - delta)) {
+            return false;
+        }
+
+        WriteBigEndian16(data, offset, static_cast<USHORT>(value + delta));
+        return true;
+    }
+
+    bool IncreaseLengthByte(UCHAR* data, SIZE_T dataLength, SIZE_T offset, UCHAR delta)
+    {
+        if (data == nullptr || offset >= dataLength || data[offset] > static_cast<UCHAR>(0xffU - delta)) {
+            return false;
+        }
+
+        data[offset] = static_cast<UCHAR>(data[offset] + delta);
+        return true;
+    }
+
+    bool FindFixtureExtensionsHeader(
+        const UCHAR* der,
+        SIZE_T derLength,
+        SIZE_T beforeOffset,
+        SIZE_T* extensionsOffset)
+    {
+        if (extensionsOffset != nullptr) {
+            *extensionsOffset = 0;
+        }
+        if (der == nullptr || extensionsOffset == nullptr || beforeOffset > derLength || beforeOffset < 6) {
+            return false;
+        }
+
+        bool found = false;
+        for (SIZE_T index = 0; index + 5 < beforeOffset; ++index) {
+            if (der[index] == 0xa3 &&
+                der[index + 1] == 0x81 &&
+                der[index + 3] == 0x30 &&
+                der[index + 4] == 0x81) {
+                *extensionsOffset = index;
+                found = true;
+            }
+        }
+        return found;
+    }
+
+    bool PatchSubjectAltNameAsCertificatePolicies(
+        UCHAR* der,
+        SIZE_T derCapacity,
+        SIZE_T* derLength,
+        bool critical,
+        bool malformedPolicyValue)
+    {
+        static const UCHAR subjectAltNameOid[] = { 0x55, 0x1d, 0x11 };
+        static const UCHAR certificatePoliciesOid[] = { 0x55, 0x1d, 0x20 };
+        static const UCHAR criticalExtension[] = { 0x01, 0x01, 0xff };
+        constexpr UCHAR CriticalExtensionLength = static_cast<UCHAR>(sizeof(criticalExtension));
+        constexpr USHORT CriticalExtensionLength16 = static_cast<USHORT>(sizeof(criticalExtension));
+        static const UCHAR validPolicies[] = {
+            0x30, 0x23,
+            0x30, 0x09, 0x06, 0x07, 0x2a, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+            0x30, 0x0a, 0x06, 0x08, 0x2a, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+            0x30, 0x0a, 0x06, 0x08, 0x2a, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0a
+        };
+
+        if (der == nullptr || derLength == nullptr) {
+            return false;
+        }
+
+        SIZE_T sanOidOffset = 0;
+        if (!FindBytes(
+            der,
+            *derLength,
+            subjectAltNameOid,
+            sizeof(subjectAltNameOid),
+            0,
+            &sanOidOffset) ||
+            sanOidOffset < 4) {
+            return false;
+        }
+
+        const SIZE_T extensionStart = sanOidOffset - 4;
+        const SIZE_T octetStringOffset = sanOidOffset + sizeof(subjectAltNameOid);
+        if (octetStringOffset + 2 > *derLength ||
+            der[extensionStart] != 0x30 ||
+            der[extensionStart + 1] < 2 ||
+            der[octetStringOffset] != 0x04) {
+            return false;
+        }
+
+        const SIZE_T policyValueLength = der[octetStringOffset + 1];
+        if (policyValueLength != sizeof(validPolicies) ||
+            octetStringOffset + 2 + policyValueLength > *derLength) {
+            return false;
+        }
+
+        memcpy(der + sanOidOffset, certificatePoliciesOid, sizeof(certificatePoliciesOid));
+        UCHAR* policyValue = der + octetStringOffset + 2;
+        if (malformedPolicyValue) {
+            memset(policyValue, 0, policyValueLength);
+            policyValue[0] = 0x31;
+            policyValue[1] = static_cast<UCHAR>(policyValueLength - 2);
+        }
+        else {
+            memcpy(policyValue, validPolicies, sizeof(validPolicies));
+        }
+
+        if (!critical) {
+            return true;
+        }
+
+        SIZE_T extensionsOffset = 0;
+        if (!FindFixtureExtensionsHeader(der, *derLength, extensionStart, &extensionsOffset) ||
+            !InsertBytes(
+                der,
+                derCapacity,
+                derLength,
+                octetStringOffset,
+                criticalExtension,
+                sizeof(criticalExtension))) {
+            return false;
+        }
+
+        return IncreaseBigEndian16(der, *derLength, 2, CriticalExtensionLength16) &&
+            IncreaseBigEndian16(der, *derLength, 6, CriticalExtensionLength16) &&
+            IncreaseLengthByte(der, *derLength, extensionsOffset + 2, CriticalExtensionLength) &&
+            IncreaseLengthByte(der, *derLength, extensionsOffset + 5, CriticalExtensionLength) &&
+            IncreaseLengthByte(der, *derLength, extensionStart + 1, CriticalExtensionLength);
+    }
+
     void TestPlainRecordRoundTrip()
     {
         const UCHAR body[] = { 1, 2, 3, 4 };
@@ -4240,7 +4375,7 @@ namespace
         ExpectStatus(status, STATUS_INVALID_NETWORK_RESPONSE, "certificate parser rejects unknown critical extensions");
     }
 
-    void TestCertificateValidationRejectsCertificatePoliciesExtension()
+    void TestCertificateValidationAcceptsNonCriticalCertificatePolicies()
     {
         UCHAR pem[TestMaxPemCertificateLength] = {};
         UCHAR der[TestMaxDerCertificateLength] = {};
@@ -4264,27 +4399,22 @@ namespace
             return;
         }
 
-        const UCHAR subjectAltNameOid[] = { 0x55, 0x1d, 0x11 };
-        const UCHAR certificatePoliciesOid[] = { 0x55, 0x1d, 0x20 };
-        SIZE_T sanOidOffset = 0;
-        const bool foundSanOid = FindBytes(
+        const bool patched = PatchSubjectAltNameAsCertificatePolicies(
             der,
-            derLength,
-            subjectAltNameOid,
-            sizeof(subjectAltNameOid),
-            0,
-            &sanOidOffset);
-        Expect(foundSanOid, "localhost certificate SAN OID is found for certificatePolicies test");
-        if (!foundSanOid) {
+            sizeof(der),
+            &derLength,
+            false,
+            false);
+        Expect(patched, "localhost certificate receives non-critical certificatePolicies fixture");
+        if (!patched) {
             return;
         }
 
-        memcpy(der + sanOidOffset, certificatePoliciesOid, sizeof(certificatePoliciesOid));
-
         ParsedCertificate parsed = {};
         NTSTATUS status = CertificateValidator::ParseCertificate(der, derLength, parsed);
-        Expect(status == STATUS_SUCCESS, "certificate parser accepts certificatePolicies as a recognized policy extension");
+        Expect(status == STATUS_SUCCESS, "certificate parser accepts valid non-critical certificatePolicies extension");
         Expect(parsed.HasCertificatePolicies, "certificate parser records certificatePolicies presence");
+        Expect(!parsed.CertificatePoliciesCritical, "certificate parser records non-critical certificatePolicies criticality");
         if (!NT_SUCCESS(status)) {
             return;
         }
@@ -4310,7 +4440,115 @@ namespace
         options.HostNameLength = strlen(options.HostName);
 
         status = CertificateValidator::ValidateChain(chain, options);
-        ExpectStatus(status, STATUS_NOT_SUPPORTED, "certificate validation rejects unsupported certificatePolicies extension");
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "non-critical certificatePolicies reaches normal trust evaluation");
+    }
+
+    void TestCertificateValidationRejectsCriticalCertificatePoliciesExtension()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost certificate fixture loads for critical certificatePolicies test");
+        if (!loaded) {
+            return;
+        }
+
+        const bool patched = PatchSubjectAltNameAsCertificatePolicies(
+            der,
+            sizeof(der),
+            &derLength,
+            true,
+            false);
+        Expect(patched, "localhost certificate receives critical certificatePolicies fixture");
+        if (!patched) {
+            return;
+        }
+
+        ParsedCertificate parsed = {};
+        NTSTATUS status = CertificateValidator::ParseCertificate(der, derLength, parsed);
+        Expect(status == STATUS_SUCCESS, "certificate parser accepts syntactically valid critical certificatePolicies");
+        Expect(parsed.HasCertificatePolicies, "certificate parser records critical certificatePolicies presence");
+        Expect(parsed.CertificatePoliciesCritical, "certificate parser records critical certificatePolicies criticality");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        const bool rebuilt = RebuildCertificateList(
+            der,
+            derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(rebuilt, "certificate list rebuilds for critical certificatePolicies validation test");
+        if (!rebuilt) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "localhost";
+        options.HostNameLength = strlen(options.HostName);
+
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_NOT_SUPPORTED, "certificate validation rejects critical certificatePolicies without policy processing");
+    }
+
+    void TestCertificateValidationRejectsMalformedCertificatePoliciesExtension()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost certificate fixture loads for malformed certificatePolicies test");
+        if (!loaded) {
+            return;
+        }
+
+        const bool patched = PatchSubjectAltNameAsCertificatePolicies(
+            der,
+            sizeof(der),
+            &derLength,
+            false,
+            true);
+        Expect(patched, "localhost certificate receives malformed certificatePolicies fixture");
+        if (!patched) {
+            return;
+        }
+
+        ParsedCertificate parsed = {};
+        const NTSTATUS status = CertificateValidator::ParseCertificate(der, derLength, parsed);
+        ExpectStatus(status, STATUS_INVALID_NETWORK_RESPONSE, "certificate parser rejects malformed certificatePolicies DER");
     }
 
     void TestCertificateValidationCanSkipVerification()
@@ -4905,7 +5143,9 @@ int main()
     TestCertificateParserRejectsSignatureAlgorithmMismatch();
     TestCertificateParserRejectsDuplicateExtensionOid();
     TestCertificateParserRejectsUnknownCriticalExtension();
-    TestCertificateValidationRejectsCertificatePoliciesExtension();
+    TestCertificateValidationAcceptsNonCriticalCertificatePolicies();
+    TestCertificateValidationRejectsCriticalCertificatePoliciesExtension();
+    TestCertificateValidationRejectsMalformedCertificatePoliciesExtension();
     TestCertificateValidationCanSkipVerification();
     TestCertificateValidationRequiresTrustMaterial();
     TestCertificateValidationPinDoesNotCreateTrust();

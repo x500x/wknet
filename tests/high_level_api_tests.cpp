@@ -7,6 +7,7 @@
 #include <KernelHttp/khttp/WebSocket.h>
 
 #include "samples/AdvancedScenarioSamples.h"
+#include "samples/ExternalTrustStore.h"
 #include "samples/HighLevelApiSamples.h"
 
 #include <string.h>
@@ -18,6 +19,10 @@
 
 #ifndef STATUS_IO_TIMEOUT
 #define STATUS_IO_TIMEOUT ((NTSTATUS)0xC00000B5L)
+#endif
+
+#ifndef STATUS_NO_MATCH
+#define STATUS_NO_MATCH ((NTSTATUS)0xC0000272L)
 #endif
 
 namespace
@@ -519,6 +524,20 @@ namespace
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
 
+    void TestExternalTrustStoreLoadsRepositoryBundle() noexcept
+    {
+        KernelHttp::samples::ExternalTrustStore trustStore = {};
+        const NTSTATUS status = KernelHttp::samples::InitializeExternalTrustStore(
+            trustStore,
+            "certs\\cacert.pem");
+
+        Expect(NT_SUCCESS(status), "external trust store loads repository cacert.pem");
+        Expect(trustStore.BundleData != nullptr, "external trust store owns bundle data");
+        Expect(trustStore.BundleDataLength != 0, "external trust store records bundle length");
+        Expect(trustStore.Store.AuthorityBundleCount() == 1, "external trust store registers one authority bundle");
+        KernelHttp::samples::ResetExternalTrustStore(trustStore);
+    }
+
     void TestLoadTimeSamplesReportIpv6Failure() noexcept
     {
         SampleCapture capture = {};
@@ -549,6 +568,41 @@ namespace
         Expect(!NT_SUCCESS(status), "load-time high-level samples report IPv6 HTTP sample failure");
         Expect(results.HttpGetIpv6.Status == STATUS_UNSUCCESSFUL, "IPv6 HTTP sample stores failure status");
         Expect(NT_SUCCESS(results.HttpGetAny.Status), "Any address-family HTTP sample still runs after IPv6 failure");
+
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
+
+    void TestLoadTimeSamplesIgnoreIpv4EnvironmentFailure() noexcept
+    {
+        SampleCapture capture = {};
+        static const char echo[] = "hello-from-khttp";
+        capture.WebSocketEchoLength = sizeof(echo) - 1;
+        for (SIZE_T index = 0; index < capture.WebSocketEchoLength; ++index) {
+            capture.WebSocketEcho[index] = static_cast<UCHAR>(echo[index]);
+        }
+
+        capture.FailHttpByAddressFamily = true;
+        capture.HttpFailureAddressFamily = KernelHttp::engine::KhAddressFamily::Ipv4;
+        capture.HttpFailureStatus = STATUS_IO_TIMEOUT;
+
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(HttpTransport, &capture);
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WebSocketConnect,
+            WebSocketSend,
+            WebSocketReceive,
+            WebSocketClose,
+            &capture);
+
+        KernelHttp::samples::HighLevelApiSampleResults results = {};
+        NTSTATUS status = KernelHttp::samples::RunHighLevelApiSamples(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &results);
+
+        Expect(NT_SUCCESS(status), "load-time high-level samples ignore IPv4 environment timeout");
+        Expect(results.HttpGetIpv4.Status == STATUS_IO_TIMEOUT, "IPv4 HTTP sample records environment timeout");
+        Expect(NT_SUCCESS(results.HttpGetAny.Status), "Any address-family HTTP sample still runs after IPv4 timeout");
 
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
@@ -626,6 +680,39 @@ namespace
         Expect(capture.WebSocketConnectCalls == 10, "all websocket connect samples are still issued");
         Expect(capture.WebSocketSendCalls == 1, "only validated websocket sample sends a message");
         Expect(capture.WebSocketCloseCalls == 1, "only validated websocket sample closes a live handle");
+
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
+
+    void TestLoadTimeSamplesIgnorePublicWebSocketNoMatchFailures() noexcept
+    {
+        SampleCapture capture = {};
+        capture.FailWebSocketConnectFromCall = true;
+        capture.WebSocketConnectFailureStartCall = 1;
+        capture.WebSocketConnectFailureStatus = STATUS_NO_MATCH;
+
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(HttpTransport, &capture);
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WebSocketConnect,
+            WebSocketSend,
+            WebSocketReceive,
+            WebSocketClose,
+            &capture);
+
+        KernelHttp::samples::HighLevelApiSampleResults results = {};
+        NTSTATUS status = KernelHttp::samples::RunHighLevelApiSamples(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &results);
+
+        Expect(NT_SUCCESS(status), "load-time samples treat public websocket DNS misses as diagnostic");
+        Expect(results.WebSocketEcho.Status == STATUS_NO_MATCH, "first websocket sample records DNS no-match");
+        Expect(results.WebSocketUrlConnect.Status == STATUS_NO_MATCH, "URL websocket sample records DNS no-match");
+        Expect(results.WebSocketConnectEx.Status == STATUS_NO_MATCH, "ConnectEx websocket sample records DNS no-match");
+        Expect(capture.WebSocketConnectCalls == 10, "all websocket connect samples are still issued after DNS no-match");
+        Expect(capture.WebSocketSendCalls == 0, "websocket DNS no-match samples do not send messages");
+        Expect(capture.WebSocketCloseCalls == 0, "websocket DNS no-match samples do not close absent handles");
 
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
@@ -792,10 +879,13 @@ namespace
 int main() noexcept
 {
     KernelHttp::khttp::test::ResetCurrentIrql();
+    TestExternalTrustStoreLoadsRepositoryBundle();
     TestLoadTimeSamplesCoverHighLevelSurface();
     TestLoadTimeSamplesReportIpv6Failure();
+    TestLoadTimeSamplesIgnoreIpv4EnvironmentFailure();
     TestLoadTimeSamplesIgnoreIpv6EnvironmentFailure();
     TestLoadTimeSamplesIgnoreRepeatedPublicWebSocketConnectFailures();
+    TestLoadTimeSamplesIgnorePublicWebSocketNoMatchFailures();
     TestAdvancedScenarioSamplesCoverMissingSurface();
     TestWebSocketReceiveHonorsPerCallMessageLimit();
     TestHighLevelWebSocketPublicValidation();

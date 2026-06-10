@@ -77,6 +77,7 @@ namespace tls
         bool AllowsServerAuth = false;
         bool HasNameConstraints = false;
         bool HasCertificatePolicies = false;
+        bool CertificatePoliciesCritical = false;
     };
 
     struct CertificateChainView final

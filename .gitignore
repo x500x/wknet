@@ -1,6 +1,7 @@
 .vs/
 *.user
 *.suo
+*.pdb
 *.VC.db
 *.VC.VC.opendb
 

@@ -44,6 +44,7 @@
 | 0xC000020C | STATUS_CONNECTION_DISCONNECTED | 连接已断开 |
 | 0xC000023D | STATUS_CONNECTION_RESET | 连接被重置 |
 | 0xC0000241 | STATUS_CONNECTION_ABORTED | 连接已中止 |
+| 0xC0000272 | STATUS_NO_MATCH | DNS/地址解析没有匹配结果 |
 | 0xC0000354 | STATUS_NETWORK_UNREACHABLE | 网络不可达 |
 | 0xC0000355 | STATUS_HOST_UNREACHABLE | 主机不可达 |
 | 0xC0000357 | STATUS_PORT_UNREACHABLE | 端口不可达 |
@@ -62,6 +63,9 @@ HTTPS 请求中 TLS 握手或证书验证失败时返回：
 | 0xC0000192 | STATUS_TRUST_EXPLICIT_DISTRUST | 明确不信任（证书被列入黑名单） |
 | 0xC0000194 | STATUS_INVALID_SIGNATURE | 无效签名 |
 | 0xC000009D | STATUS_DEVICE_NOT_CONNECTED | 设备未连接（TLS 连接未建立） |
+| 0xC00000BB | STATUS_NOT_SUPPORTED | 请求了当前未实现的证书策略，例如关键 `certificatePolicies`、Name Constraints 或强制撤销检查 |
+
+非关键 `certificatePolicies` 扩展会先做 DER 语法校验；语法合法时继续正常信任链验证，语法畸形返回 `STATUS_INVALID_NETWORK_RESPONSE`。公网强制 IPv4/IPv6 样例和公网 WebSocket DNS/connect 样例可能记录 `STATUS_NO_MATCH`、`STATUS_IO_TIMEOUT`、`STATUS_HOST_UNREACHABLE` 等环境状态，但这些诊断项不代表协议实现失败。
 
 ---
 

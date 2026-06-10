@@ -905,6 +905,48 @@ namespace
         Expect(status == STATUS_INVALID_PARAMETER, message);
     }
 
+    void TestRequestNormalizesMixedCaseExtraHeaders()
+    {
+        const HttpHeader mixedCaseName[] = {
+            { MakeText("Accept"), MakeText("*/*") }
+        };
+
+        Http2RequestOptions options = {};
+        options.TransportMode = Http2TransportMode::TlsAlpn;
+        options.ServerName = "nghttp2.org";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.Method = HttpMethod::Get;
+        options.Path = MakeText("/httpbin/get");
+        options.Authority = MakeText("nghttp2.org");
+        options.ExtraHeaders = mixedCaseName;
+        options.ExtraHeaderCount = sizeof(mixedCaseName) / sizeof(mixedCaseName[0]);
+
+        HttpHeader headers[Http2MaxRequestHeaders] = {};
+        char lowerHeaderNames[Http2MaxRequestHeaders][Http2MaxHeaderNameLength] = {};
+        char contentLength[Http2ContentLengthBufferLength] = {};
+        size_t headerCount = 0;
+
+        const NTSTATUS status = BuildHttp2RequestHeaders(
+            options,
+            headers,
+            Http2MaxRequestHeaders,
+            lowerHeaderNames,
+            contentLength,
+            &headerCount);
+
+        Expect(status == STATUS_SUCCESS, "BuildHttp2RequestHeaders accepts mixed-case extra header name");
+        const HttpHeader* accept = FindHeader(headers, headerCount, "accept");
+        Expect(accept != nullptr, "mixed-case Accept extra header is emitted as lowercase accept");
+        Expect(accept != nullptr && TextEquals(accept->Value, "*/*"), "mixed-case Accept value is preserved");
+
+        for (SIZE_T headerIndex = 0; headerIndex < headerCount; ++headerIndex) {
+            for (SIZE_T charIndex = 0; charIndex < headers[headerIndex].Name.Length; ++charIndex) {
+                const char ch = headers[headerIndex].Name.Data[charIndex];
+                Expect(ch < 'A' || ch > 'Z', "HTTP/2 request header output contains no uppercase bytes");
+            }
+        }
+    }
+
     void TestRequestRejectsInvalidExtraHeaders()
     {
         const HttpHeader pseudoPath[] = {
@@ -931,13 +973,13 @@ namespace
             sizeof(emptyName) / sizeof(emptyName[0]),
             "BuildHttp2RequestHeaders rejects empty field name");
 
-        const HttpHeader uppercaseName[] = {
-            { MakeText("X-Test"), MakeText("value") }
+        const HttpHeader colonName[] = {
+            { MakeText("x:test"), MakeText("value") }
         };
         ExpectBuildHttp2HeadersRejected(
-            uppercaseName,
-            sizeof(uppercaseName) / sizeof(uppercaseName[0]),
-            "BuildHttp2RequestHeaders rejects uppercase field name");
+            colonName,
+            sizeof(colonName) / sizeof(colonName[0]),
+            "BuildHttp2RequestHeaders rejects colon in extra field name");
 
         const HttpHeader hostName[] = {
             { MakeText("host"), MakeText("evil.example") }
@@ -2489,6 +2531,7 @@ int main()
     TestPromotedAcceptEncodingIsNotDuplicated();
     TestExtraAcceptEncodingRemainsWhenNotPromoted();
     TestRequestTeHeaderValidation();
+    TestRequestNormalizesMixedCaseExtraHeaders();
     TestRequestRejectsInvalidExtraHeaders();
     TestUpgradeReceivesResponseOnStreamOne();
     TestUpgradeReservesStreamOneForInitiatingRequest();
