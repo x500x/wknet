@@ -107,6 +107,10 @@ struct KhSessionOptions final {
 };
 ```
 
+`MaxConnectionsPerHost` 按 scheme + host + port + address-family 统计 active + idle 连接。连接复用仍按完整 `KhConnectionPoolKey` 判断，包含 SNI、ALPN、证书策略、证书存储和 TLS min/max；因此同 host 不同 TLS 身份不会跨身份复用。若同 host 配额被 idle 旧身份占用，池会关闭该 idle 连接给新身份腾出配额；active 连接占满时返回 `STATUS_INSUFFICIENT_RESOURCES`。
+
+`net::WskClient::ResolveAll` 是同步 WSK DNS 边界，进入 provider 解析后不承诺取消。DNS cache 是全局正向缓存：固定 5 分钟 TTL、16 个槽位，key 包含 host/service/address-family，ASCII 大小写不敏感；不读取 DNS 记录 TTL，不实现 negative cache 或公共 flush API，任一 `WskClient::Shutdown()` 会清空全局缓存。HTTP/WebSocket connect 按 `ResolveAll` 返回地址顺序逐个尝试，失败后尝试下一个地址；当前不实现 Happy Eyeballs。
+
 ### 4.2 关闭会话
 
 ```cpp
@@ -168,6 +172,12 @@ NTSTATUS KhHttpRequestCreate(
 | `KhHttpRequestSetConnectionPolicy` | 设置连接策略 |
 | `KhHttpRequestSetAddressFamily` | 设置地址族 |
 
+请求 URL 必须是完整 URL；HTTP 发送时生成 origin-form request-target，fragment 会被剥离，query-only URL 会发送为 `/?query`。path/query 中的 percent-encoding 按字节原样透传，但非法 percent triplet 返回 `STATUS_INVALID_PARAMETER`。request-target 上限为 8000 octets，超过时返回 `STATUS_BUFFER_TOO_SMALL`。host 只接受 ASCII 可见字符，非 ASCII/IDNA 主机名和 IPv6 zone id 当前不支持；IPv6 literal 会自动生成带方括号的 `Host`。
+
+底层 HTTP API 不暴露 absolute-form、authority-form 或 asterisk-form 发送；`KhHttpMethod` 仅支持枚举内方法，CONNECT/TRACE/custom method 不是当前公共 API。`Range`、`If-None-Match` 等条件/范围请求字段按普通 header 透传，不实现 RFC 9111 cache 或内核缓存 API。
+
+发送前会拒绝调用方手写的保留/未支持请求头：`Host`、`Content-Length`、`Connection` 返回 `STATUS_INVALID_PARAMETER`；`Transfer-Encoding`、`TE`、`Trailer` 返回 `STATUS_NOT_SUPPORTED`；带非空请求体时设置 `Expect: 100-continue` 返回 `STATUS_NOT_SUPPORTED`。`Accept-Encoding` 可覆盖，但当前不承诺完整 qvalue/content negotiation 语义，只按 decoder 子集处理响应。
+
 ### 5.3 HTTP 方法枚举
 
 ```cpp
@@ -181,6 +191,8 @@ enum class KhHttpMethod : ULONG {
     Options = 6
 };
 ```
+
+传入枚举外的 method 值会返回 `STATUS_INVALID_PARAMETER`。
 
 ### 5.4 连接策略
 
@@ -393,7 +405,7 @@ struct KhResponseView final {
 ### 7.2 获取响应头
 
 ```cpp
-// 按名称获取响应头（大小写不敏感）
+// 按名称获取响应头（大小写不敏感，返回第一个匹配字段）
 NTSTATUS KhResponseGetHeader(
     _In_ KH_RESPONSE response,
     _In_reads_bytes_(nameLength) const char* name,
@@ -413,6 +425,8 @@ NTSTATUS KhResponseGetHeaderAt(
     _Outptr_result_bytebuffer_(*valueLength) const char** value,
     _Out_ SIZE_T* valueLength) noexcept;
 ```
+
+`KhResponseGetHeader` 返回第一个匹配字段；`KhResponseGetHeaderAt` 按原始顺序枚举全部字段。API 不做字段特定合并，重复字段和 `Set-Cookie` 会保持独立条目。
 
 ### 7.3 获取响应 trailer
 
@@ -436,6 +450,8 @@ NTSTATUS KhResponseGetTrailerAt(
 ```
 
 Trailer 只在 chunked 响应完整解析后可见。非法 trailer field-name 或 framing/routing/auth 相关 forbidden trailer 会导致解析失败，不会作为成功响应暴露。
+
+响应体会先按 HTTP/1.1 `Transfer-Encoding` 链解码（`chunked / gzip / deflate / compress`，且不接受 transfer-coding 参数），再按 `Content-Encoding` 解码（`gzip / deflate / br / compress / x-compress / identity`）。close-delimited 响应必须等连接 EOF 才完成，不会进入普通 HTTP 连接池。
 
 ### 7.4 释放响应
 
@@ -503,6 +519,8 @@ struct KhWebSocketConnectOptions final {
     bool AutoReplyPing = true;
 };
 ```
+
+WebSocket 当前主路径是 HTTP/1.1 Upgrade，不协商 RFC 8441 WebSocket over HTTP/2 extended CONNECT，也不暴露 Origin、Authorization、Cookie 等自定义 opening handshake headers。握手响应返回未请求扩展时会拒绝连接；permessage-deflate 和逐 frame metadata API 不是当前公共能力。
 
 ### 9.2 发送消息
 
@@ -603,7 +621,7 @@ NTSTATUS KhWebSocketSelectedSubprotocol(
     _Out_ SIZE_T* subprotocolLength) noexcept;
 ```
 
-`KhWebSocketSendPingSync` / `KhWebSocketSendPongSync` payload 最大 125 字节。`AutoReplyPing = false` 时，调用方会收到 `KhWebSocketMessageType::Ping`，可显式发送 Pong。`KhWebSocketCloseExSync` 校验 close code 和 UTF-8 reason；`KhWebSocketSelectedSubprotocol` 返回服务端实际选择的 subprotocol，未协商时返回空视图。
+`KhWebSocketSendPingSync` / `KhWebSocketSendPongSync` payload 最大 125 字节。`AutoReplyPing = false` 时，调用方会收到 `KhWebSocketMessageType::Ping`，可显式发送 Pong。`KhWebSocketCloseExSync` 校验 close code 和 UTF-8 reason；主动关闭会发送 close frame 后关闭 transport，收到 peer close 时 echo 后关闭；`KhWebSocketSelectedSubprotocol` 返回服务端实际选择的 subprotocol，未协商时返回空视图。
 
 ## 10. 测试辅助函数
 

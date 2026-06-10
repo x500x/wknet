@@ -33,16 +33,17 @@ KernelHttp 支持的是内核客户端主路径上的现代协议子集，而不
 
 | 协议 | 已支持能力 | 当前不支持或受限能力 |
 |------|------------|----------------------|
-| HTTP/1.1 | `Content-Length`、显式 chunked 请求体、响应 `Transfer-Encoding` 链（`chunked`/`gzip`/`deflate`/`compress`）、close-delimited 响应、HEAD/101/无 body 状态码、中间 1xx 跳过、chunked trailer 语法/禁止字段校验和只读 API 暴露、RFC 3986 相对 redirect 解析 | request trailer、HTTP proxy/CONNECT/TRACE；用户设置请求 `Transfer-Encoding` 会返回 `STATUS_NOT_SUPPORTED`；`br` 仅作为 `Content-Encoding` 支持 |
-| HTTP/2 | ALPN、h2c prior knowledge / Upgrade、SETTINGS、HEADERS/CONTINUATION、DATA、PING、GOAWAY、WINDOW_UPDATE、HPACK、header block 语义校验、HPACK header-list/table-size 限制 | server push、priority、复杂多流调度、未以 `END_STREAM`/`RST_STREAM`/`GOAWAY` 结束的半截响应 |
-| WebSocket | ws/wss 握手、文本/二进制/空消息发送、控制帧校验、公开 Ping/Pong/CloseEx、selected subprotocol 查询、默认完整消息接收 | extensions、接收分片回调、permessage-deflate |
-| TLS/证书 | TLS 1.2/1.3、ECDHE + AES-GCM 主路径、TLS 1.3 降级保护、PSK ticket 绑定、HRR binder 重算、dNSName/iPAddress SAN、CN/EKU/KeyUsage/BasicConstraints/链签名/信任锚/SPKI pin | TLS 客户端证书、CBC、ChaCha20-Poly1305、OCSP/CRL 撤销检查、IDNA、Name Constraints |
+| HTTP/1.1 | `Content-Length`、显式 chunked 请求体、响应 `Transfer-Encoding` 链（`chunked`/`gzip`/`deflate`/`compress`）、close-delimited 响应、HEAD/101/无 body 状态码、中间 1xx 跳过、chunked trailer 语法/禁止字段校验和只读 API 暴露、RFC 3986 相对 redirect 解析 | request trailer、入站 request parser/server role、HTTP proxy/CONNECT/TRACE；用户设置请求 `Transfer-Encoding` 会返回 `STATUS_NOT_SUPPORTED`；`Range`/条件请求仅普通 header 透传；`Accept-Encoding` 不承诺完整 qvalue/content negotiation；`br` 仅作为 `Content-Encoding` 支持 |
+| HTTP/2 | ALPN、h2c prior knowledge / Upgrade、SETTINGS、HEADERS/CONTINUATION、DATA、PING、GOAWAY、WINDOW_UPDATE、HPACK、header block 语义校验、HPACK header-list/table-size 限制 | RFC 8441 WebSocket over HTTP/2、server push、priority、完整多流调度、未以 `END_STREAM`/`RST_STREAM`/`GOAWAY` 结束的半截响应；缺失 SETTINGS ACK 会以 `SETTINGS_TIMEOUT` 关闭；GOAWAY 终止当前单请求连接语义 |
+| WebSocket | ws/wss 握手、文本/二进制/空消息发送、控制帧校验、公开 Ping/Pong/CloseEx、selected subprotocol 查询、默认完整消息接收 | 自定义 opening handshake headers、extensions、接收分片回调、permessage-deflate；当前 WebSocket 主路径是 HTTP/1.1 Upgrade |
+| TLS/证书 | TLS 1.2/1.3、ECDHE + AES-GCM 主路径、TLS 1.3 降级保护、PSK ticket 绑定、HRR binder 重算、dNSName/iPAddress SAN、CN/EKU/KeyUsage/BasicConstraints/链签名/信任锚/SPKI pin | TLS 客户端证书、CBC、RSA key exchange、ChaCha20-Poly1305、X25519、EdDSA、OCSP/CRL 撤销检查、IDNA、Name Constraints |
 
 close-delimited HTTP/1.x 响应和 `101 Switching Protocols` 升级响应不会进入普通 HTTP 连接池。TLS ALPN 结果必须严格匹配客户端 offer 列表。TLS1.2 选择必须来自可验证的版本协商结果。证书错误、ALPN mismatch、TCP/WSK timeout、record 解密失败或 Finished 验证失败都不能被归类为 TLS1.2-only。
 证书主机校验中，URL host 为 IP literal 时只匹配 iPAddress SAN，不回退到 dNSName 或 CN。
 证书策略当前为硬策略：叶子证书默认要求 ServerAuth EKU、KeyUsage digitalSignature，且不能是 CA；中间/根证书要求 BasicConstraints CA 和 KeyUsage keyCertSign。OCSP/CRL 撤销检查、Name Constraints 和 IDNA 未实现为完整策略，调用方要求或输入触发时返回 `STATUS_NOT_SUPPORTED` 或拒绝非 ASCII 主机名。
+WebSocket 主动关闭是客户端简化语义：`WsClose`/`WsCloseEx` 在可发送时先发 close frame，然后关闭底层 transport；收到 peer close 时会 echo close frame 再关闭，不继续等待扩展的双向关闭阶段。WebSocket over HTTP/2 RFC 8441、Origin/Authorization/Cookie 等自定义 opening headers、permessage-deflate 和逐 frame metadata API 都保持延期或非目标。
 自动 redirect 默认拒绝 HTTPS 到 HTTP 降级；跨 scheme/host/port redirect 会清理 `Authorization`、`Cookie`、`Proxy-Authorization`。reused stale 连接失败只对 `GET`、`HEAD`、`OPTIONS` 等安全/幂等请求自动 fresh retry，不会自动重放 POST/PUT/PATCH/DELETE。TLS 1.3 0-RTT 默认关闭；启用时仍必须由调用方声明 replay-safe。
-WSK DNS resolve 仍是同步边界：`ResolveAll` 一旦进入底层解析不承诺取消，调用方应在上层异步操作和连接/握手超时中控制生命周期。DNS cache 使用固定 TTL，不读取 DNS 记录自身 TTL；连接池 key 包含 host、SNI、ALPN、证书策略、信任库和 TLS 版本边界，避免跨 TLS 身份复用。
+WSK DNS resolve 仍是同步边界：`ResolveAll` 一旦进入底层解析不承诺取消，调用方应在上层异步操作和连接/握手超时中控制生命周期。DNS cache 是全局正向缓存，固定 5 分钟 TTL、16 个槽位，不读取 DNS 记录自身 TTL，不实现 negative cache 或公共 flush API；任一 `WskClient::Shutdown()` 会清空全局缓存。IPv4/IPv6 连接按 `ResolveAll` 返回顺序逐个尝试，当前不实现 Happy Eyeballs 并行竞速。连接复用 key 包含 host、SNI、ALPN、证书策略、信任库和 TLS 版本边界，避免跨 TLS 身份复用；`MaxConnectionsPerHost` 配额按 scheme/host/port/address-family 统计 active + idle 连接。
 
 ### 核心抽象层说明
 

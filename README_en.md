@@ -38,20 +38,26 @@ KernelHttp implements protocol behavior on the Windows kernel path: transport us
 
 | Protocol | Supported | Current Boundary |
 |----------|-----------|------------------|
-| HTTP/1.1 | `Content-Length`, explicit chunked request bodies, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer syntax/forbidden-field validation and read-only API exposure, RFC 3986 relative redirect resolution | User-supplied request `Transfer-Encoding` is rejected; request trailers are not supported; HTTP proxy/CONNECT/TRACE is outside the current main path; `br` is supported only as `Content-Encoding` |
-| HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS, HEADERS/CONTINUATION, DATA, PING, GOAWAY, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits | Server push, priority, and complex concurrent stream scheduling are not supported; disabled `PUSH_PROMISE` is a protocol error; responses must end with `END_STREAM`, `RST_STREAM`, or `GOAWAY` |
-| WebSocket | ws/wss handshake, text/binary send, empty messages, control-frame validation, public Ping/Pong/CloseEx, selected subprotocol query, complete-message receive by default | Extension negotiation and receive-fragment callbacks are not supported; the default API aggregates complete messages |
-| TLS | TLS 1.2/1.3, ECDHE + AES-GCM main path, TLS 1.3 downgrade protection, PSK ticket binding, HRR binder recomputation, certificate chain, dNSName/iPAddress SAN, and pin validation | TLS client certificates, CBC, ChaCha20-Poly1305, OCSP/CRL revocation checks, and IDNA are not supported; Name Constraints return unsupported |
+| HTTP/1.1 | `Content-Length`, explicit chunked request bodies, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer syntax/forbidden-field validation and read-only API exposure, RFC 3986 relative redirect resolution | User-supplied request `Transfer-Encoding` is rejected; request trailers are not supported; no inbound request parser/server role is provided; HTTP proxy/CONNECT/TRACE is outside the current main path; `Range`/conditional requests are pass-through headers only; `Accept-Encoding` does not promise full qvalue/content negotiation; `br` is supported only as `Content-Encoding` |
+| HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS, HEADERS/CONTINUATION, DATA, PING, GOAWAY, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits | RFC 8441 WebSocket over HTTP/2, server push, priority, and full multiplex scheduling are not supported; disabled `PUSH_PROMISE` is a protocol error; missing SETTINGS ACK closes with `SETTINGS_TIMEOUT`; received GOAWAY terminates the current single-request connection semantics |
+| WebSocket | ws/wss handshake, text/binary send, empty messages, control-frame validation, public Ping/Pong/CloseEx, selected subprotocol query, complete-message receive by default | The main path is HTTP/1.1 Upgrade; custom opening handshake headers, extension negotiation, and receive-fragment callbacks are not supported; active close sends a close frame and then closes the transport, while received peer close is echoed before closing |
+| TLS | TLS 1.2/1.3, ECDHE + AES-GCM main path, TLS 1.3 downgrade protection, PSK ticket binding, HRR binder recomputation, certificate chain, dNSName/iPAddress SAN, and pin validation | TLS client certificates, CBC, RSA key exchange, ChaCha20-Poly1305, X25519, EdDSA, OCSP/CRL revocation checks, and IDNA are not supported; Name Constraints return unsupported |
 
 | Unsupported Optional Capability | Current Handling |
 |---------------------------------|------------------|
 | WebSocket extensions such as permessage-deflate | Out of scope; unexpected server extensions are rejected |
+| WebSocket over HTTP/2 RFC 8441 | Deferred; extended CONNECT is not negotiated, and the current WebSocket path is HTTP/1.1 Upgrade |
+| WebSocket custom opening headers | Deferred; Origin, Authorization, Cookie, and similar headers need a separate validation and sensitive-header policy |
+| WebSocket active close handshake | Client-simplified semantics: send a close frame and then close the transport; received peer close is echoed before close |
 | WebSocket receive-fragment callback | Receive aggregates complete messages; fragment callback exposure is not supported |
 | HTTP proxy / CONNECT / TRACE | Outside the current kernel client main path |
+| HTTP inbound request parser / server role | Out of scope; this project is a client protocol stack |
 | HTTP request trailers | Chunked upload does not carry request trailers; user-supplied `Transfer-Encoding` is still rejected |
-| HTTP/2 server push | Push is disabled; forbidden PUSH_PROMISE is a protocol error |
+| HTTP/2 full multiplexing / server push / priority | Full multiplex scheduling is not exposed; push is disabled, forbidden `PUSH_PROMISE` is a protocol error, and priority is not a public scheduling capability |
+| RFC 9111 cache / Range / conditional requests | No kernel cache API is provided; `Range` and conditional request fields are pass-through only and are not semantically merged or validated |
+| Accept-Encoding qvalue/content negotiation | The default header only describes the implemented response decoder subset; callers may override it, but full negotiation semantics are not provided |
 | TLS client certificates | Client certificate authentication is not supported |
-| TLS CBC / ChaCha20-Poly1305 | Not in the current cipher-suite subset |
+| TLS CBC / RSA key exchange / ChaCha20-Poly1305 / X25519 / EdDSA | Not in the current cipher-suite, group, or signature subset |
 | OCSP / CRL revocation checks | Requiring revocation returns `STATUS_NOT_SUPPORTED` |
 | IDNA host processing | Certificate dNSName/CN matching currently uses ASCII host names |
 
