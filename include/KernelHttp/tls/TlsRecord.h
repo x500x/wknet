@@ -1,6 +1,6 @@
 #pragma once
 
-#include <KernelHttp/crypto/CngProvider.h>
+#include <KernelHttp/crypto/Aead.h>
 
 namespace KernelHttp
 {
@@ -82,6 +82,7 @@ namespace tls
 
     struct TlsAeadCipherState final
     {
+        crypto::AeadAlgorithm Algorithm = crypto::AeadAlgorithm::Aes128Gcm;
         UCHAR Key[32] = {};
         SIZE_T KeyLength = 0;
         UCHAR FixedIv[TlsAesGcmTls13IvLength] = {};

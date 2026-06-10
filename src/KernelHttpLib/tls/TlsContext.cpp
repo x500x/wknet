@@ -9,6 +9,7 @@ namespace tls
     {
         constexpr SIZE_T Aes128GcmKeyLength = 16;
         constexpr SIZE_T Aes256GcmKeyLength = 32;
+        constexpr SIZE_T ChaCha20Poly1305KeyLength = 32;
 
         _Must_inspect_result_
         SIZE_T CipherSuiteKeyLength(TlsCipherSuite cipherSuite) noexcept
@@ -22,6 +23,11 @@ namespace tls
             case TlsCipherSuite::TlsEcdheRsaWithAes256GcmSha384:
             case TlsCipherSuite::TlsEcdheEcdsaWithAes256GcmSha384:
                 return Aes256GcmKeyLength;
+            case TlsCipherSuite::TlsChaCha20Poly1305Sha256:
+            case TlsCipherSuite::TlsEcdheRsaWithChaCha20Poly1305Sha256:
+            case TlsCipherSuite::TlsEcdheEcdsaWithChaCha20Poly1305Sha256:
+            case TlsCipherSuite::TlsDheRsaWithChaCha20Poly1305Sha256:
+                return ChaCha20Poly1305KeyLength;
             default:
                 return 0;
             }
@@ -37,7 +43,35 @@ namespace tls
         bool IsTls13CipherSuite(TlsCipherSuite cipherSuite) noexcept
         {
             return cipherSuite == TlsCipherSuite::TlsAes128GcmSha256 ||
-                cipherSuite == TlsCipherSuite::TlsAes256GcmSha384;
+                cipherSuite == TlsCipherSuite::TlsAes256GcmSha384 ||
+                cipherSuite == TlsCipherSuite::TlsChaCha20Poly1305Sha256 ||
+                cipherSuite == TlsCipherSuite::TlsAes128CcmSha256 ||
+                cipherSuite == TlsCipherSuite::TlsAes128Ccm8Sha256;
+        }
+
+        _Must_inspect_result_
+        crypto::AeadAlgorithm AeadAlgorithmForCipherSuite(TlsCipherSuite cipherSuite) noexcept
+        {
+            switch (cipherSuite) {
+            case TlsCipherSuite::TlsAes256GcmSha384:
+            case TlsCipherSuite::TlsEcdheRsaWithAes256GcmSha384:
+            case TlsCipherSuite::TlsEcdheEcdsaWithAes256GcmSha384:
+                return crypto::AeadAlgorithm::Aes256Gcm;
+            case TlsCipherSuite::TlsChaCha20Poly1305Sha256:
+            case TlsCipherSuite::TlsEcdheRsaWithChaCha20Poly1305Sha256:
+            case TlsCipherSuite::TlsEcdheEcdsaWithChaCha20Poly1305Sha256:
+            case TlsCipherSuite::TlsDheRsaWithChaCha20Poly1305Sha256:
+                return crypto::AeadAlgorithm::ChaCha20Poly1305;
+            case TlsCipherSuite::TlsAes128CcmSha256:
+                return crypto::AeadAlgorithm::Aes128Ccm;
+            case TlsCipherSuite::TlsAes128Ccm8Sha256:
+                return crypto::AeadAlgorithm::Aes128Ccm8;
+            case TlsCipherSuite::TlsAes128GcmSha256:
+            case TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256:
+            case TlsCipherSuite::TlsEcdheEcdsaWithAes128GcmSha256:
+            default:
+                return crypto::AeadAlgorithm::Aes128Gcm;
+            }
         }
 
         _Must_inspect_result_
@@ -238,6 +272,7 @@ namespace tls
             state.KeyLength = keyLength;
             state.FixedIvLength = TlsAesGcmTls13IvLength;
             state.SequenceNumber = 0;
+            state.Algorithm = AeadAlgorithmForCipherSuite(cipherSuite);
             return STATUS_SUCCESS;
         }
 
@@ -468,10 +503,12 @@ namespace tls
 
         RtlCopyMemory(clientWriteState.FixedIv, keyBlock.Data + offset, TlsAesGcmFixedIvLength);
         clientWriteState.FixedIvLength = TlsAesGcmFixedIvLength;
+        clientWriteState.Algorithm = AeadAlgorithmForCipherSuite(secrets_.CipherSuite);
         offset += TlsAesGcmFixedIvLength;
 
         RtlCopyMemory(serverWriteState.FixedIv, keyBlock.Data + offset, TlsAesGcmFixedIvLength);
         serverWriteState.FixedIvLength = TlsAesGcmFixedIvLength;
+        serverWriteState.Algorithm = AeadAlgorithmForCipherSuite(secrets_.CipherSuite);
 
         return STATUS_SUCCESS;
     }

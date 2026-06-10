@@ -32,8 +32,10 @@
     <ClCompile Include="client\HttpsClient.cpp" />
     <ClCompile Include="client\WebSocketClient.cpp" />
     <ClCompile Include="core\TlsTransport.cpp" />
+    <ClCompile Include="crypto\Aead.cpp" />
     <ClCompile Include="crypto\CngProvider.cpp" />
     <ClCompile Include="crypto\CngProviderCache.cpp" />
+    <ClCompile Include="crypto\KeyExchange.cpp" />
     <ClCompile Include="khttp\AsyncOp.cpp" />
     <ClCompile Include="khttp\Http.cpp" />
     <ClCompile Include="khttp\HttpAsync.cpp" />
@@ -137,8 +139,10 @@
     <ClInclude Include="..\..\include\KernelHttp\core\TlsTransport.h" />
     <ClInclude Include="..\..\include\KernelHttp\core\WorkspaceScratchAllocator.h" />
     <ClInclude Include="..\..\include\KernelHttp\core\WskTransport.h" />
+    <ClInclude Include="..\..\include\KernelHttp\crypto\Aead.h" />
     <ClInclude Include="..\..\include\KernelHttp\crypto\CngProvider.h" />
     <ClInclude Include="..\..\include\KernelHttp\crypto\CngProviderCache.h" />
+    <ClInclude Include="..\..\include\KernelHttp\crypto\KeyExchange.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpCoding.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpContentEncoding.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpParser.h" />

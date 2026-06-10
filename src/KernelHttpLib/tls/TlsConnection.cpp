@@ -1,6 +1,7 @@
 #include <KernelHttp/tls/TlsConnection.h>
 
 #include <KernelHttp/crypto/CngProviderCache.h>
+#include <KernelHttp/crypto/KeyExchange.h>
 #include <KernelHttp/tls/TlsHandshake13.h>
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -51,6 +52,49 @@ namespace tls
                 return crypto::EcCurve::P521;
             default:
                 return crypto::EcCurve::P256;
+            }
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ToKeyExchangeGroup(TlsNamedGroup group, _Out_ crypto::KeyExchangeGroup* keyExchangeGroup) noexcept
+        {
+            if (keyExchangeGroup == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            switch (group) {
+            case TlsNamedGroup::Secp256r1:
+                *keyExchangeGroup = crypto::KeyExchangeGroup::Secp256r1;
+                return STATUS_SUCCESS;
+            case TlsNamedGroup::Secp384r1:
+                *keyExchangeGroup = crypto::KeyExchangeGroup::Secp384r1;
+                return STATUS_SUCCESS;
+            case TlsNamedGroup::Secp521r1:
+                *keyExchangeGroup = crypto::KeyExchangeGroup::Secp521r1;
+                return STATUS_SUCCESS;
+            case TlsNamedGroup::X25519:
+                *keyExchangeGroup = crypto::KeyExchangeGroup::X25519;
+                return STATUS_SUCCESS;
+            case TlsNamedGroup::X448:
+                *keyExchangeGroup = crypto::KeyExchangeGroup::X448;
+                return STATUS_SUCCESS;
+            case TlsNamedGroup::Ffdhe2048:
+                *keyExchangeGroup = crypto::KeyExchangeGroup::Ffdhe2048;
+                return STATUS_SUCCESS;
+            case TlsNamedGroup::Ffdhe3072:
+                *keyExchangeGroup = crypto::KeyExchangeGroup::Ffdhe3072;
+                return STATUS_SUCCESS;
+            case TlsNamedGroup::Ffdhe4096:
+                *keyExchangeGroup = crypto::KeyExchangeGroup::Ffdhe4096;
+                return STATUS_SUCCESS;
+            case TlsNamedGroup::Ffdhe6144:
+                *keyExchangeGroup = crypto::KeyExchangeGroup::Ffdhe6144;
+                return STATUS_SUCCESS;
+            case TlsNamedGroup::Ffdhe8192:
+                *keyExchangeGroup = crypto::KeyExchangeGroup::Ffdhe8192;
+                return STATUS_SUCCESS;
+            default:
+                return STATUS_NOT_SUPPORTED;
             }
         }
 
@@ -1613,55 +1657,23 @@ namespace tls
             tls13TicketServerNameLength_ = options.ServerNameLength;
         }
 
-        HeapObject<crypto::CngKey> privateKey;
-        if (!privateKey.IsValid()) {
-            return LogTls13Failure("AllocateClientEcdhKey", STATUS_INSUFFICIENT_RESOURCES);
+        HeapObject<crypto::KeyExchangeKeyPair> keyPair;
+        if (!keyPair.IsValid()) {
+            return LogTls13Failure("AllocateClientKeyExchangePair", STATUS_INSUFFICIENT_RESOURCES);
         }
 
-        status = crypto::CngProvider::GenerateEcdhKeyPair(providerCache_, crypto::EcCurve::P256, *privateKey.Get());
+        status = crypto::KeyExchange::GenerateKeyPair(
+            providerCache_,
+            crypto::KeyExchangeGroup::X25519,
+            *keyPair.Get());
         if (!NT_SUCCESS(status)) {
-            return LogTls13Failure("GenerateP256EcdhKeyPair", status);
+            return LogTls13Failure("GenerateInitialKeyShare", status);
         }
-
-        HeapArray<UCHAR> publicPoint(1 + (66 * 2));
-        if (!publicPoint.IsValid()) {
-            return LogTls13Failure("AllocateClientKeyShare", STATUS_INSUFFICIENT_RESOURCES);
-        }
-
-        SIZE_T publicPointLength = 0;
-#if !defined(KERNEL_HTTP_USER_MODE_TEST)
-        HeapArray<UCHAR> publicBlob(sizeof(BCRYPT_ECCKEY_BLOB) + (66 * 2));
-        if (!publicBlob.IsValid()) {
-            return LogTls13Failure("AllocateClientPublicKeyBlob", STATUS_INSUFFICIENT_RESOURCES);
-        }
-
-        SIZE_T publicBlobLength = 0;
-        status = privateKey->ExportPublicKey(BCRYPT_ECCPUBLIC_BLOB, publicBlob.Get(), publicBlob.Count(), &publicBlobLength);
-        if (!NT_SUCCESS(status)) {
-            return LogTls13Failure("ExportP256PublicKeyBlob", status);
-        }
-        if (publicBlobLength < sizeof(BCRYPT_ECCKEY_BLOB)) {
-            return LogTls13Failure("ValidateP256PublicKeyBlobHeader", STATUS_INVALID_NETWORK_RESPONSE);
-        }
-        const auto* header = reinterpret_cast<const BCRYPT_ECCKEY_BLOB*>(publicBlob.Get());
-        publicPointLength = (static_cast<SIZE_T>(header->cbKey) * 2) + 1;
-        if (publicPointLength > publicPoint.Count() ||
-            publicBlobLength < sizeof(BCRYPT_ECCKEY_BLOB) + (static_cast<SIZE_T>(header->cbKey) * 2)) {
-            return LogTls13Failure("ValidateP256PublicKeyBlobLength", STATUS_INVALID_NETWORK_RESPONSE);
-        }
-        publicPoint[0] = 4;
-        RtlCopyMemory(publicPoint.Get() + 1, publicBlob.Get() + sizeof(BCRYPT_ECCKEY_BLOB), header->cbKey * 2);
-#else
-        status = privateKey->ExportPublicKey(L"ECCPUBLICBLOB", publicPoint.Get(), publicPoint.Count(), &publicPointLength);
-        if (!NT_SUCCESS(status)) {
-            return LogTls13Failure("ExportP256PublicKeyPoint", status);
-        }
-#endif
 
         Tls13KeyShareEntry keyShare = {};
-        keyShare.Group = TlsNamedGroup::Secp256r1;
-        keyShare.KeyExchange = publicPoint.Get();
-        keyShare.KeyExchangeLength = publicPointLength;
+        keyShare.Group = TlsNamedGroup::X25519;
+        keyShare.KeyExchange = keyPair->PublicKey;
+        keyShare.KeyExchangeLength = keyPair->PublicKeyLength;
 
         Tls13PskIdentity pskIdentity = {};
         const UCHAR* resumptionSecret = nullptr;
@@ -1890,49 +1902,23 @@ namespace tls
             }
             RtlCopyMemory(helloRetryRequest, handshakeBuffer_ + lastHandshakeOffset_, helloRetryRequestLength);
 
-            if (serverHello.RetryGroup != TlsNamedGroup::Secp384r1 &&
-                serverHello.RetryGroup != TlsNamedGroup::Secp521r1 &&
-                serverHello.RetryGroup != TlsNamedGroup::Secp256r1) {
+            crypto::KeyExchangeGroup retryGroup = crypto::KeyExchangeGroup::Secp256r1;
+            status = ToKeyExchangeGroup(serverHello.RetryGroup, &retryGroup);
+            if (!NT_SUCCESS(status) || !crypto::KeyExchange::IsSupportedGroup(retryGroup)) {
                 return LogTls13Failure("ValidateHelloRetryGroup", STATUS_NOT_SUPPORTED);
             }
 
-            privateKey->Close();
-            status = crypto::CngProvider::GenerateEcdhKeyPair(
+            status = crypto::KeyExchange::GenerateKeyPair(
                 providerCache_,
-                ToEcCurve(serverHello.RetryGroup),
-                *privateKey.Get());
+                retryGroup,
+                *keyPair.Get());
             if (!NT_SUCCESS(status)) {
-                return LogTls13Failure("GenerateRetryEcdhKeyPair", status);
+                return LogTls13Failure("GenerateRetryKeyShare", status);
             }
-
-#if !defined(KERNEL_HTTP_USER_MODE_TEST)
-            RtlSecureZeroMemory(publicBlob.Get(), publicBlob.Count());
-            publicBlobLength = 0;
-            status = privateKey->ExportPublicKey(BCRYPT_ECCPUBLIC_BLOB, publicBlob.Get(), publicBlob.Count(), &publicBlobLength);
-            if (!NT_SUCCESS(status)) {
-                return LogTls13Failure("ExportRetryPublicKeyBlob", status);
-            }
-            if (publicBlobLength < sizeof(BCRYPT_ECCKEY_BLOB)) {
-                return LogTls13Failure("ValidateRetryPublicKeyBlobHeader", STATUS_INVALID_NETWORK_RESPONSE);
-            }
-            header = reinterpret_cast<const BCRYPT_ECCKEY_BLOB*>(publicBlob.Get());
-            publicPointLength = (static_cast<SIZE_T>(header->cbKey) * 2) + 1;
-            if (publicPointLength > publicPoint.Count() ||
-                publicBlobLength < sizeof(BCRYPT_ECCKEY_BLOB) + (static_cast<SIZE_T>(header->cbKey) * 2)) {
-                return LogTls13Failure("ValidateRetryPublicKeyBlobLength", STATUS_INVALID_NETWORK_RESPONSE);
-            }
-            publicPoint[0] = 4;
-            RtlCopyMemory(publicPoint.Get() + 1, publicBlob.Get() + sizeof(BCRYPT_ECCKEY_BLOB), header->cbKey * 2);
-#else
-            status = privateKey->ExportPublicKey(L"ECCPUBLICBLOB", publicPoint.Get(), publicPoint.Count(), &publicPointLength);
-            if (!NT_SUCCESS(status)) {
-                return LogTls13Failure("ExportRetryPublicKeyPoint", status);
-            }
-#endif
 
             keyShare.Group = serverHello.RetryGroup;
-            keyShare.KeyExchange = publicPoint.Get();
-            keyShare.KeyExchangeLength = publicPointLength;
+            keyShare.KeyExchange = keyPair->PublicKey;
+            keyShare.KeyExchangeLength = keyPair->PublicKeyLength;
             if (pskIdentity.IdentityLength != 0 &&
                 selectedTicket != nullptr &&
                 selectedTicket->CipherSuite != context_.CipherSuite()) {
@@ -2028,31 +2014,17 @@ namespace tls
             }
         }
 
-        HeapObject<crypto::CngKey> peerKey;
-        if (!peerKey.IsValid()) {
-            return LogTls13Failure("AllocatePeerEcdhKey", STATUS_INSUFFICIENT_RESOURCES);
-        }
-
-        status = crypto::CngProvider::ImportEcdhPublicKey(
-            providerCache_,
-            ToEcCurve(serverHello.KeyShare.Group),
-            serverHello.KeyShare.KeyExchange,
-            serverHello.KeyShare.KeyExchangeLength,
-            *peerKey.Get());
-        if (!NT_SUCCESS(status)) {
-            return LogTls13Failure("ImportServerEcdhPublicKey", status);
-        }
-
         HeapArray<UCHAR> sharedSecret(66);
         if (!sharedSecret.IsValid()) {
             return LogTls13Failure("AllocateEcdhSharedSecret", STATUS_INSUFFICIENT_RESOURCES);
         }
 
         SIZE_T sharedSecretLength = 0;
-        status = crypto::CngProvider::DeriveEcdhSecret(
+        status = crypto::KeyExchange::DeriveSharedSecret(
             providerCache_,
-            *privateKey.Get(),
-            *peerKey.Get(),
+            *keyPair.Get(),
+            serverHello.KeyShare.KeyExchange,
+            serverHello.KeyShare.KeyExchangeLength,
             sharedSecret.Get(),
             sharedSecret.Count(),
             &sharedSecretLength);

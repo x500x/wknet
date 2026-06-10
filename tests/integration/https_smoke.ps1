@@ -154,12 +154,45 @@ function Invoke-HostRegression {
         )
 
     Compile-UserModeTest `
+        -Name 'tls_crypto_tests' `
+        -Source 'tests\tls_crypto_tests.cpp' `
+        -ProjectSources @(
+            'src\KernelHttpLib\http\HttpTypes.cpp',
+            'src\KernelHttpLib\crypto\Aead.cpp',
+            'src\KernelHttpLib\crypto\CngProvider.cpp',
+            'src\KernelHttpLib\crypto\CngProviderCache.cpp',
+            'src\KernelHttpLib\crypto\KeyExchange.cpp'
+        )
+
+    Compile-UserModeTest `
+        -Name 'tls_handshake_tests' `
+        -Source 'tests\tls_handshake_tests.cpp' `
+        -ProjectSources @(
+            'src\KernelHttpLib\http\HttpTypes.cpp',
+            'src\KernelHttpLib\crypto\Aead.cpp',
+            'src\KernelHttpLib\crypto\CngProvider.cpp',
+            'src\KernelHttpLib\crypto\CngProviderCache.cpp',
+            'src\KernelHttpLib\crypto\KeyExchange.cpp',
+            'src\KernelHttpLib\tls\CertificateStore.cpp',
+            'src\KernelHttpLib\tls\CertificateValidator.cpp',
+            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
+            'src\KernelHttpLib\tls\TlsConnection.cpp',
+            'src\KernelHttpLib\tls\TlsContext.cpp',
+            'src\KernelHttpLib\tls\TlsHandshake12.cpp',
+            'src\KernelHttpLib\tls\TlsHandshake13.cpp',
+            'src\KernelHttpLib\tls\TlsPolicy.cpp',
+            'src\KernelHttpLib\tls\TlsRecord.cpp'
+        )
+
+    Compile-UserModeTest `
         -Name 'tls_record_tests' `
         -Source 'tests\tls_record_tests.cpp' `
         -ProjectSources @(
             'src\KernelHttpLib\http\HttpTypes.cpp',
+            'src\KernelHttpLib\crypto\Aead.cpp',
             'src\KernelHttpLib\crypto\CngProvider.cpp',
             'src\KernelHttpLib\crypto\CngProviderCache.cpp',
+            'src\KernelHttpLib\crypto\KeyExchange.cpp',
             'src\KernelHttpLib\tls\CertificateStore.cpp',
             'src\KernelHttpLib\tls\CertificateValidator.cpp',
             'src\KernelHttpLib\tls\TlsCapabilities.cpp',
@@ -190,8 +223,10 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\tls\CertificateValidator.cpp',
             'src\KernelHttpLib\tls\TlsCapabilities.cpp',
             'src\KernelHttpLib\tls\TlsPolicy.cpp',
+            'src\KernelHttpLib\crypto\Aead.cpp',
             'src\KernelHttpLib\crypto\CngProvider.cpp',
-            'src\KernelHttpLib\crypto\CngProviderCache.cpp'
+            'src\KernelHttpLib\crypto\CngProviderCache.cpp',
+            'src\KernelHttpLib\crypto\KeyExchange.cpp'
         )
 
     Compile-UserModeTest `
@@ -224,6 +259,7 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\http\HttpParser.cpp',
             'src\KernelHttpLib\crypto\CngProvider.cpp',
             'src\KernelHttpLib\crypto\CngProviderCache.cpp',
+            'src\KernelHttpLib\crypto\KeyExchange.cpp',
             'src\KernelHttpLib\tls\CertificateStore.cpp',
             'src\KernelHttpLib\tls\TlsCapabilities.cpp',
             'src\KernelHttpLib\tls\TlsPolicy.cpp',
@@ -273,6 +309,7 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\http\HttpParser.cpp',
             'src\KernelHttpLib\crypto\CngProvider.cpp',
             'src\KernelHttpLib\crypto\CngProviderCache.cpp',
+            'src\KernelHttpLib\crypto\KeyExchange.cpp',
             'src\KernelHttpLib\tls\CertificateStore.cpp',
             'src\KernelHttpLib\tls\TlsCapabilities.cpp',
             'src\KernelHttpLib\tls\TlsPolicy.cpp',
@@ -304,8 +341,10 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\http\HttpTransferCoding.cpp',
             'src\KernelHttpLib\http\HttpContentEncoding.cpp',
             'src\KernelHttpLib\websocket\WebSocketFrame.cpp',
+            'src\KernelHttpLib\crypto\Aead.cpp',
             'src\KernelHttpLib\crypto\CngProvider.cpp',
             'src\KernelHttpLib\crypto\CngProviderCache.cpp',
+            'src\KernelHttpLib\crypto\KeyExchange.cpp',
             'src\KernelHttpLib\tls\CertificateStore.cpp',
             'src\KernelHttpLib\tls\CertificateValidator.cpp',
             'src\KernelHttpLib\tls\TlsCapabilities.cpp',

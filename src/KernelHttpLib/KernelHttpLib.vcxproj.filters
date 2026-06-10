@@ -92,10 +92,16 @@
     <ClCompile Include="core\TlsTransport.cpp">
       <Filter>Source Files\core</Filter>
     </ClCompile>
+    <ClCompile Include="crypto\Aead.cpp">
+      <Filter>Source Files\crypto</Filter>
+    </ClCompile>
     <ClCompile Include="crypto\CngProvider.cpp">
       <Filter>Source Files\crypto</Filter>
     </ClCompile>
     <ClCompile Include="crypto\CngProviderCache.cpp">
+      <Filter>Source Files\crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="crypto\KeyExchange.cpp">
       <Filter>Source Files\crypto</Filter>
     </ClCompile>
     <ClCompile Include="engine\Engine.cpp">
@@ -283,10 +289,16 @@
     <ClInclude Include="..\..\include\KernelHttp\core\WskTransport.h">
       <Filter>Header Files\core</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\crypto\Aead.h">
+      <Filter>Header Files\crypto</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\crypto\CngProvider.h">
       <Filter>Header Files\crypto</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\crypto\CngProviderCache.h">
+      <Filter>Header Files\crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\crypto\KeyExchange.h">
       <Filter>Header Files\crypto</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\engine\Engine.h">

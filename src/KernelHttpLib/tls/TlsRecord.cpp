@@ -102,6 +102,7 @@ namespace tls
 
     void TlsAeadCipherState::Reset() noexcept
     {
+        Algorithm = crypto::AeadAlgorithm::Aes128Gcm;
         RtlZeroMemory(Key, sizeof(Key));
         KeyLength = 0;
         RtlZeroMemory(FixedIv, sizeof(FixedIv));
@@ -304,11 +305,12 @@ namespace tls
             plaintext.FragmentLength,
             aad);
 
-        crypto::AesGcmKey key = {};
+        crypto::AeadKey key = {};
+        key.Algorithm = writeState.Algorithm;
         key.Key = writeState.Key;
         key.KeyLength = writeState.KeyLength;
 
-        crypto::AesGcmParameters parameters = {};
+        crypto::AeadParameters parameters = {};
         parameters.Nonce = { nonce, TlsAesGcmFixedIvLength + TlsAesGcmExplicitNonceLength };
         parameters.Aad = { aad, 13 };
 
@@ -316,7 +318,8 @@ namespace tls
         UCHAR* tag = ciphertext + plaintext.FragmentLength;
         SIZE_T encryptedLength = 0;
 
-        status = crypto::CngProvider::AesGcmEncrypt(
+        status = crypto::Aead::Encrypt(
+            nullptr,
             key,
             parameters,
             plaintext.Fragment,
@@ -394,17 +397,19 @@ namespace tls
             plaintextLength,
             aad);
 
-        crypto::AesGcmKey key = {};
+        crypto::AeadKey key = {};
+        key.Algorithm = readState.Algorithm;
         key.Key = readState.Key;
         key.KeyLength = readState.KeyLength;
 
-        crypto::AesGcmParameters parameters = {};
+        crypto::AeadParameters parameters = {};
         parameters.Nonce = { nonce, TlsAesGcmFixedIvLength + TlsAesGcmExplicitNonceLength };
         parameters.Aad = { aad, 13 };
         parameters.Tag = { tag, TlsAesGcmTagLength };
 
         SIZE_T decryptedLength = 0;
-        status = crypto::CngProvider::AesGcmDecrypt(
+        status = crypto::Aead::Decrypt(
+            nullptr,
             key,
             parameters,
             ciphertext,
@@ -518,11 +523,12 @@ namespace tls
         UCHAR* nonce = writeState.NonceScratch;
         BuildTls13Nonce(writeState, nonce);
 
-        crypto::AesGcmKey key = {};
+        crypto::AeadKey key = {};
+        key.Algorithm = writeState.Algorithm;
         key.Key = writeState.Key;
         key.KeyLength = writeState.KeyLength;
 
-        crypto::AesGcmParameters parameters = {};
+        crypto::AeadParameters parameters = {};
         parameters.Nonce = { nonce, TlsAesGcmTls13IvLength };
         parameters.Aad = { aad, TlsRecordHeaderLength };
 
@@ -541,7 +547,8 @@ namespace tls
         UCHAR* tag = ciphertext + innerPlaintextLength;
         SIZE_T encryptedLength = 0;
 
-        status = crypto::CngProvider::AesGcmEncrypt(
+        status = crypto::Aead::Encrypt(
+            nullptr,
             key,
             parameters,
             innerPlaintext,
@@ -613,11 +620,12 @@ namespace tls
         UCHAR* nonce = readState.NonceScratch;
         BuildTls13Nonce(readState, nonce);
 
-        crypto::AesGcmKey key = {};
+        crypto::AeadKey key = {};
+        key.Algorithm = readState.Algorithm;
         key.Key = readState.Key;
         key.KeyLength = readState.KeyLength;
 
-        crypto::AesGcmParameters parameters = {};
+        crypto::AeadParameters parameters = {};
         parameters.Nonce = { nonce, TlsAesGcmTls13IvLength };
         parameters.Aad = { aad, TlsRecordHeaderLength };
         parameters.Tag = {
@@ -626,7 +634,8 @@ namespace tls
         };
 
         SIZE_T decryptedLength = 0;
-        status = crypto::CngProvider::AesGcmDecrypt(
+        status = crypto::Aead::Decrypt(
+            nullptr,
             key,
             parameters,
             encrypted.Fragment,

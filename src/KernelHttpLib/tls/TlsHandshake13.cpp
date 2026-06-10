@@ -27,12 +27,15 @@ namespace tls
 
         const TlsCipherSuite DefaultCipherSuites[] = {
             TlsCipherSuite::TlsAes128GcmSha256,
-            TlsCipherSuite::TlsAes256GcmSha384
+            TlsCipherSuite::TlsAes256GcmSha384,
+            TlsCipherSuite::TlsChaCha20Poly1305Sha256
         };
 
         const TlsNamedGroup DefaultNamedGroups[] = {
+            TlsNamedGroup::X25519,
             TlsNamedGroup::Secp256r1,
-            TlsNamedGroup::Secp384r1
+            TlsNamedGroup::Secp384r1,
+            TlsNamedGroup::Secp521r1
         };
 
         const TlsSignatureScheme DefaultSignatureSchemes[] = {
@@ -907,10 +910,13 @@ namespace tls
             crypto::HashAlgorithm::Sha256;
     }
 
-    bool TlsHandshake13::IsSupportedCipherSuite(TlsCipherSuite cipherSuite) noexcept
+        bool TlsHandshake13::IsSupportedCipherSuite(TlsCipherSuite cipherSuite) noexcept
     {
         return cipherSuite == TlsCipherSuite::TlsAes128GcmSha256 ||
-            cipherSuite == TlsCipherSuite::TlsAes256GcmSha384;
+            cipherSuite == TlsCipherSuite::TlsAes256GcmSha384 ||
+            cipherSuite == TlsCipherSuite::TlsChaCha20Poly1305Sha256 ||
+            cipherSuite == TlsCipherSuite::TlsAes128CcmSha256 ||
+            cipherSuite == TlsCipherSuite::TlsAes128Ccm8Sha256;
     }
 
     namespace
