@@ -3636,6 +3636,50 @@ namespace
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
 
+    void TestWebSocketReceiveCannotRaiseConnectionLimit() noexcept
+    {
+        WsCapture capture = {};
+        const UCHAR payload[] = { 'a', 'b', 'c', 'd', 'e', 'f' };
+        capture.NextType = KernelHttp::engine::KhWebSocketMessageType::Binary;
+        capture.NextLength = sizeof(payload);
+        memcpy(capture.NextData, payload, capture.NextLength);
+
+        KernelHttp::khttp::test::SetWebSocketTransport(
+            WsConnectCallback,
+            WsSendCallback,
+            WsReceiveCallback,
+            WsCloseCallback,
+            &capture);
+
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for ws receive connection limit");
+
+        const char* url = "ws://example.com/socket";
+        KernelHttp::khttp::WebSocket* ws = nullptr;
+        KernelHttp::khttp::WsConnectConfig wsConfig = KernelHttp::khttp::DefaultWsConnectConfig();
+        wsConfig.Url = url;
+        wsConfig.UrlLength = Length(url);
+        wsConfig.MaxMessageBytes = 5;
+        status = KernelHttp::khttp::WsConnect(session, &wsConfig, &ws);
+        Expect(NT_SUCCESS(status), "WsConnect succeeds for receive connection limit");
+
+        KernelHttp::khttp::WsReceiveOptions receiveOptions = {};
+        receiveOptions.MaxMessageBytes = 10;
+        KernelHttp::khttp::WsMessage message = {};
+        status = KernelHttp::khttp::WsReceiveEx(ws, &receiveOptions, &message);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "WsReceiveEx cannot raise connection MaxMessageBytes");
+        Expect(capture.ReceiveCount == 1, "oversized receive reaches test transport once");
+        Expect(capture.CloseCount == 1, "oversized receive closes websocket transport");
+
+        KernelHttp::khttp::WsClose(ws);
+        KernelHttp::khttp::SessionClose(session);
+        KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
+
     void TestWebSocketPublicValidationMatchesRealPath() noexcept
     {
         WsCapture capture = {};
@@ -3803,6 +3847,7 @@ int main() noexcept
     TestWebSocketRoundTrip();
     TestWebSocketControlFramesAndCloseEx();
     TestWebSocketFragmentedSendEnforcesTotalLimit();
+    TestWebSocketReceiveCannotRaiseConnectionLimit();
     TestWebSocketPublicValidationMatchesRealPath();
     TestWebSocketTerminalTransportStatusDisconnectsHandle();
 

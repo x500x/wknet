@@ -865,11 +865,11 @@ namespace tls
     TlsConnection::~TlsConnection() noexcept
     {
         Reset();
-        delete[] inputBuffer_;
-        delete[] outputBuffer_;
-        delete[] tls13InnerPlaintextBuffer_;
-        delete[] plaintextBuffer_;
-        delete[] negotiatedAlpn_;
+        FreeNonPagedArray(inputBuffer_);
+        FreeNonPagedArray(outputBuffer_);
+        FreeNonPagedArray(tls13InnerPlaintextBuffer_);
+        FreeNonPagedArray(plaintextBuffer_);
+        FreeNonPagedArray(negotiatedAlpn_);
         inputBuffer_ = nullptr;
         outputBuffer_ = nullptr;
         tls13InnerPlaintextBuffer_ = nullptr;
@@ -926,25 +926,25 @@ namespace tls
     NTSTATUS TlsConnection::EnsureBuffers() noexcept
     {
         if (inputBuffer_ == nullptr) {
-            inputBuffer_ = new UCHAR[TlsIoBufferLength]();
+            inputBuffer_ = AllocateNonPagedArray<UCHAR>(TlsIoBufferLength);
             if (inputBuffer_ == nullptr) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
         }
         if (outputBuffer_ == nullptr) {
-            outputBuffer_ = new UCHAR[TlsIoBufferLength]();
+            outputBuffer_ = AllocateNonPagedArray<UCHAR>(TlsIoBufferLength);
             if (outputBuffer_ == nullptr) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
         }
         if (tls13InnerPlaintextBuffer_ == nullptr) {
-            tls13InnerPlaintextBuffer_ = new UCHAR[TlsMaxPlaintextLength + 1]();
+            tls13InnerPlaintextBuffer_ = AllocateNonPagedArray<UCHAR>(TlsMaxPlaintextLength + 1);
             if (tls13InnerPlaintextBuffer_ == nullptr) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
         }
         if (plaintextBuffer_ == nullptr) {
-            plaintextBuffer_ = new UCHAR[TlsApplicationBufferLength]();
+            plaintextBuffer_ = AllocateNonPagedArray<UCHAR>(TlsApplicationBufferLength);
             if (plaintextBuffer_ == nullptr) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
@@ -960,7 +960,7 @@ namespace tls
             RtlSecureZeroMemory(handshakeBuffer_, TlsScratchHandshakeBufferLength);
         }
         if (negotiatedAlpn_ == nullptr) {
-            negotiatedAlpn_ = new char[16]();
+            negotiatedAlpn_ = AllocateNonPagedArray<char>(16);
             if (negotiatedAlpn_ == nullptr) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
@@ -995,12 +995,12 @@ namespace tls
         if (ownedTlsScratch_ == nullptr || ownedTlsScratchLength_ < TlsScratchRequiredLength) {
             if (ownedTlsScratch_ != nullptr) {
                 RtlSecureZeroMemory(ownedTlsScratch_, ownedTlsScratchLength_);
-                delete[] ownedTlsScratch_;
+                FreeNonPagedArray(ownedTlsScratch_);
                 ownedTlsScratch_ = nullptr;
                 ownedTlsScratchLength_ = 0;
             }
 
-            ownedTlsScratch_ = new UCHAR[TlsScratchRequiredLength];
+            ownedTlsScratch_ = AllocateNonPagedArray<UCHAR>(TlsScratchRequiredLength);
             if (ownedTlsScratch_ == nullptr) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
@@ -1050,7 +1050,7 @@ namespace tls
 
         if (ownedTlsScratch_ != nullptr) {
             RtlSecureZeroMemory(ownedTlsScratch_, ownedTlsScratchLength_);
-            delete[] ownedTlsScratch_;
+            FreeNonPagedArray(ownedTlsScratch_);
             ownedTlsScratch_ = nullptr;
             ownedTlsScratchLength_ = 0;
         }

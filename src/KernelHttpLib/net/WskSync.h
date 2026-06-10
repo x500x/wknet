@@ -85,7 +85,7 @@ namespace net
             context->Irp = nullptr;
         }
 
-        delete context;
+        FreeNonPagedObject(context);
     }
 
     _Function_class_(IO_COMPLETION_ROUTINE)
@@ -117,14 +117,14 @@ namespace net
 
         *context = nullptr;
 
-        auto* sync = new WskSyncIrpContext();
+        auto* sync = AllocateNonPagedObject<WskSyncIrpContext>();
         if (sync == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
         sync->Irp = IoAllocateIrp(1, FALSE);
         if (sync->Irp == nullptr) {
-            delete sync;
+            FreeNonPagedObject(sync);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 

@@ -217,6 +217,9 @@ namespace
         if (workspace->WebSocketFrameScratch.Data != nullptr) {
             RtlZeroMemory(workspace->WebSocketFrameScratch.Data, workspace->WebSocketFrameScratch.Length);
         }
+        if (workspace->WebSocketPayloadScratch.Data != nullptr) {
+            RtlZeroMemory(workspace->WebSocketPayloadScratch.Data, workspace->WebSocketPayloadScratch.Length);
+        }
 
         workspace->ResponseLength = 0;
     }
@@ -235,6 +238,7 @@ namespace
         ReleaseBuffer(&workspace->TlsHandshakeScratch);
         ReleaseBuffer(&workspace->CertificateScratch);
         ReleaseBuffer(&workspace->WebSocketFrameScratch);
+        ReleaseBuffer(&workspace->WebSocketPayloadScratch);
         RtlSecureZeroMemory(workspace, sizeof(*workspace));
         FreeWorkspaceMemory(workspace);
     }
@@ -301,6 +305,22 @@ namespace
         RtlCopyMemory(workspace->Response.Data + workspace->ResponseLength, data, dataLength);
         workspace->ResponseLength += dataLength;
         return STATUS_SUCCESS;
+    }
+
+    NTSTATUS KhWorkspaceEnsureWebSocketPayloadCapacity(
+        KhWorkspace* workspace,
+        SIZE_T requiredCapacity) noexcept
+    {
+        if (workspace == nullptr || requiredCapacity == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (HasResponseByteLimit(workspace->MaxResponseBytes) &&
+            requiredCapacity > workspace->MaxResponseBytes) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        return GrowBuffer(workspace->PoolType, &workspace->WebSocketPayloadScratch, requiredCapacity);
     }
 }
 }

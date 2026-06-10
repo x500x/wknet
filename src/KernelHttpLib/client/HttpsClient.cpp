@@ -109,7 +109,7 @@ namespace client
         {
             if (scratch.Owned != nullptr) {
                 RtlSecureZeroMemory(scratch.Owned, scratch.OwnedLength);
-                delete[] scratch.Owned;
+                FreeNonPagedArray(scratch.Owned);
             }
 
             scratch = {};
@@ -136,7 +136,7 @@ namespace client
                 }
             }
             else {
-                base = new UCHAR[totalBytes];
+                base = AllocateNonPagedArray<UCHAR>(totalBytes);
                 if (base == nullptr) {
                     return STATUS_INSUFFICIENT_RESOURCES;
                 }
@@ -246,16 +246,16 @@ namespace client
             return status;
         }
 
-        auto* tlsConnection = new tls::TlsConnection();
+        auto* tlsConnection = AllocateNonPagedObject<tls::TlsConnection>();
         if (tlsConnection == nullptr) {
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        auto* rawTransport = new core::WskTransport(*socket.Get());
+        auto* rawTransport = AllocateNonPagedObject<core::WskTransport>(*socket.Get());
         if (rawTransport == nullptr) {
-            delete tlsConnection;
+            FreeNonPagedObject(tlsConnection);
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -264,17 +264,17 @@ namespace client
         core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
         core::WorkspaceScratchAllocator* certificateScratch = nullptr;
         if (options.Workspace != nullptr) {
-            handshakeScratch = new core::WorkspaceScratchAllocator(
+            handshakeScratch = AllocateNonPagedObject<core::WorkspaceScratchAllocator>(
                 *options.Workspace,
                 core::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
-            certificateScratch = new core::WorkspaceScratchAllocator(
+            certificateScratch = AllocateNonPagedObject<core::WorkspaceScratchAllocator>(
                 *options.Workspace,
                 core::WorkspaceScratchAllocator::BufferKind::Certificate);
             if (handshakeScratch == nullptr || certificateScratch == nullptr) {
-                delete certificateScratch;
-                delete handshakeScratch;
-                delete rawTransport;
-                delete tlsConnection;
+                FreeNonPagedObject(certificateScratch);
+                FreeNonPagedObject(handshakeScratch);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return STATUS_INSUFFICIENT_RESOURCES;
@@ -312,25 +312,25 @@ namespace client
         }
 
         status = tlsConnection->Connect(*rawTransport, tlsOptions);
-        delete certificateScratch;
-        delete handshakeScratch;
+        FreeNonPagedObject(certificateScratch);
+        FreeNonPagedObject(handshakeScratch);
         if (!NT_SUCCESS(status)) {
             if (tls12ConfirmationCandidate != nullptr &&
                 IsTls12ConfirmationCandidate(options, tlsConnection->LastHandshakeFailure())) {
                 *tls12ConfirmationCandidate = true;
             }
             kprintf("HttpsClient TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            delete rawTransport;
-            delete tlsConnection;
+            FreeNonPagedObject(rawTransport);
+            FreeNonPagedObject(tlsConnection);
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
             return status;
         }
 
-        auto* tlsTransport = new core::TlsTransport(*rawTransport, *tlsConnection);
+        auto* tlsTransport = AllocateNonPagedObject<core::TlsTransport>(*rawTransport, *tlsConnection);
         if (tlsTransport == nullptr) {
-            delete rawTransport;
-            delete tlsConnection;
+            FreeNonPagedObject(rawTransport);
+            FreeNonPagedObject(tlsConnection);
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -341,11 +341,11 @@ namespace client
         SIZE_T alpnLen = tlsConnection->NegotiatedAlpnLength();
 
         if (options.PreferHttp2 && AlpnIsH2(alpn, alpnLen)) {
-            auto* h2conn = new http2::Http2Connection();
+            auto* h2conn = AllocateNonPagedObject<http2::Http2Connection>();
             if (h2conn == nullptr) {
-                delete tlsTransport;
-                delete rawTransport;
-                delete tlsConnection;
+                FreeNonPagedObject(tlsTransport);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return STATUS_INSUFFICIENT_RESOURCES;
@@ -354,10 +354,10 @@ namespace client
             status = h2conn->Initialize(*tlsTransport);
             if (!NT_SUCCESS(status)) {
                 kprintf("HttpsClient H2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
-                delete h2conn;
-                delete tlsTransport;
-                delete rawTransport;
-                delete tlsConnection;
+                FreeNonPagedObject(h2conn);
+                FreeNonPagedObject(tlsTransport);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -385,10 +385,10 @@ namespace client
             HeapObject<Http2HeaderScratch> h2Scratch;
             if (!h2Scratch.IsValid()) {
                 h2conn->Shutdown(*tlsTransport);
-                delete h2conn;
-                delete tlsTransport;
-                delete rawTransport;
-                delete tlsConnection;
+                FreeNonPagedObject(h2conn);
+                FreeNonPagedObject(tlsTransport);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return STATUS_INSUFFICIENT_RESOURCES;
@@ -397,10 +397,10 @@ namespace client
             status = PrepareHttp2HeaderScratch(options.Workspace, *h2Scratch.Get());
             if (!NT_SUCCESS(status)) {
                 h2conn->Shutdown(*tlsTransport);
-                delete h2conn;
-                delete tlsTransport;
-                delete rawTransport;
-                delete tlsConnection;
+                FreeNonPagedObject(h2conn);
+                FreeNonPagedObject(tlsTransport);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -417,10 +417,10 @@ namespace client
             if (!NT_SUCCESS(status)) {
                 ReleaseHttp2HeaderScratch(*h2Scratch.Get());
                 h2conn->Shutdown(*tlsTransport);
-                delete h2conn;
-                delete tlsTransport;
-                delete rawTransport;
-                delete tlsConnection;
+                FreeNonPagedObject(h2conn);
+                FreeNonPagedObject(tlsTransport);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -479,7 +479,7 @@ namespace client
 
             ReleaseHttp2HeaderScratch(*h2Scratch.Get());
             h2conn->Shutdown(*tlsTransport);
-            delete h2conn;
+            FreeNonPagedObject(h2conn);
         } else {
             SIZE_T sent = 0;
             status = tlsConnection->Send(*rawTransport, buffers.RequestBuffer, requestLength, &sent);
@@ -501,9 +501,9 @@ namespace client
             }
         }
 
-        delete tlsTransport;
-        delete rawTransport;
-        delete tlsConnection;
+        FreeNonPagedObject(tlsTransport);
+        FreeNonPagedObject(rawTransport);
+        FreeNonPagedObject(tlsConnection);
         const NTSTATUS closeStatus = socket->Close();
         UNREFERENCED_PARAMETER(closeStatus);
         return status;

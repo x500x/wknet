@@ -568,7 +568,7 @@ namespace client
             return status;
         }
 
-        auto* h2conn = new http2::Http2Connection();
+        auto* h2conn = AllocateNonPagedObject<http2::Http2Connection>();
         if (h2conn == nullptr) {
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
@@ -576,9 +576,9 @@ namespace client
         }
 
         tls::TlsConnection* tlsConnection = nullptr;
-        auto* rawTransport = new core::WskTransport(*socket.Get());
+        auto* rawTransport = AllocateNonPagedObject<core::WskTransport>(*socket.Get());
         if (rawTransport == nullptr) {
-            delete h2conn;
+            FreeNonPagedObject(h2conn);
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -592,17 +592,17 @@ namespace client
             status = upgradeReplay.Allocate(2048);
         }
         if (!NT_SUCCESS(status)) {
-            delete rawTransport;
-            delete h2conn;
+            FreeNonPagedObject(rawTransport);
+            FreeNonPagedObject(h2conn);
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
             return status;
         }
 
         if (IsTlsMode(options.TransportMode)) {
-            tlsConnection = new tls::TlsConnection();
+            tlsConnection = AllocateNonPagedObject<tls::TlsConnection>();
             if (tlsConnection == nullptr) {
-                delete h2conn;
+                FreeNonPagedObject(h2conn);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return STATUS_INSUFFICIENT_RESOURCES;
@@ -624,9 +624,9 @@ namespace client
             status = tlsConnection->Connect(*rawTransport, tlsOptions);
             if (!NT_SUCCESS(status)) {
                 kprintf("Http2Client TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
-                delete tlsConnection;
-                delete rawTransport;
-                delete h2conn;
+                FreeNonPagedObject(tlsConnection);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(h2conn);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -643,19 +643,19 @@ namespace client
             if (alpn == nullptr || !AlpnEquals(alpn, alpnLen, "h2", 2)) {
                 kprintf("Http2Client ALPN not h2: %.*s\r\n",
                     static_cast<int>(alpnLen), alpn != nullptr ? alpn : "(null)");
-                delete tlsConnection;
-                delete rawTransport;
-                delete h2conn;
+                FreeNonPagedObject(tlsConnection);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(h2conn);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return STATUS_NOT_SUPPORTED;
             }
 
-            tlsTransport = new core::TlsTransport(*rawTransport, *tlsConnection);
+            tlsTransport = AllocateNonPagedObject<core::TlsTransport>(*rawTransport, *tlsConnection);
             if (tlsTransport == nullptr) {
-                delete tlsConnection;
-                delete rawTransport;
-                delete h2conn;
+                FreeNonPagedObject(tlsConnection);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(h2conn);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return STATUS_INSUFFICIENT_RESOURCES;
@@ -670,8 +670,8 @@ namespace client
                     upgradeReplay.Count(),
                     &upgradeReplayLength);
                 if (!NT_SUCCESS(status)) {
-                    delete rawTransport;
-                    delete h2conn;
+                    FreeNonPagedObject(rawTransport);
+                    FreeNonPagedObject(h2conn);
                     const NTSTATUS closeStatus = socket->Close();
                     UNREFERENCED_PARAMETER(closeStatus);
                     return status;
@@ -687,10 +687,10 @@ namespace client
             h2conn->Initialize(*activeTransport);
         if (!NT_SUCCESS(status)) {
             kprintf("Http2Client H2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            delete tlsTransport;
-            delete tlsConnection;
-            delete rawTransport;
-            delete h2conn;
+            FreeNonPagedObject(tlsTransport);
+            FreeNonPagedObject(tlsConnection);
+            FreeNonPagedObject(rawTransport);
+            FreeNonPagedObject(h2conn);
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
             return status;
@@ -711,10 +711,10 @@ namespace client
 
         if (!NT_SUCCESS(status)) {
             h2conn->Shutdown(*activeTransport);
-            delete tlsTransport;
-            delete tlsConnection;
-            delete rawTransport;
-            delete h2conn;
+            FreeNonPagedObject(tlsTransport);
+            FreeNonPagedObject(tlsConnection);
+            FreeNonPagedObject(rawTransport);
+            FreeNonPagedObject(h2conn);
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
             return status;
@@ -733,10 +733,10 @@ namespace client
                 &headerCount);
             if (!NT_SUCCESS(status)) {
                 h2conn->Shutdown(*activeTransport);
-                delete tlsTransport;
-                delete tlsConnection;
-                delete rawTransport;
-                delete h2conn;
+                FreeNonPagedObject(tlsTransport);
+                FreeNonPagedObject(tlsConnection);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(h2conn);
                 const NTSTATUS closeStatus = socket->Close();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -782,10 +782,10 @@ namespace client
 
         h2conn->Shutdown(*activeTransport);
 
-        delete tlsTransport;
-        delete tlsConnection;
-        delete rawTransport;
-        delete h2conn;
+        FreeNonPagedObject(tlsTransport);
+        FreeNonPagedObject(tlsConnection);
+        FreeNonPagedObject(rawTransport);
+        FreeNonPagedObject(h2conn);
         const NTSTATUS closeStatus = socket->Close();
         UNREFERENCED_PARAMETER(closeStatus);
         return status;

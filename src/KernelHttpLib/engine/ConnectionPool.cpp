@@ -229,21 +229,21 @@ namespace
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         if (detached->Transport != nullptr &&
             detached->Transport != detached->RawTransport) {
-            delete detached->Transport;
+            FreeNonPagedObject(detached->Transport);
             detached->Transport = nullptr;
         }
         if (detached->Tls != nullptr) {
-            delete detached->Tls;
+            FreeNonPagedObject(detached->Tls);
             detached->Tls = nullptr;
         }
         if (detached->RawTransport != nullptr) {
-            delete detached->RawTransport;
+            FreeNonPagedObject(detached->RawTransport);
             detached->RawTransport = nullptr;
         }
         if (detached->Socket != nullptr) {
             const NTSTATUS closeStatus = detached->Socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
-            delete detached->Socket;
+            FreeNonPagedObject(detached->Socket);
             detached->Socket = nullptr;
         }
 #endif

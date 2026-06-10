@@ -37,7 +37,7 @@ namespace
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         return static_cast<KhAsyncOperation*>(calloc(1, sizeof(KhAsyncOperation)));
 #else
-        return new KhAsyncOperation();
+        return AllocateNonPagedObject<KhAsyncOperation>();
 #endif
     }
 
@@ -50,7 +50,7 @@ namespace
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         free(operation);
 #else
-        delete operation;
+        FreeNonPagedObject(operation);
 #endif
     }
 

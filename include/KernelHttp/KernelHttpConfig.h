@@ -74,11 +74,11 @@ namespace KernelHttp
             count <= (static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) / sizeof(T));
     }
 
-    template<typename T>
+    template<typename T, typename... Args>
     _Ret_maybenull_
-    inline T* AllocateNonPagedObject() noexcept
+    inline T* AllocateNonPagedObject(Args&&... args) noexcept
     {
-        return new T();
+        return new T(args...);
     }
 
     template<typename T>

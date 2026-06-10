@@ -343,7 +343,7 @@ namespace net
         void DeleteWskBuffer(_In_opt_ void* context) noexcept
         {
             auto* buffer = static_cast<WskBuffer*>(context);
-            delete buffer;
+            FreeNonPagedObject(buffer);
         }
 
         struct WskSocketConnectStorage final
@@ -355,7 +355,7 @@ namespace net
         void DeleteConnectStorage(_In_opt_ void* context) noexcept
         {
             auto* storage = static_cast<WskSocketConnectStorage*>(context);
-            delete storage;
+            FreeNonPagedObject(storage);
         }
 
         _Must_inspect_result_
@@ -402,14 +402,14 @@ namespace net
 
             *buffer = nullptr;
 
-            auto* owned = new WskBuffer();
+            auto* owned = AllocateNonPagedObject<WskBuffer>();
             if (owned == nullptr) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
             NTSTATUS status = owned->Allocate(length);
             if (!NT_SUCCESS(status)) {
-                delete owned;
+                FreeNonPagedObject(owned);
                 return status;
             }
 
@@ -632,7 +632,7 @@ namespace net
             return status;
         }
 
-        auto* addressStorage = new WskSocketConnectStorage();
+        auto* addressStorage = AllocateNonPagedObject<WskSocketConnectStorage>();
         if (addressStorage == nullptr) {
             WskSyncReleaseUnsubmittedContext(context);
             return STATUS_INSUFFICIENT_RESOURCES;

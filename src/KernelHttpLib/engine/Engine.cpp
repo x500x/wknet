@@ -1688,7 +1688,7 @@ namespace
         websocket.Workspace = nullptr;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         if (websocket.Client != nullptr) {
-            delete websocket.Client;
+            FreeNonPagedObject(websocket.Client);
             websocket.Client = nullptr;
         }
 #endif

@@ -253,7 +253,7 @@ namespace engine
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         return static_cast<KhAsyncWebSocketConnectContext*>(calloc(1, sizeof(KhAsyncWebSocketConnectContext)));
 #else
-        return new KhAsyncWebSocketConnectContext();
+        return AllocateNonPagedObject<KhAsyncWebSocketConnectContext>();
 #endif
     }
 
@@ -265,7 +265,7 @@ namespace engine
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         free(context);
 #else
-        delete context;
+        FreeNonPagedObject(context);
 #endif
     }
 
@@ -625,6 +625,14 @@ namespace engine
             FreeHandle(newWebSocket);
             return status;
         }
+        status = KhWorkspaceEnsureWebSocketPayloadCapacity(
+            newWebSocket->Workspace,
+            newWebSocket->MaxMessageBytes);
+        if (!NT_SUCCESS(status)) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return status;
+        }
 
         status = ParseUrlParts(
             newWebSocket->Url,
@@ -730,7 +738,7 @@ namespace engine
         *websocket = newWebSocket;
         return STATUS_SUCCESS;
 #else
-        newWebSocket->Client = new client::WebSocketClient();
+        newWebSocket->Client = AllocateNonPagedObject<client::WebSocketClient>();
         if (newWebSocket->Client == nullptr) {
             ReleaseWebSocketStorage(*newWebSocket);
             FreeHandle(newWebSocket);
@@ -757,8 +765,8 @@ namespace engine
         buffers.ResponseBufferLength = newWebSocket->Workspace->Response.Length;
         buffers.FrameBuffer = newWebSocket->Workspace->WebSocketFrameScratch.Data;
         buffers.FrameBufferLength = newWebSocket->Workspace->WebSocketFrameScratch.Length;
-        buffers.PayloadBuffer = newWebSocket->Workspace->DecodedBody.Data;
-        buffers.PayloadBufferLength = newWebSocket->Workspace->DecodedBody.Length;
+        buffers.PayloadBuffer = newWebSocket->Workspace->WebSocketPayloadScratch.Data;
+        buffers.PayloadBufferLength = newWebSocket->Workspace->WebSocketPayloadScratch.Length;
         HeapArray<http::HttpHeader> responseHeaders(KhMaxHeadersPerResponse);
         if (!responseHeaders.IsValid()) {
             ReleaseWebSocketStorage(*newWebSocket);
@@ -1428,8 +1436,11 @@ namespace engine
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
-        const SIZE_T maxMessageBytes =
-            effectiveOptions.MaxMessageBytes != 0 ? effectiveOptions.MaxMessageBytes : websocket->MaxMessageBytes;
+        SIZE_T maxMessageBytes = websocket->MaxMessageBytes;
+        if (effectiveOptions.MaxMessageBytes != 0 &&
+            effectiveOptions.MaxMessageBytes < maxMessageBytes) {
+            maxMessageBytes = effectiveOptions.MaxMessageBytes;
+        }
         if (received.DataLength > maxMessageBytes) {
             const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
             UNREFERENCED_PARAMETER(closeStatus);
@@ -1471,25 +1482,32 @@ namespace engine
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        const SIZE_T maxMessageBytes =
-            effectiveOptions.MaxMessageBytes != 0 ? effectiveOptions.MaxMessageBytes : websocket->MaxMessageBytes;
-        HeapArray<UCHAR> frameBuffer(KhWorkspaceWebSocketFrameScratchBytes);
-        HeapArray<UCHAR> payloadBuffer(maxMessageBytes);
-        if (!frameBuffer.IsValid() || !payloadBuffer.IsValid()) {
-            return STATUS_INSUFFICIENT_RESOURCES;
+        SIZE_T maxMessageBytes = websocket->MaxMessageBytes;
+        if (effectiveOptions.MaxMessageBytes != 0 &&
+            effectiveOptions.MaxMessageBytes < maxMessageBytes) {
+            maxMessageBytes = effectiveOptions.MaxMessageBytes;
+        }
+        if (websocket->Workspace == nullptr ||
+            websocket->Workspace->WebSocketFrameScratch.Data == nullptr ||
+            websocket->Workspace->WebSocketFrameScratch.Length < KhWorkspaceWebSocketFrameScratchBytes ||
+            websocket->Workspace->WebSocketPayloadScratch.Data == nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+        if (websocket->Workspace->WebSocketPayloadScratch.Length < maxMessageBytes) {
+            return STATUS_BUFFER_TOO_SMALL;
         }
 
         MutexScope receiveLock(&websocket->ReceiveLock);
         client::WebSocketIoBuffers buffers = {};
-        buffers.FrameBuffer = frameBuffer.Get();
-        buffers.FrameBufferLength = frameBuffer.Count();
+        buffers.FrameBuffer = websocket->Workspace->WebSocketFrameScratch.Data;
+        buffers.FrameBufferLength = websocket->Workspace->WebSocketFrameScratch.Length;
         KernelHttp::websocket::WebSocketOpcode opcode = KernelHttp::websocket::WebSocketOpcode::Continuation;
         SIZE_T bytesReceived = 0;
         status = websocket->Client->ReceiveMessage(
             buffers,
             &opcode,
-            payloadBuffer.Get(),
-            payloadBuffer.Count(),
+            websocket->Workspace->WebSocketPayloadScratch.Data,
+            maxMessageBytes,
             &bytesReceived,
             websocket->AutoReplyPing);
         if (!NT_SUCCESS(status)) {
@@ -1516,7 +1534,7 @@ namespace engine
             type = KhWebSocketMessageType::Pong;
         }
 
-        const UCHAR* data = payloadBuffer.Get();
+        const UCHAR* data = websocket->Workspace->WebSocketPayloadScratch.Data;
         if (effectiveOptions.MessageCallback != nullptr) {
             status = effectiveOptions.MessageCallback(
                 effectiveOptions.CallbackContext,

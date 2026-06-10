@@ -99,7 +99,7 @@ namespace tls
                 scratch.Allocator = options.ScratchAllocator;
             }
             else {
-                scratch.Data = new UCHAR[CertificateScratchRequiredBytes];
+                scratch.Data = AllocateNonPagedArray<UCHAR>(CertificateScratchRequiredBytes);
                 if (scratch.Data == nullptr) {
                     return STATUS_INSUFFICIENT_RESOURCES;
                 }
@@ -122,7 +122,7 @@ namespace tls
             }
 
             if (scratch.Owned) {
-                delete[] scratch.Data;
+                FreeNonPagedArray(scratch.Data);
             }
             else if (scratch.Allocator != nullptr) {
                 scratch.Allocator->Release(scratch.Data);

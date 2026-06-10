@@ -42,6 +42,7 @@ namespace engine
         KhWorkspaceBuffer TlsHandshakeScratch = {};
         KhWorkspaceBuffer CertificateScratch = {};
         KhWorkspaceBuffer WebSocketFrameScratch = {};
+        KhWorkspaceBuffer WebSocketPayloadScratch = {};
         SIZE_T ResponseLength = 0;
     };
 
@@ -64,5 +65,10 @@ namespace engine
         _Inout_ KhWorkspace* workspace,
         _In_reads_bytes_opt_(dataLength) const UCHAR* data,
         SIZE_T dataLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhWorkspaceEnsureWebSocketPayloadCapacity(
+        _Inout_ KhWorkspace* workspace,
+        SIZE_T requiredCapacity) noexcept;
 }
 }

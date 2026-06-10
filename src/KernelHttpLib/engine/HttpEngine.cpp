@@ -916,7 +916,7 @@ namespace engine
             return status;
         }
 
-        auto* h2Connection = new http2::Http2Connection();
+        auto* h2Connection = AllocateNonPagedObject<http2::Http2Connection>();
         if (h2Connection == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -924,7 +924,7 @@ namespace engine
         status = h2Connection->Initialize(transport);
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            delete h2Connection;
+            FreeNonPagedObject(h2Connection);
             return status;
         }
 
@@ -951,7 +951,7 @@ namespace engine
             kprintf("High-level HTTP/2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
             const NTSTATUS shutdownStatus = h2Connection->Shutdown(transport);
             UNREFERENCED_PARAMETER(shutdownStatus);
-            delete h2Connection;
+            FreeNonPagedObject(h2Connection);
             return status;
         }
 
@@ -973,7 +973,7 @@ namespace engine
             kprintf("High-level HTTP/2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
             const NTSTATUS shutdownStatus = h2Connection->Shutdown(transport);
             UNREFERENCED_PARAMETER(shutdownStatus);
-            delete h2Connection;
+            FreeNonPagedObject(h2Connection);
             return status;
         }
 
@@ -991,7 +991,7 @@ namespace engine
 
         const NTSTATUS shutdownStatus = h2Connection->Shutdown(transport);
         UNREFERENCED_PARAMETER(shutdownStatus);
-        delete h2Connection;
+        FreeNonPagedObject(h2Connection);
         return STATUS_SUCCESS;
     }
 #endif
@@ -1298,11 +1298,11 @@ namespace engine
     void ReleaseTlsLayer(_Inout_ KhPooledConnection& connection) noexcept
     {
         if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
-            delete connection.Transport;
+            FreeNonPagedObject(connection.Transport);
             connection.Transport = connection.RawTransport;
         }
         if (connection.Tls != nullptr) {
-            delete connection.Tls;
+            FreeNonPagedObject(connection.Tls);
             connection.Tls = nullptr;
         }
     }
@@ -1312,14 +1312,14 @@ namespace engine
         ReleaseTlsLayer(connection);
 
         if (connection.RawTransport != nullptr) {
-            delete connection.RawTransport;
+            FreeNonPagedObject(connection.RawTransport);
             connection.RawTransport = nullptr;
             connection.Transport = nullptr;
         }
         if (connection.Socket != nullptr) {
             const NTSTATUS closeStatus = connection.Socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
-            delete connection.Socket;
+            FreeNonPagedObject(connection.Socket);
             connection.Socket = nullptr;
         }
 
@@ -1343,19 +1343,19 @@ namespace engine
         }
 
         if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
-            delete connection.Transport;
+            FreeNonPagedObject(connection.Transport);
             connection.Transport = nullptr;
         }
         if (connection.Tls != nullptr) {
-            delete connection.Tls;
+            FreeNonPagedObject(connection.Tls);
             connection.Tls = nullptr;
         }
         if (connection.RawTransport != nullptr) {
-            delete connection.RawTransport;
+            FreeNonPagedObject(connection.RawTransport);
             connection.RawTransport = nullptr;
         }
         if (connection.Socket != nullptr) {
-            delete connection.Socket;
+            FreeNonPagedObject(connection.Socket);
             connection.Socket = nullptr;
         }
 
@@ -1390,7 +1390,7 @@ namespace engine
         if (NT_SUCCESS(status)) {
             lastStatus = STATUS_NOT_FOUND;
             for (SIZE_T addressIndex = 0; addressIndex < remoteAddressCount; ++addressIndex) {
-                auto* socket = new net::WskSocket();
+                auto* socket = AllocateNonPagedObject<net::WskSocket>();
                 if (socket == nullptr) {
                     return STATUS_INSUFFICIENT_RESOURCES;
                 }
@@ -1408,9 +1408,9 @@ namespace engine
                     cancellation.IsCancellationRequested != nullptr ? &cancellation : nullptr);
                 if (NT_SUCCESS(status)) {
                     connection.Socket = socket;
-                    connection.RawTransport = new core::WskTransport(*connection.Socket);
+                    connection.RawTransport = AllocateNonPagedObject<core::WskTransport>(*connection.Socket);
                     if (connection.RawTransport == nullptr) {
-                        delete connection.Socket;
+                        FreeNonPagedObject(connection.Socket);
                         connection.Socket = nullptr;
                         return STATUS_INSUFFICIENT_RESOURCES;
                     }
@@ -1423,7 +1423,7 @@ namespace engine
                     static_cast<ULONG>(status),
                     addressIndex,
                     static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
-                delete socket;
+                FreeNonPagedObject(socket);
             }
         }
 
@@ -1451,7 +1451,7 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
-        auto* tlsConnection = new tls::TlsConnection();
+        auto* tlsConnection = AllocateNonPagedObject<tls::TlsConnection>();
         if (tlsConnection == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -1460,16 +1460,16 @@ namespace engine
         tls::TlsClientConnectionOptions tlsOptions = {};
         core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
         core::WorkspaceScratchAllocator* certificateScratch = nullptr;
-        handshakeScratch = new core::WorkspaceScratchAllocator(
+        handshakeScratch = AllocateNonPagedObject<core::WorkspaceScratchAllocator>(
             workspace,
             core::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
-        certificateScratch = new core::WorkspaceScratchAllocator(
+        certificateScratch = AllocateNonPagedObject<core::WorkspaceScratchAllocator>(
             workspace,
             core::WorkspaceScratchAllocator::BufferKind::Certificate);
         if (handshakeScratch == nullptr || certificateScratch == nullptr) {
-            delete certificateScratch;
-            delete handshakeScratch;
-            delete tlsConnection;
+            FreeNonPagedObject(certificateScratch);
+            FreeNonPagedObject(handshakeScratch);
+            FreeNonPagedObject(tlsConnection);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
@@ -1510,22 +1510,22 @@ namespace engine
             if (failure != nullptr) {
                 *failure = tlsConnection->LastHandshakeFailure();
             }
-            delete tlsConnection;
-            delete certificateScratch;
-            delete handshakeScratch;
+            FreeNonPagedObject(tlsConnection);
+            FreeNonPagedObject(certificateScratch);
+            FreeNonPagedObject(handshakeScratch);
             return status;
         }
 
-        auto* tlsTransport = new core::TlsTransport(*connection.RawTransport, *tlsConnection);
+        auto* tlsTransport = AllocateNonPagedObject<core::TlsTransport>(*connection.RawTransport, *tlsConnection);
         if (tlsTransport == nullptr) {
-            delete tlsConnection;
-            delete certificateScratch;
-            delete handshakeScratch;
+            FreeNonPagedObject(tlsConnection);
+            FreeNonPagedObject(certificateScratch);
+            FreeNonPagedObject(handshakeScratch);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        delete certificateScratch;
-        delete handshakeScratch;
+        FreeNonPagedObject(certificateScratch);
+        FreeNonPagedObject(handshakeScratch);
         connection.Tls = tlsConnection;
         connection.Transport = tlsTransport;
         return STATUS_SUCCESS;
@@ -2761,7 +2761,7 @@ namespace engine
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         return static_cast<KhAsyncHttpContext*>(calloc(1, sizeof(KhAsyncHttpContext)));
 #else
-        return new KhAsyncHttpContext();
+        return AllocateNonPagedObject<KhAsyncHttpContext>();
 #endif
     }
 
@@ -2773,7 +2773,7 @@ namespace engine
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         free(context);
 #else
-        delete context;
+        FreeNonPagedObject(context);
 #endif
     }
 

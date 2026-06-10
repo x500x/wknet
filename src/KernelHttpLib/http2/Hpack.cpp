@@ -535,14 +535,14 @@ namespace http2
         dataCapacity_ = maxSize * 2;
         if (dataCapacity_ < 1024) dataCapacity_ = 1024;
 
-        dataBuffer_ = new UCHAR[dataCapacity_];
+        dataBuffer_ = AllocateNonPagedArray<UCHAR>(dataCapacity_);
         if (dataBuffer_ == nullptr) return STATUS_INSUFFICIENT_RESOURCES;
 
         // Allocate entry array
         entryCapacity_ = 128;
-        entries_ = new Entry[entryCapacity_];
+        entries_ = AllocateNonPagedArray<Entry>(entryCapacity_);
         if (entries_ == nullptr) {
-            delete[] dataBuffer_;
+            FreeNonPagedArray(dataBuffer_);
             dataBuffer_ = nullptr;
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -553,11 +553,11 @@ namespace http2
     void HpackDynamicTable::Reset() noexcept
     {
         if (dataBuffer_ != nullptr) {
-            delete[] dataBuffer_;
+            FreeNonPagedArray(dataBuffer_);
             dataBuffer_ = nullptr;
         }
         if (entries_ != nullptr) {
-            delete[] entries_;
+            FreeNonPagedArray(entries_);
             entries_ = nullptr;
         }
         dataCapacity_ = 0;
@@ -626,7 +626,7 @@ namespace http2
             if (newCapacity < dataUsed_ + dataNeeded + 1024) {
                 newCapacity = dataUsed_ + dataNeeded + 1024;
             }
-            UCHAR* newBuffer = new UCHAR[newCapacity];
+            UCHAR* newBuffer = AllocateNonPagedArray<UCHAR>(newCapacity);
             if (newBuffer == nullptr) return STATUS_INSUFFICIENT_RESOURCES;
             MemCopy(newBuffer, dataBuffer_, dataUsed_);
             if (PointerInRange(name, dataBuffer_, dataUsed_)) {
@@ -635,7 +635,7 @@ namespace http2
             if (PointerInRange(value, dataBuffer_, dataUsed_)) {
                 value = newBuffer + (value - dataBuffer_);
             }
-            delete[] dataBuffer_;
+            FreeNonPagedArray(dataBuffer_);
             dataBuffer_ = newBuffer;
             dataCapacity_ = newCapacity;
         }
@@ -643,14 +643,14 @@ namespace http2
         // Ensure entry array has space
         if (entryCount_ >= entryCapacity_) {
             SIZE_T newCapacity = entryCapacity_ * 2;
-            Entry* newEntries = new Entry[newCapacity];
+            Entry* newEntries = AllocateNonPagedArray<Entry>(newCapacity);
             if (newEntries == nullptr) return STATUS_INSUFFICIENT_RESOURCES;
             // Copy existing entries maintaining logical order
             for (SIZE_T i = 0; i < entryCount_; ++i) {
                 SIZE_T srcIdx = (entryHead_ + i) % entryCapacity_;
                 newEntries[i] = entries_[srcIdx];
             }
-            delete[] entries_;
+            FreeNonPagedArray(entries_);
             entries_ = newEntries;
             entryCapacity_ = newCapacity;
             entryHead_ = 0;

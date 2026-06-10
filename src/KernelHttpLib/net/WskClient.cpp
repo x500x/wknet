@@ -34,9 +34,9 @@ namespace net
                 return;
             }
 
-            delete[] request->NodeName;
-            delete[] request->ServiceName;
-            delete request;
+            FreeNonPagedArray(request->NodeName);
+            FreeNonPagedArray(request->ServiceName);
+            FreeNonPagedObject(request);
         }
 #endif
 
@@ -353,7 +353,7 @@ namespace net
                 return nullptr;
             }
 
-            wchar_t* copy = new wchar_t[length + 1]();
+            wchar_t* copy = AllocateNonPagedArray<wchar_t>(length + 1);
             if (copy == nullptr) {
                 return nullptr;
             }
@@ -677,7 +677,7 @@ namespace net
             return status;
         }
 
-        auto* request = new ResolveRequestContext();
+        auto* request = AllocateNonPagedObject<ResolveRequestContext>();
         if (request == nullptr) {
             WskSyncReleaseUnsubmittedContext(context);
             return STATUS_INSUFFICIENT_RESOURCES;

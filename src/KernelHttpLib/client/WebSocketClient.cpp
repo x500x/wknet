@@ -559,7 +559,7 @@ namespace client
         if (bufferedFrame_ != nullptr && bufferedFrameCapacity_ != 0) {
             RtlSecureZeroMemory(bufferedFrame_, bufferedFrameCapacity_);
         }
-        delete[] bufferedFrame_;
+        FreeNonPagedArray(bufferedFrame_);
         bufferedFrame_ = nullptr;
         bufferedFrameCapacity_ = 0;
         bufferedFrameLength_ = 0;
@@ -734,7 +734,7 @@ namespace client
         }
         transportClosed_ = false;
 
-        rawTransport_ = new core::WskTransport(socket_);
+        rawTransport_ = AllocateNonPagedObject<core::WskTransport>(socket_);
         if (rawTransport_ == nullptr) {
             const NTSTATUS closeStatus = CloseTransport();
             UNREFERENCED_PARAMETER(closeStatus);
@@ -752,25 +752,25 @@ namespace client
             core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
             core::WorkspaceScratchAllocator* certificateScratch = nullptr;
             if (options.Workspace != nullptr) {
-                handshakeScratch = new core::WorkspaceScratchAllocator(
+                handshakeScratch = AllocateNonPagedObject<core::WorkspaceScratchAllocator>(
                     *options.Workspace,
                     core::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
-                certificateScratch = new core::WorkspaceScratchAllocator(
+                certificateScratch = AllocateNonPagedObject<core::WorkspaceScratchAllocator>(
                     *options.Workspace,
                     core::WorkspaceScratchAllocator::BufferKind::Certificate);
                 if (handshakeScratch == nullptr || certificateScratch == nullptr) {
-                    delete certificateScratch;
-                    delete handshakeScratch;
+                    FreeNonPagedObject(certificateScratch);
+                    FreeNonPagedObject(handshakeScratch);
                     const NTSTATUS closeStatus = CloseTransport();
                     UNREFERENCED_PARAMETER(closeStatus);
                     return STATUS_INSUFFICIENT_RESOURCES;
                 }
             }
 
-            tls_ = new tls::TlsConnection();
+            tls_ = AllocateNonPagedObject<tls::TlsConnection>();
             if (tls_ == nullptr) {
-                delete certificateScratch;
-                delete handshakeScratch;
+                FreeNonPagedObject(certificateScratch);
+                FreeNonPagedObject(handshakeScratch);
                 const NTSTATUS closeStatus = CloseTransport();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return STATUS_INSUFFICIENT_RESOURCES;
@@ -795,8 +795,8 @@ namespace client
             tlsOptions.AlpnProtocolCount = 1;
 
             status = tls_->Connect(*rawTransport_, tlsOptions);
-            delete certificateScratch;
-            delete handshakeScratch;
+            FreeNonPagedObject(certificateScratch);
+            FreeNonPagedObject(handshakeScratch);
 
             if (!NT_SUCCESS(status)) {
                 if (tls12ConfirmationCandidate != nullptr &&
@@ -1521,11 +1521,11 @@ namespace client
     NTSTATUS WebSocketClient::CloseTransport() noexcept
     {
         if (tls_ != nullptr) {
-            delete tls_;
+            FreeNonPagedObject(tls_);
             tls_ = nullptr;
         }
 
-        delete rawTransport_;
+        FreeNonPagedObject(rawTransport_);
         rawTransport_ = nullptr;
         useTls_ = false;
 
@@ -1656,7 +1656,7 @@ namespace client
             return STATUS_SUCCESS;
         }
 
-        UCHAR* replacement = new UCHAR[capacity]();
+        UCHAR* replacement = AllocateNonPagedArray<UCHAR>(capacity);
         if (replacement == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -1668,7 +1668,7 @@ namespace client
             RtlSecureZeroMemory(bufferedFrame_, bufferedFrameCapacity_);
         }
 
-        delete[] bufferedFrame_;
+        FreeNonPagedArray(bufferedFrame_);
         bufferedFrame_ = replacement;
         bufferedFrameCapacity_ = capacity;
         return STATUS_SUCCESS;
