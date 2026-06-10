@@ -39,7 +39,7 @@ NTSTATUS RunKernelHttpTestSamples(
     NTSTATUS status = RunHighLevelApiSamples(wskClient, certificateBundlePath, &results->HighLevel);
     MergeSampleStatus(aggregate, status);
 
-    status = RunHttpVerbSamples(*wskClient, &results->Http);
+    status = RunHttpVerbSamples(*wskClient, certificateBundlePath, &results->Http);
     MergeSampleStatus(aggregate, status);
 
     status = RunHttp2VerbSamples(*wskClient, &results->Http2);

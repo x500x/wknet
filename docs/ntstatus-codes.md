@@ -42,13 +42,18 @@
 |-------------|------|------|
 | 0xC00000B5 | STATUS_IO_TIMEOUT | I/O 超时（请求超时） |
 | 0xC000020C | STATUS_CONNECTION_DISCONNECTED | 连接已断开 |
-| 0xC000023D | STATUS_CONNECTION_RESET | 连接被重置 |
+| 0xC000020D | STATUS_CONNECTION_RESET | 连接被重置 |
+| 0xC0000236 | STATUS_CONNECTION_REFUSED | 连接被拒绝 |
+| 0xC000023C | STATUS_NETWORK_UNREACHABLE | 网络不可达 |
+| 0xC000023D | STATUS_HOST_UNREACHABLE | 主机不可达 |
+| 0xC000023E | STATUS_PROTOCOL_UNREACHABLE | 协议不可达 |
+| 0xC000023F | STATUS_PORT_UNREACHABLE | 端口不可达 |
 | 0xC0000241 | STATUS_CONNECTION_ABORTED | 连接已中止 |
 | 0xC0000272 | STATUS_NO_MATCH | DNS/地址解析没有匹配结果 |
-| 0xC0000354 | STATUS_NETWORK_UNREACHABLE | 网络不可达 |
-| 0xC0000355 | STATUS_HOST_UNREACHABLE | 主机不可达 |
-| 0xC0000357 | STATUS_PORT_UNREACHABLE | 端口不可达 |
-| 0xC000035A | STATUS_CONNECTION_REFUSED | 连接被拒绝 |
+
+`KernelHttpTest` 的公网样例矩阵会把 DNS/connect/timeout/reset 类状态作为环境诊断记录，包括 `STATUS_NO_MATCH`、`STATUS_IO_TIMEOUT`、`STATUS_CONNECTION_REFUSED`、`STATUS_NETWORK_UNREACHABLE`、`STATUS_HOST_UNREACHABLE`、`STATUS_PROTOCOL_UNREACHABLE`、`STATUS_CONNECTION_DISCONNECTED`、`STATUS_CONNECTION_RESET`、`STATUS_CONNECTION_ABORTED` 和 `STATUS_DEVICE_NOT_CONNECTED`。这些状态不代表协议实现失败，也不会污染整个 load-time 样例矩阵的 aggregate status。
+
+协议解析错误、API misuse、证书信任失败、证书签名错误和 unsupported protocol 仍是 fatal 状态。公网样例目前使用 `httpbin.dev` 覆盖 HTTPS HTTP/2、content-encoding 和 advanced httpbin-style 路径，使用 `httpbun.com` 覆盖 plain HTTP/1.1 verb echo，并仅在 h2c upgrade 或未迁移验证的 HEAD/OPTIONS 上保留 `nghttp2.org`。公网端点可能改变行为，live driver validation 应记录日期和时区、endpoint host、传输模式、HTTP 状态码或 NTSTATUS，以及结果是否计为 fatal。
 
 ---
 
@@ -312,12 +317,16 @@ This document lists common NTSTATUS error codes used in the KernelHttp project.
 |-------|------|-------------|
 | 0xC00000B5 | STATUS_IO_TIMEOUT | I/O timeout (request timeout) |
 | 0xC000020C | STATUS_CONNECTION_DISCONNECTED | Connection disconnected |
-| 0xC000023D | STATUS_CONNECTION_RESET | Connection reset |
+| 0xC000020D | STATUS_CONNECTION_RESET | Connection reset |
+| 0xC0000236 | STATUS_CONNECTION_REFUSED | Connection refused |
+| 0xC000023C | STATUS_NETWORK_UNREACHABLE | Network unreachable |
+| 0xC000023D | STATUS_HOST_UNREACHABLE | Host unreachable |
+| 0xC000023E | STATUS_PROTOCOL_UNREACHABLE | Protocol unreachable |
+| 0xC000023F | STATUS_PORT_UNREACHABLE | Port unreachable |
 | 0xC0000241 | STATUS_CONNECTION_ABORTED | Connection aborted |
-| 0xC0000354 | STATUS_NETWORK_UNREACHABLE | Network unreachable |
-| 0xC0000355 | STATUS_HOST_UNREACHABLE | Host unreachable |
-| 0xC0000357 | STATUS_PORT_UNREACHABLE | Port unreachable |
-| 0xC000035A | STATUS_CONNECTION_REFUSED | Connection refused |
+| 0xC0000272 | STATUS_NO_MATCH | DNS/address resolution found no match |
+
+Public endpoint samples in `KernelHttpTest` record DNS/connect/timeout/reset statuses as environment diagnostics: `STATUS_NO_MATCH`, `STATUS_IO_TIMEOUT`, `STATUS_CONNECTION_REFUSED`, `STATUS_NETWORK_UNREACHABLE`, `STATUS_HOST_UNREACHABLE`, `STATUS_PROTOCOL_UNREACHABLE`, `STATUS_CONNECTION_DISCONNECTED`, `STATUS_CONNECTION_RESET`, `STATUS_CONNECTION_ABORTED`, and `STATUS_DEVICE_NOT_CONNECTED`. These diagnostics do not poison the load-time sample aggregate. Protocol parse errors, API misuse, certificate trust/signature failures, and unsupported protocol paths remain fatal. Current public samples use `httpbin.dev` for HTTPS HTTP/2, content encoding, and advanced httpbin-style paths; `httpbun.com` for plain HTTP/1.1 verb echo; and `nghttp2.org` only where h2c upgrade or still-unmigrated HEAD/OPTIONS capability is needed.
 
 ## TLS/Certificate-Related Errors
 

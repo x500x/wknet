@@ -2,6 +2,7 @@
 
 #include <KernelHttp/http/HttpResponse.h>
 #include <KernelHttp/net/WskClient.h>
+#include <KernelHttp/tls/CertificateStore.h>
 
 namespace KernelHttp
 {
@@ -52,11 +53,13 @@ namespace samples
     _Must_inspect_result_
     NTSTATUS RunHttpVerbSamples(
         _Inout_ net::WskClient& wskClient,
+        _In_opt_ const char* certificateBundlePath,
         _Out_ HttpVerbSampleResults* results) noexcept;
 
     _Must_inspect_result_
     NTSTATUS RunRemoteHttpsAddressFamilySamples(
         _Inout_ net::WskClient& wskClient,
+        _In_opt_ const tls::CertificateStore* certificateStore,
         _Out_ HttpVerbSampleResults* results) noexcept;
 
     _Must_inspect_result_

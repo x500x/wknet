@@ -7,6 +7,7 @@
 #include <KernelHttp/khttp/Response.h>
 #include <KernelHttp/khttp/Session.h>
 #include <KernelHttp/khttp/WebSocket.h>
+#include <KernelHttpTest/SampleStatus.h>
 #include "samples/ExternalTrustStore.h"
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -57,15 +58,15 @@ namespace
     constexpr ULONG AsyncWaitTimeoutMs = 60000;
     constexpr ULONG AsyncWaitForeverMs = 0xffffffffUL;
 
-    constexpr const char* HttpGetUrl = "http://nghttp2.org/httpbin/get";
-    constexpr const char* HttpPostUrl = "http://nghttp2.org/httpbin/post";
-    constexpr const char* HttpPutUrl = "http://nghttp2.org/httpbin/put";
-    constexpr const char* HttpPatchUrl = "http://nghttp2.org/httpbin/patch";
-    constexpr const char* HttpDeleteUrl = "http://nghttp2.org/httpbin/delete";
+    constexpr const char* HttpGetUrl = "http://httpbun.com/get";
+    constexpr const char* HttpPostUrl = "http://httpbun.com/post";
+    constexpr const char* HttpPutUrl = "http://httpbun.com/put";
+    constexpr const char* HttpPatchUrl = "http://httpbun.com/patch";
+    constexpr const char* HttpDeleteUrl = "http://httpbun.com/delete";
     constexpr const char* HttpHeadUrl = "http://nghttp2.org/httpbin/get";
     constexpr const char* HttpOptionsUrl = "http://nghttp2.org/httpbin/";
-    constexpr const char* HttpsGetUrl = "https://nghttp2.org/httpbin/get";
-    constexpr const char* HttpsBuilderUrl = "https://nghttp2.org/httpbin/anything";
+    constexpr const char* HttpsGetUrl = "https://httpbin.dev/get";
+    constexpr const char* HttpsBuilderUrl = "https://httpbin.dev/anything";
     constexpr const char* WebSocketSecureEchoUrl = "wss://ws.postman-echo.com/raw";
     constexpr const char* WebSocketBinaryEchoUrl = "wss://websocket-echo.com";
     constexpr const char* AlpnHttp11 = "http/1.1";
@@ -339,23 +340,24 @@ namespace
         }
     }
 
-    bool IsPublicNetworkEnvironmentStatus(NTSTATUS status) noexcept
+    void MergePublicHttpSampleStatus(
+        NTSTATUS& aggregate,
+        NTSTATUS status,
+        const char* sampleName = "HTTP 公网样例") noexcept
     {
-        return status == STATUS_CONNECTION_REFUSED ||
-            status == STATUS_NETWORK_UNREACHABLE ||
-            status == STATUS_HOST_UNREACHABLE ||
-            status == STATUS_PROTOCOL_UNREACHABLE ||
-            status == STATUS_NO_MATCH ||
-            status == STATUS_IO_TIMEOUT ||
-            status == STATUS_CONNECTION_DISCONNECTED ||
-            status == STATUS_CONNECTION_RESET ||
-            status == STATUS_CONNECTION_ABORTED ||
-            status == STATUS_DEVICE_NOT_CONNECTED;
-    }
+        if (NT_SUCCESS(status)) {
+            return;
+        }
 
-    bool IsPublicWebSocketConnectEnvironmentStatus(NTSTATUS status) noexcept
-    {
-        return IsPublicNetworkEnvironmentStatus(status);
+        if (IsPublicEndpointDiagnosticStatus(status)) {
+            KHTTP_SAMPLE_LOG(
+                "[HTTP响应] 示例=%s 公网端点环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                sampleName,
+                static_cast<ULONG>(status));
+            return;
+        }
+
+        MergeFatalSampleStatus(aggregate, status);
     }
 
     void MergeAddressFamilySampleStatus(
@@ -369,7 +371,7 @@ namespace
         }
 
         if ((family == khttp::AddressFamily::Ipv4 || family == khttp::AddressFamily::Ipv6) &&
-            IsPublicNetworkEnvironmentStatus(status)) {
+            IsPublicEndpointDiagnosticStatus(status)) {
             KHTTP_SAMPLE_LOG(
                 "[HTTP响应] 示例=%s 公网 %s 环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                 sampleName,
@@ -378,7 +380,7 @@ namespace
             return;
         }
 
-        MergeSampleStatus(aggregate, status);
+        MergeFatalSampleStatus(aggregate, status);
     }
 
     void MergePublicWebSocketSampleStatus(
@@ -390,7 +392,7 @@ namespace
             return;
         }
 
-        if (IsPublicWebSocketConnectEnvironmentStatus(status)) {
+        if (IsPublicEndpointDiagnosticStatus(status)) {
             KHTTP_SAMPLE_LOG(
                 "[WebSocket响应] 示例=%s 公网连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                 sampleName,
@@ -398,7 +400,7 @@ namespace
             return;
         }
 
-        MergeSampleStatus(aggregate, status);
+        MergeFatalSampleStatus(aggregate, status);
     }
 
     void CaptureStatus(
@@ -1745,87 +1747,87 @@ namespace
 
         // HTTP 快捷函数示例：这些入口直接创建并发送请求。
         status = RunShortcutHttp(session, "HTTP GET 快捷函数", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpShortcutGet);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP GET 快捷函数");
         status = RunShortcutHttp(session, "HTTP POST 快捷函数", khttp::Method::Post, HttpPostUrl, jsonBytes, jsonLen, "原始字节", results->HttpShortcutPost);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP POST 快捷函数");
         status = RunShortcutHttp(session, "HTTP PUT 快捷函数", khttp::Method::Put, HttpPutUrl, jsonBytes, jsonLen, "原始字节", results->HttpShortcutPut);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP PUT 快捷函数");
         status = RunShortcutHttp(session, "HTTP PATCH 快捷函数", khttp::Method::Patch, HttpPatchUrl, jsonBytes, jsonLen, "原始字节", results->HttpShortcutPatch);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP PATCH 快捷函数");
         status = RunShortcutHttp(session, "HTTP DELETE 快捷函数", khttp::Method::Delete, HttpDeleteUrl, nullptr, 0, "无", results->HttpShortcutDelete);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP DELETE 快捷函数");
         status = RunShortcutHttp(session, "HTTP HEAD 快捷函数", khttp::Method::Head, HttpHeadUrl, nullptr, 0, "无", results->HttpShortcutHead);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP HEAD 快捷函数");
         status = RunShortcutHttp(session, "HTTP OPTIONS 快捷函数", khttp::Method::Options, HttpOptionsUrl, nullptr, 0, "无", results->HttpShortcutOptions);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP OPTIONS 快捷函数");
 
         // Request Builder 示例：这些入口展示 URL、方法、Header、Body、TLS、连接策略和地址族配置。
         status = RunSimpleSync(session, "HTTP GET 构造请求", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGet);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP GET 构造请求");
         status = RunSimpleSync(session, "HTTP POST 原始请求体", khttp::Method::Post, HttpPostUrl, jsonBytes, jsonLen, "原始字节", results->HttpPost);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP POST 原始请求体");
         status = RunSimpleSync(session, "HTTP PUT 原始请求体", khttp::Method::Put, HttpPutUrl, jsonBytes, jsonLen, "原始字节", results->HttpPut);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP PUT 原始请求体");
         status = RunSimpleSync(session, "HTTP PATCH 原始请求体", khttp::Method::Patch, HttpPatchUrl, jsonBytes, jsonLen, "原始字节", results->HttpPatch);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP PATCH 原始请求体");
         status = RunSimpleSync(session, "HTTP DELETE", khttp::Method::Delete, HttpDeleteUrl, nullptr, 0, "无", results->HttpDelete);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP DELETE");
         status = RunSimpleSync(session, "HTTP HEAD", khttp::Method::Head, HttpHeadUrl, nullptr, 0, "无", results->HttpHead);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP HEAD");
         status = RunSimpleSync(session, "HTTP OPTIONS", khttp::Method::Options, HttpOptionsUrl, nullptr, 0, "无", results->HttpOptions);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP OPTIONS");
         status = RunSimpleSync(session, "HTTP GET IPv4 地址族", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGetIpv4, nullptr, khttp::ConnPolicy::ReuseOrCreate, khttp::AddressFamily::Ipv4);
         MergeAddressFamilySampleStatus(aggregate, status, khttp::AddressFamily::Ipv4, "HTTP GET IPv4 地址族");
         status = RunSimpleSync(session, "HTTP GET IPv6 地址族", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGetIpv6, nullptr, khttp::ConnPolicy::ReuseOrCreate, khttp::AddressFamily::Ipv6);
         MergeAddressFamilySampleStatus(aggregate, status, khttp::AddressFamily::Ipv6, "HTTP GET IPv6 地址族");
         status = RunSimpleSync(session, "HTTP GET Any 地址族", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGetAny, nullptr, khttp::ConnPolicy::ReuseOrCreate, khttp::AddressFamily::Any);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP GET Any 地址族");
 
         status = RunSendWithOptions(session, results->HttpSendWithOptions, false);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP Send 带选项");
         status = RunSendWithOptions(session, results->HttpSendEx, true);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP SendEx");
         status = RunResponseHeaderSample(session, results->HttpResponseHeader);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP 响应头");
 
         status = RunRequestBodySample(session, "HTTP 文本请求体", "文本", LiteralLength(TextBody), results->HttpTextBody, SetTextBody);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP 文本请求体");
         status = RunRequestBodySample(session, "HTTP JSON 请求体", "JSON", LiteralLength(JsonBody), results->HttpJsonBody, SetJsonBody);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP JSON 请求体");
         status = RunRequestBodySample(session, "HTTP Raw 请求体", "Raw", sizeof(RawBody), results->HttpRawBody, SetRawBody);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP Raw 请求体");
         status = RunRequestBodySample(session, "HTTP 表单请求体", "表单", LiteralLength("source=kernel-http&kind=form"), results->HttpFormBody, SetFormBody);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP 表单请求体");
         status = RunRequestBodySample(session, "HTTP Multipart 请求体", "Multipart", LiteralLength("field+file-bytes"), results->HttpMultipartBody, SetMultipartBody);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP Multipart 请求体");
         status = RunRequestBodySample(session, "HTTP 文件请求体", "文件", 0, results->HttpFileBody, SetFileBody);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP 文件请求体");
         status = RunRequestBodySample(session, "HTTP 清空请求体", "清空后的空请求体", 0, results->HttpClearBody, SetClearBody);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP 清空请求体");
 
         status = RunSimpleAsync(session, "HTTP GET 异步快捷函数", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpGetAsync);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP GET 异步快捷函数");
         status = RunSimpleAsync(session, "HTTP POST 异步快捷函数", khttp::Method::Post, HttpPostUrl, jsonBytes, jsonLen, "原始字节", results->HttpPostAsync);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP POST 异步快捷函数");
         status = RunPreparedAsync(session, "HTTP SendAsync", AsyncSendVariant::SendAsync, results->HttpSendAsync);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP SendAsync");
         status = RunPreparedAsync(session, "HTTP SendAsync 带选项", AsyncSendVariant::SendAsyncWithOptions, results->HttpSendAsyncWithOptions);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP SendAsync 带选项");
         status = RunPreparedAsync(session, "HTTP SendAsyncEx", AsyncSendVariant::SendAsyncEx, results->HttpSendAsyncEx);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTP SendAsyncEx");
         status = RunAsyncCancelSample(session, results->HttpAsyncCancel);
         MergeSampleStatus(aggregate, status);
 
         status = RunSimpleSync(session, "HTTPS GET 校验证书", khttp::Method::Get, HttpsGetUrl, nullptr, 0, "无", results->HttpsVerifyGet, &ngHttp2Tls);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTPS GET 校验证书");
         status = RunSimpleSync(session, "HTTPS GET 不校验证书", khttp::Method::Get, HttpsGetUrl, nullptr, 0, "无", results->HttpsNoVerifyGet, &noVerifyTls);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTPS GET 不校验证书");
         status = RunHttpsRequestBuilder(session, results->HttpsRequestBuilder, ngHttp2Tls);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTPS Request Builder");
         status = RunSimpleSync(session, "HTTPS GET HTTP/1.1 ALPN", khttp::Method::Get, HttpsGetUrl, nullptr, 0, "无", results->HttpsHttp11, &ngHttp2Http11Tls);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTPS GET HTTP/1.1 ALPN");
         status = RunSimpleSync(session, "HTTPS GET HTTP/2 ALPN", khttp::Method::Get, HttpsGetUrl, nullptr, 0, "无", results->HttpsHttp2, &ngHttp2Http2Tls);
-        MergeSampleStatus(aggregate, status);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTPS GET HTTP/2 ALPN");
 
         status = RunWebSocketSample(session, "WebSocket Echo", WsConnectVariant::Config, WsSendVariant::Text, false, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketEcho);
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket Echo");

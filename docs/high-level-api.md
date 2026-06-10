@@ -110,8 +110,8 @@ NTSTATUS s = khttp::SessionCreate(&wskClient, nullptr, &session);
 
 khttp::Response* resp = nullptr;
 s = khttp::Get(session,
-               "http://nghttp2.org/httpbin/get",
-               sizeof("http://nghttp2.org/httpbin/get") - 1,
+               "http://httpbun.com/get",
+               sizeof("http://httpbun.com/get") - 1,
                &resp);
 
 if (NT_SUCCESS(s)) {
@@ -343,7 +343,9 @@ constexpr ULONG  DefaultTlsHandshakeTimeoutMs   = TlsHandshakeReceiveTimeoutMill
 
 `src/KernelHttpTest/samples/HighLevelApiSamples.cpp` 中按场景列出了：会话创建、HTTP 同步快捷函数、Request 构造、各类请求体、Send 选项与回调、响应头读取、各种异步入口、`AsyncCancel`、HTTPS（含 ALPN 切换）、WebSocket 同步与异步连接、文本 / 二进制 / Ex / 回调接收等。可以直接对照阅读，每个样例都打印请求与响应详情，便于调试。
 
-驱动加载时的公网矩阵会把强制 IPv4/IPv6 样例的网络不可达、DNS 无匹配、连接超时等环境状态记录到对应 result 字段，但不让这些公网诊断项决定整个样例矩阵成败；公网 WebSocket DNS/connect 环境失败同样只记录，已建连后的协议或验证错误仍按失败处理。
+驱动加载时的公网矩阵是运行环境诊断，不是确定性的协议 conformance 测试。DNS 无匹配、网络/主机/协议不可达、连接拒绝、连接断开/重置/中止、设备未连接和 I/O 超时会记录到对应 result 字段，但不让这些公网诊断项决定整个样例矩阵成败。协议解析错误、API misuse、证书信任失败、签名错误、ALPN mismatch 或 unsupported protocol 仍按失败处理；公网 WebSocket 也只把 DNS/connect 阶段的环境失败视为诊断，已建连后的握手、echo 或 frame 错误仍是 fatal。
+
+公网样例端点按能力选择：`httpbin.dev` 用于 HTTPS HTTP/2 verb、content-encoding 和 advanced httpbin-style 路径；`httpbun.com` 用于 plain HTTP/1.1 GET/POST/PUT/PATCH/DELETE verb echo；`nghttp2.org` 只保留需要其 HTTP/2/h2c 能力的路径，例如 h2c upgrade，以及尚未迁移验证的 HEAD/OPTIONS 样例。公网服务仍可能变更行为，live driver validation 需要记录日期和时区、endpoint host、传输模式、HTTP 状态码或 NTSTATUS，以及该结果被计为 fatal 还是 diagnostic。
 
 `src/KernelHttpTest/samples/ExternalTrustStore.{h,cpp}` 给出了如何从 PEM bundle 构造会话级证书 `Store` 的模板，并被 `RunHighLevelApiSamples` 在创建 Session 时使用。测试驱动默认从驱动镜像目录读取 `cacert.pem`；也可在服务注册表值 `CertificateBundlePath` 中配置完整路径，例如 `\??\E:\work\kernel_http\certs\cacert.pem`。
 

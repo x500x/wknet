@@ -5,6 +5,7 @@
 #include <KernelHttp/khttp/Test.h>
 #include <KernelHttp/khttp/Session.h>
 #include <KernelHttp/khttp/WebSocket.h>
+#include <KernelHttpTest/SampleStatus.h>
 
 #include "samples/AdvancedScenarioSamples.h"
 #include "samples/ExternalTrustStore.h"
@@ -188,7 +189,7 @@ namespace
             ++capture->HttpsHttp2AlpnCalls;
         }
         if (isHttps &&
-            BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /httpbin/status/204 ")) {
+            BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /status/204 ")) {
             return STATUS_TRUST_FAILURE;
         }
         if (isHttps && TextEqualsLiteral(request->Alpn, request->AlpnLength, "kernel-http-test")) {
@@ -198,7 +199,7 @@ namespace
 
         static const char redirectResponse[] =
             "HTTP/1.1 302 Found\r\n"
-            "Location: /httpbin/get\r\n"
+            "Location: /get\r\n"
             "Content-Length: 0\r\n"
             "Connection: close\r\n"
             "\r\n";
@@ -223,25 +224,25 @@ namespace
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             "cccccccccccccccccccccccccccccccc";
 
-        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /httpbin/redirect/1 ")) {
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /redirect/1 ")) {
             response->RawResponse = redirectResponse;
             response->RawResponseLength = sizeof(redirectResponse) - 1;
             response->ConnectionReusable = false;
             return STATUS_SUCCESS;
         }
-        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /httpbin/status/404 ")) {
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /status/404 ")) {
             response->RawResponse = notFoundResponse;
             response->RawResponseLength = sizeof(notFoundResponse) - 1;
             response->ConnectionReusable = false;
             return STATUS_SUCCESS;
         }
-        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /httpbin/status/500 ")) {
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /status/500 ")) {
             response->RawResponse = serverErrorResponse;
             response->RawResponseLength = sizeof(serverErrorResponse) - 1;
             response->ConnectionReusable = false;
             return STATUS_SUCCESS;
         }
-        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /httpbin/encoding/utf8 ")) {
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /encoding/utf8 ")) {
             response->RawResponse = largeResponse;
             response->RawResponseLength = sizeof(largeResponse) - 1;
             response->ConnectionReusable = false;
@@ -536,6 +537,32 @@ namespace
         Expect(trustStore.BundleDataLength != 0, "external trust store records bundle length");
         Expect(trustStore.Store.AuthorityBundleCount() == 1, "external trust store registers one authority bundle");
         KernelHttp::samples::ResetExternalTrustStore(trustStore);
+    }
+
+    void TestPublicEndpointStatusClassification() noexcept
+    {
+        using KernelHttp::samples::IsPublicEndpointDiagnosticStatus;
+
+        Expect(IsPublicEndpointDiagnosticStatus(STATUS_IO_TIMEOUT), "timeout is a public endpoint diagnostic status");
+        Expect(IsPublicEndpointDiagnosticStatus(STATUS_NO_MATCH), "DNS no-match is a public endpoint diagnostic status");
+        Expect(
+            IsPublicEndpointDiagnosticStatus(STATUS_CONNECTION_RESET),
+            "connection reset is a public endpoint diagnostic status");
+        Expect(
+            !IsPublicEndpointDiagnosticStatus(STATUS_INVALID_NETWORK_RESPONSE),
+            "protocol errors remain fatal");
+        Expect(!IsPublicEndpointDiagnosticStatus(STATUS_INVALID_PARAMETER), "API misuse remains fatal");
+        Expect(!IsPublicEndpointDiagnosticStatus(STATUS_TRUST_FAILURE), "certificate trust failures remain fatal");
+    }
+
+    void TestPublicDiagnosticMergeKeepsAggregateSuccessForEnvironmentFailures() noexcept
+    {
+        NTSTATUS aggregate = STATUS_SUCCESS;
+        KernelHttp::samples::MergePublicDiagnosticSampleStatus(aggregate, STATUS_IO_TIMEOUT);
+        Expect(aggregate == STATUS_SUCCESS, "public timeout does not poison aggregate");
+
+        KernelHttp::samples::MergePublicDiagnosticSampleStatus(aggregate, STATUS_INVALID_NETWORK_RESPONSE);
+        Expect(aggregate == STATUS_INVALID_NETWORK_RESPONSE, "protocol error poisons aggregate");
     }
 
     void TestLoadTimeSamplesReportIpv6Failure() noexcept
@@ -880,6 +907,8 @@ int main() noexcept
 {
     KernelHttp::khttp::test::ResetCurrentIrql();
     TestExternalTrustStoreLoadsRepositoryBundle();
+    TestPublicEndpointStatusClassification();
+    TestPublicDiagnosticMergeKeepsAggregateSuccessForEnvironmentFailures();
     TestLoadTimeSamplesCoverHighLevelSurface();
     TestLoadTimeSamplesReportIpv6Failure();
     TestLoadTimeSamplesIgnoreIpv4EnvironmentFailure();

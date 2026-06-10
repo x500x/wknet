@@ -4,6 +4,9 @@
 #include <KernelHttp/client/HttpClient.h>
 #include <KernelHttp/client/HttpsClient.h>
 #include <KernelHttp/client/WebSocketClient.h>
+#include <KernelHttpTest/SampleStatus.h>
+
+#include "samples/ExternalTrustStore.h"
 
 namespace KernelHttp
 {
@@ -18,11 +21,17 @@ namespace samples
         constexpr SIZE_T SampleHeaderCapacity = 32;
         constexpr const wchar_t* NgHttp2ServerName = L"nghttp2.org";
         constexpr const wchar_t* NgHttp2ServiceName = L"80";
-        constexpr const wchar_t* NgHttp2HttpsServiceName = L"443";
-        constexpr const char* NgHttp2TlsServerName = "nghttp2.org";
-        constexpr SIZE_T NgHttp2TlsServerNameLength = sizeof("nghttp2.org") - 1;
         constexpr const char* NgHttp2HostName = "nghttp2.org";
         constexpr SIZE_T NgHttp2HostNameLength = sizeof("nghttp2.org") - 1;
+        constexpr const wchar_t* HttpBinDevServerName = L"httpbin.dev";
+        constexpr const wchar_t* HttpBinDevHttpsServiceName = L"443";
+        constexpr const char* HttpBinDevTlsServerName = "httpbin.dev";
+        constexpr SIZE_T HttpBinDevTlsServerNameLength = sizeof("httpbin.dev") - 1;
+        constexpr const char* HttpBinDevHostName = "httpbin.dev";
+        constexpr SIZE_T HttpBinDevHostNameLength = sizeof("httpbin.dev") - 1;
+        constexpr const wchar_t* HttpBunServerName = L"httpbun.com";
+        constexpr const wchar_t* HttpBunServiceName = L"80";
+        constexpr const char* HttpBunHostName = "httpbun.com";
         constexpr const wchar_t* WebSocketEchoServerName = L"ws.postman-echo.com";
         constexpr const wchar_t* WebSocketEchoServiceName = L"443";
         constexpr const char* WebSocketEchoTlsServerName = "ws.postman-echo.com";
@@ -41,19 +50,6 @@ namespace samples
             0x35, 0x02, 0x4C, 0x42, 0x64, 0x58, 0x1C, 0xE0,
             0xA0, 0x4B, 0x64, 0xF1, 0x7F, 0xFA, 0xEF, 0xC7
         };
-        constexpr UCHAR NgHttp2LeafSpkiSha256[tls::CertificateSha256ThumbprintLength] = {
-            0x6A, 0x61, 0x41, 0x3D, 0xDF, 0xF5, 0x7B, 0x64,
-            0x3D, 0x10, 0x6D, 0x23, 0x5C, 0x6C, 0x3B, 0xA9,
-            0x39, 0x46, 0xE1, 0xC5, 0xDC, 0xDF, 0xEB, 0x5A,
-            0xB4, 0x69, 0x0C, 0xDC, 0xEB, 0x8D, 0x9D, 0xF7
-        };
-        constexpr UCHAR NgHttp2LetsEncryptE8SpkiSha256[tls::CertificateSha256ThumbprintLength] = {
-            0x88, 0x5B, 0xF0, 0x57, 0x22, 0x52, 0xC6, 0x74,
-            0x1D, 0xC9, 0xA5, 0x2F, 0x50, 0x44, 0x48, 0x7F,
-            0xEF, 0x2A, 0x93, 0xB8, 0x11, 0xCD, 0xED, 0xFA,
-            0xD7, 0x62, 0x4C, 0xC2, 0x83, 0xB7, 0xCD, 0xD5
-        };
-
         struct SampleIoBuffers final
         {
             char Request[SampleRequestBufferLength] = {};
@@ -92,9 +88,14 @@ namespace samples
 
         bool RequestPrefersHttp2(_In_ const http::HttpRequestBuildOptions& request) noexcept
         {
-            return request.Host.Data != nullptr &&
-                request.Host.Length == NgHttp2HostNameLength &&
-                http::TextEqualsIgnoreCase(request.Host, http::MakeText(NgHttp2HostName));
+            if (request.Host.Data == nullptr) {
+                return false;
+            }
+
+            return (request.Host.Length == NgHttp2HostNameLength &&
+                http::TextEqualsIgnoreCase(request.Host, http::MakeText(NgHttp2HostName))) ||
+                (request.Host.Length == HttpBinDevHostNameLength &&
+                    http::TextEqualsIgnoreCase(request.Host, http::MakeText(HttpBinDevHostName)));
         }
 
         void LogHttpText(_In_opt_ const char* label, http::HttpText value) noexcept
@@ -394,15 +395,51 @@ namespace samples
 
         NTSTATUS MergeSampleStatus(NTSTATUS current, NTSTATUS next) noexcept
         {
-            return NT_SUCCESS(current) ? next : current;
+            NTSTATUS aggregate = current;
+            MergeFatalSampleStatus(aggregate, next);
+            return aggregate;
+        }
+
+        NTSTATUS MergePublicSampleStatus(
+            NTSTATUS current,
+            _In_z_ const char* sampleName,
+            NTSTATUS next) noexcept
+        {
+            if (!NT_SUCCESS(next) && IsPublicEndpointDiagnosticStatus(next)) {
+                kprintf("[%s] 公网端点环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                    sampleName,
+                    static_cast<ULONG>(next));
+                return current;
+            }
+
+            return MergeSampleStatus(current, next);
+        }
+
+        NTSTATUS MergePublicConnectSampleStatus(
+            NTSTATUS current,
+            _In_z_ const char* sampleName,
+            NTSTATUS next,
+            const HttpVerbSampleResult& result) noexcept
+        {
+            if (!NT_SUCCESS(next) &&
+                result.StatusCode == 0 &&
+                IsPublicEndpointDiagnosticStatus(next)) {
+                kprintf("[%s] 公网端点连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                    sampleName,
+                    static_cast<ULONG>(next));
+                return current;
+            }
+
+            return MergeSampleStatus(current, next);
         }
 
         _Must_inspect_result_
-        NTSTATUS SendNgHttp2HttpBinGet(
+        NTSTATUS SendHttpBinDevHttpsGet(
             _Inout_ net::WskClient& wskClient,
             _In_z_ const char* sampleName,
             _In_ http::HttpText path,
             _In_ http::HttpText acceptEncoding,
+            _In_opt_ const tls::CertificateStore* certificateStore,
             _Out_ HttpVerbSampleResult& result) noexcept
         {
             const http::HttpHeader headers[] = {
@@ -413,19 +450,23 @@ namespace samples
             http::HttpRequestBuildOptions request = {};
             request.Method = http::HttpMethod::Get;
             request.Path = path;
-            request.Host = http::MakeText("nghttp2.org");
+            request.Host = http::MakeText(HttpBinDevHostName);
             request.UserAgent = http::MakeText("KernelHttp/0.1");
             request.Connection = http::HttpConnectionDirective::Close;
             request.ExtraHeaders = headers;
             request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
 
-            return SendSampleRequest(
+            return SendHttpsSampleRequest(
                 wskClient,
-                NgHttp2ServerName,
-                NgHttp2ServiceName,
+                HttpBinDevServerName,
+                HttpBinDevHttpsServiceName,
+                HttpBinDevTlsServerName,
+                HttpBinDevTlsServerNameLength,
                 sampleName,
                 request,
                 false,
+                certificateStore,
+                true,
                 result);
         }
 
@@ -466,24 +507,6 @@ namespace samples
             storeOptions.PinCount = 1;
 
             return certificateStore.Initialize(storeOptions);
-        }
-
-        _Must_inspect_result_
-        NTSTATUS InitializeNgHttp2CertificateStore(
-            _Out_ tls::CertificateStore& certificateStore,
-            _Out_ tls::CertificateTrustAnchor& anchor,
-            _Out_ tls::CertificatePin& pin) noexcept
-        {
-            return InitializePinnedCertificateStore(
-                NgHttp2LetsEncryptE8SpkiSha256,
-                sizeof(NgHttp2LetsEncryptE8SpkiSha256),
-                NgHttp2LeafSpkiSha256,
-                sizeof(NgHttp2LeafSpkiSha256),
-                NgHttp2TlsServerName,
-                NgHttp2TlsServerNameLength,
-                certificateStore,
-                anchor,
-                pin);
         }
 
         _Must_inspect_result_
@@ -657,25 +680,20 @@ namespace samples
 
     NTSTATUS RunRemoteHttpsAddressFamilySamples(
         net::WskClient& wskClient,
+        const tls::CertificateStore* certificateStore,
         HttpVerbSampleResults* results) noexcept
     {
         if (results == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        *results = {};
+        results->RemoteHttpsIpv4 = {};
+        results->RemoteHttpsIpv6 = {};
 
-        tls::CertificateTrustAnchor anchor = {};
-        tls::CertificatePin pin = {};
-        tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializeNgHttp2CertificateStore(
-            certificateStore,
-            anchor,
-            pin);
-        if (!NT_SUCCESS(status)) {
-            results->RemoteHttpsIpv4.Status = status;
-            results->RemoteHttpsIpv6.Status = status;
-            return status;
+        if (certificateStore == nullptr) {
+            results->RemoteHttpsIpv4.Status = STATUS_INVALID_PARAMETER;
+            results->RemoteHttpsIpv6.Status = STATUS_INVALID_PARAMETER;
+            return STATUS_INVALID_PARAMETER;
         }
 
         const http::HttpHeader headers[] = {
@@ -685,54 +703,59 @@ namespace samples
 
         http::HttpRequestBuildOptions request = {};
         request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/httpbin/get");
-        request.Host = http::MakeText("nghttp2.org");
+        request.Path = http::MakeText("/get");
+        request.Host = http::MakeText(HttpBinDevHostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.Connection = http::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
         request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
 
-        status = SendHttpsSampleRequestWithTlsVersion(
+        NTSTATUS status = STATUS_SUCCESS;
+        NTSTATUS sampleStatus = SendHttpsSampleRequestWithTlsVersion(
             wskClient,
-            NgHttp2ServerName,
-            NgHttp2HttpsServiceName,
-            NgHttp2TlsServerName,
-            NgHttp2TlsServerNameLength,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
             "HTTPS REMOTE IPv4",
             request,
             false,
-            &certificateStore,
+            certificateStore,
             true,
             tls::TlsProtocol::Tls12,
             tls::TlsProtocol::Tls13,
             net::WskAddressFamily::Ipv4,
             RequestPrefersHttp2(request),
             results->RemoteHttpsIpv4);
+        status = MergePublicSampleStatus(status, "HTTPS REMOTE IPv4", sampleStatus);
 
-        status = MergeSampleStatus(
+        sampleStatus = SendHttpsSampleRequestWithTlsVersion(
+            wskClient,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
+            "HTTPS REMOTE IPv6",
+            request,
+            false,
+            certificateStore,
+            true,
+            tls::TlsProtocol::Tls12,
+            tls::TlsProtocol::Tls13,
+            net::WskAddressFamily::Ipv6,
+            RequestPrefersHttp2(request),
+            results->RemoteHttpsIpv6);
+        status = MergePublicSampleStatus(
             status,
-            SendHttpsSampleRequestWithTlsVersion(
-                wskClient,
-                NgHttp2ServerName,
-                NgHttp2HttpsServiceName,
-                NgHttp2TlsServerName,
-                NgHttp2TlsServerNameLength,
-                "HTTPS REMOTE IPv6",
-                request,
-                false,
-                &certificateStore,
-                true,
-                tls::TlsProtocol::Tls12,
-                tls::TlsProtocol::Tls13,
-                net::WskAddressFamily::Ipv6,
-                RequestPrefersHttp2(request),
-                results->RemoteHttpsIpv6));
+            "HTTPS REMOTE IPv6",
+            sampleStatus);
 
         return status;
     }
 
     NTSTATUS RunHttpsGetNgHttp2HttpBinSample(
         net::WskClient& wskClient,
+        const tls::CertificateStore* certificateStore,
         HttpVerbSampleResult* result) noexcept
     {
         if (result == nullptr) {
@@ -740,14 +763,9 @@ namespace samples
         }
 
         *result = {};
-
-        tls::CertificateTrustAnchor anchor = {};
-        tls::CertificatePin pin = {};
-        tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
-        if (!NT_SUCCESS(status)) {
-            result->Status = status;
-            return status;
+        if (certificateStore == nullptr) {
+            result->Status = STATUS_INVALID_PARAMETER;
+            return result->Status;
         }
 
         const http::HttpHeader headers[] = {
@@ -757,8 +775,8 @@ namespace samples
 
         http::HttpRequestBuildOptions request = {};
         request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/httpbin/get");
-        request.Host = http::MakeText("nghttp2.org");
+        request.Path = http::MakeText("/get");
+        request.Host = http::MakeText(HttpBinDevHostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.Connection = http::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
@@ -766,20 +784,21 @@ namespace samples
 
         return SendHttpsSampleRequest(
             wskClient,
-            NgHttp2ServerName,
-            NgHttp2HttpsServiceName,
-            NgHttp2TlsServerName,
-            NgHttp2TlsServerNameLength,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
             "HTTPS GET",
             request,
             false,
-            &certificateStore,
+            certificateStore,
             true,
             *result);
     }
 
     NTSTATUS RunHttpsPostNgHttp2HttpBinSample(
         net::WskClient& wskClient,
+        const tls::CertificateStore* certificateStore,
         HttpVerbSampleResult* result) noexcept
     {
         if (result == nullptr) {
@@ -787,14 +806,9 @@ namespace samples
         }
 
         *result = {};
-
-        tls::CertificateTrustAnchor anchor = {};
-        tls::CertificatePin pin = {};
-        tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
-        if (!NT_SUCCESS(status)) {
-            result->Status = status;
-            return status;
+        if (certificateStore == nullptr) {
+            result->Status = STATUS_INVALID_PARAMETER;
+            return result->Status;
         }
 
         const http::HttpHeader headers[] = {
@@ -805,8 +819,8 @@ namespace samples
         const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS POST\"}";
         http::HttpRequestBuildOptions request = {};
         request.Method = http::HttpMethod::Post;
-        request.Path = http::MakeText("/httpbin/post");
-        request.Host = http::MakeText("nghttp2.org");
+        request.Path = http::MakeText("/post");
+        request.Host = http::MakeText(HttpBinDevHostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.ContentType = http::MakeText("application/json");
         request.Connection = http::HttpConnectionDirective::Close;
@@ -817,20 +831,21 @@ namespace samples
 
         return SendHttpsSampleRequest(
             wskClient,
-            NgHttp2ServerName,
-            NgHttp2HttpsServiceName,
-            NgHttp2TlsServerName,
-            NgHttp2TlsServerNameLength,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
             "HTTPS POST",
             request,
             false,
-            &certificateStore,
+            certificateStore,
             true,
             *result);
     }
 
     NTSTATUS RunHttpsPutNgHttp2HttpBinSample(
         net::WskClient& wskClient,
+        const tls::CertificateStore* certificateStore,
         HttpVerbSampleResult* result) noexcept
     {
         if (result == nullptr) {
@@ -838,14 +853,9 @@ namespace samples
         }
 
         *result = {};
-
-        tls::CertificateTrustAnchor anchor = {};
-        tls::CertificatePin pin = {};
-        tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
-        if (!NT_SUCCESS(status)) {
-            result->Status = status;
-            return status;
+        if (certificateStore == nullptr) {
+            result->Status = STATUS_INVALID_PARAMETER;
+            return result->Status;
         }
 
         const http::HttpHeader headers[] = {
@@ -856,8 +866,8 @@ namespace samples
         const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS PUT\"}";
         http::HttpRequestBuildOptions request = {};
         request.Method = http::HttpMethod::Put;
-        request.Path = http::MakeText("/httpbin/put");
-        request.Host = http::MakeText("nghttp2.org");
+        request.Path = http::MakeText("/put");
+        request.Host = http::MakeText(HttpBinDevHostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.ContentType = http::MakeText("application/json");
         request.Connection = http::HttpConnectionDirective::Close;
@@ -868,20 +878,21 @@ namespace samples
 
         return SendHttpsSampleRequest(
             wskClient,
-            NgHttp2ServerName,
-            NgHttp2HttpsServiceName,
-            NgHttp2TlsServerName,
-            NgHttp2TlsServerNameLength,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
             "HTTPS PUT",
             request,
             false,
-            &certificateStore,
+            certificateStore,
             true,
             *result);
     }
 
     NTSTATUS RunHttpsPatchNgHttp2HttpBinSample(
         net::WskClient& wskClient,
+        const tls::CertificateStore* certificateStore,
         HttpVerbSampleResult* result) noexcept
     {
         if (result == nullptr) {
@@ -889,14 +900,9 @@ namespace samples
         }
 
         *result = {};
-
-        tls::CertificateTrustAnchor anchor = {};
-        tls::CertificatePin pin = {};
-        tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
-        if (!NT_SUCCESS(status)) {
-            result->Status = status;
-            return status;
+        if (certificateStore == nullptr) {
+            result->Status = STATUS_INVALID_PARAMETER;
+            return result->Status;
         }
 
         const http::HttpHeader headers[] = {
@@ -907,8 +913,8 @@ namespace samples
         const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS PATCH\"}";
         http::HttpRequestBuildOptions request = {};
         request.Method = http::HttpMethod::Patch;
-        request.Path = http::MakeText("/httpbin/patch");
-        request.Host = http::MakeText("nghttp2.org");
+        request.Path = http::MakeText("/patch");
+        request.Host = http::MakeText(HttpBinDevHostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.ContentType = http::MakeText("application/json");
         request.Connection = http::HttpConnectionDirective::Close;
@@ -919,20 +925,21 @@ namespace samples
 
         return SendHttpsSampleRequest(
             wskClient,
-            NgHttp2ServerName,
-            NgHttp2HttpsServiceName,
-            NgHttp2TlsServerName,
-            NgHttp2TlsServerNameLength,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
             "HTTPS PATCH",
             request,
             false,
-            &certificateStore,
+            certificateStore,
             true,
             *result);
     }
 
     NTSTATUS RunHttpsDeleteNgHttp2HttpBinSample(
         net::WskClient& wskClient,
+        const tls::CertificateStore* certificateStore,
         HttpVerbSampleResult* result) noexcept
     {
         if (result == nullptr) {
@@ -940,14 +947,9 @@ namespace samples
         }
 
         *result = {};
-
-        tls::CertificateTrustAnchor anchor = {};
-        tls::CertificatePin pin = {};
-        tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
-        if (!NT_SUCCESS(status)) {
-            result->Status = status;
-            return status;
+        if (certificateStore == nullptr) {
+            result->Status = STATUS_INVALID_PARAMETER;
+            return result->Status;
         }
 
         const http::HttpHeader headers[] = {
@@ -957,8 +959,8 @@ namespace samples
 
         http::HttpRequestBuildOptions request = {};
         request.Method = http::HttpMethod::DeleteMethod;
-        request.Path = http::MakeText("/httpbin/delete");
-        request.Host = http::MakeText("nghttp2.org");
+        request.Path = http::MakeText("/delete");
+        request.Host = http::MakeText(HttpBinDevHostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.Connection = http::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
@@ -966,14 +968,14 @@ namespace samples
 
         return SendHttpsSampleRequest(
             wskClient,
-            NgHttp2ServerName,
-            NgHttp2HttpsServiceName,
-            NgHttp2TlsServerName,
-            NgHttp2TlsServerNameLength,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
             "HTTPS DELETE",
             request,
             false,
-            &certificateStore,
+            certificateStore,
             true,
             *result);
     }
@@ -1002,7 +1004,7 @@ namespace samples
         http::HttpRequestBuildOptions request = {};
         request.Method = method;
         request.Path = path;
-        request.Host = http::MakeText("nghttp2.org");
+        request.Host = http::MakeText(HttpBinDevHostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.ContentType = contentType;
         request.Connection = http::HttpConnectionDirective::Close;
@@ -1013,10 +1015,10 @@ namespace samples
 
         return SendHttpsSampleRequest(
             wskClient,
-            NgHttp2ServerName,
-            NgHttp2HttpsServiceName,
-            NgHttp2TlsServerName,
-            NgHttp2TlsServerNameLength,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
             sampleName,
             request,
             false,
@@ -1033,7 +1035,7 @@ namespace samples
             wskClient,
             "HTTPS GET no-verify",
             http::HttpMethod::Get,
-            http::MakeText("/httpbin/get"),
+            http::MakeText("/get"),
             {},
             nullptr,
             0,
@@ -1050,7 +1052,7 @@ namespace samples
             wskClient,
             "HTTPS POST no-verify",
             http::HttpMethod::Post,
-            http::MakeText("/httpbin/post"),
+            http::MakeText("/post"),
             http::MakeText("application/json"),
             body,
             sizeof(body) - 1,
@@ -1067,7 +1069,7 @@ namespace samples
             wskClient,
             "HTTPS PUT no-verify",
             http::HttpMethod::Put,
-            http::MakeText("/httpbin/put"),
+            http::MakeText("/put"),
             http::MakeText("application/json"),
             body,
             sizeof(body) - 1,
@@ -1084,7 +1086,7 @@ namespace samples
             wskClient,
             "HTTPS PATCH no-verify",
             http::HttpMethod::Patch,
-            http::MakeText("/httpbin/patch"),
+            http::MakeText("/patch"),
             http::MakeText("application/json"),
             body,
             sizeof(body) - 1,
@@ -1099,7 +1101,7 @@ namespace samples
             wskClient,
             "HTTPS DELETE no-verify",
             http::HttpMethod::DeleteMethod,
-            http::MakeText("/httpbin/delete"),
+            http::MakeText("/delete"),
             {},
             nullptr,
             0,
@@ -1108,6 +1110,7 @@ namespace samples
 
     NTSTATUS RunTls13HttpsGetSample(
         net::WskClient& wskClient,
+        const tls::CertificateStore* certificateStore,
         HttpVerbSampleResult* result) noexcept
     {
         if (result == nullptr) {
@@ -1115,14 +1118,9 @@ namespace samples
         }
 
         *result = {};
-
-        tls::CertificateTrustAnchor anchor = {};
-        tls::CertificatePin pin = {};
-        tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
-        if (!NT_SUCCESS(status)) {
-            result->Status = status;
-            return status;
+        if (certificateStore == nullptr) {
+            result->Status = STATUS_INVALID_PARAMETER;
+            return result->Status;
         }
 
         const http::HttpHeader headers[] = {
@@ -1132,8 +1130,8 @@ namespace samples
 
         http::HttpRequestBuildOptions request = {};
         request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/httpbin/get");
-        request.Host = http::MakeText("nghttp2.org");
+        request.Path = http::MakeText("/get");
+        request.Host = http::MakeText(HttpBinDevHostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.Connection = http::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
@@ -1141,14 +1139,14 @@ namespace samples
 
         return SendHttpsSampleRequestWithTlsVersion(
             wskClient,
-            NgHttp2ServerName,
-            NgHttp2HttpsServiceName,
-            NgHttp2TlsServerName,
-            NgHttp2TlsServerNameLength,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
             "TLS1.3 HTTPS GET",
             request,
             false,
-            &certificateStore,
+            certificateStore,
             true,
             tls::TlsProtocol::Tls13,
             tls::TlsProtocol::Tls13,
@@ -1159,6 +1157,7 @@ namespace samples
 
     NTSTATUS RunTls13Http2GetSample(
         net::WskClient& wskClient,
+        const tls::CertificateStore* certificateStore,
         HttpVerbSampleResult* result) noexcept
     {
         if (result == nullptr) {
@@ -1166,14 +1165,9 @@ namespace samples
         }
 
         *result = {};
-
-        tls::CertificateTrustAnchor anchor = {};
-        tls::CertificatePin pin = {};
-        tls::CertificateStore certificateStore;
-        NTSTATUS status = InitializeNgHttp2CertificateStore(certificateStore, anchor, pin);
-        if (!NT_SUCCESS(status)) {
-            result->Status = status;
-            return status;
+        if (certificateStore == nullptr) {
+            result->Status = STATUS_INVALID_PARAMETER;
+            return result->Status;
         }
 
         const http::HttpHeader headers[] = {
@@ -1183,8 +1177,8 @@ namespace samples
 
         http::HttpRequestBuildOptions request = {};
         request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/httpbin/get");
-        request.Host = http::MakeText("nghttp2.org");
+        request.Path = http::MakeText("/get");
+        request.Host = http::MakeText(HttpBinDevHostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.Connection = http::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
@@ -1192,14 +1186,14 @@ namespace samples
 
         return SendHttpsSampleRequestWithTlsVersion(
             wskClient,
-            NgHttp2ServerName,
-            NgHttp2HttpsServiceName,
-            NgHttp2TlsServerName,
-            NgHttp2TlsServerNameLength,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
             "TLS1.3 HTTP/2 GET",
             request,
             false,
-            &certificateStore,
+            certificateStore,
             true,
             tls::TlsProtocol::Tls13,
             tls::TlsProtocol::Tls13,
@@ -1223,8 +1217,8 @@ namespace samples
 
         http::HttpRequestBuildOptions request = {};
         request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/httpbin/get");
-        request.Host = http::MakeText("nghttp2.org");
+        request.Path = http::MakeText("/get");
+        request.Host = http::MakeText(HttpBinDevHostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.Connection = http::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
@@ -1232,10 +1226,10 @@ namespace samples
 
         return SendHttpsSampleRequestWithTlsVersion(
             wskClient,
-            NgHttp2ServerName,
-            NgHttp2HttpsServiceName,
-            NgHttp2TlsServerName,
-            NgHttp2TlsServerNameLength,
+            HttpBinDevServerName,
+            HttpBinDevHttpsServiceName,
+            HttpBinDevTlsServerName,
+            HttpBinDevTlsServerNameLength,
             "TLS1.3 HTTPS GET no-verify",
             request,
             false,
@@ -1250,6 +1244,7 @@ namespace samples
 
     NTSTATUS RunHttpVerbSamples(
         net::WskClient& wskClient,
+        const char* certificateBundlePath,
         HttpVerbSampleResults* results) noexcept
     {
         if (results == nullptr) {
@@ -1258,70 +1253,88 @@ namespace samples
 
         *results = {};
 
+        ExternalTrustStore trustStore = {};
+        NTSTATUS status = InitializeExternalTrustStore(
+            trustStore,
+            certificateBundlePath != nullptr ? certificateBundlePath : ExternalTrustStoreDefaultBundlePath);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         const http::HttpHeader commonHeaders[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
             { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
         };
 
-        NTSTATUS status = SendNgHttp2HttpBinGet(
+        NTSTATUS sampleStatus = SendHttpBinDevHttpsGet(
             wskClient,
             "ENCODING identity",
-            http::MakeText("/httpbin/get"),
+            http::MakeText("/get"),
             http::MakeText("identity"),
+            &trustStore.Store,
             results->IdentityEncoding);
+        status = MergePublicSampleStatus(status, "ENCODING identity", sampleStatus);
 
-        status = MergeSampleStatus(
+        sampleStatus = SendHttpBinDevHttpsGet(
+            wskClient,
+            "ENCODING gzip",
+            http::MakeText("/gzip"),
+            http::MakeText("gzip"),
+            &trustStore.Store,
+            results->GzipEncoding);
+        status = MergePublicSampleStatus(
             status,
-            SendNgHttp2HttpBinGet(
-                wskClient,
-                "ENCODING gzip",
-                http::MakeText("/httpbin/gzip"),
-                http::MakeText("gzip"),
-                results->GzipEncoding));
+            "ENCODING gzip",
+            sampleStatus);
 
-        status = MergeSampleStatus(
+        sampleStatus = SendHttpBinDevHttpsGet(
+            wskClient,
+            "ENCODING deflate",
+            http::MakeText("/deflate"),
+            http::MakeText("deflate"),
+            &trustStore.Store,
+            results->DeflateEncoding);
+        status = MergePublicSampleStatus(
             status,
-            SendNgHttp2HttpBinGet(
-                wskClient,
-                "ENCODING deflate",
-                http::MakeText("/httpbin/deflate"),
-                http::MakeText("deflate"),
-                results->DeflateEncoding));
+            "ENCODING deflate",
+            sampleStatus);
 
-        status = MergeSampleStatus(
+        sampleStatus = SendHttpBinDevHttpsGet(
+            wskClient,
+            "ENCODING br",
+            http::MakeText("/brotli"),
+            http::MakeText("br"),
+            &trustStore.Store,
+            results->BrotliEncoding);
+        status = MergePublicSampleStatus(
             status,
-            SendNgHttp2HttpBinGet(
-                wskClient,
-                "ENCODING br",
-                http::MakeText("/httpbin/brotli"),
-                http::MakeText("br"),
-                results->BrotliEncoding));
+            "ENCODING br",
+            sampleStatus);
 
         http::HttpRequestBuildOptions getNgHttp2HttpBin = {};
         getNgHttp2HttpBin.Method = http::HttpMethod::Get;
-        getNgHttp2HttpBin.Path = http::MakeText("/httpbin/get");
-        getNgHttp2HttpBin.Host = http::MakeText("nghttp2.org");
+        getNgHttp2HttpBin.Path = http::MakeText("/get");
+        getNgHttp2HttpBin.Host = http::MakeText(HttpBunHostName);
         getNgHttp2HttpBin.UserAgent = http::MakeText("KernelHttp/0.1");
         getNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
         getNgHttp2HttpBin.ExtraHeaders = commonHeaders;
         getNgHttp2HttpBin.ExtraHeaderCount = sizeof(commonHeaders) / sizeof(commonHeaders[0]);
 
-        status = MergeSampleStatus(
-            status,
-            SendSampleRequest(
-                wskClient,
-                NgHttp2ServerName,
-                NgHttp2ServiceName,
-                "GET",
-                getNgHttp2HttpBin,
-                false,
-                results->GetNgHttp2HttpBin));
+        sampleStatus = SendSampleRequest(
+            wskClient,
+            HttpBunServerName,
+            HttpBunServiceName,
+            "GET",
+            getNgHttp2HttpBin,
+            false,
+            results->GetNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "GET", sampleStatus);
 
         const char postBody[] = "{\"source\":\"kernel-http\",\"method\":\"POST\"}";
         http::HttpRequestBuildOptions postNgHttp2HttpBin = {};
         postNgHttp2HttpBin.Method = http::HttpMethod::Post;
-        postNgHttp2HttpBin.Path = http::MakeText("/httpbin/post");
-        postNgHttp2HttpBin.Host = http::MakeText("nghttp2.org");
+        postNgHttp2HttpBin.Path = http::MakeText("/post");
+        postNgHttp2HttpBin.Host = http::MakeText(HttpBunHostName);
         postNgHttp2HttpBin.UserAgent = http::MakeText("KernelHttp/0.1");
         postNgHttp2HttpBin.ContentType = http::MakeText("application/json");
         postNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
@@ -1330,22 +1343,21 @@ namespace samples
         postNgHttp2HttpBin.ExtraHeaders = commonHeaders;
         postNgHttp2HttpBin.ExtraHeaderCount = sizeof(commonHeaders) / sizeof(commonHeaders[0]);
 
-        status = MergeSampleStatus(
-            status,
-            SendSampleRequest(
-                wskClient,
-                NgHttp2ServerName,
-                NgHttp2ServiceName,
-                "POST",
-                postNgHttp2HttpBin,
-                false,
-                results->PostNgHttp2HttpBin));
+        sampleStatus = SendSampleRequest(
+            wskClient,
+            HttpBunServerName,
+            HttpBunServiceName,
+            "POST",
+            postNgHttp2HttpBin,
+            false,
+            results->PostNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "POST", sampleStatus);
 
         const char putBody[] = "{\"source\":\"kernel-http\",\"method\":\"PUT\"}";
         http::HttpRequestBuildOptions putNgHttp2HttpBin = {};
         putNgHttp2HttpBin.Method = http::HttpMethod::Put;
-        putNgHttp2HttpBin.Path = http::MakeText("/httpbin/put");
-        putNgHttp2HttpBin.Host = http::MakeText("nghttp2.org");
+        putNgHttp2HttpBin.Path = http::MakeText("/put");
+        putNgHttp2HttpBin.Host = http::MakeText(HttpBunHostName);
         putNgHttp2HttpBin.UserAgent = http::MakeText("KernelHttp/0.1");
         putNgHttp2HttpBin.ContentType = http::MakeText("application/json");
         putNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
@@ -1354,22 +1366,21 @@ namespace samples
         putNgHttp2HttpBin.ExtraHeaders = commonHeaders;
         putNgHttp2HttpBin.ExtraHeaderCount = sizeof(commonHeaders) / sizeof(commonHeaders[0]);
 
-        status = MergeSampleStatus(
-            status,
-            SendSampleRequest(
-                wskClient,
-                NgHttp2ServerName,
-                NgHttp2ServiceName,
-                "PUT",
-                putNgHttp2HttpBin,
-                false,
-                results->PutNgHttp2HttpBin));
+        sampleStatus = SendSampleRequest(
+            wskClient,
+            HttpBunServerName,
+            HttpBunServiceName,
+            "PUT",
+            putNgHttp2HttpBin,
+            false,
+            results->PutNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "PUT", sampleStatus);
 
         const char patchBody[] = "{\"source\":\"kernel-http\",\"method\":\"PATCH\"}";
         http::HttpRequestBuildOptions patchNgHttp2HttpBin = {};
         patchNgHttp2HttpBin.Method = http::HttpMethod::Patch;
-        patchNgHttp2HttpBin.Path = http::MakeText("/httpbin/patch");
-        patchNgHttp2HttpBin.Host = http::MakeText("nghttp2.org");
+        patchNgHttp2HttpBin.Path = http::MakeText("/patch");
+        patchNgHttp2HttpBin.Host = http::MakeText(HttpBunHostName);
         patchNgHttp2HttpBin.UserAgent = http::MakeText("KernelHttp/0.1");
         patchNgHttp2HttpBin.ContentType = http::MakeText("application/json");
         patchNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
@@ -1378,22 +1389,21 @@ namespace samples
         patchNgHttp2HttpBin.ExtraHeaders = commonHeaders;
         patchNgHttp2HttpBin.ExtraHeaderCount = sizeof(commonHeaders) / sizeof(commonHeaders[0]);
 
-        status = MergeSampleStatus(
-            status,
-            SendSampleRequest(
-                wskClient,
-                NgHttp2ServerName,
-                NgHttp2ServiceName,
-                "PATCH",
-                patchNgHttp2HttpBin,
-                false,
-                results->PatchNgHttp2HttpBin));
+        sampleStatus = SendSampleRequest(
+            wskClient,
+            HttpBunServerName,
+            HttpBunServiceName,
+            "PATCH",
+            patchNgHttp2HttpBin,
+            false,
+            results->PatchNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "PATCH", sampleStatus);
 
         const char deleteBody[] = "{\"source\":\"kernel-http\",\"method\":\"DELETE\"}";
         http::HttpRequestBuildOptions deleteNgHttp2HttpBin = {};
         deleteNgHttp2HttpBin.Method = http::HttpMethod::DeleteMethod;
-        deleteNgHttp2HttpBin.Path = http::MakeText("/httpbin/delete");
-        deleteNgHttp2HttpBin.Host = http::MakeText("nghttp2.org");
+        deleteNgHttp2HttpBin.Path = http::MakeText("/delete");
+        deleteNgHttp2HttpBin.Host = http::MakeText(HttpBunHostName);
         deleteNgHttp2HttpBin.UserAgent = http::MakeText("KernelHttp/0.1");
         deleteNgHttp2HttpBin.ContentType = http::MakeText("application/json");
         deleteNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
@@ -1402,68 +1412,87 @@ namespace samples
         deleteNgHttp2HttpBin.ExtraHeaders = commonHeaders;
         deleteNgHttp2HttpBin.ExtraHeaderCount = sizeof(commonHeaders) / sizeof(commonHeaders[0]);
 
-        status = MergeSampleStatus(
-            status,
-            SendSampleRequest(
-                wskClient,
-                NgHttp2ServerName,
-                NgHttp2ServiceName,
-                "DELETE",
-                deleteNgHttp2HttpBin,
-                false,
-                results->DeleteNgHttp2HttpBin));
+        sampleStatus = SendSampleRequest(
+            wskClient,
+            HttpBunServerName,
+            HttpBunServiceName,
+            "DELETE",
+            deleteNgHttp2HttpBin,
+            false,
+            results->DeleteNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "DELETE", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunHttpsGetNgHttp2HttpBinSample(wskClient, &results->HttpsGetNgHttp2HttpBin));
+        sampleStatus = RunHttpsGetNgHttp2HttpBinSample(
+            wskClient,
+            &trustStore.Store,
+            &results->HttpsGetNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "HTTPS GET", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunHttpsPostNgHttp2HttpBinSample(wskClient, &results->HttpsPostNgHttp2HttpBin));
+        sampleStatus = RunHttpsPostNgHttp2HttpBinSample(
+            wskClient,
+            &trustStore.Store,
+            &results->HttpsPostNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "HTTPS POST", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunHttpsPutNgHttp2HttpBinSample(wskClient, &results->HttpsPutNgHttp2HttpBin));
+        sampleStatus = RunHttpsPutNgHttp2HttpBinSample(
+            wskClient,
+            &trustStore.Store,
+            &results->HttpsPutNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "HTTPS PUT", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunHttpsPatchNgHttp2HttpBinSample(wskClient, &results->HttpsPatchNgHttp2HttpBin));
+        sampleStatus = RunHttpsPatchNgHttp2HttpBinSample(
+            wskClient,
+            &trustStore.Store,
+            &results->HttpsPatchNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "HTTPS PATCH", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunHttpsDeleteNgHttp2HttpBinSample(wskClient, &results->HttpsDeleteNgHttp2HttpBin));
+        sampleStatus = RunHttpsDeleteNgHttp2HttpBinSample(
+            wskClient,
+            &trustStore.Store,
+            &results->HttpsDeleteNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "HTTPS DELETE", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunHttpsGetNgHttp2HttpBinNoVerifySample(wskClient, &results->HttpsGetNgHttp2HttpBinNoVerify));
+        sampleStatus = RunHttpsGetNgHttp2HttpBinNoVerifySample(
+            wskClient,
+            &results->HttpsGetNgHttp2HttpBinNoVerify);
+        status = MergePublicSampleStatus(status, "HTTPS GET no-verify", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunHttpsPostNgHttp2HttpBinNoVerifySample(wskClient, &results->HttpsPostNgHttp2HttpBinNoVerify));
+        sampleStatus = RunHttpsPostNgHttp2HttpBinNoVerifySample(
+            wskClient,
+            &results->HttpsPostNgHttp2HttpBinNoVerify);
+        status = MergePublicSampleStatus(status, "HTTPS POST no-verify", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunHttpsPutNgHttp2HttpBinNoVerifySample(wskClient, &results->HttpsPutNgHttp2HttpBinNoVerify));
+        sampleStatus = RunHttpsPutNgHttp2HttpBinNoVerifySample(
+            wskClient,
+            &results->HttpsPutNgHttp2HttpBinNoVerify);
+        status = MergePublicSampleStatus(status, "HTTPS PUT no-verify", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunHttpsPatchNgHttp2HttpBinNoVerifySample(wskClient, &results->HttpsPatchNgHttp2HttpBinNoVerify));
+        sampleStatus = RunHttpsPatchNgHttp2HttpBinNoVerifySample(
+            wskClient,
+            &results->HttpsPatchNgHttp2HttpBinNoVerify);
+        status = MergePublicSampleStatus(status, "HTTPS PATCH no-verify", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunHttpsDeleteNgHttp2HttpBinNoVerifySample(wskClient, &results->HttpsDeleteNgHttp2HttpBinNoVerify));
+        sampleStatus = RunHttpsDeleteNgHttp2HttpBinNoVerifySample(
+            wskClient,
+            &results->HttpsDeleteNgHttp2HttpBinNoVerify);
+        status = MergePublicSampleStatus(status, "HTTPS DELETE no-verify", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunTls13HttpsGetSample(wskClient, &results->Tls13HttpsGet));
+        sampleStatus = RunTls13HttpsGetSample(
+            wskClient,
+            &trustStore.Store,
+            &results->Tls13HttpsGet);
+        status = MergePublicSampleStatus(status, "TLS1.3 HTTPS GET", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunTls13Http2GetSample(wskClient, &results->Tls13Http2Get));
+        sampleStatus = RunTls13Http2GetSample(
+            wskClient,
+            &trustStore.Store,
+            &results->Tls13Http2Get);
+        status = MergePublicSampleStatus(status, "TLS1.3 HTTP/2 GET", sampleStatus);
 
-        status = MergeSampleStatus(
-            status,
-            RunTls13HttpsGetNoVerifySample(wskClient, &results->Tls13HttpsGetNoVerify));
+        sampleStatus = RunTls13HttpsGetNoVerifySample(
+            wskClient,
+            &results->Tls13HttpsGetNoVerify);
+        status = MergePublicSampleStatus(status, "TLS1.3 HTTPS GET no-verify", sampleStatus);
 
         http::HttpRequestBuildOptions headNgHttp2HttpBin = {};
         headNgHttp2HttpBin.Method = http::HttpMethod::Head;
@@ -1474,16 +1503,15 @@ namespace samples
         headNgHttp2HttpBin.ExtraHeaders = commonHeaders;
         headNgHttp2HttpBin.ExtraHeaderCount = sizeof(commonHeaders) / sizeof(commonHeaders[0]);
 
-        status = MergeSampleStatus(
-            status,
-            SendSampleRequest(
-                wskClient,
-                NgHttp2ServerName,
-                NgHttp2ServiceName,
-                "HEAD",
-                headNgHttp2HttpBin,
-                true,
-                results->HeadNgHttp2HttpBin));
+        sampleStatus = SendSampleRequest(
+            wskClient,
+            NgHttp2ServerName,
+            NgHttp2ServiceName,
+            "HEAD",
+            headNgHttp2HttpBin,
+            true,
+            results->HeadNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "HEAD", sampleStatus);
 
         http::HttpRequestBuildOptions optionsNgHttp2HttpBin = {};
         optionsNgHttp2HttpBin.Method = http::HttpMethod::Options;
@@ -1494,29 +1522,34 @@ namespace samples
         optionsNgHttp2HttpBin.ExtraHeaders = commonHeaders;
         optionsNgHttp2HttpBin.ExtraHeaderCount = sizeof(commonHeaders) / sizeof(commonHeaders[0]);
 
-        status = MergeSampleStatus(
-            status,
-            SendSampleRequest(
-                wskClient,
-                NgHttp2ServerName,
-                NgHttp2ServiceName,
-                "OPTIONS",
-                optionsNgHttp2HttpBin,
-                false,
-                results->OptionsNgHttp2HttpBin));
+        sampleStatus = SendSampleRequest(
+            wskClient,
+            NgHttp2ServerName,
+            NgHttp2ServiceName,
+            "OPTIONS",
+            optionsNgHttp2HttpBin,
+            false,
+            results->OptionsNgHttp2HttpBin);
+        status = MergePublicSampleStatus(status, "OPTIONS", sampleStatus);
 
-        status = MergeSampleStatus(
+        sampleStatus = RunWebSocketEchoSample(wskClient, &results->WebSocketEcho);
+        status = MergePublicConnectSampleStatus(
             status,
-            RunWebSocketEchoSample(wskClient, &results->WebSocketEcho));
+            "WEBSOCKET ECHO",
+            sampleStatus,
+            results->WebSocketEcho);
 
-        status = MergeSampleStatus(
+        sampleStatus = RunWebSocketEchoNoVerifySample(wskClient, &results->WebSocketEchoNoVerify);
+        status = MergePublicConnectSampleStatus(
             status,
-            RunWebSocketEchoNoVerifySample(wskClient, &results->WebSocketEchoNoVerify));
+            "WEBSOCKET ECHO no-verify",
+            sampleStatus,
+            results->WebSocketEchoNoVerify);
 
-        status = MergeSampleStatus(
-            status,
-            RunRemoteHttpsAddressFamilySamples(wskClient, results));
+        sampleStatus = RunRemoteHttpsAddressFamilySamples(wskClient, &trustStore.Store, results);
+        status = MergeSampleStatus(status, sampleStatus);
 
+        ResetExternalTrustStore(trustStore);
         return status;
     }
 }

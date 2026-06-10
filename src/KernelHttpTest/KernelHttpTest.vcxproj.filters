@@ -47,6 +47,9 @@
     <ClInclude Include="..\..\include\KernelHttp\KernelHttp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttpTest\SampleStatus.h">
+      <Filter>Header Files\samples</Filter>
+    </ClInclude>
     <ClInclude Include="samples\AdvancedScenarioSamples.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>

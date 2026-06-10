@@ -8,6 +8,7 @@
 #include <KernelHttp/khttp/Response.h>
 #include <KernelHttp/khttp/Session.h>
 #include <KernelHttp/khttp/WebSocket.h>
+#include <KernelHttpTest/SampleStatus.h>
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <KernelHttp/khttp/Test.h>
 #endif
@@ -40,14 +41,14 @@ namespace samples
 {
     namespace
     {
-        constexpr const char* RedirectUrl = "http://nghttp2.org/httpbin/redirect/1";
-        constexpr const char* NotFoundUrl = "http://nghttp2.org/httpbin/status/404";
-        constexpr const char* ServerErrorUrl = "http://nghttp2.org/httpbin/status/500";
-        constexpr const char* LargeResponseUrl = "http://nghttp2.org/httpbin/encoding/utf8";
-        constexpr const char* LargePostUrl = "http://nghttp2.org/httpbin/post";
-        constexpr const char* DelayUrl = "http://nghttp2.org/httpbin/delay/5";
-        constexpr const char* TrustFailureUrl = "https://nghttp2.org/httpbin/status/204";
-        constexpr const char* HttpsGetUrl = "https://nghttp2.org/httpbin/get";
+        constexpr const char* RedirectUrl = "https://httpbin.dev/redirect/1";
+        constexpr const char* NotFoundUrl = "https://httpbin.dev/status/404";
+        constexpr const char* ServerErrorUrl = "https://httpbin.dev/status/500";
+        constexpr const char* LargeResponseUrl = "https://httpbin.dev/encoding/utf8";
+        constexpr const char* LargePostUrl = "https://httpbin.dev/post";
+        constexpr const char* DelayUrl = "https://httpbin.dev/delay/5";
+        constexpr const char* TrustFailureUrl = "https://httpbin.dev/status/204";
+        constexpr const char* HttpsGetUrl = "https://httpbin.dev/get";
         constexpr const char* WebSocketUrl = "wss://ws.postman-echo.com/raw";
         constexpr const char* WebSocketText = "kernel-http advanced websocket";
         constexpr SIZE_T LargeBodyBytes = 64 * 1024;
@@ -79,26 +80,12 @@ namespace samples
             }
         }
 
-        bool IsPublicNetworkEnvironmentStatus(NTSTATUS status) noexcept
-        {
-            return status == STATUS_CONNECTION_REFUSED ||
-                status == STATUS_NETWORK_UNREACHABLE ||
-                status == STATUS_HOST_UNREACHABLE ||
-                status == STATUS_PROTOCOL_UNREACHABLE ||
-                status == STATUS_NO_MATCH ||
-                status == STATUS_IO_TIMEOUT ||
-                status == STATUS_CONNECTION_DISCONNECTED ||
-                status == STATUS_CONNECTION_RESET ||
-                status == STATUS_CONNECTION_ABORTED ||
-                status == STATUS_DEVICE_NOT_CONNECTED;
-        }
-
         void MergePublicDiagnosticSampleStatus(
             _Inout_ NTSTATUS& aggregate,
             _In_z_ const char* sampleName,
             NTSTATUS status) noexcept
         {
-            if (!NT_SUCCESS(status) && IsPublicNetworkEnvironmentStatus(status)) {
+            if (!NT_SUCCESS(status) && IsPublicEndpointDiagnosticStatus(status)) {
                 kprintf(
                     "[高级场景] 示例=%s 公网连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                     sampleName,
@@ -279,9 +266,9 @@ namespace samples
         {
             constexpr SIZE_T OperationCount = 3;
             const char* urls[OperationCount] = {
-                "http://nghttp2.org/httpbin/get?sample=concurrent-1",
-                "http://nghttp2.org/httpbin/get?sample=concurrent-2",
-                "http://nghttp2.org/httpbin/get?sample=concurrent-3"
+                "https://httpbin.dev/get?sample=concurrent-1",
+                "https://httpbin.dev/get?sample=concurrent-2",
+                "https://httpbin.dev/get?sample=concurrent-3"
             };
             khttp::AsyncOp* operations[OperationCount] = {};
 
@@ -523,23 +510,23 @@ namespace samples
         }
 
         status = ValidateStatusCode(session, RedirectUrl, 200, results->HttpRedirect);
-        MergeSampleStatus(aggregate, "HTTP Redirect 200", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "HTTP Redirect 200", status);
         status = RunDisabledRedirectSample(session, results->HttpRedirectDisabled);
-        MergeSampleStatus(aggregate, "HTTP RedirectDisabled 302", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "HTTP RedirectDisabled 302", status);
         status = ValidateStatusCode(session, NotFoundUrl, 404, results->HttpNotFound);
-        MergeSampleStatus(aggregate, "HTTP NotFound 404", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "HTTP NotFound 404", status);
         status = ValidateStatusCode(session, ServerErrorUrl, 500, results->HttpServerError);
-        MergeSampleStatus(aggregate, "HTTP ServerError 500", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "HTTP ServerError 500", status);
         status = RunLargeResponseSample(session, results->HttpLargeResponse);
-        MergeSampleStatus(aggregate, "HTTP LargeResponse", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "HTTP LargeResponse", status);
         status = RunResponseLimitSample(session, results->HttpResponseLimit);
-        MergeSampleStatus(aggregate, "HTTP ResponseLimit", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "HTTP ResponseLimit", status);
         status = RunLargePostSample(session, results->HttpLargePost);
-        MergeSampleStatus(aggregate, "HTTP LargePost", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "HTTP LargePost", status);
         status = RunConcurrentAsyncSample(session, results->HttpConcurrentAsync);
-        MergeSampleStatus(aggregate, "HTTP ConcurrentAsync", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "HTTP ConcurrentAsync", status);
         status = RunAsyncWaitTimeoutSample(session, results->HttpAsyncWaitTimeout);
-        MergeSampleStatus(aggregate, "HTTP AsyncWaitTimeout", status);
+        MergePublicDiagnosticSampleStatus(aggregate, "HTTP AsyncWaitTimeout", status);
 
         HeapObject<tls::CertificateStore> emptyTrustStore;
         if (!emptyTrustStore.IsValid()) {

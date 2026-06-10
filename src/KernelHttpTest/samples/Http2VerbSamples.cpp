@@ -3,6 +3,7 @@
 #include <KernelHttp/KernelHttpConfig.h>
 #include <KernelHttp/client/Http2Client.h>
 #include <KernelHttp/http2/Http2Frame.h>
+#include <KernelHttpTest/SampleStatus.h>
 
 namespace KernelHttp
 {
@@ -182,7 +183,24 @@ namespace samples
 
         NTSTATUS MergeSampleStatus(NTSTATUS current, NTSTATUS next) noexcept
         {
-            return NT_SUCCESS(current) ? next : current;
+            NTSTATUS aggregate = current;
+            MergeFatalSampleStatus(aggregate, next);
+            return aggregate;
+        }
+
+        NTSTATUS MergePublicSampleStatus(
+            NTSTATUS current,
+            _In_z_ const char* sampleName,
+            NTSTATUS next) noexcept
+        {
+            if (!NT_SUCCESS(next) && IsPublicEndpointDiagnosticStatus(next)) {
+                kprintf("[%s] 公网端点环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                    sampleName,
+                    static_cast<ULONG>(next));
+                return current;
+            }
+
+            return MergeSampleStatus(current, next);
         }
 
         void CaptureFrameSampleResult(
@@ -428,7 +446,8 @@ namespace samples
 
         *results = {};
 
-        NTSTATUS status = SendHttp2SampleRequest(
+        NTSTATUS status = STATUS_SUCCESS;
+        NTSTATUS sampleStatus = SendHttp2SampleRequest(
             wskClient,
             "HTTP2 GET",
             client::Http2TransportMode::TlsAlpn,
@@ -438,9 +457,10 @@ namespace samples
             0,
             {},
             results->Http2GetHttpBin);
+        status = MergePublicSampleStatus(status, "HTTP2 GET", sampleStatus);
 
         const UCHAR postBody[] = "{\"source\":\"kernel-http\",\"method\":\"HTTP2 POST\"}";
-        status = MergeSampleStatus(status, SendHttp2SampleRequest(
+        sampleStatus = SendHttp2SampleRequest(
             wskClient,
             "HTTP2 POST",
             client::Http2TransportMode::TlsAlpn,
@@ -449,9 +469,10 @@ namespace samples
             postBody,
             sizeof(postBody) - 1,
             http::MakeText("application/json"),
-            results->Http2PostHttpBin));
+            results->Http2PostHttpBin);
+        status = MergePublicSampleStatus(status, "HTTP2 POST", sampleStatus);
 
-        status = MergeSampleStatus(status, SendHttp2SampleRequest(
+        sampleStatus = SendHttp2SampleRequest(
             wskClient,
             "H2C prior knowledge GET",
             client::Http2TransportMode::H2cPriorKnowledge,
@@ -460,9 +481,10 @@ namespace samples
             nullptr,
             0,
             {},
-            results->H2cPriorKnowledgeGet));
+            results->H2cPriorKnowledgeGet);
+        status = MergePublicSampleStatus(status, "H2C prior knowledge GET", sampleStatus);
 
-        status = MergeSampleStatus(status, SendHttp2SampleRequest(
+        sampleStatus = SendHttp2SampleRequest(
             wskClient,
             "H2C upgrade GET",
             client::Http2TransportMode::H2cUpgrade,
@@ -471,7 +493,8 @@ namespace samples
             nullptr,
             0,
             {},
-            results->H2cUpgradeGet));
+            results->H2cUpgradeGet);
+        status = MergePublicSampleStatus(status, "H2C upgrade GET", sampleStatus);
 
         status = MergeSampleStatus(status, RunGoAwayFrameSample(results->GoAwayFrame));
         status = MergeSampleStatus(status, RunRstStreamFrameSample(results->RstStreamFrame));

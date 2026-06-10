@@ -505,6 +505,20 @@ NTSTATUS MixedUsage(net::WskClient& wskClient) {
 - 跟踪异步操作状态。
 - 使用 IRQL 检查确保在正确的 IRQL 级别调用。
 
+### 公网样例端点与诊断状态
+
+`KernelHttpTest` 的驱动加载公网样例用于观察真实网络路径，不作为确定性的协议 conformance 测试。DNS 无匹配、网络/主机/协议不可达、连接拒绝、连接断开/重置/中止、设备未连接和 I/O 超时会记录到对应样例结果中，但这类公网环境诊断状态不会决定整个样例矩阵失败。
+
+协议解析错误、API misuse、证书信任失败、证书签名错误、ALPN/unsupported protocol 等仍然是 fatal 状态。也就是说，公网端点不可达可以被记录为诊断；一旦服务端已返回畸形协议数据、证书策略失败或本地 API 使用错误，样例矩阵仍会失败。
+
+当前端点按能力分工：
+
+- `httpbin.dev`：HTTPS HTTP/2 verb、content-encoding 和通用 advanced httpbin-style 路径。
+- `httpbun.com`：plain HTTP/1.1 GET/POST/PUT/PATCH/DELETE verb echo。
+- `nghttp2.org`：仅保留需要已验证 HTTP/2/h2c 能力的路径，例如 h2c upgrade，以及尚未迁移验证的 HEAD/OPTIONS 样例。
+
+公网服务可能改变行为。做 live driver validation 时，应记录日期和时区、endpoint host、传输模式（HTTP/1.1、HTTPS HTTP/2、h2c prior knowledge、h2c upgrade）、HTTP 状态码或 NTSTATUS，以及该结果被计为 fatal 还是 diagnostic。
+
 ## 迁移指南
 
 ### 从高层 API 迁移到底层 API
