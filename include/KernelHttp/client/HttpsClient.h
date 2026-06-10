@@ -32,6 +32,7 @@ namespace client
         bool PreferHttp2 = true;
         tls::TlsProtocol MinimumTlsProtocol = tls::TlsProtocol::Tls12;
         tls::TlsProtocol MaximumTlsProtocol = tls::TlsProtocol::Tls13;
+        tls::TlsPolicy Policy = {};
         tls::Tls13SessionCache* SessionCache = nullptr;
         engine::KhWorkspace* Workspace = nullptr;
         const crypto::CngProviderCache* ProviderCache = nullptr;

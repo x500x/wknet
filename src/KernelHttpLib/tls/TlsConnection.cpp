@@ -1071,6 +1071,7 @@ namespace tls
             !IsValidBuffer(options.EarlyData, options.EarlyDataLength) ||
             options.HandshakeReceiveTimeoutMilliseconds == 0 ||
             (options.VerifyCertificate && options.CertificateStore == nullptr) ||
+            !NT_SUCCESS(TlsValidatePolicy(options.Policy)) ||
             static_cast<UCHAR>(options.MinimumProtocol) > static_cast<UCHAR>(options.MaximumProtocol)) {
             RecordHandshakeFailure(TlsHandshakeFailureCategory::LocalPolicy, STATUS_INVALID_PARAMETER);
             return STATUS_INVALID_PARAMETER;

@@ -29,10 +29,23 @@ namespace tls
     {
         TlsAes128GcmSha256 = 0x1301,
         TlsAes256GcmSha384 = 0x1302,
+        TlsChaCha20Poly1305Sha256 = 0x1303,
+        TlsAes128CcmSha256 = 0x1304,
+        TlsAes128Ccm8Sha256 = 0x1305,
+        TlsRsaWithAes128CbcSha256 = 0x003C,
+        TlsRsaWithAes128GcmSha256 = 0x009C,
+        TlsRsaWithAes256GcmSha384 = 0x009D,
+        TlsDheRsaWithAes128GcmSha256 = 0x009E,
+        TlsDheRsaWithAes256GcmSha384 = 0x009F,
+        TlsEcdheEcdsaWithAes128CbcSha256 = 0xC023,
+        TlsEcdheRsaWithAes128CbcSha256 = 0xC027,
         TlsEcdheRsaWithAes128GcmSha256 = 0xC02F,
         TlsEcdheEcdsaWithAes128GcmSha256 = 0xC02B,
         TlsEcdheRsaWithAes256GcmSha384 = 0xC030,
-        TlsEcdheEcdsaWithAes256GcmSha384 = 0xC02C
+        TlsEcdheEcdsaWithAes256GcmSha384 = 0xC02C,
+        TlsEcdheRsaWithChaCha20Poly1305Sha256 = 0xCCA8,
+        TlsEcdheEcdsaWithChaCha20Poly1305Sha256 = 0xCCA9,
+        TlsDheRsaWithChaCha20Poly1305Sha256 = 0xCCAA
     };
 
     enum class TlsHandshakeState : UCHAR

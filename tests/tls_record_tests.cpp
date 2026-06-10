@@ -5,9 +5,11 @@
 #include <KernelHttp/tls/TlsContext.h>
 #include <KernelHttp/tls/CertificateStore.h>
 #include <KernelHttp/tls/CertificateValidator.h>
+#include <KernelHttp/tls/TlsCapabilities.h>
 #include <KernelHttp/tls/TlsHandshake12.h>
 #include <KernelHttp/tls/TlsHandshake13.h>
 #include <KernelHttp/tls/TlsConnection.h>
+#include <KernelHttp/tls/TlsPolicy.h>
 #include <KernelHttp/tls/TlsRecord.h>
 
 #include <stdio.h>
@@ -44,6 +46,7 @@ using KernelHttp::tls::TlsClientHelloOptions;
 using KernelHttp::tls::TlsRecordHeaderLength;
 using KernelHttp::tls::TlsContentType;
 using KernelHttp::tls::TlsContext;
+using KernelHttp::tls::Tls12KeyExchangeKind;
 using KernelHttp::tls::TlsHandshake12;
 using KernelHttp::tls::TlsHandshake13;
 using KernelHttp::tls::TlsHandshakeMessageView;
@@ -73,6 +76,8 @@ using KernelHttp::tls::TlsServerHelloView;
 using KernelHttp::tls::TlsServerKeyExchangeView;
 using KernelHttp::tls::TlsSignatureScheme;
 using KernelHttp::tls::TlsSessionSecrets;
+using KernelHttp::tls::TlsPolicy;
+using KernelHttp::tls::TlsSecurityProfile;
 using KernelHttp::tls::TlsTranscriptHash;
 using KernelHttp::tls::TlsVerifyDataLength;
 
@@ -5063,6 +5068,40 @@ namespace
         Expect(status == STATUS_SUCCESS, "transcript finishes");
         Expect(written == 32, "SHA-256 transcript length is 32");
     }
+
+    void TestTlsCapabilityMatrix()
+    {
+        Expect(KernelHttp::tls::TlsIsKnownNamedGroup(TlsNamedGroup::X25519), "X25519 is a known named group");
+        Expect(KernelHttp::tls::TlsIsKnownNamedGroup(TlsNamedGroup::X448), "X448 is a known named group");
+        Expect(KernelHttp::tls::TlsIsKnownCipherSuite(TlsCipherSuite::TlsChaCha20Poly1305Sha256), "TLS 1.3 ChaCha20-Poly1305 is known");
+        Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::Ed25519), "Ed25519 is a known signature scheme");
+        Expect(KernelHttp::tls::TlsIsDefaultEnabledNamedGroup(TlsNamedGroup::X25519), "X25519 is default-enabled");
+        Expect(!KernelHttp::tls::TlsIsDefaultEnabledTls12KeyExchange(Tls12KeyExchangeKind::Rsa), "TLS 1.2 RSA key exchange is not default-enabled");
+    }
+
+    void TestTlsPolicyValidation()
+    {
+        TlsPolicy policy = {};
+        ExpectStatus(KernelHttp::tls::TlsValidatePolicy(policy), STATUS_SUCCESS, "modern default policy validates");
+        Expect(KernelHttp::tls::TlsPolicyAllowsNamedGroup(policy, TlsNamedGroup::X25519), "modern default policy allows X25519");
+        Expect(KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsChaCha20Poly1305Sha256), "modern default policy allows ChaCha20-Poly1305");
+        Expect(!KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128GcmSha256), "modern default policy rejects RSA key exchange");
+
+        policy.EnableTls12RsaKeyExchange = true;
+        ExpectStatus(KernelHttp::tls::TlsValidatePolicy(policy), STATUS_INVALID_PARAMETER, "modern default policy rejects legacy RSA opt-in");
+
+        policy = {};
+        policy.Profile = TlsSecurityProfile::CompatibilityExplicit;
+        policy.EnableTls12RsaKeyExchange = true;
+        policy.EnableTls12Cbc = true;
+        policy.EnableTls12Renegotiation = true;
+        ExpectStatus(KernelHttp::tls::TlsValidatePolicy(policy), STATUS_SUCCESS, "compatibility policy validates");
+        Expect(KernelHttp::tls::TlsPolicyAllowsTls12KeyExchange(policy, Tls12KeyExchangeKind::Rsa), "compatibility policy allows TLS 1.2 RSA");
+        Expect(KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128GcmSha256), "compatibility policy allows RSA GCM");
+        Expect(KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128CbcSha256), "compatibility policy allows RSA CBC");
+        Expect(KernelHttp::tls::TlsPolicyAllowsTls12Renegotiation(policy), "compatibility policy allows renegotiation");
+        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::Ed25519), "compatibility policy still allows modern signatures");
+    }
 }
 
 int main()
@@ -5157,6 +5196,8 @@ int main()
     TestEncodeClientKeyExchange();
     TestFinishedVerifyData();
     TestTranscriptHash();
+    TestTlsCapabilityMatrix();
+    TestTlsPolicyValidation();
 
     if (g_failed) {
         return 1;

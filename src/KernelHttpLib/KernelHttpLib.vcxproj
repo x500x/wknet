@@ -58,9 +58,11 @@
     <ClCompile Include="tls\TlsContext.cpp" />
     <ClCompile Include="tls\CertificateStore.cpp" />
     <ClCompile Include="tls\CertificateValidator.cpp" />
+    <ClCompile Include="tls\TlsCapabilities.cpp" />
     <ClCompile Include="tls\TlsConnection.cpp" />
     <ClCompile Include="tls\TlsHandshake12.cpp" />
     <ClCompile Include="tls\TlsHandshake13.cpp" />
+    <ClCompile Include="tls\TlsPolicy.cpp" />
     <ClCompile Include="tls\TlsRecord.cpp" />
     <ClCompile Include="websocket\WebSocketFrame.cpp" />
     <ClCompile Include="..\..\third_party\brotli\c\common\constants.c">
@@ -167,9 +169,11 @@
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsContext.h" />
     <ClInclude Include="..\..\include\KernelHttp\tls\CertificateStore.h" />
     <ClInclude Include="..\..\include\KernelHttp\tls\CertificateValidator.h" />
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsCapabilities.h" />
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsConnection.h" />
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsHandshake12.h" />
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsHandshake13.h" />
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsPolicy.h" />
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsRecord.h" />
     <ClInclude Include="..\..\include\KernelHttp\websocket\WebSocketFrame.h" />
   </ItemGroup>

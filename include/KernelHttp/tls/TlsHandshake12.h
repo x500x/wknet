@@ -31,7 +31,14 @@ namespace tls
     {
         Secp256r1 = 23,
         Secp384r1 = 24,
-        Secp521r1 = 25
+        Secp521r1 = 25,
+        X25519 = 29,
+        X448 = 30,
+        Ffdhe2048 = 256,
+        Ffdhe3072 = 257,
+        Ffdhe4096 = 258,
+        Ffdhe6144 = 259,
+        Ffdhe8192 = 260
     };
 
     enum class TlsSignatureScheme : USHORT
@@ -40,8 +47,16 @@ namespace tls
         EcdsaSecp256r1Sha256 = 0x0403,
         RsaPkcs1Sha384 = 0x0501,
         EcdsaSecp384r1Sha384 = 0x0503,
+        RsaPkcs1Sha512 = 0x0601,
+        EcdsaSecp521r1Sha512 = 0x0603,
+        Ed25519 = 0x0807,
+        Ed448 = 0x0808,
         RsaPssRsaeSha256 = 0x0804,
-        RsaPssRsaeSha384 = 0x0805
+        RsaPssRsaeSha384 = 0x0805,
+        RsaPssRsaeSha512 = 0x0806,
+        RsaPssPssSha256 = 0x0809,
+        RsaPssPssSha384 = 0x080a,
+        RsaPssPssSha512 = 0x080b
     };
 
     struct TlsHandshakeMessageView final

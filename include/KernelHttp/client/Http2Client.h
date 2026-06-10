@@ -5,6 +5,7 @@
 #include <KernelHttp/http2/Http2Connection.h>
 #include <KernelHttp/net/WskClient.h>
 #include <KernelHttp/tls/CertificateStore.h>
+#include <KernelHttp/tls/TlsPolicy.h>
 
 namespace KernelHttp
 {
@@ -40,6 +41,7 @@ namespace client
         bool IncludeContentLength = false;
         const tls::CertificateStore* CertificateStore = nullptr;
         bool VerifyCertificate = true;
+        tls::TlsPolicy Policy = {};
     };
 
     _Must_inspect_result_

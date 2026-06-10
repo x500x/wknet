@@ -38,6 +38,7 @@ namespace engine
         KhTlsVersion MaxTlsVersion = KhTlsVersion::Tls13;
         KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
         const tls::CertificateStore* CertificateStore = nullptr;
+        tls::TlsPolicy Policy = {};
         char TlsServerName[KhPoolMaxTlsServerNameLength + 1] = {};
         SIZE_T TlsServerNameLength = 0;
         char Alpn[KhPoolMaxAlpnLength + 1] = {};

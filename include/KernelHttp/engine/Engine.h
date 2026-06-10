@@ -2,6 +2,7 @@
 
 #include <KernelHttp/http/HttpTypes.h>
 #include <KernelHttp/net/WskClient.h>
+#include <KernelHttp/tls/TlsPolicy.h>
 
 namespace KernelHttp
 {
@@ -150,6 +151,7 @@ namespace engine
         SIZE_T ServerNameLength = 0;
         const char* Alpn = nullptr;
         SIZE_T AlpnLength = 0;
+        tls::TlsPolicy Policy = {};
         ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;
     };
 
@@ -508,6 +510,7 @@ namespace engine
         const tls::CertificateStore* CertificateStore = nullptr;
         const char* Alpn = nullptr;
         SIZE_T AlpnLength = 0;
+        tls::TlsPolicy Policy = {};
         bool PoolableConnection = false;
         bool ReusedConnection = false;
         ULONG ConnectionId = 0;
@@ -540,6 +543,7 @@ namespace engine
         const tls::CertificateStore* CertificateStore = nullptr;
         KhTlsVersion MinTlsVersion = KhTlsVersion::Tls12;
         KhTlsVersion MaxTlsVersion = KhTlsVersion::Tls13;
+        tls::TlsPolicy Policy = {};
         KhAddressFamily AddressFamily = KhAddressFamily::Any;
         bool AutoReplyPing = true;
         SIZE_T MaxMessageBytes = 0;

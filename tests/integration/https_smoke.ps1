@@ -162,10 +162,12 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\crypto\CngProviderCache.cpp',
             'src\KernelHttpLib\tls\CertificateStore.cpp',
             'src\KernelHttpLib\tls\CertificateValidator.cpp',
+            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
             'src\KernelHttpLib\tls\TlsConnection.cpp',
             'src\KernelHttpLib\tls\TlsContext.cpp',
             'src\KernelHttpLib\tls\TlsHandshake12.cpp',
             'src\KernelHttpLib\tls\TlsHandshake13.cpp',
+            'src\KernelHttpLib\tls\TlsPolicy.cpp',
             'src\KernelHttpLib\tls\TlsRecord.cpp'
         )
 
@@ -186,6 +188,8 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\tls\TlsRecord.cpp',
             'src\KernelHttpLib\tls\CertificateStore.cpp',
             'src\KernelHttpLib\tls\CertificateValidator.cpp',
+            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
+            'src\KernelHttpLib\tls\TlsPolicy.cpp',
             'src\KernelHttpLib\crypto\CngProvider.cpp',
             'src\KernelHttpLib\crypto\CngProviderCache.cpp'
         )
@@ -221,6 +225,8 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\crypto\CngProvider.cpp',
             'src\KernelHttpLib\crypto\CngProviderCache.cpp',
             'src\KernelHttpLib\tls\CertificateStore.cpp',
+            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
+            'src\KernelHttpLib\tls\TlsPolicy.cpp',
             'src\KernelHttpLib\websocket\WebSocketFrame.cpp',
             'third_party\brotli\c\common\constants.c',
             'third_party\brotli\c\common\context.c',
@@ -268,6 +274,8 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\crypto\CngProvider.cpp',
             'src\KernelHttpLib\crypto\CngProviderCache.cpp',
             'src\KernelHttpLib\tls\CertificateStore.cpp',
+            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
+            'src\KernelHttpLib\tls\TlsPolicy.cpp',
             'src\KernelHttpLib\websocket\WebSocketFrame.cpp',
             'third_party\brotli\c\common\constants.c',
             'third_party\brotli\c\common\context.c',
@@ -300,10 +308,12 @@ function Invoke-HostRegression {
             'src\KernelHttpLib\crypto\CngProviderCache.cpp',
             'src\KernelHttpLib\tls\CertificateStore.cpp',
             'src\KernelHttpLib\tls\CertificateValidator.cpp',
+            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
             'src\KernelHttpLib\tls\TlsConnection.cpp',
             'src\KernelHttpLib\tls\TlsContext.cpp',
             'src\KernelHttpLib\tls\TlsHandshake12.cpp',
             'src\KernelHttpLib\tls\TlsHandshake13.cpp',
+            'src\KernelHttpLib\tls\TlsPolicy.cpp',
             'src\KernelHttpLib\tls\TlsRecord.cpp',
             'third_party\brotli\c\common\constants.c',
             'third_party\brotli\c\common\context.c',

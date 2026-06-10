@@ -331,6 +331,12 @@ namespace
             left.MaxTlsVersion == right.MaxTlsVersion &&
             left.CertificatePolicy == right.CertificatePolicy &&
             left.CertificateStore == right.CertificateStore &&
+            left.Policy.Profile == right.Policy.Profile &&
+            left.Policy.EnableTls12RsaKeyExchange == right.Policy.EnableTls12RsaKeyExchange &&
+            left.Policy.EnableTls12Cbc == right.Policy.EnableTls12Cbc &&
+            left.Policy.EnableTls12Renegotiation == right.Policy.EnableTls12Renegotiation &&
+            left.Policy.EnablePostHandshakeClientAuth == right.Policy.EnablePostHandshakeClientAuth &&
+            left.Policy.RequireRevocationCheck == right.Policy.RequireRevocationCheck &&
             TextEquals(left.Scheme, left.SchemeLength, right.Scheme, right.SchemeLength) &&
             TextEquals(left.Host, left.HostLength, right.Host, right.HostLength) &&
             TextEquals(left.TlsServerName, left.TlsServerNameLength, right.TlsServerName, right.TlsServerNameLength) &&

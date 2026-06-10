@@ -1,6 +1,7 @@
 #pragma once
 
 #include <KernelHttp/http/HttpTypes.h>
+#include <KernelHttp/tls/TlsPolicy.h>
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <ntddk.h>
@@ -182,6 +183,7 @@ namespace khttp
         SIZE_T ServerNameLength = 0;
         const char* Alpn = nullptr;
         SIZE_T AlpnLength = 0;
+        tls::TlsPolicy Policy = {};
         ULONG HandshakeTimeoutMs = DefaultTlsHandshakeTimeoutMs;
     };
 

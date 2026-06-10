@@ -329,7 +329,7 @@ namespace
             return false;
         }
 
-        return true;
+        return NT_SUCCESS(tls::TlsValidatePolicy(options.Policy));
     }
 
     bool IsValidSessionOptions(const KhSessionOptions& options) noexcept

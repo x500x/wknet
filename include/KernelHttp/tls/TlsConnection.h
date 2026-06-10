@@ -4,6 +4,7 @@
 #include <KernelHttp/core/ITransport.h>
 #include <KernelHttp/tls/CertificateValidator.h>
 #include <KernelHttp/tls/TlsHandshake13.h>
+#include <KernelHttp/tls/TlsPolicy.h>
 #include <KernelHttp/tls/TlsRecord.h>
 
 namespace KernelHttp
@@ -63,6 +64,7 @@ namespace tls
         bool* EarlyDataAccepted = nullptr;
         TlsProtocol MinimumProtocol = TlsProtocol::Tls12;
         TlsProtocol MaximumProtocol = TlsProtocol::Tls13;
+        TlsPolicy Policy = {};
         ULONG HandshakeReceiveTimeoutMilliseconds = TlsHandshakeReceiveTimeoutMilliseconds;
         Tls13SessionCache* SessionCache = nullptr;
         core::IScratchAllocator* HandshakeScratchAllocator = nullptr;

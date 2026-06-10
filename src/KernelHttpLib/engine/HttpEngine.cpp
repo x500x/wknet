@@ -439,6 +439,7 @@ namespace engine
         key->MaxTlsVersion = request.Tls.MaxVersion;
         key->CertificatePolicy = request.Tls.CertificatePolicy;
         key->CertificateStore = request.Tls.CertificateStore;
+        key->Policy = request.Tls.Policy;
         const bool useTlsIdentity = TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https");
         const char* tlsServerName = request.Tls.ServerName != nullptr ? request.Tls.ServerName : request.Host;
         const SIZE_T tlsServerNameLength = request.Tls.ServerName != nullptr ?
@@ -823,6 +824,9 @@ namespace engine
         options->Body = request.Body;
         options->BodyLength = request.BodyLength;
         options->IncludeContentLength = request.HasBody;
+        options->CertificateStore = request.Tls.CertificateStore;
+        options->VerifyCertificate = request.Tls.CertificatePolicy == KhCertificatePolicy::Verify;
+        options->Policy = request.Tls.Policy;
 
         SIZE_T extraHeaderCount = 0;
         for (SIZE_T index = 0; index < requestHeaderCount; ++index) {
@@ -1481,6 +1485,7 @@ namespace engine
         tlsOptions.VerifyCertificate = request.Tls.CertificatePolicy == KhCertificatePolicy::Verify;
         tlsOptions.MinimumProtocol = ToTlsProtocol(request.Tls.MinVersion);
         tlsOptions.MaximumProtocol = ToTlsProtocol(maximumTlsVersion);
+        tlsOptions.Policy = request.Tls.Policy;
         tlsOptions.HandshakeReceiveTimeoutMilliseconds = request.Tls.HandshakeReceiveTimeoutMilliseconds;
         tlsOptions.HandshakeScratchAllocator = handshakeScratch;
         tlsOptions.CertificateScratchAllocator = certificateScratch;
@@ -1698,6 +1703,7 @@ namespace engine
         testRequest.CertificateStore = request.Tls.CertificateStore;
         testRequest.Alpn = request.Tls.Alpn;
         testRequest.AlpnLength = request.Tls.AlpnLength;
+        testRequest.Policy = request.Tls.Policy;
         testRequest.PoolableConnection = request.ConnectionPolicy != KhConnectionPolicy::NoPool;
         testRequest.ReusedConnection = reusedConnection;
         testRequest.ConnectionId = pooledConnection != nullptr ? pooledConnection->Id : 0;

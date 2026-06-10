@@ -45,6 +45,7 @@ namespace client
         net::WskAddressFamily AddressFamily = net::WskAddressFamily::Any;
         tls::TlsProtocol MinimumTlsProtocol = tls::TlsProtocol::Tls12;
         tls::TlsProtocol MaximumTlsProtocol = tls::TlsProtocol::Tls13;
+        tls::TlsPolicy Policy = {};
         ULONG HandshakeReceiveTimeoutMilliseconds = TlsHandshakeReceiveTimeoutMilliseconds;
         const net::WskCancellationToken* Cancellation = nullptr;
         bool UseTls = false;

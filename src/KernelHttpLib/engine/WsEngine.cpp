@@ -673,6 +673,12 @@ namespace engine
             options.Tls.AlpnLength == 0 &&
             options.Tls.MinVersion == KhTlsVersion::Tls12 &&
             options.Tls.MaxVersion == KhTlsVersion::Tls13 &&
+            options.Tls.Policy.Profile == tls::TlsSecurityProfile::ModernDefault &&
+            !options.Tls.Policy.EnableTls12RsaKeyExchange &&
+            !options.Tls.Policy.EnableTls12Cbc &&
+            !options.Tls.Policy.EnableTls12Renegotiation &&
+            !options.Tls.Policy.EnablePostHandshakeClientAuth &&
+            !options.Tls.Policy.RequireRevocationCheck &&
             options.Tls.HandshakeReceiveTimeoutMilliseconds == KhDefaultTlsHandshakeReceiveTimeoutMilliseconds) {
             effectiveTls = session->Options.Tls;
         }
@@ -715,6 +721,7 @@ namespace engine
         testRequest.CertificateStore = effectiveTls.CertificateStore;
         testRequest.MinTlsVersion = effectiveTls.MinVersion;
         testRequest.MaxTlsVersion = effectiveTls.MaxVersion;
+        testRequest.Policy = effectiveTls.Policy;
         testRequest.HandshakeReceiveTimeoutMilliseconds = effectiveTls.HandshakeReceiveTimeoutMilliseconds;
         testRequest.AddressFamily = options.AddressFamily;
         testRequest.AutoReplyPing = newWebSocket->AutoReplyPing;
@@ -796,6 +803,7 @@ namespace engine
         connectOptions.AddressFamily = ToWskAddressFamily(options.AddressFamily);
         connectOptions.MinimumTlsProtocol = ToTlsProtocol(effectiveTls.MinVersion);
         connectOptions.MaximumTlsProtocol = ToTlsProtocol(effectiveTls.MaxVersion);
+        connectOptions.Policy = effectiveTls.Policy;
         connectOptions.HandshakeReceiveTimeoutMilliseconds = effectiveTls.HandshakeReceiveTimeoutMilliseconds;
         net::WskCancellationToken cancellation = {};
         if (cancellationOperation != nullptr) {

@@ -555,7 +555,8 @@ namespace client
         if (IsTlsMode(options.TransportMode) &&
             (options.ServerName == nullptr ||
                 options.ServerNameLength == 0 ||
-                (options.VerifyCertificate && options.CertificateStore == nullptr))) {
+                (options.VerifyCertificate && options.CertificateStore == nullptr) ||
+                !NT_SUCCESS(tls::TlsValidatePolicy(options.Policy)))) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -620,6 +621,7 @@ namespace client
             tlsOptions.ServerNameLength = options.ServerNameLength;
             tlsOptions.CertificateStore = options.CertificateStore;
             tlsOptions.VerifyCertificate = options.VerifyCertificate;
+            tlsOptions.Policy = options.Policy;
             tlsOptions.AlpnProtocols = alpnProtocols;
             tlsOptions.AlpnProtocolCount = 2;
 

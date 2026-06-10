@@ -191,6 +191,9 @@
     <ClCompile Include="tls\CertificateValidator.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
+    <ClCompile Include="tls\TlsCapabilities.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
     <ClCompile Include="tls\TlsConnection.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
@@ -198,6 +201,9 @@
       <Filter>Source Files\tls</Filter>
     </ClCompile>
     <ClCompile Include="tls\TlsHandshake13.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsPolicy.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
     <ClCompile Include="tls\TlsRecord.cpp">
@@ -406,6 +412,9 @@
     <ClInclude Include="..\..\include\KernelHttp\tls\CertificateValidator.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsCapabilities.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsConnection.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
@@ -413,6 +422,9 @@
       <Filter>Header Files\tls</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsHandshake13.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\tls\TlsPolicy.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsRecord.h">
