@@ -3,6 +3,8 @@
 #endif
 
 #include <KernelHttp/khttp/Test.h>
+#include <KernelHttp/khttp/Http.h>
+#include <KernelHttp/khttp/Response.h>
 #include <KernelHttp/khttp/Session.h>
 #include <KernelHttp/khttp/WebSocket.h>
 #include <KernelHttpTest/SampleStatus.h>
@@ -257,6 +259,54 @@ namespace
             "\r\n";
         response->RawResponse = rawResponse;
         response->RawResponseLength = sizeof(rawResponse) - 1;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    constexpr SIZE_T LargePostBodyLength = 88 * 1024;
+
+    SIZE_T BuildLargePostResponse(char* buffer, SIZE_T capacity) noexcept
+    {
+        static const char header[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 90112\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        const SIZE_T headerLength = sizeof(header) - 1;
+        if (buffer == nullptr || capacity < headerLength + LargePostBodyLength) {
+            return 0;
+        }
+
+        memcpy(buffer, header, headerLength);
+        for (SIZE_T index = 0; index < LargePostBodyLength; ++index) {
+            buffer[headerLength + index] = static_cast<char>('a' + (index % 26));
+        }
+        return headerLength + LargePostBodyLength;
+    }
+
+    NTSTATUS LargePostHttpTransport(
+        void*,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        if (request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (!BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "POST /post ")) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        static char rawResponse[LargePostBodyLength + 128] = {};
+        static SIZE_T rawResponseLength = 0;
+        if (rawResponseLength == 0) {
+            rawResponseLength = BuildLargePostResponse(rawResponse, sizeof(rawResponse));
+            if (rawResponseLength == 0) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+        }
+
+        response->RawResponse = rawResponse;
+        response->RawResponseLength = rawResponseLength;
         response->ConnectionReusable = false;
         return STATUS_SUCCESS;
     }
@@ -799,6 +849,63 @@ namespace
         KernelHttp::khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
 
+    void TestHighLevelPostLargeResponseHonorsMaxResponseBytes() noexcept
+    {
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(LargePostHttpTransport, nullptr);
+
+        static const char url[] = "https://httpbin.dev/post";
+        static const UCHAR requestBody[] = { 'x' };
+
+        KernelHttp::khttp::SessionConfig config = KernelHttp::khttp::DefaultSessionConfig();
+        config.MaxResponseBytes = 128 * 1024;
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for large POST response");
+
+        KernelHttp::khttp::Response* response = nullptr;
+        status = KernelHttp::khttp::Post(
+            session,
+            url,
+            sizeof(url) - 1,
+            requestBody,
+            sizeof(requestBody),
+            &response);
+        Expect(NT_SUCCESS(status), "khttp::Post aggregates large response within MaxResponseBytes");
+        Expect(
+            KernelHttp::khttp::ResponseBodyLength(response) == LargePostBodyLength,
+            "khttp::Post large response body length matches");
+        KernelHttp::khttp::ResponseRelease(response);
+        KernelHttp::khttp::SessionClose(session);
+
+        config = KernelHttp::khttp::DefaultSessionConfig();
+        config.MaxResponseBytes = 64 * 1024;
+        session = nullptr;
+        status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for limited large POST response");
+
+        response = nullptr;
+        status = KernelHttp::khttp::Post(
+            session,
+            url,
+            sizeof(url) - 1,
+            requestBody,
+            sizeof(requestBody),
+            &response);
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "khttp::Post rejects large response above MaxResponseBytes");
+        Expect(response == nullptr, "limited khttp::Post leaves response null");
+        KernelHttp::khttp::ResponseRelease(response);
+        KernelHttp::khttp::SessionClose(session);
+
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
     void TestWebSocketReceiveHonorsPerCallMessageLimit() noexcept
     {
         SampleCapture capture = {};
@@ -916,6 +1023,7 @@ int main() noexcept
     TestLoadTimeSamplesIgnoreRepeatedPublicWebSocketConnectFailures();
     TestLoadTimeSamplesIgnorePublicWebSocketNoMatchFailures();
     TestAdvancedScenarioSamplesCoverMissingSurface();
+    TestHighLevelPostLargeResponseHonorsMaxResponseBytes();
     TestWebSocketReceiveHonorsPerCallMessageLimit();
     TestHighLevelWebSocketPublicValidation();
 

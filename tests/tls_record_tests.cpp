@@ -104,6 +104,8 @@ namespace
     const char PkiLeafCertificatePath[] = "tests\\testdata\\pki\\leaf.cert.pem";
     const char PkiBadLeafCertificatePath[] = "tests\\testdata\\pki\\bad-leaf.cert.pem";
     const char PkiIdnaLeafCertificatePath[] = "tests\\testdata\\pki\\idna-leaf.cert.pem";
+    const char WsPostmanEchoServerKeyExchangePath[] =
+        "tests\\testdata\\tls\\ws-postman-echo-server-key-exchange.bin";
     const char PemCertificateBegin[] = "-----BEGIN CERTIFICATE-----";
     const char PemCertificateEnd[] = "-----END CERTIFICATE-----";
 
@@ -4436,6 +4438,43 @@ namespace
         Expect(keyExchange.SignatureLength == 4, "signature parses");
     }
 
+    void TestParseWsPostmanEchoServerKeyExchange()
+    {
+        UCHAR body[329] = {};
+        SIZE_T bodyLength = 0;
+        const bool loaded = ReadFileBytes(
+            WsPostmanEchoServerKeyExchangePath,
+            body,
+            sizeof(body),
+            &bodyLength);
+        Expect(loaded, "ws.postman-echo.com ServerKeyExchange fixture loads");
+        Expect(bodyLength == 329, "ws.postman-echo.com ServerKeyExchange body length matches");
+
+        TlsContext context;
+        NTSTATUS status = context.InitializeClient({ 3, 3 });
+        Expect(status == STATUS_SUCCESS, "context initializes for ws.postman-echo.com ServerKeyExchange");
+        status = context.SetCipherSuite(TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256);
+        Expect(status == STATUS_SUCCESS, "context selects TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256");
+
+        TlsHandshakeMessageView message = {};
+        message.Type = TlsHandshakeType::ServerKeyExchange;
+        message.Body = body;
+        message.BodyLength = bodyLength;
+
+        TlsServerKeyExchangeView keyExchange = {};
+        status = TlsHandshake12::ParseServerKeyExchange(context, message, keyExchange);
+
+        Expect(status == STATUS_SUCCESS, "ws.postman-echo.com ServerKeyExchange parses");
+        Expect(keyExchange.NamedGroup == TlsNamedGroup::Secp256r1,
+            "ws.postman-echo.com ServerKeyExchange named group parses");
+        Expect(keyExchange.EcPointLength == 65,
+            "ws.postman-echo.com ServerKeyExchange EC point length parses");
+        Expect(keyExchange.SignatureScheme == TlsSignatureScheme::RsaPkcs1Sha256,
+            "ws.postman-echo.com ServerKeyExchange signature scheme parses");
+        Expect(keyExchange.SignatureLength == 256,
+            "ws.postman-echo.com ServerKeyExchange signature length parses");
+    }
+
     void TestTls12ServerHelloOfferValidation()
     {
         TlsContext context;
@@ -6086,6 +6125,7 @@ int main()
     TestTls12ConnectionRejectsServerHelloWithoutEms();
     TestTls12ServerHelloAlpnStrictness();
     TestParseServerKeyExchange();
+    TestParseWsPostmanEchoServerKeyExchange();
     TestTls12ServerHelloOfferValidation();
     TestTls12ServerKeyExchangeOfferValidation();
     TestParseCertificateListState();

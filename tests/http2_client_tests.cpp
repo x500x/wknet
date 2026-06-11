@@ -3,6 +3,7 @@
 #endif
 
 #include <KernelHttp/client/Http2Client.h>
+#include <KernelHttp/engine/Workspace.h>
 #include <KernelHttp/http2/Http2Connection.h>
 #include <KernelHttp/net/WskSocket.h>
 #include <KernelHttp/tls/TlsConnection.h>
@@ -16,6 +17,12 @@ using KernelHttp::client::Http2MaxHeaderNameLength;
 using KernelHttp::client::Http2MaxRequestHeaders;
 using KernelHttp::client::Http2RequestOptions;
 using KernelHttp::client::Http2TransportMode;
+using KernelHttp::engine::KhWorkspace;
+using KernelHttp::engine::KhWorkspaceAppendResponse;
+using KernelHttp::engine::KhWorkspaceCreate;
+using KernelHttp::engine::KhWorkspaceOptions;
+using KernelHttp::engine::KhWorkspaceRelease;
+using KernelHttp::engine::KhWorkspaceResponseInitialBytes;
 using KernelHttp::http::HttpHeader;
 using KernelHttp::http::HttpMethod;
 using KernelHttp::http::HttpText;
@@ -27,6 +34,7 @@ using KernelHttp::http2::Http2FrameCodec;
 using KernelHttp::http2::Http2FrameHeader;
 using KernelHttp::http2::Http2InitialWindowSize;
 using KernelHttp::http2::Http2MaxWindowSize;
+using KernelHttp::http2::Http2ResponseBodySink;
 using KernelHttp::http2::Http2Settings;
 using KernelHttp::http2::Http2Transport;
 using KernelHttp::http2::HpackEncoder;
@@ -154,6 +162,14 @@ namespace
             }
         }
         return nullptr;
+    }
+
+    NTSTATUS AppendWorkspaceResponseForTest(
+        void* context,
+        const UCHAR* data,
+        SIZE_T dataLength) noexcept
+    {
+        return KhWorkspaceAppendResponse(static_cast<KhWorkspace*>(context), data, dataLength);
     }
 
     class ScriptedHttp2Transport final : public Http2Transport
@@ -1240,6 +1256,149 @@ namespace
             "HTTP/2 large response sends stream WINDOW_UPDATE frames");
     }
 
+    void TestWorkspaceResponseSinkGrowsForLargeResponse()
+    {
+        constexpr SIZE_T FirstChunkLength = 32768;
+        constexpr SIZE_T SecondChunkLength = 32768;
+        constexpr SIZE_T FinalChunkLength = 24 * 1024;
+        constexpr SIZE_T TotalBodyLength =
+            FirstChunkLength + SecondChunkLength + FinalChunkLength;
+
+        static UCHAR firstChunk[FirstChunkLength] = {};
+        static UCHAR secondChunk[SecondChunkLength] = {};
+        static UCHAR finalChunk[FinalChunkLength] = {};
+        static UCHAR script[92 * 1024] = {};
+        SIZE_T scriptLength = 0;
+
+        for (SIZE_T i = 0; i < FirstChunkLength; ++i) {
+            firstChunk[i] = static_cast<UCHAR>('a' + (i % 26));
+        }
+        for (SIZE_T i = 0; i < SecondChunkLength; ++i) {
+            secondChunk[i] = static_cast<UCHAR>('A' + (i % 26));
+        }
+        for (SIZE_T i = 0; i < FinalChunkLength; ++i) {
+            finalChunk[i] = static_cast<UCHAR>('0' + (i % 10));
+        }
+
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 workspace sink server settings fixture builds");
+        Expect(AppendResponseHeaders(false, true, script, sizeof(script), &scriptLength),
+            "HTTP/2 workspace sink headers fixture builds");
+        Expect(AppendData(firstChunk, sizeof(firstChunk), false, script, sizeof(script), &scriptLength),
+            "HTTP/2 workspace sink first DATA fixture builds");
+        Expect(AppendData(secondChunk, sizeof(secondChunk), false, script, sizeof(script), &scriptLength),
+            "HTTP/2 workspace sink second DATA fixture builds");
+        Expect(AppendData(finalChunk, sizeof(finalChunk), true, script, sizeof(script), &scriptLength),
+            "HTTP/2 workspace sink final DATA fixture builds");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("POST") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/post") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+
+        {
+            KhWorkspaceOptions options = {};
+            options.MaxResponseBytes = 128 * 1024;
+            KhWorkspace* workspace = nullptr;
+            NTSTATUS status = KhWorkspaceCreate(&options, &workspace);
+            Expect(NT_SUCCESS(status) && workspace != nullptr, "workspace creates for large H2 response");
+            Expect(
+                workspace != nullptr &&
+                    workspace->Response.Length == KhWorkspaceResponseInitialBytes,
+                "workspace starts with initial response capacity");
+
+            ScriptedHttp2Transport transport(script, scriptLength);
+            Http2Connection connection;
+            status = connection.Initialize(transport);
+            Expect(status == STATUS_SUCCESS, "HTTP/2 workspace sink connection initializes");
+
+            HttpHeader responseHeaders[4] = {};
+            SIZE_T responseHeaderCount = 0;
+            SIZE_T responseBodyLength = 0;
+            USHORT statusCode = 0;
+            char nameValueBuffer[128] = {};
+            Http2ResponseBodySink sink = {};
+            sink.Append = AppendWorkspaceResponseForTest;
+            sink.Context = workspace;
+
+            status = connection.SendRequest(
+                transport,
+                requestHeaders,
+                sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+                nullptr,
+                0,
+                responseHeaders,
+                sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+                &responseHeaderCount,
+                sink,
+                &responseBodyLength,
+                &statusCode,
+                nameValueBuffer,
+                sizeof(nameValueBuffer));
+
+            Expect(status == STATUS_SUCCESS, "HTTP/2 workspace sink receives large response");
+            Expect(statusCode == 200, "HTTP/2 workspace sink status is decoded");
+            Expect(responseBodyLength == TotalBodyLength, "HTTP/2 workspace sink body length matches");
+            Expect(workspace != nullptr && workspace->ResponseLength == TotalBodyLength,
+                "workspace records H2 response length");
+            Expect(workspace != nullptr && workspace->Response.Length >= TotalBodyLength,
+                "workspace response buffer grows for H2 DATA");
+            Expect(workspace != nullptr && memcmp(workspace->Response.Data, firstChunk, FirstChunkLength) == 0,
+                "workspace response starts with first chunk");
+            Expect(
+                CountSentFrames(transport, KernelHttp::http2::Http2FrameType::WindowUpdate, 1) >= 2,
+                "HTTP/2 workspace sink still sends stream WINDOW_UPDATE frames");
+
+            KhWorkspaceRelease(workspace);
+        }
+
+        {
+            KhWorkspaceOptions options = {};
+            options.MaxResponseBytes = 64 * 1024;
+            KhWorkspace* workspace = nullptr;
+            NTSTATUS status = KhWorkspaceCreate(&options, &workspace);
+            Expect(NT_SUCCESS(status) && workspace != nullptr, "limited workspace creates for H2 response");
+
+            ScriptedHttp2Transport transport(script, scriptLength);
+            Http2Connection connection;
+            status = connection.Initialize(transport);
+            Expect(status == STATUS_SUCCESS, "limited HTTP/2 workspace sink connection initializes");
+
+            HttpHeader responseHeaders[4] = {};
+            SIZE_T responseHeaderCount = 0;
+            SIZE_T responseBodyLength = 0;
+            USHORT statusCode = 0;
+            char nameValueBuffer[128] = {};
+            Http2ResponseBodySink sink = {};
+            sink.Append = AppendWorkspaceResponseForTest;
+            sink.Context = workspace;
+
+            status = connection.SendRequest(
+                transport,
+                requestHeaders,
+                sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+                nullptr,
+                0,
+                responseHeaders,
+                sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+                &responseHeaderCount,
+                sink,
+                &responseBodyLength,
+                &statusCode,
+                nameValueBuffer,
+                sizeof(nameValueBuffer));
+
+            Expect(status == STATUS_BUFFER_TOO_SMALL,
+                "HTTP/2 workspace sink honors MaxResponseBytes");
+            Expect(workspace != nullptr && workspace->ResponseLength == 64 * 1024,
+                "limited workspace keeps received bytes up to response limit");
+
+            KhWorkspaceRelease(workspace);
+        }
+    }
+
     void TestConnectionAcceptsRaisedMaxFrameSizePayload()
     {
         constexpr SIZE_T BodyLength = 32768;
@@ -2063,6 +2222,75 @@ namespace
             "HTTP/2 malformed response headers send RST_STREAM");
     }
 
+    void TestConnectionAcceptsResponseFieldValueOptionalWhitespace()
+    {
+        const HttpHeader headers[] = {
+            { MakeText(":status"), MakeText("200") },
+            { MakeText("content-security-policy"), MakeText(" frame-ancestors 'self'") },
+            { MakeText("x-trailing-tab"), { "ok\t", 3 } },
+            { MakeText("content-length"), MakeText("0") }
+        };
+
+        UCHAR script[512] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 OWS response server settings fixture builds");
+        Expect(AppendEncodedResponseHeaders(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            true,
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 OWS response headers fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 OWS response connection initializes");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[8] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[160] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_SUCCESS, "HTTP/2 accepts response field value OWS");
+        Expect(statusCode == 200, "HTTP/2 OWS response status is decoded");
+        const HttpHeader* csp = FindHeader(
+            responseHeaders,
+            responseHeaderCount,
+            "content-security-policy");
+        Expect(csp != nullptr, "HTTP/2 OWS response preserves CSP header");
+        Expect(
+            csp != nullptr &&
+                csp->Value.Length == sizeof(" frame-ancestors 'self'") - 1 &&
+                memcmp(csp->Value.Data, " frame-ancestors 'self'", csp->Value.Length) == 0,
+            "HTTP/2 OWS response preserves leading SP value");
+    }
+
     void TestConnectionRejectsMalformedResponseHeaders()
     {
         const UCHAR duplicateStatus[] = { 0x88, 0x88 };
@@ -2158,21 +2386,13 @@ namespace
             sizeof(crValue),
             "HTTP/2 rejects CR response field value");
 
-        const UCHAR leadingSpaceValue[] = {
-            0x88, 0x00, 0x06, 'x', '-', 't', 'e', 's', 't', 0x02, ' ', 'v'
+        const UCHAR lfValue[] = {
+            0x88, 0x00, 0x06, 'x', '-', 't', 'e', 's', 't', 0x03, 'a', '\n', 'b'
         };
         ExpectResponseHeaderBlockRejected(
-            leadingSpaceValue,
-            sizeof(leadingSpaceValue),
-            "HTTP/2 rejects leading SP response field value");
-
-        const UCHAR trailingTabValue[] = {
-            0x88, 0x00, 0x06, 'x', '-', 't', 'e', 's', 't', 0x02, 'v', '\t'
-        };
-        ExpectResponseHeaderBlockRejected(
-            trailingTabValue,
-            sizeof(trailingTabValue),
-            "HTTP/2 rejects trailing HTAB response field value");
+            lfValue,
+            sizeof(lfValue),
+            "HTTP/2 rejects LF response field value");
     }
 
     void TestConnectionValidatesResponseContentLength()
@@ -2537,6 +2757,7 @@ int main()
     TestUpgradeReservesStreamOneForInitiatingRequest();
     TestEndStreamDataSkipsStreamWindowUpdate();
     TestLargeResponseReplenishesStreamWindow();
+    TestWorkspaceResponseSinkGrowsForLargeResponse();
     TestConnectionAcceptsRaisedMaxFrameSizePayload();
     TestTimeoutBeforeEndStreamFailsResponse();
     TestDeleteWithBodySendsDataEndStream();
@@ -2559,6 +2780,7 @@ int main()
     TestSettingsAckTimeoutSendsGoAway();
     TestConnectionRejectsInvalidPingLengths();
     TestConnectionRejectsPushPromiseWhenPushDisabled();
+    TestConnectionAcceptsResponseFieldValueOptionalWhitespace();
     TestConnectionRejectsMalformedResponseHeaders();
     TestConnectionValidatesResponseContentLength();
     TestConnectionRejectsDataForNoBodyResponses();

@@ -307,6 +307,47 @@ namespace
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS KhWorkspaceEnsureDecodedBodyCapacity(KhWorkspace* workspace, SIZE_T requiredCapacity) noexcept
+    {
+        if (workspace == nullptr || requiredCapacity == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const bool hasLimit = HasResponseByteLimit(workspace->MaxResponseBytes);
+        if (hasLimit && requiredCapacity > workspace->MaxResponseBytes) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        if (requiredCapacity <= workspace->DecodedBody.Length) {
+            return STATUS_SUCCESS;
+        }
+
+        SIZE_T newLength = workspace->DecodedBody.Length;
+        if (newLength == 0) {
+            newLength = hasLimit ?
+                MinimumSize(KhWorkspaceDecodedBodyBytes, workspace->MaxResponseBytes) :
+                KhWorkspaceDecodedBodyBytes;
+        }
+
+        while (newLength < requiredCapacity) {
+            if (hasLimit && newLength >= workspace->MaxResponseBytes) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            if (AddWouldOverflow(newLength, newLength)) {
+                newLength = requiredCapacity;
+            }
+            else {
+                newLength *= 2;
+                if (hasLimit && newLength > workspace->MaxResponseBytes) {
+                    newLength = workspace->MaxResponseBytes;
+                }
+            }
+        }
+
+        return GrowBuffer(workspace->PoolType, &workspace->DecodedBody, newLength);
+    }
+
     NTSTATUS KhWorkspaceEnsureWebSocketPayloadCapacity(
         KhWorkspace* workspace,
         SIZE_T requiredCapacity) noexcept

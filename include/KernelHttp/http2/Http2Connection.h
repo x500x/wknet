@@ -67,6 +67,17 @@ namespace http2
         core::ITransport& transport_;
     };
 
+    typedef NTSTATUS (*Http2ResponseBodyAppendCallback)(
+        _Inout_opt_ void* context,
+        _In_reads_bytes_opt_(dataLength) const UCHAR* data,
+        SIZE_T dataLength);
+
+    struct Http2ResponseBodySink final
+    {
+        Http2ResponseBodyAppendCallback Append = nullptr;
+        void* Context = nullptr;
+    };
+
     class Http2Connection final
     {
     public:
@@ -101,6 +112,21 @@ namespace http2
             SIZE_T nameValueCapacity) noexcept;
 
         NTSTATUS SendRequest(
+            _Inout_ Http2Transport& transport,
+            _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
+            SIZE_T requestHeaderCount,
+            _In_reads_bytes_opt_(bodyLength) const UCHAR* body,
+            SIZE_T bodyLength,
+            _Out_writes_(responseHeaderCapacity) http::HttpHeader* responseHeaders,
+            SIZE_T responseHeaderCapacity,
+            _Out_ SIZE_T* responseHeaderCount,
+            _In_ const Http2ResponseBodySink& responseBodySink,
+            _Out_ SIZE_T* responseBodyLength,
+            _Out_ USHORT* statusCode,
+            _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,
+            SIZE_T nameValueCapacity) noexcept;
+
+        NTSTATUS SendRequest(
             _Inout_ core::ITransport& transport,
             _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
             SIZE_T requestHeaderCount,
@@ -111,6 +137,21 @@ namespace http2
             _Out_ SIZE_T* responseHeaderCount,
             _Out_writes_bytes_(responseBodyCapacity) char* responseBody,
             SIZE_T responseBodyCapacity,
+            _Out_ SIZE_T* responseBodyLength,
+            _Out_ USHORT* statusCode,
+            _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,
+            SIZE_T nameValueCapacity) noexcept;
+
+        NTSTATUS SendRequest(
+            _Inout_ core::ITransport& transport,
+            _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
+            SIZE_T requestHeaderCount,
+            _In_reads_bytes_opt_(bodyLength) const UCHAR* body,
+            SIZE_T bodyLength,
+            _Out_writes_(responseHeaderCapacity) http::HttpHeader* responseHeaders,
+            SIZE_T responseHeaderCapacity,
+            _Out_ SIZE_T* responseHeaderCount,
+            _In_ const Http2ResponseBodySink& responseBodySink,
             _Out_ SIZE_T* responseBodyLength,
             _Out_ USHORT* statusCode,
             _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,
@@ -197,8 +238,7 @@ namespace http2
             _Out_writes_(responseHeaderCapacity) http::HttpHeader* responseHeaders,
             SIZE_T responseHeaderCapacity,
             _Out_ SIZE_T* responseHeaderCount,
-            _Out_writes_bytes_(responseBodyCapacity) char* responseBody,
-            SIZE_T responseBodyCapacity,
+            _In_ const Http2ResponseBodySink& responseBodySink,
             _Out_ SIZE_T* responseBodyLength,
             _Out_ USHORT* statusCode,
             _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,

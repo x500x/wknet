@@ -866,6 +866,95 @@ namespace engine
     }
 
     _Must_inspect_result_
+    NTSTATUS AppendHttp2ResponseBodyToWorkspace(
+        void* context,
+        const UCHAR* data,
+        SIZE_T dataLength) noexcept
+    {
+        auto* workspace = static_cast<KhWorkspace*>(context);
+        if (workspace == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        return KhWorkspaceAppendResponse(workspace, data, dataLength);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ KhWorkspace& workspace) noexcept
+    {
+        const SIZE_T currentLength = workspace.DecodedBody.Length;
+        if (workspace.MaxResponseBytes != 0 && currentLength >= workspace.MaxResponseBytes) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        SIZE_T requiredCapacity = currentLength == 0 ?
+            KhWorkspaceDecodedBodyBytes :
+            currentLength * 2;
+        if (currentLength != 0 &&
+            requiredCapacity < currentLength) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        if (workspace.MaxResponseBytes != 0 &&
+            requiredCapacity > workspace.MaxResponseBytes) {
+            requiredCapacity = workspace.MaxResponseBytes;
+        }
+
+        if (requiredCapacity <= currentLength) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        return KhWorkspaceEnsureDecodedBodyCapacity(&workspace, requiredCapacity);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS DecodeContentWithWorkspace(
+        _In_reads_(responseHeaderCount) const http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCount,
+        _In_reads_bytes_(responseBodyLength) const char* responseBody,
+        SIZE_T responseBodyLength,
+        _Inout_ KhWorkspace& workspace,
+        _Out_ http::HttpContentDecodeResult* decoded) noexcept
+    {
+        if (decoded == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *decoded = {};
+
+        for (;;) {
+            http::HttpContentDecodeBuffers decodeBuffers = {};
+            decodeBuffers.DecodedBody = reinterpret_cast<char*>(workspace.DecodedBody.Data);
+            decodeBuffers.DecodedBodyCapacity = workspace.DecodedBody.Length;
+            decodeBuffers.ScratchBody = reinterpret_cast<char*>(workspace.Request.Data);
+            decodeBuffers.ScratchBodyCapacity = workspace.Request.Length;
+
+            NTSTATUS status = http::HttpContentEncoding::Decode(
+                responseHeaders,
+                responseHeaderCount,
+                responseBody,
+                responseBodyLength,
+                decodeBuffers,
+                *decoded);
+            if (status != STATUS_BUFFER_TOO_SMALL) {
+                if (NT_SUCCESS(status) &&
+                    workspace.MaxResponseBytes != 0 &&
+                    decoded->BodyLength > workspace.MaxResponseBytes) {
+                    *decoded = {};
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+                return status;
+            }
+
+            status = GrowDecodedBodyAfterBufferTooSmall(workspace);
+            if (!NT_SUCCESS(status)) {
+                *decoded = {};
+                return status;
+            }
+        }
+    }
+
+    _Must_inspect_result_
     NTSTATUS SendHttp2ViaTransport(
         const KhRequest& request,
         KhWorkspace& workspace,
@@ -943,6 +1032,10 @@ namespace engine
         SIZE_T responseHeaderCount = 0;
         SIZE_T responseBodyLength = 0;
         USHORT statusCode = 0;
+        http2::Http2ResponseBodySink responseBodySink = {};
+        responseBodySink.Append = AppendHttp2ResponseBodyToWorkspace;
+        responseBodySink.Context = &workspace;
+
         status = h2Connection->SendRequest(
             transport,
             h2Scratch.Headers,
@@ -952,12 +1045,11 @@ namespace engine
             responseHeaders,
             headerCapacity,
             &responseHeaderCount,
-            reinterpret_cast<char*>(workspace.Response.Data),
-            workspace.Response.Length,
+            responseBodySink,
             &responseBodyLength,
             &statusCode,
-            reinterpret_cast<char*>(workspace.DecodedBody.Data),
-            workspace.DecodedBody.Length);
+            reinterpret_cast<char*>(workspace.Http2HeaderScratch.Data),
+            workspace.Http2HeaderScratch.Length);
 
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
@@ -967,20 +1059,14 @@ namespace engine
             return status;
         }
 
-        http::HttpContentDecodeBuffers decodeBuffers = {};
-        decodeBuffers.DecodedBody = reinterpret_cast<char*>(workspace.DecodedBody.Data);
-        decodeBuffers.DecodedBodyCapacity = workspace.DecodedBody.Length;
-        decodeBuffers.ScratchBody = reinterpret_cast<char*>(workspace.Request.Data);
-        decodeBuffers.ScratchBodyCapacity = workspace.Request.Length;
-
         http::HttpContentDecodeResult decoded = {};
-        status = http::HttpContentEncoding::Decode(
+        status = DecodeContentWithWorkspace(
             responseHeaders,
             responseHeaderCount,
             reinterpret_cast<const char*>(workspace.Response.Data),
             responseBodyLength,
-            decodeBuffers,
-            decoded);
+            workspace,
+            &decoded);
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
             const NTSTATUS shutdownStatus = h2Connection->Shutdown(transport);

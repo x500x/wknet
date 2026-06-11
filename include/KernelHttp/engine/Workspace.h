@@ -67,6 +67,11 @@ namespace engine
         SIZE_T dataLength) noexcept;
 
     _Must_inspect_result_
+    NTSTATUS KhWorkspaceEnsureDecodedBodyCapacity(
+        _Inout_ KhWorkspace* workspace,
+        SIZE_T requiredCapacity) noexcept;
+
+    _Must_inspect_result_
     NTSTATUS KhWorkspaceEnsureWebSocketPayloadCapacity(
         _Inout_ KhWorkspace* workspace,
         SIZE_T requiredCapacity) noexcept;

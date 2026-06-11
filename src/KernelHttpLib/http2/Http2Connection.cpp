@@ -22,6 +22,46 @@ namespace http2
             for (SIZE_T i = 0; i < len; ++i) d[i] = s[i];
         }
 
+        struct FixedResponseBodySinkContext final
+        {
+            char* Buffer = nullptr;
+            SIZE_T Capacity = 0;
+            SIZE_T Length = 0;
+        };
+
+        bool AddWouldOverflow(SIZE_T left, SIZE_T right) noexcept
+        {
+            return left > static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) - right;
+        }
+
+        NTSTATUS AppendFixedResponseBody(
+            void* context,
+            const UCHAR* data,
+            SIZE_T dataLength) noexcept
+        {
+            auto* fixed = static_cast<FixedResponseBodySinkContext*>(context);
+            if (fixed == nullptr || (data == nullptr && dataLength != 0)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (dataLength == 0) {
+                return STATUS_SUCCESS;
+            }
+
+            if (AddWouldOverflow(fixed->Length, dataLength)) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            const SIZE_T requiredLength = fixed->Length + dataLength;
+            if (fixed->Buffer == nullptr || requiredLength > fixed->Capacity) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            MemCopy(fixed->Buffer + fixed->Length, data, dataLength);
+            fixed->Length = requiredLength;
+            return STATUS_SUCCESS;
+        }
+
         bool TextEquals(const char* a, SIZE_T aLen, const char* b, SIZE_T bLen) noexcept
         {
             if (aLen != bLen) return false;
@@ -202,13 +242,6 @@ namespace http2
         bool IsValidHttp2FieldValue(const char* data, SIZE_T len) noexcept
         {
             if (data == nullptr && len != 0) {
-                return false;
-            }
-            if (len == 0) {
-                return true;
-            }
-            if (data[0] == ' ' || data[0] == '\t' ||
-                data[len - 1] == ' ' || data[len - 1] == '\t') {
                 return false;
             }
             for (SIZE_T i = 0; i < len; ++i) {
@@ -408,11 +441,54 @@ namespace http2
         char* nameValueBuffer,
         SIZE_T nameValueCapacity) noexcept
     {
+        if (responseBody == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        FixedResponseBodySinkContext fixedBody = {};
+        fixedBody.Buffer = responseBody;
+        fixedBody.Capacity = responseBodyCapacity;
+
+        Http2ResponseBodySink sink = {};
+        sink.Append = AppendFixedResponseBody;
+        sink.Context = &fixedBody;
+
+        return SendRequest(
+            transport,
+            requestHeaders,
+            requestHeaderCount,
+            body,
+            bodyLength,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            sink,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
+    NTSTATUS Http2Connection::SendRequest(
+        Http2Transport& transport,
+        const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        const UCHAR* body,
+        SIZE_T bodyLength,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        const Http2ResponseBodySink& responseBodySink,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
         NTSTATUS status = EnsureBuffers();
         if (!NT_SUCCESS(status)) return status;
 
         if (requestHeaders == nullptr || responseHeaders == nullptr ||
-            responseHeaderCount == nullptr || responseBody == nullptr ||
+            responseHeaderCount == nullptr || responseBodySink.Append == nullptr ||
             responseBodyLength == nullptr || statusCode == nullptr ||
             nameValueBuffer == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -608,8 +684,7 @@ namespace http2
             responseHeaders,
             responseHeaderCapacity,
             responseHeaderCount,
-            responseBody,
-            responseBodyCapacity,
+            responseBodySink,
             responseBodyLength,
             statusCode,
             nameValueBuffer,
@@ -644,6 +719,18 @@ namespace http2
         status = stream.SendHeaders(true);
         if (!NT_SUCCESS(status)) return status;
 
+        if (responseBody == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        FixedResponseBodySinkContext fixedBody = {};
+        fixedBody.Buffer = responseBody;
+        fixedBody.Capacity = responseBodyCapacity;
+
+        Http2ResponseBodySink sink = {};
+        sink.Append = AppendFixedResponseBody;
+        sink.Context = &fixedBody;
+
         return ReceiveResponseFrames(
             transport,
             stream,
@@ -651,8 +738,7 @@ namespace http2
             responseHeaders,
             responseHeaderCapacity,
             responseHeaderCount,
-            responseBody,
-            responseBodyCapacity,
+            sink,
             responseBodyLength,
             statusCode,
             nameValueBuffer,
@@ -694,8 +780,7 @@ namespace http2
         http::HttpHeader* responseHeaders,
         SIZE_T responseHeaderCapacity,
         SIZE_T* responseHeaderCount,
-        char* responseBody,
-        SIZE_T responseBodyCapacity,
+        const Http2ResponseBodySink& responseBodySink,
         SIZE_T* responseBodyLength,
         USHORT* statusCode,
         char* nameValueBuffer,
@@ -703,7 +788,7 @@ namespace http2
     {
         if (responseHeaders == nullptr ||
             responseHeaderCount == nullptr ||
-            responseBody == nullptr ||
+            responseBodySink.Append == nullptr ||
             responseBodyLength == nullptr ||
             statusCode == nullptr ||
             nameValueBuffer == nullptr) {
@@ -1038,14 +1123,12 @@ namespace http2
                 }
                 connectionRecvWindow_ -= static_cast<LONG>(fpLen);
 
-                if (bodyLen + contentLen > responseBodyCapacity) {
+                if (AddWouldOverflow(bodyLen, contentLen)) {
                     return STATUS_BUFFER_TOO_SMALL;
                 }
-                MemCopy(responseBody + bodyLen, content, contentLen);
-                bodyLen += contentLen;
-                responseDataReceived = true;
+                const SIZE_T nextBodyLen = bodyLen + contentLen;
                 if (responseContentLengthPresent &&
-                    static_cast<ULONGLONG>(bodyLen) > responseContentLength) {
+                    static_cast<ULONGLONG>(nextBodyLen) > responseContentLength) {
                     const NTSTATUS rstStatus = SendRstStream(
                         transport,
                         fh.StreamId,
@@ -1053,6 +1136,16 @@ namespace http2
                     UNREFERENCED_PARAMETER(rstStatus);
                     return STATUS_INVALID_NETWORK_RESPONSE;
                 }
+
+                status = responseBodySink.Append(
+                    responseBodySink.Context,
+                    content,
+                    contentLen);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                bodyLen = nextBodyLen;
+                responseDataReceived = true;
 
                 // Update flow control
                 connectionRecvConsumed_ += static_cast<ULONG>(fpLen);
@@ -1154,6 +1247,38 @@ namespace http2
             responseHeaderCount,
             responseBody,
             responseBodyCapacity,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
+    NTSTATUS Http2Connection::SendRequest(
+        core::ITransport& transport,
+        const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        const UCHAR* body,
+        SIZE_T bodyLength,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        const Http2ResponseBodySink& responseBodySink,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
+        Http2ITransportAdapter adapter(transport);
+        return SendRequest(
+            adapter,
+            requestHeaders,
+            requestHeaderCount,
+            body,
+            bodyLength,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBodySink,
             responseBodyLength,
             statusCode,
             nameValueBuffer,

@@ -48,6 +48,150 @@ namespace tls
             return capability != nullptr ? capability->Tls12KeyExchange : Tls12KeyExchangeKind::None;
         }
 
+        struct Tls12ServerKeyExchangeDiagnostic final
+        {
+            UCHAR CurveType = 0;
+            USHORT NamedGroup = 0;
+            UCHAR EcPointLength = 0;
+            USHORT SignatureScheme = 0;
+            USHORT SignatureLength = 0;
+            SIZE_T Offset = 0;
+        };
+
+        bool TryReadDiagnosticUint16(
+            _In_reads_bytes_(bodyLength) const UCHAR* body,
+            SIZE_T bodyLength,
+            _Inout_ SIZE_T* offset,
+            _Out_ USHORT* value) noexcept
+        {
+            if (body == nullptr || offset == nullptr || value == nullptr ||
+                *offset > bodyLength || bodyLength - *offset < sizeof(USHORT)) {
+                return false;
+            }
+
+            *value = static_cast<USHORT>(
+                (static_cast<USHORT>(body[*offset]) << 8) |
+                static_cast<USHORT>(body[*offset + 1]));
+            *offset += sizeof(USHORT);
+            return true;
+        }
+
+        bool TrySkipDiagnosticOpaque16(
+            _In_reads_bytes_(bodyLength) const UCHAR* body,
+            SIZE_T bodyLength,
+            _Inout_ SIZE_T* offset) noexcept
+        {
+            USHORT length = 0;
+            if (!TryReadDiagnosticUint16(body, bodyLength, offset, &length)) {
+                return false;
+            }
+            if (*offset > bodyLength || static_cast<SIZE_T>(length) > bodyLength - *offset) {
+                return false;
+            }
+
+            *offset += length;
+            return true;
+        }
+
+        void CaptureServerKeyExchangeDiagnostic(
+            Tls12KeyExchangeKind keyExchangeKind,
+            _In_ const TlsHandshakeMessageView& handshake,
+            _Out_ Tls12ServerKeyExchangeDiagnostic* diagnostic) noexcept
+        {
+            if (diagnostic == nullptr) {
+                return;
+            }
+
+            *diagnostic = {};
+            const UCHAR* body = handshake.Body;
+            const SIZE_T bodyLength = handshake.BodyLength;
+            if (body == nullptr || bodyLength == 0) {
+                return;
+            }
+
+            SIZE_T offset = 0;
+            if (keyExchangeKind == Tls12KeyExchangeKind::EcdheRsa ||
+                keyExchangeKind == Tls12KeyExchangeKind::EcdheEcdsa) {
+                diagnostic->CurveType = body[offset++];
+                diagnostic->Offset = offset;
+
+                if (!TryReadDiagnosticUint16(body, bodyLength, &offset, &diagnostic->NamedGroup)) {
+                    return;
+                }
+                diagnostic->Offset = offset;
+
+                if (offset >= bodyLength) {
+                    return;
+                }
+                diagnostic->EcPointLength = body[offset++];
+                diagnostic->Offset = offset;
+
+                if (static_cast<SIZE_T>(diagnostic->EcPointLength) > bodyLength - offset) {
+                    return;
+                }
+                offset += diagnostic->EcPointLength;
+                diagnostic->Offset = offset;
+            }
+            else if (keyExchangeKind == Tls12KeyExchangeKind::DheRsa) {
+                if (!TrySkipDiagnosticOpaque16(body, bodyLength, &offset)) {
+                    diagnostic->Offset = offset;
+                    return;
+                }
+                if (!TrySkipDiagnosticOpaque16(body, bodyLength, &offset)) {
+                    diagnostic->Offset = offset;
+                    return;
+                }
+                if (!TrySkipDiagnosticOpaque16(body, bodyLength, &offset)) {
+                    diagnostic->Offset = offset;
+                    return;
+                }
+                diagnostic->Offset = offset;
+            }
+            else {
+                return;
+            }
+
+            if (!TryReadDiagnosticUint16(body, bodyLength, &offset, &diagnostic->SignatureScheme)) {
+                return;
+            }
+            diagnostic->Offset = offset;
+
+            if (!TryReadDiagnosticUint16(body, bodyLength, &offset, &diagnostic->SignatureLength)) {
+                return;
+            }
+            diagnostic->Offset = offset;
+
+            if (static_cast<SIZE_T>(diagnostic->SignatureLength) > bodyLength - offset) {
+                return;
+            }
+            offset += diagnostic->SignatureLength;
+            diagnostic->Offset = offset;
+        }
+
+        void LogServerKeyExchangeParseFailure(
+            NTSTATUS status,
+            TlsCipherSuite cipherSuite,
+            Tls12KeyExchangeKind keyExchangeKind,
+            _In_ const TlsHandshakeMessageView& handshake) noexcept
+        {
+            Tls12ServerKeyExchangeDiagnostic diagnostic = {};
+            CaptureServerKeyExchangeDiagnostic(keyExchangeKind, handshake, &diagnostic);
+
+            kprintf(
+                "TlsConnection parse ServerKeyExchange failed: 0x%08X cipher=0x%04X kx=%u type=%u body=%Iu curve=%u group=%u point=%u sig=0x%04X sigLen=%u offset=%Iu\r\n",
+                static_cast<ULONG>(status),
+                static_cast<unsigned>(cipherSuite),
+                static_cast<unsigned>(keyExchangeKind),
+                static_cast<unsigned>(handshake.Type),
+                handshake.BodyLength,
+                static_cast<unsigned>(diagnostic.CurveType),
+                static_cast<unsigned>(diagnostic.NamedGroup),
+                static_cast<unsigned>(diagnostic.EcPointLength),
+                static_cast<unsigned>(diagnostic.SignatureScheme),
+                static_cast<unsigned>(diagnostic.SignatureLength),
+                diagnostic.Offset);
+        }
+
         _Must_inspect_result_
         SIZE_T Tls12AeadKeyLengthForCipherSuite(TlsCipherSuite cipherSuite) noexcept
         {
@@ -2198,10 +2342,11 @@ namespace tls
         if (serverKeyExchangeKind != Tls12KeyExchangeKind::Rsa) {
             status = TlsHandshake12::ParseServerKeyExchange(context_, handshake, keyExchange);
             if (!NT_SUCCESS(status)) {
-                kprintf("TlsConnection parse ServerKeyExchange failed: 0x%08X type=%u body=%Iu\r\n",
-                    static_cast<ULONG>(status),
-                    static_cast<unsigned>(handshake.Type),
-                    handshake.BodyLength);
+                LogServerKeyExchangeParseFailure(
+                    status,
+                    context_.CipherSuite(),
+                    serverKeyExchangeKind,
+                    handshake);
                 return status;
             }
             status = TlsHandshake12::ValidateServerKeyExchangeOffer(keyExchange, hello);
