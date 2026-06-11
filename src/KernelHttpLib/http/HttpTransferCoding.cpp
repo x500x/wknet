@@ -131,6 +131,44 @@ namespace http
         }
 
         _Must_inspect_result_
+        HttpTransferCodingKind GetTransferCoding(
+            const HttpTransferCodingInfo& info,
+            SIZE_T index) noexcept
+        {
+            switch (index) {
+            case 0:
+                return info.Coding0;
+            case 1:
+                return info.Coding1;
+            case 2:
+                return info.Coding2;
+            default:
+                return info.Coding3;
+            }
+        }
+
+        void SetTransferCoding(
+            HttpTransferCodingInfo& info,
+            SIZE_T index,
+            HttpTransferCodingKind coding) noexcept
+        {
+            switch (index) {
+            case 0:
+                info.Coding0 = coding;
+                return;
+            case 1:
+                info.Coding1 = coding;
+                return;
+            case 2:
+                info.Coding2 = coding;
+                return;
+            default:
+                info.Coding3 = coding;
+                return;
+            }
+        }
+
+        _Must_inspect_result_
         NTSTATUS AppendTransferCoding(
             HttpTransferCodingKind coding,
             HttpTransferCodingInfo& info) noexcept
@@ -141,13 +179,13 @@ namespace http
 
             if (coding == HttpTransferCodingKind::Chunked) {
                 for (SIZE_T index = 0; index < info.CodingCount; ++index) {
-                    if (info.Codings[index] == HttpTransferCodingKind::Chunked) {
+                    if (GetTransferCoding(info, index) == HttpTransferCodingKind::Chunked) {
                         return STATUS_INVALID_NETWORK_RESPONSE;
                     }
                 }
             }
 
-            info.Codings[info.CodingCount] = coding;
+            SetTransferCoding(info, info.CodingCount, coding);
             ++info.CodingCount;
             return STATUS_SUCCESS;
         }
@@ -328,7 +366,7 @@ namespace http
 
         info.HasTransferEncoding = true;
         info.FinalCodingIsChunked =
-            info.Codings[info.CodingCount - 1] == HttpTransferCodingKind::Chunked;
+            GetTransferCoding(info, info.CodingCount - 1) == HttpTransferCodingKind::Chunked;
         return STATUS_SUCCESS;
     }
 
@@ -373,7 +411,7 @@ namespace http
 
         for (SIZE_T reverseIndex = info.CodingCount; reverseIndex > 0; --reverseIndex) {
             const SIZE_T codingIndex = reverseIndex - 1;
-            const HttpTransferCodingKind coding = info.Codings[codingIndex];
+            const HttpTransferCodingKind coding = GetTransferCoding(info, codingIndex);
             if (coding == HttpTransferCodingKind::Chunked) {
                 char* destination = nullptr;
                 SIZE_T destinationCapacity = 0;

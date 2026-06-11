@@ -17,6 +17,56 @@ namespace crypto
             UCHAR RoundKeys[Aes128RoundKeyLength] = {};
         };
 
+        struct AeadScratch final
+        {
+            UCHAR AesTemp[4] = {};
+            UCHAR AesState[AesBlockLength] = {};
+            UCHAR CcmBlock[AesBlockLength] = {};
+            UCHAR CcmCounter[AesBlockLength] = {};
+            UCHAR CcmStream[AesBlockLength] = {};
+            UCHAR CcmMac[AeadMaxTagLength] = {};
+            ULONG ChaChaState[16] = {};
+            ULONG ChaChaWorking[16] = {};
+            UCHAR ChaChaBlock[ChaChaBlockLength] = {};
+            ULONG PolyValues[5] = {};
+            UCHAR PolyPadded[17] = {};
+            ULONG PolyR[5] = {};
+            ULONG PolyH[5] = {};
+            ULONG PolyG[5] = {};
+            UCHAR PolyKey[32] = {};
+            UCHAR ExpectedTag[AeadMaxTagLength] = {};
+        };
+
+        class AeadScratchGuard final
+        {
+        public:
+            AeadScratchGuard() noexcept = default;
+
+            ~AeadScratchGuard() noexcept
+            {
+                if (scratch_.IsValid()) {
+                    RtlSecureZeroMemory(scratch_.Get(), sizeof(AeadScratch));
+                }
+            }
+
+            AeadScratchGuard(const AeadScratchGuard&) = delete;
+            AeadScratchGuard& operator=(const AeadScratchGuard&) = delete;
+
+            _Must_inspect_result_
+            bool IsValid() const noexcept
+            {
+                return scratch_.IsValid();
+            }
+
+            AeadScratch& Get() noexcept
+            {
+                return *scratch_.Get();
+            }
+
+        private:
+            HeapObject<AeadScratch> scratch_;
+        };
+
         const UCHAR AesSBox[256] = {
             0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5,
             0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -178,6 +228,7 @@ namespace crypto
         _Must_inspect_result_
         NTSTATUS Aes128Initialize(
             _In_ const AeadKey& key,
+            _Inout_ AeadScratch& scratch,
             _Out_ Aes128Context& context) noexcept
         {
             if (key.Key == nullptr || key.KeyLength != Aes128KeyLength) {
@@ -187,10 +238,11 @@ namespace crypto
             RtlCopyMemory(context.RoundKeys, key.Key, Aes128KeyLength);
             SIZE_T bytesGenerated = Aes128KeyLength;
             SIZE_T rconIndex = 0;
-            UCHAR temp[4] = {};
+            UCHAR* temp = scratch.AesTemp;
+            RtlZeroMemory(temp, sizeof(scratch.AesTemp));
 
             while (bytesGenerated < Aes128RoundKeyLength) {
-                for (SIZE_T index = 0; index < sizeof(temp); ++index) {
+                for (SIZE_T index = 0; index < sizeof(scratch.AesTemp); ++index) {
                     temp[index] = context.RoundKeys[bytesGenerated - 4 + index];
                 }
 
@@ -204,24 +256,26 @@ namespace crypto
                     ++rconIndex;
                 }
 
-                for (SIZE_T index = 0; index < sizeof(temp); ++index) {
+                for (SIZE_T index = 0; index < sizeof(scratch.AesTemp); ++index) {
                     context.RoundKeys[bytesGenerated] =
                         static_cast<UCHAR>(context.RoundKeys[bytesGenerated - Aes128KeyLength] ^ temp[index]);
                     ++bytesGenerated;
                 }
             }
 
-            RtlSecureZeroMemory(temp, sizeof(temp));
+            RtlSecureZeroMemory(temp, sizeof(scratch.AesTemp));
             return STATUS_SUCCESS;
         }
 
         void Aes128EncryptBlock(
             _In_ const Aes128Context& context,
+            _Inout_ AeadScratch& scratch,
             _In_reads_bytes_(AesBlockLength) const UCHAR* input,
             _Out_writes_bytes_(AesBlockLength) UCHAR* output) noexcept
         {
-            UCHAR state[AesBlockLength] = {};
-            RtlCopyMemory(state, input, sizeof(state));
+            UCHAR* state = scratch.AesState;
+            RtlZeroMemory(state, sizeof(scratch.AesState));
+            RtlCopyMemory(state, input, sizeof(scratch.AesState));
 
             AesAddRoundKey(state, context.RoundKeys);
             for (SIZE_T round = 1; round < 10; ++round) {
@@ -235,8 +289,8 @@ namespace crypto
             AesShiftRows(state);
             AesAddRoundKey(state, context.RoundKeys + (10 * AesBlockLength));
 
-            RtlCopyMemory(output, state, sizeof(state));
-            RtlSecureZeroMemory(state, sizeof(state));
+            RtlCopyMemory(output, state, sizeof(scratch.AesState));
+            RtlSecureZeroMemory(state, sizeof(scratch.AesState));
         }
 
         _Must_inspect_result_
@@ -265,18 +319,20 @@ namespace crypto
 
         void CcmMacBlock(
             _In_ const Aes128Context& context,
+            _Inout_ AeadScratch& scratch,
             _In_reads_bytes_(AesBlockLength) const UCHAR* block,
             _Inout_updates_(AesBlockLength) UCHAR* mac) noexcept
         {
             for (SIZE_T index = 0; index < AesBlockLength; ++index) {
                 mac[index] = static_cast<UCHAR>(mac[index] ^ block[index]);
             }
-            Aes128EncryptBlock(context, mac, mac);
+            Aes128EncryptBlock(context, scratch, mac, mac);
         }
 
         _Must_inspect_result_
         NTSTATUS CcmComputeMac(
             _In_ const Aes128Context& context,
+            _Inout_ AeadScratch& scratch,
             _In_ const AeadParameters& parameters,
             _In_reads_bytes_opt_(plaintextLength) const UCHAR* plaintext,
             SIZE_T plaintextLength,
@@ -290,18 +346,19 @@ namespace crypto
                 return STATUS_INVALID_PARAMETER;
             }
 
-            UCHAR block[AesBlockLength] = {};
+            UCHAR* block = scratch.CcmBlock;
+            RtlZeroMemory(block, sizeof(scratch.CcmBlock));
             block[0] = static_cast<UCHAR>(
                 (parameters.Aad.Length != 0 ? 0x40 : 0) |
                 (((tagLength - 2) / 2) << 3) |
                 (lengthFieldLength - 1));
             RtlCopyMemory(block + 1, parameters.Nonce.Data, nonceLength);
             WriteBigEndianLength(static_cast<ULONGLONG>(plaintextLength), block + 1 + nonceLength, lengthFieldLength);
-            CcmMacBlock(context, block, mac);
+            CcmMacBlock(context, scratch, block, mac);
 
             SIZE_T aadOffset = 0;
             if (parameters.Aad.Length != 0) {
-                RtlZeroMemory(block, sizeof(block));
+                RtlZeroMemory(block, sizeof(scratch.CcmBlock));
                 block[0] = static_cast<UCHAR>((parameters.Aad.Length >> 8) & 0xff);
                 block[1] = static_cast<UCHAR>(parameters.Aad.Length & 0xff);
                 SIZE_T blockOffset = 2;
@@ -314,35 +371,36 @@ namespace crypto
                     blockOffset += chunk;
                     aadOffset += chunk;
                     if (blockOffset == AesBlockLength) {
-                        CcmMacBlock(context, block, mac);
-                        RtlZeroMemory(block, sizeof(block));
+                        CcmMacBlock(context, scratch, block, mac);
+                        RtlZeroMemory(block, sizeof(scratch.CcmBlock));
                         blockOffset = 0;
                     }
                 }
                 if (blockOffset != 0) {
-                    CcmMacBlock(context, block, mac);
+                    CcmMacBlock(context, scratch, block, mac);
                 }
             }
 
             SIZE_T plaintextOffset = 0;
             while (plaintextOffset < plaintextLength) {
-                RtlZeroMemory(block, sizeof(block));
+                RtlZeroMemory(block, sizeof(scratch.CcmBlock));
                 const SIZE_T chunk =
                     (plaintextLength - plaintextOffset) < AesBlockLength ?
                     (plaintextLength - plaintextOffset) :
                     AesBlockLength;
                 RtlCopyMemory(block, plaintext + plaintextOffset, chunk);
-                CcmMacBlock(context, block, mac);
+                CcmMacBlock(context, scratch, block, mac);
                 plaintextOffset += chunk;
             }
 
-            RtlSecureZeroMemory(block, sizeof(block));
+            RtlSecureZeroMemory(block, sizeof(scratch.CcmBlock));
             return STATUS_SUCCESS;
         }
 
         _Must_inspect_result_
         NTSTATUS CcmCrypt(
             _In_ const Aes128Context& context,
+            _Inout_ AeadScratch& scratch,
             _In_ const AeadParameters& parameters,
             _In_reads_bytes_opt_(inputLength) const UCHAR* input,
             SIZE_T inputLength,
@@ -355,13 +413,15 @@ namespace crypto
                 return STATUS_INVALID_PARAMETER;
             }
 
-            UCHAR counter[AesBlockLength] = {};
-            UCHAR stream[AesBlockLength] = {};
+            UCHAR* counter = scratch.CcmCounter;
+            UCHAR* stream = scratch.CcmStream;
+            RtlZeroMemory(counter, sizeof(scratch.CcmCounter));
+            RtlZeroMemory(stream, sizeof(scratch.CcmStream));
             SIZE_T offset = 0;
             SIZE_T counterValue = 1;
             while (offset < inputLength) {
                 BuildCcmCounterBlock(parameters.Nonce.Data, parameters.Nonce.Length, counterValue, counter);
-                Aes128EncryptBlock(context, counter, stream);
+                Aes128EncryptBlock(context, scratch, counter, stream);
 
                 const SIZE_T chunk =
                     (inputLength - offset) < AesBlockLength ?
@@ -375,8 +435,8 @@ namespace crypto
                 ++counterValue;
             }
 
-            RtlSecureZeroMemory(counter, sizeof(counter));
-            RtlSecureZeroMemory(stream, sizeof(stream));
+            RtlSecureZeroMemory(counter, sizeof(scratch.CcmCounter));
+            RtlSecureZeroMemory(stream, sizeof(scratch.CcmStream));
             return STATUS_SUCCESS;
         }
 
@@ -426,31 +486,32 @@ namespace crypto
         }
 
         void ChaCha20Block(
+            _Inout_ AeadScratch& scratch,
             _In_reads_bytes_(AeadChaCha20Poly1305KeyLength) const UCHAR* key,
             ULONG counter,
             _In_reads_bytes_(AeadChaCha20Poly1305NonceLength) const UCHAR* nonce,
             _Out_writes_bytes_(ChaChaBlockLength) UCHAR* output) noexcept
         {
-            ULONG state[16] = {
-                0x61707865UL,
-                0x3320646eUL,
-                0x79622d32UL,
-                0x6b206574UL,
-                ReadLittleEndian32(key),
-                ReadLittleEndian32(key + 4),
-                ReadLittleEndian32(key + 8),
-                ReadLittleEndian32(key + 12),
-                ReadLittleEndian32(key + 16),
-                ReadLittleEndian32(key + 20),
-                ReadLittleEndian32(key + 24),
-                ReadLittleEndian32(key + 28),
-                counter,
-                ReadLittleEndian32(nonce),
-                ReadLittleEndian32(nonce + 4),
-                ReadLittleEndian32(nonce + 8)
-            };
+            ULONG* state = scratch.ChaChaState;
+            ULONG* working = scratch.ChaChaWorking;
+            state[0] = 0x61707865UL;
+            state[1] = 0x3320646eUL;
+            state[2] = 0x79622d32UL;
+            state[3] = 0x6b206574UL;
+            state[4] = ReadLittleEndian32(key);
+            state[5] = ReadLittleEndian32(key + 4);
+            state[6] = ReadLittleEndian32(key + 8);
+            state[7] = ReadLittleEndian32(key + 12);
+            state[8] = ReadLittleEndian32(key + 16);
+            state[9] = ReadLittleEndian32(key + 20);
+            state[10] = ReadLittleEndian32(key + 24);
+            state[11] = ReadLittleEndian32(key + 28);
+            state[12] = counter;
+            state[13] = ReadLittleEndian32(nonce);
+            state[14] = ReadLittleEndian32(nonce + 4);
+            state[15] = ReadLittleEndian32(nonce + 8);
 
-            ULONG working[16] = {};
+            RtlZeroMemory(working, sizeof(scratch.ChaChaWorking));
             for (SIZE_T index = 0; index < 16; ++index) {
                 working[index] = state[index];
             }
@@ -470,12 +531,13 @@ namespace crypto
                 WriteLittleEndian32(working[index] + state[index], output + (index * 4));
             }
 
-            RtlSecureZeroMemory(state, sizeof(state));
-            RtlSecureZeroMemory(working, sizeof(working));
+            RtlSecureZeroMemory(state, sizeof(scratch.ChaChaState));
+            RtlSecureZeroMemory(working, sizeof(scratch.ChaChaWorking));
         }
 
         _Must_inspect_result_
         NTSTATUS ChaCha20Xor(
+            _Inout_ AeadScratch& scratch,
             _In_reads_bytes_(AeadChaCha20Poly1305KeyLength) const UCHAR* key,
             ULONG counter,
             _In_reads_bytes_(AeadChaCha20Poly1305NonceLength) const UCHAR* nonce,
@@ -488,10 +550,11 @@ namespace crypto
                 return STATUS_INVALID_PARAMETER;
             }
 
-            UCHAR block[ChaChaBlockLength] = {};
+            UCHAR* block = scratch.ChaChaBlock;
+            RtlZeroMemory(block, sizeof(scratch.ChaChaBlock));
             SIZE_T offset = 0;
             while (offset < inputLength) {
-                ChaCha20Block(key, counter, nonce, block);
+                ChaCha20Block(scratch, key, counter, nonce, block);
                 ++counter;
 
                 const SIZE_T remaining = inputLength - offset;
@@ -502,18 +565,21 @@ namespace crypto
                 offset += chunk;
             }
 
-            RtlSecureZeroMemory(block, sizeof(block));
+            RtlSecureZeroMemory(block, sizeof(scratch.ChaChaBlock));
             return STATUS_SUCCESS;
         }
 
         void Poly1305ProcessBlock(
+            _Inout_ AeadScratch& scratch,
             _Inout_updates_(5) ULONG h[5],
             _In_reads_(5) const ULONG r[5],
             _In_reads_bytes_(blockLength) const UCHAR* block,
             SIZE_T blockLength) noexcept
         {
-            ULONG values[5] = {};
-            UCHAR padded[17] = {};
+            ULONG* values = scratch.PolyValues;
+            UCHAR* padded = scratch.PolyPadded;
+            RtlZeroMemory(values, sizeof(scratch.PolyValues));
+            RtlZeroMemory(padded, sizeof(scratch.PolyPadded));
             if (blockLength != 0) {
                 RtlCopyMemory(padded, block, blockLength);
             }
@@ -586,18 +652,23 @@ namespace crypto
             h[0] &= 0x3ffffffUL;
             h[1] += carry;
 
-            RtlSecureZeroMemory(values, sizeof(values));
-            RtlSecureZeroMemory(padded, sizeof(padded));
+            RtlSecureZeroMemory(values, sizeof(scratch.PolyValues));
+            RtlSecureZeroMemory(padded, sizeof(scratch.PolyPadded));
         }
 
         void Poly1305(
+            _Inout_ AeadScratch& scratch,
             _In_reads_bytes_(32) const UCHAR* key,
             _In_reads_bytes_opt_(messageLength) const UCHAR* message,
             SIZE_T messageLength,
             _Out_writes_bytes_(16) UCHAR* tag) noexcept
         {
-            ULONG r[5] = {};
-            ULONG h[5] = {};
+            ULONG* r = scratch.PolyR;
+            ULONG* h = scratch.PolyH;
+            ULONG* g = scratch.PolyG;
+            RtlZeroMemory(r, sizeof(scratch.PolyR));
+            RtlZeroMemory(h, sizeof(scratch.PolyH));
+            RtlZeroMemory(g, sizeof(scratch.PolyG));
 
             const ULONG t0 = ReadLittleEndian32(key);
             const ULONG t1 = ReadLittleEndian32(key + 4);
@@ -614,7 +685,7 @@ namespace crypto
             while (offset < messageLength) {
                 const SIZE_T remaining = messageLength - offset;
                 const SIZE_T chunk = remaining < 16 ? remaining : 16;
-                Poly1305ProcessBlock(h, r, message + offset, chunk);
+                Poly1305ProcessBlock(scratch, h, r, message + offset, chunk);
                 offset += chunk;
             }
 
@@ -634,7 +705,6 @@ namespace crypto
             h[0] &= 0x3ffffffUL;
             h[1] += carry;
 
-            ULONG g[5] = {};
             g[0] = h[0] + 5;
             carry = g[0] >> 26;
             g[0] &= 0x3ffffffUL;
@@ -676,9 +746,9 @@ namespace crypto
             WriteLittleEndian32(static_cast<ULONG>(f2), tag + 8);
             WriteLittleEndian32(static_cast<ULONG>(f3), tag + 12);
 
-            RtlSecureZeroMemory(r, sizeof(r));
-            RtlSecureZeroMemory(h, sizeof(h));
-            RtlSecureZeroMemory(g, sizeof(g));
+            RtlSecureZeroMemory(r, sizeof(scratch.PolyR));
+            RtlSecureZeroMemory(h, sizeof(scratch.PolyH));
+            RtlSecureZeroMemory(g, sizeof(scratch.PolyG));
         }
 
         _Must_inspect_result_
@@ -776,13 +846,19 @@ namespace crypto
                 return STATUS_INVALID_PARAMETER;
             }
 
-            UCHAR polyKey[32] = {};
-            UCHAR block[ChaChaBlockLength] = {};
-            ChaCha20Block(key.Key, 0, parameters.Nonce.Data, block);
-            RtlCopyMemory(polyKey, block, sizeof(polyKey));
-            RtlSecureZeroMemory(block, sizeof(block));
+            AeadScratchGuard scratchGuard;
+            if (!scratchGuard.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            AeadScratch& scratch = scratchGuard.Get();
+            UCHAR* polyKey = scratch.PolyKey;
+            UCHAR* block = scratch.ChaChaBlock;
+            ChaCha20Block(scratch, key.Key, 0, parameters.Nonce.Data, block);
+            RtlCopyMemory(polyKey, block, sizeof(scratch.PolyKey));
+            RtlSecureZeroMemory(block, sizeof(scratch.ChaChaBlock));
 
             status = ChaCha20Xor(
+                scratch,
                 key.Key,
                 1,
                 parameters.Nonce.Data,
@@ -791,7 +867,7 @@ namespace crypto
                 ciphertext,
                 ciphertextLength);
             if (!NT_SUCCESS(status)) {
-                RtlSecureZeroMemory(polyKey, sizeof(polyKey));
+                RtlSecureZeroMemory(polyKey, sizeof(scratch.PolyKey));
                 return status;
             }
 
@@ -804,13 +880,13 @@ namespace crypto
                 macInput,
                 &macInputLength);
             if (NT_SUCCESS(status)) {
-                Poly1305(polyKey, macInput.Get(), macInputLength, tag);
+                Poly1305(scratch, polyKey, macInput.Get(), macInputLength, tag);
                 if (bytesWritten != nullptr) {
                     *bytesWritten = plaintextLength;
                 }
             }
 
-            RtlSecureZeroMemory(polyKey, sizeof(polyKey));
+            RtlSecureZeroMemory(polyKey, sizeof(scratch.PolyKey));
             if (macInput.IsValid()) {
                 RtlSecureZeroMemory(macInput.Get(), macInput.Count());
             }
@@ -843,12 +919,18 @@ namespace crypto
                 return STATUS_INVALID_PARAMETER;
             }
 
-            UCHAR polyKey[32] = {};
-            UCHAR block[ChaChaBlockLength] = {};
-            UCHAR expectedTag[AeadChaCha20Poly1305TagLength] = {};
-            ChaCha20Block(key.Key, 0, parameters.Nonce.Data, block);
-            RtlCopyMemory(polyKey, block, sizeof(polyKey));
-            RtlSecureZeroMemory(block, sizeof(block));
+            AeadScratchGuard scratchGuard;
+            if (!scratchGuard.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            AeadScratch& scratch = scratchGuard.Get();
+            UCHAR* polyKey = scratch.PolyKey;
+            UCHAR* block = scratch.ChaChaBlock;
+            UCHAR* expectedTag = scratch.ExpectedTag;
+            RtlZeroMemory(expectedTag, AeadChaCha20Poly1305TagLength);
+            ChaCha20Block(scratch, key.Key, 0, parameters.Nonce.Data, block);
+            RtlCopyMemory(polyKey, block, sizeof(scratch.PolyKey));
+            RtlSecureZeroMemory(block, sizeof(scratch.ChaChaBlock));
 
             HeapArray<UCHAR> macInput;
             SIZE_T macInputLength = 0;
@@ -859,14 +941,15 @@ namespace crypto
                 macInput,
                 &macInputLength);
             if (NT_SUCCESS(status)) {
-                Poly1305(polyKey, macInput.Get(), macInputLength, expectedTag);
-                if (!MemoryEquals(expectedTag, parameters.Tag.Data, sizeof(expectedTag))) {
+                Poly1305(scratch, polyKey, macInput.Get(), macInputLength, expectedTag);
+                if (!MemoryEquals(expectedTag, parameters.Tag.Data, AeadChaCha20Poly1305TagLength)) {
                     status = STATUS_INVALID_SIGNATURE;
                 }
             }
 
             if (NT_SUCCESS(status)) {
                 status = ChaCha20Xor(
+                    scratch,
                     key.Key,
                     1,
                     parameters.Nonce.Data,
@@ -879,8 +962,8 @@ namespace crypto
                 }
             }
 
-            RtlSecureZeroMemory(polyKey, sizeof(polyKey));
-            RtlSecureZeroMemory(expectedTag, sizeof(expectedTag));
+            RtlSecureZeroMemory(polyKey, sizeof(scratch.PolyKey));
+            RtlSecureZeroMemory(expectedTag, AeadChaCha20Poly1305TagLength);
             if (macInput.IsValid()) {
                 RtlSecureZeroMemory(macInput.Get(), macInput.Count());
             }
@@ -919,14 +1002,22 @@ namespace crypto
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
-            status = Aes128Initialize(key, *context.Get());
+            AeadScratchGuard scratchGuard;
+            if (!scratchGuard.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            AeadScratch& scratch = scratchGuard.Get();
+
+            status = Aes128Initialize(key, scratch, *context.Get());
             if (!NT_SUCCESS(status)) {
                 return status;
             }
 
-            UCHAR mac[AeadMaxTagLength] = {};
+            UCHAR* mac = scratch.CcmMac;
+            RtlZeroMemory(mac, sizeof(scratch.CcmMac));
             status = CcmComputeMac(
                 *context.Get(),
+                scratch,
                 parameters,
                 plaintext,
                 plaintextLength,
@@ -935,6 +1026,7 @@ namespace crypto
             if (NT_SUCCESS(status)) {
                 status = CcmCrypt(
                     *context.Get(),
+                    scratch,
                     parameters,
                     plaintext,
                     plaintextLength,
@@ -942,21 +1034,23 @@ namespace crypto
                     ciphertextLength);
             }
             if (NT_SUCCESS(status)) {
-                UCHAR counter[AesBlockLength] = {};
-                UCHAR stream[AesBlockLength] = {};
+                UCHAR* counter = scratch.CcmCounter;
+                UCHAR* stream = scratch.CcmStream;
+                RtlZeroMemory(counter, sizeof(scratch.CcmCounter));
+                RtlZeroMemory(stream, sizeof(scratch.CcmStream));
                 BuildCcmCounterBlock(parameters.Nonce.Data, parameters.Nonce.Length, 0, counter);
-                Aes128EncryptBlock(*context.Get(), counter, stream);
+                Aes128EncryptBlock(*context.Get(), scratch, counter, stream);
                 for (SIZE_T index = 0; index < tagLength; ++index) {
                     tag[index] = static_cast<UCHAR>(mac[index] ^ stream[index]);
                 }
                 if (bytesWritten != nullptr) {
                     *bytesWritten = plaintextLength;
                 }
-                RtlSecureZeroMemory(counter, sizeof(counter));
-                RtlSecureZeroMemory(stream, sizeof(stream));
+                RtlSecureZeroMemory(counter, sizeof(scratch.CcmCounter));
+                RtlSecureZeroMemory(stream, sizeof(scratch.CcmStream));
             }
 
-            RtlSecureZeroMemory(mac, sizeof(mac));
+            RtlSecureZeroMemory(mac, sizeof(scratch.CcmMac));
             RtlSecureZeroMemory(context->RoundKeys, sizeof(context->RoundKeys));
             return status;
         }
@@ -993,13 +1087,20 @@ namespace crypto
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
-            status = Aes128Initialize(key, *context.Get());
+            AeadScratchGuard scratchGuard;
+            if (!scratchGuard.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            AeadScratch& scratch = scratchGuard.Get();
+
+            status = Aes128Initialize(key, scratch, *context.Get());
             if (!NT_SUCCESS(status)) {
                 return status;
             }
 
             status = CcmCrypt(
                 *context.Get(),
+                scratch,
                 parameters,
                 ciphertext,
                 ciphertextLength,
@@ -1010,20 +1111,25 @@ namespace crypto
                 return status;
             }
 
-            UCHAR mac[AeadMaxTagLength] = {};
+            UCHAR* mac = scratch.CcmMac;
+            RtlZeroMemory(mac, sizeof(scratch.CcmMac));
             status = CcmComputeMac(
                 *context.Get(),
+                scratch,
                 parameters,
                 plaintext,
                 ciphertextLength,
                 parameters.Tag.Length,
                 mac);
             if (NT_SUCCESS(status)) {
-                UCHAR counter[AesBlockLength] = {};
-                UCHAR stream[AesBlockLength] = {};
-                UCHAR expectedTag[AeadMaxTagLength] = {};
+                UCHAR* counter = scratch.CcmCounter;
+                UCHAR* stream = scratch.CcmStream;
+                UCHAR* expectedTag = scratch.ExpectedTag;
+                RtlZeroMemory(counter, sizeof(scratch.CcmCounter));
+                RtlZeroMemory(stream, sizeof(scratch.CcmStream));
+                RtlZeroMemory(expectedTag, sizeof(scratch.ExpectedTag));
                 BuildCcmCounterBlock(parameters.Nonce.Data, parameters.Nonce.Length, 0, counter);
-                Aes128EncryptBlock(*context.Get(), counter, stream);
+                Aes128EncryptBlock(*context.Get(), scratch, counter, stream);
                 for (SIZE_T index = 0; index < parameters.Tag.Length; ++index) {
                     expectedTag[index] = static_cast<UCHAR>(mac[index] ^ stream[index]);
                 }
@@ -1034,12 +1140,12 @@ namespace crypto
                 else if (bytesWritten != nullptr) {
                     *bytesWritten = ciphertextLength;
                 }
-                RtlSecureZeroMemory(counter, sizeof(counter));
-                RtlSecureZeroMemory(stream, sizeof(stream));
-                RtlSecureZeroMemory(expectedTag, sizeof(expectedTag));
+                RtlSecureZeroMemory(counter, sizeof(scratch.CcmCounter));
+                RtlSecureZeroMemory(stream, sizeof(scratch.CcmStream));
+                RtlSecureZeroMemory(expectedTag, sizeof(scratch.ExpectedTag));
             }
 
-            RtlSecureZeroMemory(mac, sizeof(mac));
+            RtlSecureZeroMemory(mac, sizeof(scratch.CcmMac));
             RtlSecureZeroMemory(context->RoundKeys, sizeof(context->RoundKeys));
             return status;
         }

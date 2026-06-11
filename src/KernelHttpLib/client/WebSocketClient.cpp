@@ -1108,10 +1108,15 @@ namespace client
         if (!NT_SUCCESS(status)) {
             return status;
         }
+        if (!receiveFrameHeader_.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        websocket::WebSocketFrameHeader& header = *receiveFrameHeader_.Get();
 
         for (;;) {
             SIZE_T frameLength = bufferedFrameLength_;
-            websocket::WebSocketFrameHeader header = {};
+            RtlZeroMemory(&header, sizeof(header));
             for (;;) {
                 bool headerDecoded = false;
                 bool complete = false;

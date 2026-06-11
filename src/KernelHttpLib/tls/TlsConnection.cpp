@@ -961,6 +961,7 @@ namespace tls
 
         void StoreTls12SessionFromHandshake(
             _Inout_opt_ Tls12SessionCache* cache,
+            _Inout_ Tls12Session& stored,
             _In_ const TlsClientConnectionOptions& options,
             ULONG policyIdentity,
             _In_ const TlsServerHelloView& serverHello,
@@ -984,7 +985,7 @@ namespace tls
                 return;
             }
 
-            Tls12Session stored = {};
+            RtlSecureZeroMemory(&stored, sizeof(stored));
             stored.SessionIdLength = serverHello.SessionIdLength;
             if (stored.SessionIdLength != 0) {
                 RtlCopyMemory(stored.SessionId, serverHello.SessionId, stored.SessionIdLength);
@@ -1504,6 +1505,15 @@ namespace tls
         tlsPolicy_ = {};
         tlsPolicyIdentity_ = 0;
         serverCertificatePublicKeyAlgorithm_ = CertificatePublicKeyAlgorithm::Unknown;
+        if (tlsKeyBlockScratch_.IsValid()) {
+            RtlSecureZeroMemory(tlsKeyBlockScratch_.Get(), sizeof(TlsKeyBlock));
+        }
+        if (tls12SessionScratch_.IsValid()) {
+            RtlSecureZeroMemory(tls12SessionScratch_.Get(), sizeof(Tls12Session));
+        }
+        if (tls13SessionTicketScratch_.IsValid()) {
+            RtlSecureZeroMemory(tls13SessionTicketScratch_.Get(), sizeof(Tls13SessionTicket));
+        }
         RtlSecureZeroMemory(tls12PendingTicket_, sizeof(tls12PendingTicket_));
         tls12PendingTicketLength_ = 0;
         tls12PendingTicketLifetimeHintSeconds_ = 0;
@@ -1952,7 +1962,11 @@ namespace tls
                 return status;
             }
 
-            TlsKeyBlock resumedKeyBlock = {};
+            if (!tlsKeyBlockScratch_.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            TlsKeyBlock& resumedKeyBlock = *tlsKeyBlockScratch_.Get();
+            RtlSecureZeroMemory(&resumedKeyBlock, sizeof(resumedKeyBlock));
             const SIZE_T resumedKeyLength = Tls12AeadKeyLengthForCipherSuite(context_.CipherSuite());
             const SIZE_T resumedMacKeyLength = Tls12MacKeyLengthForCipherSuite(context_.CipherSuite());
             const SIZE_T resumedFixedIvLength = Tls12FixedIvLengthForCipherSuite(context_.CipherSuite());
@@ -2047,8 +2061,12 @@ namespace tls
                 return status;
             }
 
+            if (!tls12SessionScratch_.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
             StoreTls12SessionFromHandshake(
                 tls12SessionCache_,
+                *tls12SessionScratch_.Get(),
                 options,
                 tlsPolicyIdentity_,
                 serverHello,
@@ -2391,7 +2409,12 @@ namespace tls
             return status;
         }
 
-        TlsKeyBlock keyBlock = {};
+        if (!tlsKeyBlockScratch_.IsValid()) {
+            RtlSecureZeroMemory(transcriptHash.Get(), transcriptHash.Count());
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        TlsKeyBlock& keyBlock = *tlsKeyBlockScratch_.Get();
+        RtlSecureZeroMemory(&keyBlock, sizeof(keyBlock));
         const SIZE_T keyLength = Tls12AeadKeyLengthForCipherSuite(context_.CipherSuite());
         const SIZE_T macKeyLength = Tls12MacKeyLengthForCipherSuite(context_.CipherSuite());
         const SIZE_T fixedIvLength = Tls12FixedIvLengthForCipherSuite(context_.CipherSuite());
@@ -2492,8 +2515,12 @@ namespace tls
             return status;
         }
 
+        if (!tls12SessionScratch_.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
         StoreTls12SessionFromHandshake(
             tls12SessionCache_,
+            *tls12SessionScratch_.Get(),
             options,
             tlsPolicyIdentity_,
             serverHello,
@@ -4101,7 +4128,11 @@ namespace tls
             return STATUS_SUCCESS;
         }
 
-        Tls13SessionTicket stored = {};
+        if (!tls13SessionTicketScratch_.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        Tls13SessionTicket& stored = *tls13SessionTicketScratch_.Get();
+        RtlSecureZeroMemory(&stored, sizeof(stored));
         stored.IdentityLength = ticket.TicketLength;
         RtlCopyMemory(stored.Identity, ticket.Ticket, ticket.TicketLength);
         stored.NonceLength = ticket.NonceLength;

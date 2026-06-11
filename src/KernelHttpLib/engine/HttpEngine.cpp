@@ -66,6 +66,12 @@ namespace engine
         SIZE_T HostHeaderCapacity = 0;
     };
 
+    struct RedirectOriginSnapshot final
+    {
+        char Scheme[KhMaxSchemeLength + 1] = {};
+        char Host[KhMaxHostLength + 1] = {};
+    };
+
     class WorkspaceGuard final
     {
     public:
@@ -2504,13 +2510,15 @@ namespace engine
         http::HttpText location,
         _Inout_ KhWorkspace& workspace) noexcept
     {
-        char oldScheme[KhMaxSchemeLength + 1] = {};
-        char oldHost[KhMaxHostLength + 1] = {};
+        HeapObject<RedirectOriginSnapshot> oldOrigin;
+        if (!oldOrigin.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
         const SIZE_T oldSchemeLength = request.SchemeLength;
         const SIZE_T oldHostLength = request.HostLength;
         const USHORT oldPort = request.Port;
-        RtlCopyMemory(oldScheme, request.Scheme, sizeof(oldScheme));
-        RtlCopyMemory(oldHost, request.Host, sizeof(oldHost));
+        RtlCopyMemory(oldOrigin->Scheme, request.Scheme, sizeof(oldOrigin->Scheme));
+        RtlCopyMemory(oldOrigin->Host, request.Host, sizeof(oldOrigin->Host));
 
         SIZE_T redirectUrlLength = 0;
         NTSTATUS status = BuildRedirectUrl(
@@ -2534,9 +2542,9 @@ namespace engine
         }
 
         if (IsCrossOriginRedirect(
-            oldScheme,
+            oldOrigin->Scheme,
             oldSchemeLength,
-            oldHost,
+            oldOrigin->Host,
             oldHostLength,
             oldPort,
             request)) {

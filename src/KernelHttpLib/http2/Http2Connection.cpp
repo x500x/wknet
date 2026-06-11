@@ -880,8 +880,10 @@ namespace http2
                         return STATUS_INVALID_NETWORK_RESPONSE;
                     }
 
-                    http::HttpHeader trailerHeaders[16] = {};
-                    http::HttpHeader* decodedHeaders = trailers ? trailerHeaders : responseHeaders;
+                    if (trailers) {
+                        RtlZeroMemory(trailerHeaders_, sizeof(trailerHeaders_));
+                    }
+                    http::HttpHeader* decodedHeaders = trailers ? trailerHeaders_ : responseHeaders;
                     const SIZE_T decodedHeaderCapacity = trailers ? 16 : responseHeaderCapacity;
                     char* decodedNameValueBuffer = trailers ?
                         reinterpret_cast<char*>(headerBlock_) :

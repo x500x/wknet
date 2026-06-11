@@ -240,6 +240,7 @@ namespace client
         net::WskSocket socket_ = {};
         core::WskTransport* rawTransport_ = nullptr;
         tls::TlsConnection* tls_ = nullptr;
+        HeapObject<websocket::WebSocketFrameHeader> receiveFrameHeader_;
         UCHAR* bufferedFrame_ = nullptr;
         SIZE_T bufferedFrameCapacity_ = 0;
         SIZE_T bufferedFrameLength_ = 0;

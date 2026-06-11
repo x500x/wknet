@@ -9,6 +9,7 @@ namespace crypto
     {
         constexpr SIZE_T FieldElementLength = 16;
         using FieldElement = long long[FieldElementLength];
+        constexpr SIZE_T X25519ProductLength = 31;
 
         const UCHAR X25519BasePoint[KeyExchangeX25519KeyLength] = {
             9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -24,6 +25,53 @@ namespace crypto
 
         const FieldElement Field121665 = {
             0xDB41, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        };
+
+        const UCHAR FfdheGeneratorTwo[1] = { 2 };
+
+        struct X25519Scratch final
+        {
+            UCHAR Scalar[KeyExchangeX25519KeyLength] = {};
+            long long Product[X25519ProductLength] = {};
+            long long Value[FieldElementLength] = {};
+            long long Reduced[FieldElementLength] = {};
+            long long X[FieldElementLength] = {};
+            long long A[FieldElementLength] = {};
+            long long B[FieldElementLength] = {};
+            long long C[FieldElementLength] = {};
+            long long D[FieldElementLength] = {};
+            long long E[FieldElementLength] = {};
+            long long F[FieldElementLength] = {};
+        };
+
+        class X25519ScratchGuard final
+        {
+        public:
+            X25519ScratchGuard() noexcept = default;
+
+            ~X25519ScratchGuard() noexcept
+            {
+                if (scratch_.IsValid()) {
+                    RtlSecureZeroMemory(scratch_.Get(), sizeof(X25519Scratch));
+                }
+            }
+
+            X25519ScratchGuard(const X25519ScratchGuard&) = delete;
+            X25519ScratchGuard& operator=(const X25519ScratchGuard&) = delete;
+
+            _Must_inspect_result_
+            bool IsValid() const noexcept
+            {
+                return scratch_.IsValid();
+            }
+
+            X25519Scratch& Get() noexcept
+            {
+                return *scratch_.Get();
+            }
+
+        private:
+            HeapObject<X25519Scratch> scratch_;
         };
 
         constexpr SIZE_T X448LimbCount = KeyExchangeX448KeyLength / sizeof(ULONG);
@@ -403,11 +451,13 @@ namespace crypto
         }
 
         void MultiplyFieldElement(
+            _Inout_ X25519Scratch& scratch,
             _Out_writes_(FieldElementLength) FieldElement output,
             _In_reads_(FieldElementLength) const FieldElement left,
             _In_reads_(FieldElementLength) const FieldElement right) noexcept
         {
-            long long product[31] = {};
+            long long* product = scratch.Product;
+            RtlZeroMemory(product, sizeof(scratch.Product));
             for (SIZE_T leftIndex = 0; leftIndex < FieldElementLength; ++leftIndex) {
                 for (SIZE_T rightIndex = 0; rightIndex < FieldElementLength; ++rightIndex) {
                     product[leftIndex + rightIndex] += left[leftIndex] * right[rightIndex];
@@ -423,14 +473,15 @@ namespace crypto
 
             CarryFieldElement(output);
             CarryFieldElement(output);
-            RtlSecureZeroMemory(product, sizeof(product));
+            RtlSecureZeroMemory(product, sizeof(scratch.Product));
         }
 
         void SquareFieldElement(
+            _Inout_ X25519Scratch& scratch,
             _Out_writes_(FieldElementLength) FieldElement output,
             _In_reads_(FieldElementLength) const FieldElement input) noexcept
         {
-            MultiplyFieldElement(output, input, input);
+            MultiplyFieldElement(scratch, output, input, input);
         }
 
         void UnpackFieldElement(
@@ -446,11 +497,14 @@ namespace crypto
         }
 
         void PackFieldElement(
+            _Inout_ X25519Scratch& scratch,
             _Out_writes_bytes_(KeyExchangeX25519KeyLength) UCHAR* output,
             _In_reads_(FieldElementLength) const FieldElement input) noexcept
         {
-            FieldElement value = {};
-            FieldElement reduced = {};
+            FieldElement& value = scratch.Value;
+            FieldElement& reduced = scratch.Reduced;
+            RtlZeroMemory(value, sizeof(scratch.Value));
+            RtlZeroMemory(reduced, sizeof(scratch.Reduced));
             CopyFieldElement(value, input);
             CarryFieldElement(value);
             CarryFieldElement(value);
@@ -473,24 +527,26 @@ namespace crypto
                 output[(2 * index) + 1] = static_cast<UCHAR>((value[index] >> 8) & 0xff);
             }
 
-            RtlSecureZeroMemory(value, sizeof(value));
-            RtlSecureZeroMemory(reduced, sizeof(reduced));
+            RtlSecureZeroMemory(value, sizeof(scratch.Value));
+            RtlSecureZeroMemory(reduced, sizeof(scratch.Reduced));
         }
 
         void InvertFieldElement(
+            _Inout_ X25519Scratch& scratch,
             _Out_writes_(FieldElementLength) FieldElement output,
             _In_reads_(FieldElementLength) const FieldElement input) noexcept
         {
-            FieldElement value = {};
+            FieldElement& value = scratch.Value;
+            RtlZeroMemory(value, sizeof(scratch.Value));
             CopyFieldElement(value, input);
             for (int index = 253; index >= 0; --index) {
-                SquareFieldElement(value, value);
+                SquareFieldElement(scratch, value, value);
                 if (index != 2 && index != 4) {
-                    MultiplyFieldElement(value, value, input);
+                    MultiplyFieldElement(scratch, value, value, input);
                 }
             }
             CopyFieldElement(output, value);
-            RtlSecureZeroMemory(value, sizeof(value));
+            RtlSecureZeroMemory(value, sizeof(scratch.Value));
         }
 
         void ClampX25519Scalar(_Inout_updates_(KeyExchangeX25519KeyLength) UCHAR* scalar) noexcept
@@ -510,17 +566,30 @@ namespace crypto
                 return STATUS_INVALID_PARAMETER;
             }
 
-            UCHAR scalar[KeyExchangeX25519KeyLength] = {};
-            RtlCopyMemory(scalar, privateKey, sizeof(scalar));
+            X25519ScratchGuard scratchGuard;
+            if (!scratchGuard.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            X25519Scratch& scratch = scratchGuard.Get();
+
+            UCHAR* scalar = scratch.Scalar;
+            RtlCopyMemory(scalar, privateKey, sizeof(scratch.Scalar));
             ClampX25519Scalar(scalar);
 
-            FieldElement x = {};
-            FieldElement a = {};
-            FieldElement b = {};
-            FieldElement c = {};
-            FieldElement d = {};
-            FieldElement e = {};
-            FieldElement f = {};
+            FieldElement& x = scratch.X;
+            FieldElement& a = scratch.A;
+            FieldElement& b = scratch.B;
+            FieldElement& c = scratch.C;
+            FieldElement& d = scratch.D;
+            FieldElement& e = scratch.E;
+            FieldElement& f = scratch.F;
+            RtlZeroMemory(x, sizeof(scratch.X));
+            RtlZeroMemory(a, sizeof(scratch.A));
+            RtlZeroMemory(b, sizeof(scratch.B));
+            RtlZeroMemory(c, sizeof(scratch.C));
+            RtlZeroMemory(d, sizeof(scratch.D));
+            RtlZeroMemory(e, sizeof(scratch.E));
+            RtlZeroMemory(f, sizeof(scratch.F));
 
             UnpackFieldElement(x, peerPublicKey);
             a[0] = 1;
@@ -535,36 +604,36 @@ namespace crypto
                 SubtractFieldElement(a, a, c);
                 AddFieldElement(c, b, d);
                 SubtractFieldElement(b, b, d);
-                SquareFieldElement(d, e);
-                SquareFieldElement(f, a);
-                MultiplyFieldElement(a, c, a);
-                MultiplyFieldElement(c, b, e);
+                SquareFieldElement(scratch, d, e);
+                SquareFieldElement(scratch, f, a);
+                MultiplyFieldElement(scratch, a, c, a);
+                MultiplyFieldElement(scratch, c, b, e);
                 AddFieldElement(e, a, c);
                 SubtractFieldElement(a, a, c);
-                SquareFieldElement(b, a);
+                SquareFieldElement(scratch, b, a);
                 SubtractFieldElement(c, d, f);
-                MultiplyFieldElement(a, c, Field121665);
+                MultiplyFieldElement(scratch, a, c, Field121665);
                 AddFieldElement(a, a, d);
-                MultiplyFieldElement(c, c, a);
-                MultiplyFieldElement(a, d, f);
-                MultiplyFieldElement(d, b, x);
-                SquareFieldElement(b, e);
+                MultiplyFieldElement(scratch, c, c, a);
+                MultiplyFieldElement(scratch, a, d, f);
+                MultiplyFieldElement(scratch, d, b, x);
+                SquareFieldElement(scratch, b, e);
                 SelectFieldElement(a, b, swap);
                 SelectFieldElement(c, d, swap);
             }
 
-            InvertFieldElement(c, c);
-            MultiplyFieldElement(a, a, c);
-            PackFieldElement(output, a);
+            InvertFieldElement(scratch, c, c);
+            MultiplyFieldElement(scratch, a, a, c);
+            PackFieldElement(scratch, output, a);
 
-            RtlSecureZeroMemory(scalar, sizeof(scalar));
-            RtlSecureZeroMemory(x, sizeof(x));
-            RtlSecureZeroMemory(a, sizeof(a));
-            RtlSecureZeroMemory(b, sizeof(b));
-            RtlSecureZeroMemory(c, sizeof(c));
-            RtlSecureZeroMemory(d, sizeof(d));
-            RtlSecureZeroMemory(e, sizeof(e));
-            RtlSecureZeroMemory(f, sizeof(f));
+            RtlSecureZeroMemory(scalar, sizeof(scratch.Scalar));
+            RtlSecureZeroMemory(x, sizeof(scratch.X));
+            RtlSecureZeroMemory(a, sizeof(scratch.A));
+            RtlSecureZeroMemory(b, sizeof(scratch.B));
+            RtlSecureZeroMemory(c, sizeof(scratch.C));
+            RtlSecureZeroMemory(d, sizeof(scratch.D));
+            RtlSecureZeroMemory(e, sizeof(scratch.E));
+            RtlSecureZeroMemory(f, sizeof(scratch.F));
             return STATUS_SUCCESS;
         }
 
@@ -1659,11 +1728,10 @@ namespace crypto
                 return STATUS_INVALID_PARAMETER;
             }
 
-            const UCHAR generator[] = { 2 };
             NTSTATUS status = FfdheModularExponent(
                 *ffdhe,
-                generator,
-                sizeof(generator),
+                FfdheGeneratorTwo,
+                sizeof(FfdheGeneratorTwo),
                 privateKey,
                 privateKeyLength,
                 publicKey,

@@ -7,6 +7,8 @@ namespace engine
 {
 namespace
 {
+    constexpr const char PunycodePrefix[] = "xn--";
+
     char ToLowerAscii(char value) noexcept
     {
         return (value >= 'A' && value <= 'Z') ? static_cast<char>(value + ('a' - 'A')) : value;
@@ -236,9 +238,8 @@ namespace
             return out <= 63 ? STATUS_SUCCESS : STATUS_INVALID_PARAMETER;
         }
 
-        const char prefix[] = "xn--";
-        for (SIZE_T index = 0; index < sizeof(prefix) - 1; ++index) {
-            NTSTATUS status = AppendOutputChar(prefix[index], output, outputCapacity, &out);
+        for (SIZE_T index = 0; index < sizeof(PunycodePrefix) - 1; ++index) {
+            NTSTATUS status = AppendOutputChar(PunycodePrefix[index], output, outputCapacity, &out);
             if (!NT_SUCCESS(status)) {
                 return status;
             }

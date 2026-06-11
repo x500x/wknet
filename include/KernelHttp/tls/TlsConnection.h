@@ -312,6 +312,9 @@ namespace tls
         TlsPolicy tlsPolicy_ = {};
         ULONG tlsPolicyIdentity_ = 0;
         CertificatePublicKeyAlgorithm serverCertificatePublicKeyAlgorithm_ = CertificatePublicKeyAlgorithm::Unknown;
+        HeapObject<TlsKeyBlock> tlsKeyBlockScratch_;
+        HeapObject<Tls12Session> tls12SessionScratch_;
+        HeapObject<Tls13SessionTicket> tls13SessionTicketScratch_;
         UCHAR tls12PendingTicket_[Tls12MaxTicketLength] = {};
         SIZE_T tls12PendingTicketLength_ = 0;
         ULONG tls12PendingTicketLifetimeHintSeconds_ = 0;

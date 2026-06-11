@@ -245,6 +245,7 @@ namespace http2
         UCHAR* framePayload_ = nullptr;
         UCHAR* headerBlock_ = nullptr;
         UCHAR* responseHeaderBlock_ = nullptr;
+        http::HttpHeader trailerHeaders_[16] = {};
     };
 }
 }

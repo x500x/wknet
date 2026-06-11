@@ -19,7 +19,10 @@ namespace http
 
     struct HttpTransferCodingInfo final
     {
-        HttpTransferCodingKind Codings[HttpMaxTransferCodings] = {};
+        HttpTransferCodingKind Coding0 = HttpTransferCodingKind::Chunked;
+        HttpTransferCodingKind Coding1 = HttpTransferCodingKind::Chunked;
+        HttpTransferCodingKind Coding2 = HttpTransferCodingKind::Chunked;
+        HttpTransferCodingKind Coding3 = HttpTransferCodingKind::Chunked;
         SIZE_T CodingCount = 0;
         bool HasTransferEncoding = false;
         bool FinalCodingIsChunked = false;

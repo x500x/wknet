@@ -65,6 +65,7 @@ namespace tls
 
         const char PemCertificateBegin[] = "-----BEGIN CERTIFICATE-----";
         const char PemCertificateEnd[] = "-----END CERTIFICATE-----";
+        constexpr const char PunycodePrefix[] = "xn--";
 
         struct DerElement final
         {
@@ -1683,9 +1684,8 @@ namespace tls
                 return out <= 63 ? STATUS_SUCCESS : STATUS_INVALID_PARAMETER;
             }
 
-            const char prefix[] = "xn--";
-            for (SIZE_T index = 0; index < sizeof(prefix) - 1; ++index) {
-                NTSTATUS status = AppendOutputChar(prefix[index], output, outputCapacity, &out);
+            for (SIZE_T index = 0; index < sizeof(PunycodePrefix) - 1; ++index) {
+                NTSTATUS status = AppendOutputChar(PunycodePrefix[index], output, outputCapacity, &out);
                 if (!NT_SUCCESS(status)) {
                     return status;
                 }
