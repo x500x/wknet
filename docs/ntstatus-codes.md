@@ -68,9 +68,20 @@ HTTPS 请求中 TLS 握手或证书验证失败时返回：
 | 0xC0000192 | STATUS_TRUST_EXPLICIT_DISTRUST | 明确不信任（证书被列入黑名单） |
 | 0xC0000194 | STATUS_INVALID_SIGNATURE | 无效签名 |
 | 0xC000009D | STATUS_DEVICE_NOT_CONNECTED | 设备未连接（TLS 连接未建立） |
-| 0xC00000BB | STATUS_NOT_SUPPORTED | 请求了当前未实现的证书策略，例如关键 `certificatePolicies`、Name Constraints 或强制撤销检查 |
+| 0xC00000BB | STATUS_NOT_SUPPORTED | TLS policy 禁止、本地 crypto provider 不支持、ALPN 无匹配或 0-RTT 未显式 replay-safe |
+| 0xC00000C3 | STATUS_INVALID_NETWORK_RESPONSE | peer alert、TLS record/handshake 编码错误、证书 DER 畸形或协议语义错误 |
 
-非关键 `certificatePolicies` 扩展会先做 DER 语法校验；语法合法时继续正常信任链验证，语法畸形返回 `STATUS_INVALID_NETWORK_RESPONSE`。公网强制 IPv4/IPv6 样例和公网 WebSocket DNS/connect 样例可能记录 `STATUS_NO_MATCH`、`STATUS_IO_TIMEOUT`、`STATUS_HOST_UNREACHABLE` 等环境状态，但这些诊断项不代表协议实现失败。
+TLS/证书错误的常见分类：
+
+| 分类 | 典型 NTSTATUS | 说明 |
+|------|---------------|------|
+| TLS policy disabled | `STATUS_NOT_SUPPORTED` | 调用方请求了当前 policy 禁止的能力，例如默认策略下的 TLS 1.2 RSA key exchange、CBC、renegotiation，或未声明 replay-safe 的 0-RTT |
+| Unsupported local provider | `STATUS_NOT_SUPPORTED` | 本地 CNG/BCrypt 或内置 provider 路径不支持所需算法、key type 或 signature scheme |
+| Peer alert / protocol error | `STATUS_INVALID_NETWORK_RESPONSE` | peer 发送 fatal/warning alert，或握手/record 编码、ALPN、ServerHello 选择违反协议 |
+| Revocation failure | `STATUS_TRUST_FAILURE` | OCSP/CRL 缓存条目缺失、过期、unknown 或 revoked；强撤销判定依赖调用方提供的新鲜条目 |
+| Certificate policy failure | `STATUS_TRUST_FAILURE` 或 `STATUS_INVALID_NETWORK_RESPONSE` | Name Constraints、certificatePolicies/policyConstraints/inhibitAnyPolicy、EKU/KeyUsage/BasicConstraints、SAN/CN/IDNA 校验失败；畸形 DER 返回 `STATUS_INVALID_NETWORK_RESPONSE` |
+
+`certificatePolicies`、Name Constraints 和 IDNA 会参与证书验证。公网强制 IPv4/IPv6 样例和公网 WebSocket DNS/connect 样例可能记录 `STATUS_NO_MATCH`、`STATUS_IO_TIMEOUT`、`STATUS_HOST_UNREACHABLE` 等环境状态，但这些诊断项不代表协议实现失败。
 
 ---
 
@@ -336,6 +347,19 @@ Public endpoint samples in `KernelHttpTest` record DNS/connect/timeout/reset sta
 | 0xC0000191 | STATUS_TRUST_NO_TRUST | No trust (certificate not trusted) |
 | 0xC0000192 | STATUS_TRUST_EXPLICIT_DISTRUST | Explicit distrust |
 | 0xC0000194 | STATUS_INVALID_SIGNATURE | Invalid signature |
+| 0xC000009D | STATUS_DEVICE_NOT_CONNECTED | Device not connected (TLS connection not established) |
+| 0xC00000BB | STATUS_NOT_SUPPORTED | TLS policy disabled, unsupported local crypto provider, ALPN mismatch, or 0-RTT without replay-safe opt-in |
+| 0xC00000C3 | STATUS_INVALID_NETWORK_RESPONSE | Peer TLS alert, malformed TLS record/handshake, malformed certificate DER, or protocol semantic error |
+
+Common TLS/certificate categories:
+
+| Category | Typical NTSTATUS | Meaning |
+|----------|------------------|---------|
+| TLS policy disabled | `STATUS_NOT_SUPPORTED` | The requested capability is forbidden by the active policy, for example TLS 1.2 RSA key exchange, CBC, renegotiation under the default profile, or 0-RTT without replay-safe opt-in |
+| Unsupported local provider | `STATUS_NOT_SUPPORTED` | The local CNG/BCrypt or in-tree provider path cannot supply the required algorithm, key type, or signature scheme |
+| Peer alert / protocol error | `STATUS_INVALID_NETWORK_RESPONSE` | The peer sent an alert, or record/handshake encoding, ALPN, or ServerHello selection violates protocol rules |
+| Revocation failure | `STATUS_TRUST_FAILURE` | OCSP/CRL cached data is missing, expired, unknown, or revoked; hard revocation depends on fresh entries supplied by the caller |
+| Certificate policy failure | `STATUS_TRUST_FAILURE` or `STATUS_INVALID_NETWORK_RESPONSE` | Name Constraints, certificatePolicies/policyConstraints/inhibitAnyPolicy, EKU/KeyUsage/BasicConstraints, SAN/CN/IDNA validation failed; malformed DER returns `STATUS_INVALID_NETWORK_RESPONSE` |
 
 ## Resource and Parameter Errors
 

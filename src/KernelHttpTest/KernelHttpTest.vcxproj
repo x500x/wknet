@@ -40,6 +40,10 @@
   <ItemGroup>
     <Inf Include="KernelHttpTest.inf" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\tests\tls_interop_matrix_tests.cpp" />
+    <None Include="..\..\tests\integration\tls_matrix.ps1" />
+  </ItemGroup>
   <ItemDefinitionGroup>
     <Inf>
       <DateStamp>05/20/2026</DateStamp>

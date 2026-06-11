@@ -17,14 +17,14 @@ English | [简体中文](README.md)
 
 ## 📖 Introduction
 
-KernelHttp is a pure kernel-mode HTTP/HTTPS client library designed specifically for Windows kernel driver development. Built from the ground up, it implements a kernel-friendly modern client protocol subset: HTTP/1.1, HTTP/2, WebSocket, and TLS 1.2/1.3 handshake and encrypted communication. Unsupported optional capabilities are documented below.
+KernelHttp is a pure kernel-mode HTTP/HTTPS client library designed specifically for Windows kernel driver development. Built from the ground up, it implements a kernel-friendly client protocol stack: HTTP/1.1, HTTP/2, WebSocket, and TLS 1.2/1.3 handshake, record protection, and certificate validation. Default security behavior and explicit compatibility capabilities are documented below.
 
 ### ✨ Key Features
 
 - **🔒 Pure Kernel-Mode Implementation**: No dependency on WinHTTP, WinINet, SChannel, or other user-mode components
 - **🌐 WSK Network Transport**: Uses Windows Sockets Kernel (WSK) for network communication, with `ITransport` abstraction supporting WSK and TLS transport layers
 - **🔐 CNG/BCrypt Cryptography**: Uses kernel-mode CNG (Cryptography Next Generation) for cryptographic operations, supporting TLS 1.2/1.3 handshake
-- **📡 Explicit Protocol Subset**: Supports the client main paths for HTTP/1.1, HTTP/2 (with h2c plaintext upgrade), WebSocket, and TLS 1.2/1.3, with unsupported optional capabilities documented
+- **📡 Explicit Capability Matrix**: Supports the client main paths for HTTP/1.1, HTTP/2 (with h2c plaintext upgrade), WebSocket, and TLS 1.2/1.3, with default capabilities separated from explicit compatibility capabilities
 - **🔄 Connection Pool Management**: Built-in connection pool with connection reuse, idle timeout, concurrency protection, and automatic management
 - **⚡ Asynchronous Operations**: Supports async requests with concurrency protection and workspace isolation, avoiding blocking kernel threads
 - **🎯 Two-Layer API**: Provides both high-level simplified API (`khttp`) and low-level fine-grained control API (`engine`)
@@ -41,7 +41,7 @@ KernelHttp implements protocol behavior on the Windows kernel path: transport us
 | HTTP/1.1 | `Content-Length`, explicit chunked request bodies, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer syntax/forbidden-field validation and read-only API exposure, RFC 3986 relative redirect resolution | User-supplied request `Transfer-Encoding` is rejected; request trailers are not supported; no inbound request parser/server role is provided; HTTP proxy/CONNECT/TRACE is outside the current main path; `Range`/conditional requests are pass-through headers only; `Accept-Encoding` does not promise full qvalue/content negotiation; `br` is supported only as `Content-Encoding` |
 | HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS, HEADERS/CONTINUATION, DATA, PING, GOAWAY, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits | RFC 8441 WebSocket over HTTP/2, server push, priority, and full multiplex scheduling are not supported; disabled `PUSH_PROMISE` is a protocol error; missing SETTINGS ACK closes with `SETTINGS_TIMEOUT`; received GOAWAY terminates the current single-request connection semantics |
 | WebSocket | ws/wss handshake, text/binary send, empty messages, control-frame validation, public Ping/Pong/CloseEx, selected subprotocol query, complete-message receive by default | The main path is HTTP/1.1 Upgrade; custom opening handshake headers, extension negotiation, and receive-fragment callbacks are not supported; active close sends a close frame and then closes the transport, while received peer close is echoed before closing |
-| TLS | TLS 1.2/1.3, ECDHE + AES-GCM main path, TLS 1.3 downgrade protection, PSK ticket binding, HRR binder recomputation, certificate chain, dNSName/iPAddress SAN, and pin validation | TLS client certificates, CBC, RSA key exchange, ChaCha20-Poly1305, X25519, EdDSA, OCSP/CRL revocation checks, and IDNA are not supported; Name Constraints return unsupported |
+| TLS | TLS 1.2/1.3, all standard TLS 1.3 cipher suites, TLS 1.2 ECDHE/DHE/RSA key exchange, AES-GCM/AES-CBC/ChaCha20-Poly1305, X25519/X448/NIST P curves/FFDHE, RSA-PSS/RSA-PKCS1/ECDSA/EdDSA signature schemes, SNI, ALPN, PSK/session ticket, explicit opt-in 0-RTT, KeyUpdate, record padding, client certificates, OCSP stapling parse, certificate chain reordering and validation, Name Constraints, certificatePolicies, IDNA, OCSP/CRL revocation cache, SPKI pin | The default policy does not enable TLS 1.2 RSA key exchange, CBC, or renegotiation; those require `TlsSecurityProfile::CompatibilityExplicit` plus the matching explicit option. The library does not hard-code a system CA bundle and does not use WinHTTP, WinINet, or SChannel as the kernel main path; online revocation input must be provided by callers or a bounded external cache |
 
 | Unsupported Optional Capability | Current Handling |
 |---------------------------------|------------------|
@@ -56,10 +56,9 @@ KernelHttp implements protocol behavior on the Windows kernel path: transport us
 | HTTP/2 full multiplexing / server push / priority | Full multiplex scheduling is not exposed; push is disabled, forbidden `PUSH_PROMISE` is a protocol error, and priority is not a public scheduling capability |
 | RFC 9111 cache / Range / conditional requests | No kernel cache API is provided; `Range` and conditional request fields are pass-through only and are not semantically merged or validated |
 | Accept-Encoding qvalue/content negotiation | The default header only describes the implemented response decoder subset; callers may override it, but full negotiation semantics are not provided |
-| TLS client certificates | Client certificate authentication is not supported |
-| TLS CBC / RSA key exchange / ChaCha20-Poly1305 / X25519 / EdDSA | Not in the current cipher-suite, group, or signature subset |
-| OCSP / CRL revocation checks | Requiring revocation returns `STATUS_NOT_SUPPORTED` |
-| IDNA host processing | Certificate dNSName/CN matching currently uses ASCII host names |
+| TLS 1.2 RSA key exchange / CBC / renegotiation | Implemented but disabled by default; callers must use `CompatibilityExplicit` policy and enable RSA, CBC, or renegotiation explicitly |
+| TLS 1.3 0-RTT | Implemented but disabled by default; callers must enable early data and mark the request replay-safe |
+| Online OCSP/CRL fetching | The library does not recursively fetch revocation data; callers provide external trust/certificate/revocation data or cached entries for hard revocation decisions |
 
 Automatic redirects reject HTTPS-to-HTTP downgrades by default. Cross scheme/host/port redirects strip `Authorization`, `Cookie`, and `Proxy-Authorization`. 301/302 rewrite POST to GET by default, 303 rewrites every method except HEAD to GET, and 307/308 preserve method and body. Reused stale-connection failures are retried fresh only for safe/idempotent requests such as `GET`, `HEAD`, and `OPTIONS`; POST/PUT/PATCH/DELETE are not replayed automatically.
 
@@ -450,9 +449,15 @@ pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\websocket_client_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\http2_frame_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\hpack_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\http2_client_tests.exe'
+pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_crypto_tests.exe'
+pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_handshake_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_record_tests.exe'
+pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_interop_matrix_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\khttp_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\high_level_api_tests.exe'
+
+# Local TLS interop matrix: uses 127.0.0.1 only; reports explicit SKIP when OpenSSL/BoringSSL is absent
+pwsh -NoLogo -NoProfile -File .\tests\integration\tls_matrix.ps1 -Configuration Debug -Platform x64
 
 # Build library and example driver
 msbuild KernelHttp.sln /m /restore /p:Configuration=Debug /p:Platform=x64
@@ -466,7 +471,11 @@ msbuild KernelHttp.sln /m /restore /p:Configuration=Debug /p:Platform=x64
 | `hpack_tests.cpp` | HTTP/2 HPACK encoding/decoding |
 | `http2_frame_tests.cpp` | HTTP/2 frame processing |
 | `http2_client_tests.cpp` | HTTP/2 client tests |
+| `tls_crypto_tests.cpp` | TLS crypto vectors and key exchange |
+| `tls_handshake_tests.cpp` | TLS ClientHello/handshake encoding and parsing |
 | `tls_record_tests.cpp` | TLS record protocol |
+| `tls_interop_matrix_tests.cpp` | TLS capability/policy/interop matrix manifest |
+| `tests/integration/tls_matrix.ps1` | Local OpenSSL/BoringSSL loopback interop matrix |
 | `websocket_frame_tests.cpp` | WebSocket frame processing |
 | `khttp_tests.cpp` | High-level API tests |
 | `high_level_api_tests.cpp` | High-level API integration tests |

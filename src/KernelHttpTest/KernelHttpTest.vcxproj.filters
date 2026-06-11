@@ -74,4 +74,12 @@
       <Filter>Driver Files</Filter>
     </Inf>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\tests\tls_interop_matrix_tests.cpp">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="..\..\tests\integration\tls_matrix.ps1">
+      <Filter>Driver Files</Filter>
+    </None>
+  </ItemGroup>
 </Project>

@@ -2,6 +2,17 @@
 *.user
 *.suo
 *.pdb
+*.ipdb
+*.iobj
+*.obj
+*.idb
+*.ilk
+*.pch
+*.res
+*.rsp
+*.tlog
+*.lastbuildstate
+*.recipe
 *.VC.db
 *.VC.VC.opendb
 

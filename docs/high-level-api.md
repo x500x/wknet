@@ -7,7 +7,7 @@
 > **并发安全**：内部实现已对连接池、句柄释放、异步完成等关键路径加锁保护。异步路径使用独立的 Workspace 避免数据竞争。调用方仍需保证同一 `Request` 不被多个 `Send` 并发使用。
 
 > **协议与 IRQL 边界**：同步 HTTP、WebSocket、TLS 和证书验证路径要求 `PASSIVE_LEVEL`。HTTP/1.1 请求体默认使用 `Content-Length`，也可通过 `RequestSetBodyMode(Chunked)` 显式发送 chunked 请求体；用户设置请求 `Transfer-Encoding`、`TE`、`Trailer` 会返回 `STATUS_NOT_SUPPORTED`，带请求体的 `Expect: 100-continue` 暂不支持，request trailer 暂不支持。响应 `Transfer-Encoding` 支持 `chunked/gzip/deflate/compress` 链式解码且不接受 transfer-coding 参数；`br` 仅作为 `Content-Encoding` 支持；chunked trailer 会被校验、消费，并可通过 trailer 只读 API 在响应完成后访问。close-delimited 响应和 `101 Switching Protocols` 升级响应不会进入普通 HTTP 连接池。HTTP/2 TLS 主路径要求 ALPN `h2`；h2c prior knowledge / Upgrade 仅保留为显式 legacy/test path，不作为现代内核主路径能力宣传。HTTP/2 不支持 RFC 8441 WebSocket over HTTP/2、server push、priority 或完整多流调度，收到禁用的 `PUSH_PROMISE` 视为协议错误，缺失 SETTINGS ACK 会以 `SETTINGS_TIMEOUT` 关闭，收到 GOAWAY 会终止当前单请求连接语义。WebSocket 主路径是 HTTP/1.1 Upgrade，默认接收完整消息，不暴露接收分片回调、不协商扩展，也不提供自定义 opening handshake headers。TLS ALPN 结果必须来自客户端 offer 列表；TLS1.2 只能在获得可验证版本协商证据后选择；证书错误、ALPN mismatch、网络超时或 record 解密失败都不是 TLS1.2-only 证据。证书主机为 IP literal 时只匹配 iPAddress SAN，不回退到 dNSName 或 CN。
-> **安全策略**：自动 redirect 默认拒绝 HTTPS 到 HTTP 降级；跨源 redirect 清理 `Authorization`、`Cookie`、`Proxy-Authorization`；reused stale 连接失败只对 `GET`、`HEAD`、`OPTIONS` 等安全/幂等请求自动 fresh retry。TLS 1.3 0-RTT 默认关闭，启用时仍要求调用方显式标记 replay-safe。非关键 `certificatePolicies` 会做 DER 语法校验后继续正常证书验证；关键 `certificatePolicies`、Name Constraints、OCSP/CRL 撤销检查或 IDNA 完整策略当前不实现，触发这些要求时返回 `STATUS_NOT_SUPPORTED` 或拒绝非 ASCII 主机名。叶子证书默认硬性要求 ServerAuth EKU、KeyUsage digitalSignature 且不能是 CA；中间/根证书要求 BasicConstraints CA 和 KeyUsage keyCertSign。
+> **安全策略**：自动 redirect 默认拒绝 HTTPS 到 HTTP 降级；跨源 redirect 清理 `Authorization`、`Cookie`、`Proxy-Authorization`；reused stale 连接失败只对 `GET`、`HEAD`、`OPTIONS` 等安全/幂等请求自动 fresh retry。TLS 1.3 0-RTT 默认关闭，启用时仍要求调用方显式标记 replay-safe。TLS 1.2 RSA key exchange、CBC 和 renegotiation 已实现但默认关闭，只能通过 `TlsSecurityProfile::CompatibilityExplicit` 和对应开关显式启用。证书链构建、Name Constraints、certificatePolicies、IDNA 和 OCSP/CRL 缓存条目会参与验证；强撤销判定依赖调用方提供的新鲜 stapled/cached revocation entry，库层不在证书验证过程中递归发起在线 HTTP 获取。叶子证书默认硬性要求 ServerAuth EKU、KeyUsage digitalSignature 且不能是 CA；中间/根证书要求 BasicConstraints CA 和 KeyUsage keyCertSign。
 
 ## 1. 模块组成与依赖关系
 
@@ -80,7 +80,7 @@ struct SessionConfig final {
 
 调用 `DefaultSessionConfig()` 获取一份默认值再按需修改即可（`samples/HighLevelApiSamples.cpp:1701-1707`）。会话级 TLS 在 `SessionConfig::Tls` 中提供，单个请求可通过 `RequestSetTls` 覆盖。
 
-`MaxConnsPerHost` 是 scheme + host + port + address-family 维度的 active + idle 配额，不是完整 TLS 身份维度。实际复用仍要求完整连接池 key 一致，包括 SNI、ALPN、证书策略、信任库和 TLS 版本边界；同一 host 但 TLS 身份不同的连接不会互相复用。若同 host 配额被空闲的旧 TLS 身份占住，连接池可以先关闭该空闲连接再创建新身份连接；active 连接占满时返回 `STATUS_INSUFFICIENT_RESOURCES`。
+`MaxConnsPerHost` 是 scheme + host + port + address-family 维度的 active + idle 配额，不是完整 TLS 身份维度。实际复用仍要求完整连接池 key 一致，包括 SNI、ALPN、证书策略、信任库、TLS 版本边界、TLS policy identity 和客户端凭据；同一 host 但 TLS 身份不同的连接不会互相复用。若同 host 配额被空闲的旧 TLS 身份占住，连接池可以先关闭该空闲连接再创建新身份连接；active 连接占满时返回 `STATUS_INSUFFICIENT_RESOURCES`。
 
 DNS 解析通过 `net::WskClient::ResolveAll` 同步完成。解析进入 WSK provider 后不承诺被 `AsyncCancel` 中断，取消只保证上层异步操作、后续 connect/handshake/send/receive 等有界路径观察取消。DNS cache 是模块全局正向缓存：固定 5 分钟 TTL、16 个槽位，key 包含 host/service/address-family（ASCII 大小写不敏感），不读取 DNS 记录 TTL，不实现 negative cache 或公共 flush API；任一 `WskClient::Shutdown()` 会清空全局缓存。`Any` 地址族按 resolver 返回顺序连接，失败后尝试下一个地址，当前不实现 Happy Eyeballs 并行 IPv4/IPv6 竞速。
 
@@ -149,7 +149,7 @@ HTTP 请求只接受完整 URL，发送时生成 origin-form request-target；fr
 | `RequestSetMultipartBody` | `multipart/form-data`，传入 `MultipartPart` 数组（字段、文件字节、文件路径） |
 | `RequestSetFileBody` | 文件路径作为请求体（内核态走 `\SystemRoot\…` NT 路径） |
 | `RequestClearBody` | 清除已设置的请求体 |
-| `RequestSetTls` | 覆盖会话默认 TLS（含证书策略、ALPN、SNI、信任库） |
+| `RequestSetTls` | 覆盖会话默认 TLS（含证书策略、ALPN、SNI、信任库、TLS policy、客户端凭据） |
 | `RequestSetConnPolicy` | `ReuseOrCreate`（默认池化复用）/ `ForceNew`（强制新连接）/ `NoPool`（既不复用也不进池） |
 | `RequestSetAddressFamily` | `Any` / `Ipv4` / `Ipv6` |
 
@@ -335,7 +335,7 @@ constexpr ULONG  DefaultTlsHandshakeTimeoutMs   = TlsHandshakeReceiveTimeoutMill
 ## 13. 错误处理建议
 
 - 区分协议层失败（HTTP 状态码）与传输 / TLS / WSK 失败（NTSTATUS）。`Send*` 返回 `NT_SUCCESS` 时仍可能拿到 4xx/5xx 响应。
-- 与 TLS / 证书相关的常见 NTSTATUS：`STATUS_TRUST_FAILURE`、`STATUS_INVALID_SIGNATURE`、`STATUS_NOT_SUPPORTED`（如 ALPN 不匹配）。
+- 与 TLS / 证书相关的常见 NTSTATUS：`STATUS_TRUST_FAILURE`、`STATUS_TRUST_NO_TRUST`、`STATUS_INVALID_SIGNATURE`、`STATUS_INVALID_NETWORK_RESPONSE`、`STATUS_NOT_SUPPORTED`。`STATUS_NOT_SUPPORTED` 常见于本地 provider 不支持、TLS policy 禁止、0-RTT 未标记 replay-safe 或 ALPN 无匹配。
 - 与连接 / 池相关：`STATUS_DEVICE_NOT_CONNECTED`、`STATUS_CONNECTION_DISCONNECTED`、`STATUS_IO_TIMEOUT`。
 - 异步路径上 `AsyncWait` 的 `STATUS_TIMEOUT` / `STATUS_PENDING` 表示超时未完成；`STATUS_CANCELLED` 表示被 `AsyncCancel` 打断。
 

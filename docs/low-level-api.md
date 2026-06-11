@@ -137,9 +137,13 @@ struct KhTlsOptions final {
     SIZE_T ServerNameLength = 0;
     const char* Alpn = nullptr;  // ALPN 协议，如 "h2"、"http/1.1"
     SIZE_T AlpnLength = 0;
+    tls::TlsPolicy Policy = {};  // TLS 能力策略
+    const tls::TlsClientCredential* ClientCredential = nullptr;  // 可选客户端证书凭据
     ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;  // 握手超时
 };
 ```
+
+默认 `Policy` 使用 `TlsSecurityProfile::ModernDefault`：TLS 1.3、PFS group、AEAD 和现代签名默认可用；TLS 1.2 RSA key exchange、CBC 和 renegotiation 不会默认启用。需要连接遗留服务端时，调用方必须显式设置 `TlsSecurityProfile::CompatibilityExplicit` 并分别开启 `EnableTls12RsaKeyExchange`、`EnableTls12Cbc` 或 `EnableTls12Renegotiation`。客户端证书通过 `tls::TlsClientCredential` 提供证书链、私钥签名回调、支持的 signature scheme 和 KeyUsage 约束；无匹配凭据时，TLS 客户端证书请求会按协议发送空 Certificate。
 
 ## 5. 请求构建（`KhRequest*`）
 
@@ -696,6 +700,8 @@ bool KhTestSessionHasProviderCache(KH_SESSION session) noexcept;
 - 在会话级别设置默认 TLS 配置
 - 在请求级别覆盖特定请求的 TLS 配置
 - 使用 `CertificateStore` 进行证书锁定
+- 使用 `TlsPolicy` 显式区分现代默认能力和 TLS 1.2 legacy 兼容能力
+- 使用 `TlsClientCredential` 提供 TLS 1.2/1.3 客户端证书
 
 ### 11.4 异步操作
 
@@ -722,7 +728,9 @@ bool KhTestSessionHasProviderCache(KH_SESSION session) noexcept;
 | `STATUS_IO_TIMEOUT` | 操作超时 |
 | `STATUS_CONNECTION_DISCONNECTED` | 连接断开 |
 | `STATUS_TRUST_FAILURE` | 证书信任失败 |
-| `STATUS_NOT_SUPPORTED` | 操作不支持 |
+| `STATUS_INVALID_SIGNATURE` | TLS 或证书签名校验失败 |
+| `STATUS_INVALID_NETWORK_RESPONSE` | peer TLS alert、握手/record 编码错误或证书 DER 畸形 |
+| `STATUS_NOT_SUPPORTED` | 操作不支持、TLS policy 禁止、本地 provider 缺失或 0-RTT 未显式 replay-safe |
 | `STATUS_CANCELLED` | 操作被取消 |
 
 ### 12.2 错误处理策略

@@ -185,6 +185,16 @@ function Invoke-HostRegression {
         )
 
     Compile-UserModeTest `
+        -Name 'tls_interop_matrix_tests' `
+        -Source 'tests\tls_interop_matrix_tests.cpp' `
+        -ProjectSources @(
+            'src\KernelHttpLib\http\HttpTypes.cpp',
+            'src\KernelHttpLib\tls\CertificateStore.cpp',
+            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
+            'src\KernelHttpLib\tls\TlsPolicy.cpp'
+        )
+
+    Compile-UserModeTest `
         -Name 'tls_record_tests' `
         -Source 'tests\tls_record_tests.cpp' `
         -ProjectSources @(
