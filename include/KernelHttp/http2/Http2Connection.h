@@ -266,6 +266,9 @@ namespace http2
         _Must_inspect_result_
         NTSTATUS EnsureBuffers() noexcept;
 
+        _Must_inspect_result_
+        NTSTATUS EnsureDecodedHeaderScratch(SIZE_T responseHeaderCapacity) noexcept;
+
         Http2Settings localSettings_ = {};
         Http2Settings peerSettings_ = {};
         ULONG nextStreamId_ = 1;
@@ -285,6 +288,8 @@ namespace http2
         UCHAR* framePayload_ = nullptr;
         UCHAR* headerBlock_ = nullptr;
         UCHAR* responseHeaderBlock_ = nullptr;
+        http::HttpHeader* decodedHeaderScratch_ = nullptr;
+        SIZE_T decodedHeaderScratchCapacity_ = 0;
         http::HttpHeader trailerHeaders_[16] = {};
     };
 }

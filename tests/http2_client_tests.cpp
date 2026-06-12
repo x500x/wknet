@@ -1085,7 +1085,7 @@ namespace
 
         Expect(status == STATUS_SUCCESS, "Upgrade stream 1 response succeeds");
         Expect(statusCode == 200, "Upgrade stream 1 status is decoded");
-        Expect(responseHeaderCount == 1, "Upgrade stream 1 header count matches");
+        Expect(responseHeaderCount == 0, "Upgrade stream 1 pseudo-header is hidden");
         Expect(responseBodyLength == 0, "Upgrade stream 1 response body is empty");
     }
 
@@ -2418,6 +2418,71 @@ namespace
             "HTTP/2 OWS response preserves leading SP value");
     }
 
+    void TestConnectionHidesResponsePseudoHeaders()
+    {
+        const HttpHeader headers[] = {
+            { MakeText(":status"), MakeText("200") },
+            { MakeText("content-type"), MakeText("application/json") },
+            { MakeText("content-length"), MakeText("0") }
+        };
+
+        UCHAR script[512] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 pseudo-hide server settings fixture builds");
+        Expect(AppendEncodedResponseHeaders(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            true,
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 pseudo-hide response headers fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 pseudo-hide connection initializes");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+        HttpHeader responseHeaders[2] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[8] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[160] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_SUCCESS, "HTTP/2 accepts response when visible header capacity excludes :status");
+        Expect(statusCode == 200, "HTTP/2 hidden pseudo-header still drives status");
+        Expect(responseHeaderCount == 2, "HTTP/2 exposes only regular response headers");
+        Expect(FindHeader(responseHeaders, responseHeaderCount, ":status") == nullptr,
+            "HTTP/2 response headers do not expose :status");
+        Expect(FindHeader(responseHeaders, responseHeaderCount, "content-type") != nullptr,
+            "HTTP/2 response preserves content-type header");
+        Expect(FindHeader(responseHeaders, responseHeaderCount, "content-length") != nullptr,
+            "HTTP/2 response preserves content-length header");
+    }
+
     void TestHttpsH2HeaderNameValueBufferSurvivesDecodedBodyWrite()
     {
         const HttpHeader headers[] = {
@@ -2896,7 +2961,7 @@ namespace
 
         Expect(status == STATUS_SUCCESS, "HTTP/2 accepts response trailers after DATA with END_STREAM");
         Expect(statusCode == 200, "HTTP/2 trailer response preserves status");
-        Expect(responseHeaderCount == 1, "HTTP/2 trailer response preserves initial header count");
+        Expect(responseHeaderCount == 0, "HTTP/2 trailer response hides initial pseudo-header");
         Expect(responseBodyLength == sizeof(data), "HTTP/2 trailer response body length");
         Expect(memcmp(responseBody, data, sizeof(data)) == 0, "HTTP/2 trailer response body bytes");
     }
@@ -3014,6 +3079,7 @@ int main()
     TestConnectionRejectsInvalidPingLengths();
     TestConnectionRejectsPushPromiseWhenPushDisabled();
     TestConnectionAcceptsResponseFieldValueOptionalWhitespace();
+    TestConnectionHidesResponsePseudoHeaders();
     TestHttpsH2HeaderNameValueBufferSurvivesDecodedBodyWrite();
     TestConnectionRejectsMalformedResponseHeaders();
     TestConnectionValidatesResponseContentLength();

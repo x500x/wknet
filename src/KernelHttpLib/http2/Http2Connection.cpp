@@ -291,6 +291,40 @@ namespace http2
                 statusCode == 304;
         }
 
+        NTSTATUS CopyRegularResponseHeaders(
+            const http::HttpHeader* decodedHeaders,
+            SIZE_T decodedHeaderCount,
+            http::HttpHeader* responseHeaders,
+            SIZE_T responseHeaderCapacity,
+            SIZE_T* responseHeaderCount) noexcept
+        {
+            if (responseHeaders == nullptr ||
+                responseHeaderCount == nullptr ||
+                (decodedHeaders == nullptr && decodedHeaderCount != 0)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            SIZE_T regularHeaderCount = 0;
+            for (SIZE_T index = 0; index < decodedHeaderCount; ++index) {
+                const http::HttpHeader& header = decodedHeaders[index];
+                if (header.Name.Data != nullptr &&
+                    header.Name.Length != 0 &&
+                    header.Name.Data[0] == ':') {
+                    continue;
+                }
+
+                if (regularHeaderCount >= responseHeaderCapacity) {
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+
+                responseHeaders[regularHeaderCount] = header;
+                ++regularHeaderCount;
+            }
+
+            *responseHeaderCount = regularHeaderCount;
+            return STATUS_SUCCESS;
+        }
+
         ULONG OutboundPayloadLimit(ULONG peerMaxFrameSize) noexcept
         {
             const ULONG sendBufferPayload =
@@ -309,11 +343,14 @@ namespace http2
         FreeNonPagedArray(framePayload_);
         FreeNonPagedArray(headerBlock_);
         FreeNonPagedArray(responseHeaderBlock_);
+        FreeNonPagedArray(decodedHeaderScratch_);
         sendBuffer_ = nullptr;
         framePayload_ = nullptr;
         headerBlock_ = nullptr;
         responseHeaderBlock_ = nullptr;
+        decodedHeaderScratch_ = nullptr;
         framePayloadCapacity_ = 0;
+        decodedHeaderScratchCapacity_ = 0;
     }
 
     NTSTATUS Http2Connection::EnsureBuffers() noexcept
@@ -335,6 +372,29 @@ namespace http2
             responseHeaderBlock_ = AllocateNonPagedArray<UCHAR>(HeaderBlockCapacity);
             if (responseHeaderBlock_ == nullptr) return STATUS_INSUFFICIENT_RESOURCES;
         }
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS Http2Connection::EnsureDecodedHeaderScratch(SIZE_T responseHeaderCapacity) noexcept
+    {
+        if (responseHeaderCapacity == static_cast<SIZE_T>(~static_cast<SIZE_T>(0))) {
+            return STATUS_INTEGER_OVERFLOW;
+        }
+
+        const SIZE_T requiredCapacity = responseHeaderCapacity + 1;
+        if (decodedHeaderScratch_ != nullptr &&
+            decodedHeaderScratchCapacity_ >= requiredCapacity) {
+            return STATUS_SUCCESS;
+        }
+
+        http::HttpHeader* scratch = AllocateNonPagedArray<http::HttpHeader>(requiredCapacity);
+        if (scratch == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        FreeNonPagedArray(decodedHeaderScratch_);
+        decodedHeaderScratch_ = scratch;
+        decodedHeaderScratchCapacity_ = requiredCapacity;
         return STATUS_SUCCESS;
     }
 
@@ -896,6 +956,11 @@ namespace http2
         *responseBodyLength = 0;
         *statusCode = 0;
 
+        NTSTATUS status = EnsureDecodedHeaderScratch(responseHeaderCapacity);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         bool streamClosed = false;
         bool responseHeadersReceived = false;
         bool responseDataReceived = false;
@@ -916,7 +981,7 @@ namespace http2
             UCHAR* fp = framePayload_;
             SIZE_T fpLen = 0;
 
-            NTSTATUS status = ReadFrame(transport, &fh, fp, framePayloadCapacity_, &fpLen);
+            status = ReadFrame(transport, &fh, fp, framePayloadCapacity_, &fpLen);
             if (!NT_SUCCESS(status)) {
                 kprintf("Http2Connection ReadFrame failed: 0x%08X stream=%u headers=%u body=%Iu\r\n",
                     static_cast<ULONG>(status),
@@ -1065,8 +1130,8 @@ namespace http2
                     if (trailers) {
                         RtlZeroMemory(trailerHeaders_, sizeof(trailerHeaders_));
                     }
-                    http::HttpHeader* decodedHeaders = trailers ? trailerHeaders_ : responseHeaders;
-                    const SIZE_T decodedHeaderCapacity = trailers ? 16 : responseHeaderCapacity;
+                    http::HttpHeader* decodedHeaders = trailers ? trailerHeaders_ : decodedHeaderScratch_;
+                    const SIZE_T decodedHeaderCapacity = trailers ? 16 : decodedHeaderScratchCapacity_;
                     char* decodedNameValueBuffer = trailers ?
                         reinterpret_cast<char*>(headerBlock_) :
                         nameValueBuffer;
@@ -1129,7 +1194,15 @@ namespace http2
                     }
 
                     if (!trailers) {
-                        *responseHeaderCount = decodedHeaderCount;
+                        status = CopyRegularResponseHeaders(
+                            decodedHeaders,
+                            decodedHeaderCount,
+                            responseHeaders,
+                            responseHeaderCapacity,
+                            responseHeaderCount);
+                        if (!NT_SUCCESS(status)) {
+                            return status;
+                        }
                         *statusCode = decodedStatusCode;
                         responseContentLengthPresent = decodedContentLengthPresent;
                         responseContentLength = decodedContentLength;
