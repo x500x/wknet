@@ -44,6 +44,8 @@ namespace tls
 
     enum class TlsSignatureScheme : USHORT
     {
+        RsaPkcs1Sha1 = 0x0201,
+        EcdsaSha1 = 0x0203,
         RsaPkcs1Sha256 = 0x0401,
         EcdsaSecp256r1Sha256 = 0x0403,
         RsaPkcs1Sha384 = 0x0501,

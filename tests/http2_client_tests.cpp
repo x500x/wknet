@@ -3,11 +3,13 @@
 #endif
 
 #include <KernelHttp/client/Http2Client.h>
+#include <KernelHttp/client/HttpsClient.h>
 #include <KernelHttp/engine/Workspace.h>
 #include <KernelHttp/http2/Http2Connection.h>
 #include <KernelHttp/net/WskSocket.h>
 #include <KernelHttp/tls/TlsConnection.h>
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -17,6 +19,7 @@ using KernelHttp::client::Http2MaxHeaderNameLength;
 using KernelHttp::client::Http2MaxRequestHeaders;
 using KernelHttp::client::Http2RequestOptions;
 using KernelHttp::client::Http2TransportMode;
+using KernelHttp::client::HttpsResponseBuffers;
 using KernelHttp::engine::KhWorkspace;
 using KernelHttp::engine::KhWorkspaceAppendResponse;
 using KernelHttp::engine::KhWorkspaceCreate;
@@ -162,6 +165,23 @@ namespace
             }
         }
         return nullptr;
+    }
+
+    bool TextDataInBuffer(HttpText text, const char* buffer, SIZE_T bufferLength)
+    {
+        if (text.Data == nullptr || buffer == nullptr || text.Length > bufferLength) {
+            return false;
+        }
+
+        const uintptr_t bufferStart = reinterpret_cast<uintptr_t>(buffer);
+        const uintptr_t bufferEnd = bufferStart + bufferLength;
+        const uintptr_t textStart = reinterpret_cast<uintptr_t>(text.Data);
+        const uintptr_t textEnd = textStart + text.Length;
+        if (bufferEnd < bufferStart || textEnd < textStart) {
+            return false;
+        }
+
+        return textStart >= bufferStart && textEnd <= bufferEnd;
     }
 
     NTSTATUS AppendWorkspaceResponseForTest(
@@ -1716,6 +1736,113 @@ namespace
             "HTTP/2 dynamic SETTINGS_INITIAL_WINDOW_SIZE releases exactly one blocked DATA byte");
     }
 
+    void RunPostBodyExceedingInitialWindowWithBothUpdates(
+        bool connectionWindowFirst,
+        const char* successMessage,
+        const char* dataCountMessage,
+        const char* finalDataMessage)
+    {
+        static_assert(Http2InitialWindowSize + 1 == 65536, "flow-control test expects a 65536-byte body");
+
+        UCHAR script[512] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 65536-byte POST server settings fixture builds");
+        if (connectionWindowFirst) {
+            Expect(AppendConnectionWindowUpdate(1, script, sizeof(script), &scriptLength),
+                "HTTP/2 65536-byte POST connection WINDOW_UPDATE fixture builds");
+            Expect(AppendStreamWindowUpdate(1, 1, script, sizeof(script), &scriptLength),
+                "HTTP/2 65536-byte POST stream WINDOW_UPDATE fixture builds");
+        }
+        else {
+            Expect(AppendStreamWindowUpdate(1, 1, script, sizeof(script), &scriptLength),
+                "HTTP/2 65536-byte POST stream WINDOW_UPDATE fixture builds");
+            Expect(AppendConnectionWindowUpdate(1, script, sizeof(script), &scriptLength),
+                "HTTP/2 65536-byte POST connection WINDOW_UPDATE fixture builds");
+        }
+        Expect(AppendResponseHeaders(true, true, script, sizeof(script), &scriptLength),
+            "HTTP/2 65536-byte POST response headers fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 connection initializes for 65536-byte POST test");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("POST") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") },
+            { MakeText("content-length"), MakeText("65536") }
+        };
+        static UCHAR requestBody[Http2InitialWindowSize + 1] = {};
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            requestBody,
+            sizeof(requestBody),
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_SUCCESS, successMessage);
+        Expect(statusCode == 200, "HTTP/2 65536-byte POST response status is decoded");
+
+        const SIZE_T dataFrameCount =
+            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Data, 1);
+        if (dataFrameCount != 5) {
+            printf(
+                "HTTP/2 DATA frame count for 65536-byte POST %s order: %zu\n",
+                connectionWindowFirst ? "connection-first" : "stream-first",
+                dataFrameCount);
+        }
+        Expect(dataFrameCount == 5, dataCountMessage);
+
+        KernelHttp::http2::Http2FrameHeader finalDataFrame = {};
+        const UCHAR* finalDataPayload = nullptr;
+        Expect(
+            FindSentFrame(
+                transport,
+                KernelHttp::http2::Http2FrameType::Data,
+                1,
+                4,
+                &finalDataFrame,
+                &finalDataPayload),
+            finalDataMessage);
+        Expect(finalDataFrame.Length == 1, "HTTP/2 65536-byte POST final DATA carries one byte");
+        Expect((finalDataFrame.Flags & Http2FrameFlags::EndStream) != 0,
+            "HTTP/2 65536-byte POST final DATA ends stream");
+        Expect(finalDataPayload != nullptr, "HTTP/2 65536-byte POST final DATA payload is present");
+    }
+
+    void TestPostBodyExceedingInitialWindowAcceptsBothWindowUpdateOrders()
+    {
+        RunPostBodyExceedingInitialWindowWithBothUpdates(
+            true,
+            "HTTP/2 POST handles 65536-byte body with connection WINDOW_UPDATE first",
+            "HTTP/2 POST sends final DATA after connection-first WINDOW_UPDATE pair",
+            "HTTP/2 POST records final DATA after connection-first WINDOW_UPDATE pair");
+        RunPostBodyExceedingInitialWindowWithBothUpdates(
+            false,
+            "HTTP/2 POST handles 65536-byte body with stream WINDOW_UPDATE first",
+            "HTTP/2 POST sends final DATA after stream-first WINDOW_UPDATE pair",
+            "HTTP/2 POST records final DATA after stream-first WINDOW_UPDATE pair");
+    }
+
     void TestNonActiveStreamWindowUpdateDoesNotIncreaseConnectionWindow()
     {
         UCHAR script[512] = {};
@@ -2291,6 +2418,111 @@ namespace
             "HTTP/2 OWS response preserves leading SP value");
     }
 
+    void TestHttpsH2HeaderNameValueBufferSurvivesDecodedBodyWrite()
+    {
+        const HttpHeader headers[] = {
+            { MakeText(":status"), MakeText("200") },
+            { MakeText("content-type"), MakeText("application/json") }
+        };
+        const UCHAR body[] = "{ \"args\": true }";
+
+        UCHAR script[512] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTPS/H2 lifetime server settings fixture builds");
+        Expect(AppendEncodedResponseHeaders(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            false,
+            script,
+            sizeof(script),
+            &scriptLength), "HTTPS/H2 lifetime response headers fixture builds");
+        Expect(AppendData(body, sizeof(body) - 1, true, script, sizeof(script), &scriptLength),
+            "HTTPS/H2 lifetime response body fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTPS/H2 lifetime connection initializes");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+
+        char requestBuffer[128] = {};
+        char responseBody[64] = {};
+        char decodedBody[64] = {};
+        char scratchBody[64] = {};
+        char headerNameValue[192] = {};
+        HttpHeader responseHeaders[4] = {};
+
+        HttpsResponseBuffers buffers = {};
+        buffers.RequestBuffer = requestBuffer;
+        buffers.RequestBufferLength = sizeof(requestBuffer);
+        buffers.ResponseBuffer = responseBody;
+        buffers.ResponseBufferLength = sizeof(responseBody);
+        buffers.DecodedBodyBuffer = decodedBody;
+        buffers.DecodedBodyBufferLength = sizeof(decodedBody);
+        buffers.ScratchBodyBuffer = scratchBody;
+        buffers.ScratchBodyBufferLength = sizeof(scratchBody);
+        buffers.HeaderNameValueBuffer = headerNameValue;
+        buffers.HeaderNameValueBufferLength = sizeof(headerNameValue);
+        buffers.Headers = responseHeaders;
+        buffers.HeaderCapacity = sizeof(responseHeaders) / sizeof(responseHeaders[0]);
+
+        SIZE_T responseHeaderCount = 0;
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            buffers.Headers,
+            buffers.HeaderCapacity,
+            &responseHeaderCount,
+            buffers.ResponseBuffer,
+            buffers.ResponseBufferLength,
+            &responseBodyLength,
+            &statusCode,
+            buffers.HeaderNameValueBuffer,
+            buffers.HeaderNameValueBufferLength);
+
+        Expect(status == STATUS_SUCCESS, "HTTPS/H2 lifetime request succeeds");
+        Expect(statusCode == 200, "HTTPS/H2 lifetime status is decoded");
+        Expect(responseBodyLength == sizeof(body) - 1, "HTTPS/H2 lifetime body length is decoded");
+
+        if (responseBodyLength <= buffers.DecodedBodyBufferLength) {
+            memcpy(buffers.DecodedBodyBuffer, buffers.ResponseBuffer, responseBodyLength);
+        }
+
+        const HttpHeader* contentType = FindHeader(
+            buffers.Headers,
+            responseHeaderCount,
+            "content-type");
+        Expect(contentType != nullptr, "HTTPS/H2 lifetime content-type header is present");
+        Expect(
+            contentType != nullptr && TextEquals(contentType->Name, "content-type"),
+            "HTTPS/H2 header name survives decoded body write");
+        Expect(
+            contentType != nullptr && TextEquals(contentType->Value, "application/json"),
+            "HTTPS/H2 header value survives decoded body write");
+        Expect(
+            contentType != nullptr &&
+                TextDataInBuffer(contentType->Name, buffers.HeaderNameValueBuffer, buffers.HeaderNameValueBufferLength) &&
+                TextDataInBuffer(contentType->Value, buffers.HeaderNameValueBuffer, buffers.HeaderNameValueBufferLength),
+            "HTTPS/H2 header name/value live in the header buffer");
+        Expect(
+            contentType != nullptr &&
+                !TextDataInBuffer(contentType->Name, buffers.DecodedBodyBuffer, buffers.DecodedBodyBufferLength) &&
+                !TextDataInBuffer(contentType->Value, buffers.DecodedBodyBuffer, buffers.DecodedBodyBufferLength),
+            "HTTPS/H2 header name/value do not live in decoded body buffer");
+    }
+
     void TestConnectionRejectsMalformedResponseHeaders()
     {
         const UCHAR duplicateStatus[] = { 0x88, 0x88 };
@@ -2763,6 +2995,7 @@ int main()
     TestDeleteWithBodySendsDataEndStream();
     TestInitialWindowSizeDoesNotOverwriteConnectionWindow();
     TestDynamicInitialWindowSizeAdjustsActiveStreamWindow();
+    TestPostBodyExceedingInitialWindowAcceptsBothWindowUpdateOrders();
     TestNonActiveStreamWindowUpdateDoesNotIncreaseConnectionWindow();
     TestConnectionRejectsOrphanContinuation();
     TestConnectionRejectsInterleavedFrameDuringContinuation();
@@ -2781,6 +3014,7 @@ int main()
     TestConnectionRejectsInvalidPingLengths();
     TestConnectionRejectsPushPromiseWhenPushDisabled();
     TestConnectionAcceptsResponseFieldValueOptionalWhitespace();
+    TestHttpsH2HeaderNameValueBufferSurvivesDecodedBodyWrite();
     TestConnectionRejectsMalformedResponseHeaders();
     TestConnectionValidatesResponseContentLength();
     TestConnectionRejectsDataForNoBodyResponses();

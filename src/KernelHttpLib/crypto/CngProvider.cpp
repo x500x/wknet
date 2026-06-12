@@ -149,6 +149,43 @@ namespace crypto
         }
 
         _Must_inspect_result_
+        NTSTATUS GetDwordProperty(
+            _In_ BCRYPT_HANDLE handle,
+            _In_ LPCWSTR property,
+            _Out_ ULONG* value) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS EcdsaSignatureLengthForSha1(
+            _In_ const CngKey& publicKey,
+            _Out_ SIZE_T* signatureLength) noexcept
+        {
+            if (signatureLength == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            *signatureLength = 0;
+            ULONG keyBits = 0;
+            NTSTATUS status = GetDwordProperty(publicKey.Handle(), BCRYPT_KEY_LENGTH, &keyBits);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            switch (keyBits) {
+            case 256:
+                *signatureLength = 64;
+                return STATUS_SUCCESS;
+            case 384:
+                *signatureLength = 96;
+                return STATUS_SUCCESS;
+            case 521:
+                *signatureLength = 132;
+                return STATUS_SUCCESS;
+            default:
+                return STATUS_NOT_SUPPORTED;
+            }
+        }
+
+        _Must_inspect_result_
         NTSTATUS VerifyEcdsaSignature(
             SignatureAlgorithm algorithm,
             _In_ const CngKey& publicKey,
@@ -157,7 +194,13 @@ namespace crypto
             _In_reads_bytes_(signatureLength) const UCHAR* signature,
             SIZE_T signatureLength) noexcept
         {
-            const SIZE_T rawLength = EcdsaSignatureLength(algorithm);
+            SIZE_T rawLength = EcdsaSignatureLength(algorithm);
+            if (algorithm == SignatureAlgorithm::EcdsaSha1) {
+                NTSTATUS status = EcdsaSignatureLengthForSha1(publicKey, &rawLength);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
             if (rawLength == 0) {
                 return STATUS_NOT_SUPPORTED;
             }
@@ -1427,6 +1470,11 @@ namespace crypto
         ULONG flags = 0;
 
         switch (algorithm) {
+        case SignatureAlgorithm::RsaPkcs1Sha1:
+            pkcs1.pszAlgId = BCRYPT_SHA1_ALGORITHM;
+            paddingInfo = &pkcs1;
+            flags = BCRYPT_PAD_PKCS1;
+            break;
         case SignatureAlgorithm::RsaPkcs1Sha256:
             pkcs1.pszAlgId = BCRYPT_SHA256_ALGORITHM;
             paddingInfo = &pkcs1;
@@ -1460,6 +1508,7 @@ namespace crypto
             paddingInfo = &pss;
             flags = BCRYPT_PAD_PSS;
             break;
+        case SignatureAlgorithm::EcdsaSha1:
         case SignatureAlgorithm::EcdsaSha256:
         case SignatureAlgorithm::EcdsaSha384:
         case SignatureAlgorithm::EcdsaSha512:

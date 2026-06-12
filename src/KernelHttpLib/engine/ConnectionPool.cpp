@@ -336,12 +336,32 @@ namespace
             left.Policy.EnableTls12RsaKeyExchange == right.Policy.EnableTls12RsaKeyExchange &&
             left.Policy.EnableTls12Cbc == right.Policy.EnableTls12Cbc &&
             left.Policy.EnableTls12Renegotiation == right.Policy.EnableTls12Renegotiation &&
+            left.Policy.EnableTls12Sha1Signatures == right.Policy.EnableTls12Sha1Signatures &&
             left.Policy.EnablePostHandshakeClientAuth == right.Policy.EnablePostHandshakeClientAuth &&
             left.Policy.RequireRevocationCheck == right.Policy.RequireRevocationCheck &&
+            left.AutomaticAlpn == right.AutomaticAlpn &&
             TextEquals(left.Scheme, left.SchemeLength, right.Scheme, right.SchemeLength) &&
             TextEquals(left.Host, left.HostLength, right.Host, right.HostLength) &&
             TextEquals(left.TlsServerName, left.TlsServerNameLength, right.TlsServerName, right.TlsServerNameLength) &&
             TextEquals(left.Alpn, left.AlpnLength, right.Alpn, right.AlpnLength);
+    }
+
+    bool KhConnectionPoolKeysEqualForAutoAlpnAcquire(
+        const KhConnectionPoolKey& left,
+        const KhConnectionPoolKey& right) noexcept
+    {
+        if (left.AlpnLength != 0 || right.AlpnLength == 0) {
+            return KhConnectionPoolKeysEqual(left, right);
+        }
+
+        if (!left.AutomaticAlpn || !right.AutomaticAlpn) {
+            return KhConnectionPoolKeysEqual(left, right);
+        }
+
+        KhConnectionPoolKey normalizedRight = right;
+        RtlZeroMemory(normalizedRight.Alpn, sizeof(normalizedRight.Alpn));
+        normalizedRight.AlpnLength = 0;
+        return KhConnectionPoolKeysEqual(left, normalizedRight);
     }
 
     NTSTATUS KhConnectionPoolAcquire(
@@ -372,7 +392,7 @@ namespace
                 KhPooledConnection& candidate = pool->Entries[index];
                 if (candidate.Connected &&
                     !candidate.InUse &&
-                    KhConnectionPoolKeysEqual(candidate.Key, key)) {
+                    KhConnectionPoolKeysEqualForAutoAlpnAcquire(key, candidate.Key)) {
                     if (IsIdleExpired(*pool, candidate, now)) {
                         DetachConnectionResources(candidate, &detached);
                         if (pool->ActiveCount != 0) {

@@ -34,12 +34,14 @@ namespace crypto
 
     enum class SignatureAlgorithm : UCHAR
     {
+        RsaPkcs1Sha1,
         RsaPkcs1Sha256,
         RsaPkcs1Sha384,
         RsaPkcs1Sha512,
         RsaPssSha256,
         RsaPssSha384,
         RsaPssSha512,
+        EcdsaSha1,
         EcdsaSha256,
         EcdsaSha384,
         EcdsaSha512,

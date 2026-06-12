@@ -17,6 +17,7 @@ namespace samples
         constexpr SIZE_T SampleRequestBufferLength = 1024;
         constexpr SIZE_T SampleResponseBufferLength = 16384;
         constexpr SIZE_T SampleDecodedBodyBufferLength = 8192;
+        constexpr SIZE_T SampleHeaderNameValueBufferLength = 8192;
         constexpr SIZE_T SampleScratchBodyBufferLength = 8192;
         constexpr SIZE_T SampleHeaderCapacity = 32;
         constexpr const wchar_t* NgHttp2ServerName = L"nghttp2.org";
@@ -55,6 +56,7 @@ namespace samples
             char Request[SampleRequestBufferLength] = {};
             char Response[SampleResponseBufferLength] = {};
             char DecodedBody[SampleDecodedBodyBufferLength] = {};
+            char HeaderNameValue[SampleHeaderNameValueBufferLength] = {};
             char ScratchBody[SampleScratchBodyBufferLength] = {};
             http::HttpHeader Headers[SampleHeaderCapacity] = {};
         };
@@ -96,6 +98,12 @@ namespace samples
                 http::TextEqualsIgnoreCase(request.Host, http::MakeText(NgHttp2HostName))) ||
                 (request.Host.Length == HttpBinDevHostNameLength &&
                     http::TextEqualsIgnoreCase(request.Host, http::MakeText(HttpBinDevHostName)));
+        }
+
+        void EnablePostmanWebSocketTlsCompatibility(_Inout_ tls::TlsPolicy& policy) noexcept
+        {
+            policy.Profile = tls::TlsSecurityProfile::CompatibilityExplicit;
+            policy.EnableTls12Sha1Signatures = true;
         }
 
         void LogHttpText(_In_opt_ const char* label, http::HttpText value) noexcept
@@ -335,6 +343,8 @@ namespace samples
             responseBuffers.ResponseBufferLength = sizeof(buffers->Response);
             responseBuffers.DecodedBodyBuffer = buffers->DecodedBody;
             responseBuffers.DecodedBodyBufferLength = sizeof(buffers->DecodedBody);
+            responseBuffers.HeaderNameValueBuffer = buffers->HeaderNameValue;
+            responseBuffers.HeaderNameValueBufferLength = sizeof(buffers->HeaderNameValue);
             responseBuffers.ScratchBodyBuffer = buffers->ScratchBody;
             responseBuffers.ScratchBodyBufferLength = sizeof(buffers->ScratchBody);
             responseBuffers.Headers = buffers->Headers;
@@ -574,8 +584,13 @@ namespace samples
         options.CertificateStore = certificateStore;
         options.MinimumTlsProtocol = tls::TlsProtocol::Tls12;
         options.MaximumTlsProtocol = tls::TlsProtocol::Tls12;
+        EnablePostmanWebSocketTlsCompatibility(options.Policy);
         options.UseTls = true;
         options.VerifyCertificate = verifyCertificate;
+
+        kprintf(
+            "[%s] TLS策略=CompatibilityExplicit SHA1签名=启用(endpoint兼容)\r\n",
+            sampleName);
 
         HeapObject<client::WebSocketClient> webSocket;
         if (!webSocket.IsValid()) {

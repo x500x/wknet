@@ -18,6 +18,7 @@ namespace tls
         bool EnableTls12RsaKeyExchange = false;
         bool EnableTls12Cbc = false;
         bool EnableTls12Renegotiation = false;
+        bool EnableTls12Sha1Signatures = false;
         bool EnablePostHandshakeClientAuth = false;
         bool RequireRevocationCheck = false;
     };

@@ -53,6 +53,8 @@ namespace client
         SIZE_T ResponseBufferLength = 0;
         char* DecodedBodyBuffer = nullptr;
         SIZE_T DecodedBodyBufferLength = 0;
+        char* HeaderNameValueBuffer = nullptr;
+        SIZE_T HeaderNameValueBufferLength = 0;
         char* ScratchBodyBuffer = nullptr;
         SIZE_T ScratchBodyBufferLength = 0;
         http::HttpHeader* Headers = nullptr;

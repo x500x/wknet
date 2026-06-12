@@ -166,6 +166,7 @@ namespace detail
         dst.ServerNameLength = src.ServerNameLength;
         dst.Alpn = src.Alpn;
         dst.AlpnLength = src.AlpnLength;
+        dst.PreferHttp2 = src.PreferHttp2;
         dst.Policy = src.Policy;
         dst.ClientCredential = src.ClientCredential;
         dst.HandshakeReceiveTimeoutMilliseconds = src.HandshakeTimeoutMs;

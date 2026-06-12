@@ -34,7 +34,8 @@ namespace tls
         case TlsSecurityProfile::ModernDefault:
             if (policy.EnableTls12RsaKeyExchange ||
                 policy.EnableTls12Cbc ||
-                policy.EnableTls12Renegotiation) {
+                policy.EnableTls12Renegotiation ||
+                policy.EnableTls12Sha1Signatures) {
                 return STATUS_INVALID_PARAMETER;
             }
             return STATUS_SUCCESS;
@@ -99,6 +100,12 @@ namespace tls
         }
 
         if (capability->DefaultDisposition == TlsCapabilityDisposition::Legacy) {
+            if (scheme == TlsSignatureScheme::RsaPkcs1Sha1 ||
+                scheme == TlsSignatureScheme::EcdsaSha1) {
+                return IsCompatibilityProfile(policy) &&
+                    policy.EnableTls12Sha1Signatures &&
+                    capability->CompatibilityDisposition != TlsCapabilityDisposition::Unsupported;
+            }
             return IsCompatibilityProfile(policy) &&
                 capability->CompatibilityDisposition != TlsCapabilityDisposition::Unsupported;
         }

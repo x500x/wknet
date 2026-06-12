@@ -30,6 +30,7 @@ namespace
     constexpr USHORT ExtensionSignatureAlgorithms = 13;
     constexpr USHORT ExtensionSignatureAlgorithmsCert = 50;
     constexpr USHORT ExtensionSupportedGroups = 10;
+    constexpr USHORT ExtensionSupportedVersions = 43;
     constexpr USHORT ExtensionKeyShare = 51;
 
     bool g_failed = false;
@@ -262,6 +263,20 @@ namespace
         return false;
     }
 
+    bool Tls13ClientHelloSupportedVersionsAreTls13Only(
+        const UCHAR* clientHello,
+        SIZE_T clientHelloLength)
+    {
+        const UCHAR* extension = nullptr;
+        SIZE_T extensionLength = 0;
+        if (!FindExtension(clientHello, clientHelloLength, ExtensionSupportedVersions, &extension, &extensionLength) ||
+            extensionLength != 3) {
+            return false;
+        }
+
+        return extension[0] == 2 && ReadUint16(extension + 1) == 0x0304;
+    }
+
     bool HasRequiredExtension(const TlsCipherSuiteCapability& capability, ULONG extensionFlag)
     {
         return (capability.RequiredExtensions & extensionFlag) != 0;
@@ -325,6 +340,9 @@ namespace
         Expect(
             ExtensionPayloadEquals(message, written, ExtensionSignatureAlgorithms, ExtensionSignatureAlgorithmsCert),
             "TLS 1.3 ClientHello sends signature_algorithms_cert matching signature_algorithms");
+        Expect(
+            Tls13ClientHelloSupportedVersionsAreTls13Only(message, written),
+            "TLS 1.3 ClientHello supported_versions only offers 0x0304");
         Expect(
             ClientHelloOffersSignatureScheme(message, written, TlsSignatureScheme::RsaPssRsaeSha512),
             "TLS 1.3 ClientHello offers RSA-PSS-RSAE SHA512");
@@ -610,6 +628,18 @@ namespace
         Expect(
             !KernelHttp::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsEcdheRsaWithAes128CbcSha256),
             "modern policy rejects TLS 1.2 AES-CBC");
+        Expect(
+            !KernelHttp::tls::TlsPolicyAllowsSignatureScheme(modern, TlsSignatureScheme::RsaPkcs1Sha1),
+            "modern policy rejects TLS 1.2 rsa_pkcs1_sha1");
+        Expect(
+            !KernelHttp::tls::TlsPolicyAllowsSignatureScheme(modern, TlsSignatureScheme::EcdsaSha1),
+            "modern policy rejects TLS 1.2 ecdsa_sha1");
+
+        modern.EnableTls12Sha1Signatures = true;
+        ExpectStatus(
+            KernelHttp::tls::TlsValidatePolicy(modern),
+            STATUS_INVALID_PARAMETER,
+            "modern policy rejects SHA1 signature opt-in");
 
         TlsPolicy compatibility = {};
         compatibility.Profile = KernelHttp::tls::TlsSecurityProfile::CompatibilityExplicit;
@@ -619,6 +649,12 @@ namespace
         Expect(
             !KernelHttp::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsEcdheRsaWithAes128CbcSha256),
             "compatibility policy still requires explicit CBC opt-in");
+        Expect(
+            !KernelHttp::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::RsaPkcs1Sha1),
+            "compatibility policy keeps rsa_pkcs1_sha1 disabled without SHA1 opt-in");
+        Expect(
+            !KernelHttp::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::EcdsaSha1),
+            "compatibility policy keeps ecdsa_sha1 disabled without SHA1 opt-in");
 
         compatibility.EnableTls12RsaKeyExchange = true;
         Expect(
@@ -635,6 +671,14 @@ namespace
         Expect(
             KernelHttp::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsEcdheRsaWithAes128CbcSha256),
             "compatibility policy allows ECDHE AES-CBC after CBC opt-in");
+
+        compatibility.EnableTls12Sha1Signatures = true;
+        Expect(
+            KernelHttp::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::RsaPkcs1Sha1),
+            "compatibility policy allows rsa_pkcs1_sha1 after SHA1 opt-in");
+        Expect(
+            KernelHttp::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::EcdsaSha1),
+            "compatibility policy allows ecdsa_sha1 after SHA1 opt-in");
     }
 
     void TestTls12ClientHelloEncodesExplicitFullMatrix()
@@ -675,6 +719,56 @@ namespace
         Expect(ClientHelloOffersSignatureScheme(message, written, TlsSignatureScheme::Ed25519), "TLS 1.2 ClientHello offers Ed25519");
         Expect(ClientHelloOffersSignatureScheme(message, written, TlsSignatureScheme::Ed448), "TLS 1.2 ClientHello offers Ed448");
     }
+
+    void TestTls12ClientHelloSignatureSha1Matrix()
+    {
+        TlsContext context;
+        NTSTATUS status = context.InitializeClient({ 3, 3 });
+        ExpectStatus(status, STATUS_SUCCESS, "TLS 1.2 context initializes for default signature matrix");
+
+        UCHAR message[2048] = {};
+        SIZE_T written = 0;
+        TlsClientHelloOptions options = {};
+        status = TlsHandshake12::EncodeClientHello(context, options, message, sizeof(message), &written);
+
+        ExpectStatus(status, STATUS_SUCCESS, "TLS 1.2 ClientHello encodes default signature matrix");
+        Expect(
+            !ClientHelloOffersSignatureScheme(message, written, TlsSignatureScheme::RsaPkcs1Sha1),
+            "modern TLS 1.2 ClientHello does not offer rsa_pkcs1_sha1");
+        Expect(
+            !ClientHelloOffersSignatureScheme(message, written, TlsSignatureScheme::EcdsaSha1),
+            "modern TLS 1.2 ClientHello does not offer ecdsa_sha1");
+
+        const TlsSignatureScheme compatibilitySchemes[] = {
+            TlsSignatureScheme::RsaPssRsaeSha256,
+            TlsSignatureScheme::EcdsaSecp256r1Sha256,
+            TlsSignatureScheme::RsaPkcs1Sha1,
+            TlsSignatureScheme::EcdsaSha1
+        };
+
+        TlsContext compatibilityContext;
+        status = compatibilityContext.InitializeClient({ 3, 3 });
+        ExpectStatus(status, STATUS_SUCCESS, "TLS 1.2 context initializes for compatibility signature matrix");
+
+        options = {};
+        options.SignatureSchemes = compatibilitySchemes;
+        options.SignatureSchemeCount = sizeof(compatibilitySchemes) / sizeof(compatibilitySchemes[0]);
+        written = 0;
+        status = TlsHandshake12::EncodeClientHello(
+            compatibilityContext,
+            options,
+            message,
+            sizeof(message),
+            &written);
+
+        ExpectStatus(status, STATUS_SUCCESS, "TLS 1.2 ClientHello encodes explicit compatibility signature matrix");
+        Expect(
+            ClientHelloOffersSignatureScheme(message, written, TlsSignatureScheme::RsaPkcs1Sha1),
+            "compatibility TLS 1.2 ClientHello can offer rsa_pkcs1_sha1 when enabled by policy");
+        Expect(
+            ClientHelloOffersSignatureScheme(message, written, TlsSignatureScheme::EcdsaSha1),
+            "compatibility TLS 1.2 ClientHello can offer ecdsa_sha1 when enabled by policy");
+    }
 }
 
 int main()
@@ -688,6 +782,7 @@ int main()
     TestTls12CipherSuiteMetadata();
     TestTls12PolicyMatrix();
     TestTls12ClientHelloEncodesExplicitFullMatrix();
+    TestTls12ClientHelloSignatureSha1Matrix();
 
     if (g_failed) {
         return 1;

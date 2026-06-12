@@ -6,7 +6,7 @@
 
 > **并发安全**：内部实现已对连接池、句柄释放、异步完成等关键路径加锁保护。异步路径使用独立的 Workspace 避免数据竞争。调用方仍需保证同一 `Request` 不被多个 `Send` 并发使用。
 
-> **协议与 IRQL 边界**：同步 HTTP、WebSocket、TLS 和证书验证路径要求 `PASSIVE_LEVEL`。HTTP/1.1 请求体默认使用 `Content-Length`，也可通过 `RequestSetBodyMode(Chunked)` 显式发送 chunked 请求体；用户设置请求 `Transfer-Encoding`、`TE`、`Trailer` 会返回 `STATUS_NOT_SUPPORTED`，带请求体的 `Expect: 100-continue` 暂不支持，request trailer 暂不支持。响应 `Transfer-Encoding` 支持 `chunked/gzip/deflate/compress` 链式解码且不接受 transfer-coding 参数；`br` 仅作为 `Content-Encoding` 支持；chunked trailer 会被校验、消费，并可通过 trailer 只读 API 在响应完成后访问。close-delimited 响应和 `101 Switching Protocols` 升级响应不会进入普通 HTTP 连接池。HTTP/2 TLS 主路径要求 ALPN `h2`；h2c prior knowledge / Upgrade 仅保留为显式 legacy/test path，不作为现代内核主路径能力宣传。HTTP/2 不支持 RFC 8441 WebSocket over HTTP/2、server push、priority 或完整多流调度，收到禁用的 `PUSH_PROMISE` 视为协议错误，缺失 SETTINGS ACK 会以 `SETTINGS_TIMEOUT` 关闭，收到 GOAWAY 会终止当前单请求连接语义。WebSocket 主路径是 HTTP/1.1 Upgrade，默认接收完整消息，不暴露接收分片回调、不协商扩展，也不提供自定义 opening handshake headers。TLS ALPN 结果必须来自客户端 offer 列表；TLS1.2 只能在获得可验证版本协商证据后选择；证书错误、ALPN mismatch、网络超时或 record 解密失败都不是 TLS1.2-only 证据。证书主机为 IP literal 时只匹配 iPAddress SAN，不回退到 dNSName 或 CN。
+> **协议与 IRQL 边界**：同步 HTTP、WebSocket、TLS 和证书验证路径要求 `PASSIVE_LEVEL`。HTTP/1.1 请求体默认使用 `Content-Length`，也可通过 `RequestSetBodyMode(Chunked)` 显式发送 chunked 请求体；用户设置请求 `Transfer-Encoding`、`TE`、`Trailer` 会返回 `STATUS_NOT_SUPPORTED`，带请求体的 `Expect: 100-continue` 暂不支持，request trailer 暂不支持。响应 `Transfer-Encoding` 支持 `chunked/gzip/deflate/compress` 链式解码且不接受 transfer-coding 参数；`br` 仅作为 `Content-Encoding` 支持；chunked trailer 会被校验、消费，并可通过 trailer 只读 API 在响应完成后访问。close-delimited 响应和 `101 Switching Protocols` 升级响应不会进入普通 HTTP 连接池。HTTPS 默认自动 offer `h2` 和 `http/1.1` 并按 TLS 实际协商结果选择 HTTP/2 或 HTTP/1.1；显式 `TlsConfig::Alpn` 可强制单一协议。h2c prior knowledge / Upgrade 仅保留为显式 legacy/test path，不作为现代内核主路径能力宣传。HTTP/2 不支持 RFC 8441 WebSocket over HTTP/2、server push、priority 或完整多流调度，收到禁用的 `PUSH_PROMISE` 视为协议错误，缺失 SETTINGS ACK 会以 `SETTINGS_TIMEOUT` 关闭，收到 GOAWAY 会终止当前单请求连接语义。WebSocket 主路径是 HTTP/1.1 Upgrade，默认接收完整消息，不暴露接收分片回调、不协商扩展，也不提供自定义 opening handshake headers。TLS ALPN 结果必须来自客户端 offer 列表；TLS1.2 只能在获得可验证版本协商证据后选择；证书错误、ALPN mismatch、网络超时或 record 解密失败都不是 TLS1.2-only 证据。证书主机为 IP literal 时只匹配 iPAddress SAN，不回退到 dNSName 或 CN。
 > **安全策略**：自动 redirect 默认拒绝 HTTPS 到 HTTP 降级；跨源 redirect 清理 `Authorization`、`Cookie`、`Proxy-Authorization`；reused stale 连接失败只对 `GET`、`HEAD`、`OPTIONS` 等安全/幂等请求自动 fresh retry。TLS 1.3 0-RTT 默认关闭，启用时仍要求调用方显式标记 replay-safe。TLS 1.2 RSA key exchange、CBC 和 renegotiation 已实现但默认关闭，只能通过 `TlsSecurityProfile::CompatibilityExplicit` 和对应开关显式启用。证书链构建、Name Constraints、certificatePolicies、IDNA 和 OCSP/CRL 缓存条目会参与验证；强撤销判定依赖调用方提供的新鲜 stapled/cached revocation entry，库层不在证书验证过程中递归发起在线 HTTP 获取。叶子证书默认硬性要求 ServerAuth EKU、KeyUsage digitalSignature 且不能是 CA；中间/根证书要求 BasicConstraints CA 和 KeyUsage keyCertSign。
 
 ## 1. 模块组成与依赖关系
@@ -96,11 +96,12 @@ struct TlsConfig final {
     SIZE_T      ServerNameLength = 0;
     const char* Alpn             = nullptr;       // 例 "h2" / "http/1.1"
     SIZE_T      AlpnLength       = 0;
+    bool        PreferHttp2      = true;          // HTTPS 未显式 ALPN 时 offer h2,http/1.1
     ULONG       HandshakeTimeoutMs = DefaultTlsHandshakeTimeoutMs;
 };
 ```
 
-注意：`Store` 指向的 `CertificateStore` 由调用方拥有，必须在使用期间保持有效。`samples/ExternalTrustStore.{h,cpp}` 给出了基于外部信任锚 + leaf SPKI 锁定的初始化模板。
+默认 `MinVersion=TLS1.2`、`MaxVersion=TLS1.3`，含义是优先 TLS 1.3，只有对端给出版本协商证据时才重连降级到 TLS 1.2；设置 `MinVersion=MaxVersion=Tls13` 表示只允许 TLS 1.3。`Alpn=nullptr` 且 `PreferHttp2=true` 时 HTTPS 自动 offer `h2,http/1.1`；显式设置 `Alpn` 时只 offer 调用方指定的协议。`Store` 指向的 `CertificateStore` 由调用方拥有，必须在使用期间保持有效。`samples/ExternalTrustStore.{h,cpp}` 给出了基于外部信任锚 + leaf SPKI 锁定的初始化模板。
 
 ## 5. 一次同步请求的最短路径
 
@@ -341,7 +342,7 @@ constexpr ULONG  DefaultTlsHandshakeTimeoutMs   = TlsHandshakeReceiveTimeoutMill
 
 ## 14. 可运行示例索引
 
-`src/KernelHttpTest/samples/HighLevelApiSamples.cpp` 中按场景列出了：会话创建、HTTP 同步快捷函数、Request 构造、各类请求体、Send 选项与回调、响应头读取、各种异步入口、`AsyncCancel`、HTTPS（含 ALPN 切换）、WebSocket 同步与异步连接、文本 / 二进制 / Ex / 回调接收等。可以直接对照阅读，每个样例都打印请求与响应详情，便于调试。
+`src/KernelHttpTest/samples/HighLevelApiSamples.cpp` 中按场景列出了：会话创建、HTTP 同步快捷函数、Request 构造、各类请求体、Send 选项与回调、响应头读取、各种异步入口、`AsyncCancel`、HTTPS（含默认 ALPN 自动协商和显式 ALPN 覆盖）、WebSocket 同步与异步连接、文本 / 二进制 / Ex / 回调接收等。可以直接对照阅读，每个样例都打印请求与响应详情，便于调试。
 
 驱动加载时的公网矩阵是运行环境诊断，不是确定性的协议 conformance 测试。DNS 无匹配、网络/主机/协议不可达、连接拒绝、连接断开/重置/中止、设备未连接和 I/O 超时会记录到对应 result 字段，但不让这些公网诊断项决定整个样例矩阵成败。协议解析错误、API misuse、证书信任失败、签名错误、ALPN mismatch 或 unsupported protocol 仍按失败处理；公网 WebSocket 也只把 DNS/connect 阶段的环境失败视为诊断，已建连后的握手、echo 或 frame 错误仍是 fatal。
 

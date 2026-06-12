@@ -49,6 +49,14 @@ namespace test
     {
         return engine::KhTestRunAsyncOperation(detail::ToApiAsyncOp(operation));
     }
+
+    bool IsHttpTls12ConfirmationCandidate(
+        engine::KhTlsVersion minVersion,
+        engine::KhTlsVersion maxVersion,
+        ULONG category) noexcept
+    {
+        return engine::KhTestIsHttpTls12ConfirmationCandidate(minVersion, maxVersion, category);
+    }
 }
 #endif
 

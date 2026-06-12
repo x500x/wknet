@@ -35,6 +35,10 @@ namespace test
     void ResetCurrentIrql() noexcept;
     void SetAsyncAutoRun(bool enabled) noexcept;
     NTSTATUS RunAsyncOperation(_In_ AsyncOp* operation) noexcept;
+    bool IsHttpTls12ConfirmationCandidate(
+        engine::KhTlsVersion minVersion,
+        engine::KhTlsVersion maxVersion,
+        ULONG category) noexcept;
 }
 }
 }

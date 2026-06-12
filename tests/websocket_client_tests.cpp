@@ -2456,6 +2456,50 @@ namespace
         Expect(!server.Connected, "websocket TLS validation fails before socket connect");
         g_server = nullptr;
     }
+
+    void TestTlsSha1CompatibilityPolicyValidation()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.ServiceName = L"443";
+        options.TlsServerName = "ws.postman-echo.com";
+        options.TlsServerNameLength = strlen(options.TlsServerName);
+        options.UseTls = true;
+        options.VerifyCertificate = false;
+        options.MinimumTlsProtocol = KernelHttp::tls::TlsProtocol::Tls12;
+        options.MaximumTlsProtocol = KernelHttp::tls::TlsProtocol::Tls12;
+        options.Policy.EnableTls12Sha1Signatures = true;
+
+        NTSTATUS status = client.Connect(wskClient, options, buffers);
+        Expect(status == STATUS_INVALID_PARAMETER, "websocket rejects SHA1 signature switch on modern TLS policy");
+        Expect(!server.Connected, "websocket invalid modern SHA1 policy fails before socket connect");
+
+        options.Policy.Profile = KernelHttp::tls::TlsSecurityProfile::CompatibilityExplicit;
+        status = KernelHttp::tls::TlsValidatePolicy(options.Policy);
+        Expect(status == STATUS_SUCCESS, "websocket accepts explicit compatibility TLS policy with SHA1 signatures");
+        g_server = nullptr;
+    }
 }
 
 namespace KernelHttp
@@ -2646,6 +2690,7 @@ int main()
     TestCloseTreatsConnectionResetAsClosed();
     TestClosePropagatesNonTerminalErrors();
     TestTlsVersionRangeValidation();
+    TestTlsSha1CompatibilityPolicyValidation();
 
     if (g_failed) {
         printf("WEBSOCKET CLIENT TESTS FAILED\n");

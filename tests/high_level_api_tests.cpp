@@ -4,6 +4,7 @@
 
 #include <KernelHttp/khttp/Test.h>
 #include <KernelHttp/khttp/Http.h>
+#include <KernelHttp/khttp/Request.h>
 #include <KernelHttp/khttp/Response.h>
 #include <KernelHttp/khttp/Session.h>
 #include <KernelHttp/khttp/WebSocket.h>
@@ -93,6 +94,8 @@ namespace
         SIZE_T HttpsNoVerifyWithoutStoreCalls = 0;
         SIZE_T HttpsHttp11AlpnCalls = 0;
         SIZE_T HttpsHttp2AlpnCalls = 0;
+        SIZE_T HttpsDefaultAlpnOfferCalls = 0;
+        SIZE_T HttpsNoAlpnOfferCalls = 0;
         SIZE_T HttpsUnsupportedAlpnCalls = 0;
         SIZE_T WebSocketConnectCalls = 0;
         SIZE_T WebSocketIpv4Calls = 0;
@@ -104,6 +107,8 @@ namespace
         SIZE_T WebSocketVerifyCalls = 0;
         SIZE_T WebSocketVerifyWithStoreCalls = 0;
         SIZE_T WebSocketTls12MaxCalls = 0;
+        SIZE_T WebSocketPostmanSha1CompatibilityCalls = 0;
+        SIZE_T WebSocketBinaryModernPolicyCalls = 0;
         SIZE_T WebSocketSendCalls = 0;
         SIZE_T WebSocketTextSendCalls = 0;
         SIZE_T WebSocketBinarySendCalls = 0;
@@ -132,6 +137,55 @@ namespace
         bool WebSocketGreetingBeforeEcho = false;
         bool PendingWebSocketGreeting = false;
     };
+
+    constexpr SIZE_T LargePostBodyLength = 180 * 1024;
+
+    SIZE_T BuildLargePostResponse(char* buffer, SIZE_T capacity) noexcept
+    {
+        static const char header[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 184320\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        const SIZE_T headerLength = sizeof(header) - 1;
+        if (buffer == nullptr || capacity < headerLength + LargePostBodyLength) {
+            return 0;
+        }
+
+        memcpy(buffer, header, headerLength);
+        for (SIZE_T index = 0; index < LargePostBodyLength; ++index) {
+            buffer[headerLength + index] = static_cast<char>('a' + (index % 26));
+        }
+        return headerLength + LargePostBodyLength;
+    }
+
+    NTSTATUS SetLargePostResponse(KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        if (response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        static char rawResponse[LargePostBodyLength + 128] = {};
+        static SIZE_T rawResponseLength = 0;
+        if (rawResponseLength == 0) {
+            rawResponseLength = BuildLargePostResponse(rawResponse, sizeof(rawResponse));
+            if (rawResponseLength == 0) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+        }
+
+        response->RawResponse = rawResponse;
+        response->RawResponseLength = rawResponseLength;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    bool IsAdvancedLargePostRequest(const KernelHttp::engine::KhTestHttpTransportRequest* request) noexcept
+    {
+        return request != nullptr &&
+            BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "POST /post ") &&
+            BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "Content-Length: 65536\r\n");
+    }
 
     NTSTATUS HttpTransport(
         void* context,
@@ -189,6 +243,12 @@ namespace
         }
         if (isHttps && TextEqualsLiteral(request->Alpn, request->AlpnLength, "h2")) {
             ++capture->HttpsHttp2AlpnCalls;
+        }
+        if (isHttps && TextEqualsLiteral(request->OfferedAlpn, request->OfferedAlpnLength, "h2,http/1.1")) {
+            ++capture->HttpsDefaultAlpnOfferCalls;
+        }
+        if (isHttps && request->OfferedAlpnLength == 0) {
+            ++capture->HttpsNoAlpnOfferCalls;
         }
         if (isHttps &&
             BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /status/204 ")) {
@@ -250,6 +310,15 @@ namespace
             response->ConnectionReusable = false;
             return STATUS_SUCCESS;
         }
+        if (IsAdvancedLargePostRequest(request)) {
+            return SetLargePostResponse(response);
+        }
+
+        if (isHttps && TextEqualsLiteral(request->Alpn, request->AlpnLength, "h2")) {
+            response->NegotiatedAlpn = "h2";
+            response->NegotiatedAlpnLength = 2;
+            return STATUS_SUCCESS;
+        }
 
         static const char rawResponse[] =
             "HTTP/1.1 200 OK\r\n"
@@ -261,27 +330,6 @@ namespace
         response->RawResponseLength = sizeof(rawResponse) - 1;
         response->ConnectionReusable = false;
         return STATUS_SUCCESS;
-    }
-
-    constexpr SIZE_T LargePostBodyLength = 88 * 1024;
-
-    SIZE_T BuildLargePostResponse(char* buffer, SIZE_T capacity) noexcept
-    {
-        static const char header[] =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Length: 90112\r\n"
-            "Connection: close\r\n"
-            "\r\n";
-        const SIZE_T headerLength = sizeof(header) - 1;
-        if (buffer == nullptr || capacity < headerLength + LargePostBodyLength) {
-            return 0;
-        }
-
-        memcpy(buffer, header, headerLength);
-        for (SIZE_T index = 0; index < LargePostBodyLength; ++index) {
-            buffer[headerLength + index] = static_cast<char>('a' + (index % 26));
-        }
-        return headerLength + LargePostBodyLength;
     }
 
     NTSTATUS LargePostHttpTransport(
@@ -296,10 +344,72 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        static char rawResponse[LargePostBodyLength + 128] = {};
+        return SetLargePostResponse(response);
+    }
+
+    // The decoded body is far larger than the 16 KiB initial workspace DecodedBody buffer,
+    // so chunked transfer-decoding exercises the same DecodedBody grow-retry path that a
+    // gzip/deflate response over HTTP/1.1 hits on the public httpbin endpoint.
+    constexpr SIZE_T ChunkedLargeBodyLength = 32 * 1024;
+    constexpr SIZE_T CloseDelimitedLargeBodyLength = 32 * 1024;
+
+    SIZE_T BuildChunkedLargeResponse(char* buffer, SIZE_T capacity) noexcept
+    {
+        static const char header[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        const SIZE_T headerLength = sizeof(header) - 1;
+
+        // One chunk: hex size line + body + CRLF, then the terminating 0-length chunk.
+        char chunkSizeLine[16] = {};
+        const int chunkSizeLineLength = snprintf(
+            chunkSizeLine,
+            sizeof(chunkSizeLine),
+            "%zx\r\n",
+            static_cast<size_t>(ChunkedLargeBodyLength));
+        if (chunkSizeLineLength <= 0) {
+            return 0;
+        }
+
+        static const char chunkTrailer[] = "\r\n0\r\n\r\n";
+        const SIZE_T chunkTrailerLength = sizeof(chunkTrailer) - 1;
+        const SIZE_T total = headerLength +
+            static_cast<SIZE_T>(chunkSizeLineLength) +
+            ChunkedLargeBodyLength +
+            chunkTrailerLength;
+        if (buffer == nullptr || capacity < total) {
+            return 0;
+        }
+
+        SIZE_T cursor = 0;
+        memcpy(buffer + cursor, header, headerLength);
+        cursor += headerLength;
+        memcpy(buffer + cursor, chunkSizeLine, static_cast<SIZE_T>(chunkSizeLineLength));
+        cursor += static_cast<SIZE_T>(chunkSizeLineLength);
+        for (SIZE_T index = 0; index < ChunkedLargeBodyLength; ++index) {
+            buffer[cursor + index] = static_cast<char>('a' + (index % 26));
+        }
+        cursor += ChunkedLargeBodyLength;
+        memcpy(buffer + cursor, chunkTrailer, chunkTrailerLength);
+        cursor += chunkTrailerLength;
+        return cursor;
+    }
+
+    NTSTATUS ChunkedLargeResponseHttpTransport(
+        void*,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        if (request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        static char rawResponse[ChunkedLargeBodyLength + 256] = {};
         static SIZE_T rawResponseLength = 0;
         if (rawResponseLength == 0) {
-            rawResponseLength = BuildLargePostResponse(rawResponse, sizeof(rawResponse));
+            rawResponseLength = BuildChunkedLargeResponse(rawResponse, sizeof(rawResponse));
             if (rawResponseLength == 0) {
                 return STATUS_BUFFER_TOO_SMALL;
             }
@@ -307,6 +417,96 @@ namespace
 
         response->RawResponse = rawResponse;
         response->RawResponseLength = rawResponseLength;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    SIZE_T BuildCloseDelimitedLargeResponse(char* buffer, SIZE_T capacity) noexcept
+    {
+        static const char header[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        const SIZE_T headerLength = sizeof(header) - 1;
+        if (buffer == nullptr || capacity < headerLength + CloseDelimitedLargeBodyLength) {
+            return 0;
+        }
+
+        memcpy(buffer, header, headerLength);
+        for (SIZE_T index = 0; index < CloseDelimitedLargeBodyLength; ++index) {
+            buffer[headerLength + index] = static_cast<char>('A' + (index % 26));
+        }
+        return headerLength + CloseDelimitedLargeBodyLength;
+    }
+
+    NTSTATUS CloseDelimitedLargeResponseHttpTransport(
+        void*,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        if (request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        static char rawResponse[CloseDelimitedLargeBodyLength + 128] = {};
+        static SIZE_T rawResponseLength = 0;
+        if (rawResponseLength == 0) {
+            rawResponseLength = BuildCloseDelimitedLargeResponse(rawResponse, sizeof(rawResponse));
+            if (rawResponseLength == 0) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+        }
+
+        response->RawResponse = rawResponse;
+        response->RawResponseLength = rawResponseLength;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    struct ProtocolAutodetectCapture final
+    {
+        SIZE_T Calls = 0;
+        SIZE_T DefaultOfferCalls = 0;
+        SIZE_T NoOfferCalls = 0;
+        SIZE_T ExplicitHttp11Calls = 0;
+        const char* NegotiatedAlpn = nullptr;
+        SIZE_T NegotiatedAlpnLength = 0;
+    };
+
+    NTSTATUS ProtocolAutodetectTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<ProtocolAutodetectCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->Calls;
+        if (TextEqualsLiteral(request->OfferedAlpn, request->OfferedAlpnLength, "h2,http/1.1")) {
+            ++capture->DefaultOfferCalls;
+        }
+        if (request->OfferedAlpnLength == 0) {
+            ++capture->NoOfferCalls;
+        }
+        if (TextEqualsLiteral(request->OfferedAlpn, request->OfferedAlpnLength, "http/1.1")) {
+            ++capture->ExplicitHttp11Calls;
+        }
+
+        response->NegotiatedAlpn = capture->NegotiatedAlpn;
+        response->NegotiatedAlpnLength = capture->NegotiatedAlpnLength;
+        if (TextEqualsLiteral(capture->NegotiatedAlpn, capture->NegotiatedAlpnLength, "h2")) {
+            return STATUS_SUCCESS;
+        }
+
+        static const char rawResponse[] =
+            "HTTP/1.1 204 No Content\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        response->RawResponse = rawResponse;
+        response->RawResponseLength = sizeof(rawResponse) - 1;
         response->ConnectionReusable = false;
         return STATUS_SUCCESS;
     }
@@ -335,9 +535,17 @@ namespace
         }
         if (TextEqualsLiteral(request->Host, request->HostLength, "ws.postman-echo.com")) {
             ++capture->WebSocketEchoHostCalls;
+            if (request->Policy.Profile == KernelHttp::tls::TlsSecurityProfile::CompatibilityExplicit &&
+                request->Policy.EnableTls12Sha1Signatures) {
+                ++capture->WebSocketPostmanSha1CompatibilityCalls;
+            }
         }
         if (TextEqualsLiteral(request->Host, request->HostLength, "websocket-echo.com")) {
             ++capture->WebSocketBinaryEchoHostCalls;
+            if (request->Policy.Profile == KernelHttp::tls::TlsSecurityProfile::ModernDefault &&
+                !request->Policy.EnableTls12Sha1Signatures) {
+                ++capture->WebSocketBinaryModernPolicyCalls;
+            }
         }
         if (TextEqualsLiteral(request->Scheme, request->SchemeLength, "wss") &&
             request->CertificatePolicy == KernelHttp::engine::KhCertificatePolicy::Verify) {
@@ -544,6 +752,7 @@ namespace
             "no-verify HTTPS sample does not require a certificate store");
         Expect(capture.HttpsHttp11AlpnCalls == 1, "HTTPS HTTP/1.1 ALPN sample is issued");
         Expect(capture.HttpsHttp2AlpnCalls == 1, "HTTPS HTTP/2 ALPN sample is issued");
+        Expect(capture.HttpsDefaultAlpnOfferCalls >= 2, "HTTPS default samples offer h2 and HTTP/1.1 automatically");
 
         Expect(capture.WebSocketConnectCalls == 10, "all websocket connect variants are issued");
         Expect(capture.WebSocketIpv4Calls == 0, "websocket samples do not force IPv4");
@@ -552,6 +761,12 @@ namespace
         Expect(capture.WebSocketSecureCalls == 10, "secure wss samples are issued");
         Expect(capture.WebSocketEchoHostCalls == 8, "websocket text samples use the Postman raw echo endpoint");
         Expect(capture.WebSocketBinaryEchoHostCalls == 2, "websocket binary samples use the binary echo endpoint");
+        Expect(
+            capture.WebSocketPostmanSha1CompatibilityCalls == capture.WebSocketEchoHostCalls,
+            "Postman websocket samples pass explicit TLS 1.2 SHA1 signature compatibility policy");
+        Expect(
+            capture.WebSocketBinaryModernPolicyCalls == capture.WebSocketBinaryEchoHostCalls,
+            "non-Postman websocket samples keep modern TLS policy");
         Expect(capture.WebSocketVerifyCalls == 10, "verified websocket samples are issued");
         Expect(capture.WebSocketVerifyWithStoreCalls == 10, "verified websocket samples provide a certificate store");
         Expect(capture.WebSocketTls12MaxCalls == 8, "explicit websocket secure samples cap TLS at 1.2 for endpoint compatibility");
@@ -827,6 +1042,7 @@ namespace
         Expect(results.HttpLargeResponse.BodyLength == 96, "large response sample records body");
         Expect(NT_SUCCESS(results.HttpResponseLimit.Status), "response limit sample treats buffer limit as expected");
         Expect(results.HttpLargePost.StatusCode == 200, "large POST sample succeeds");
+        Expect(results.HttpLargePost.BodyLength == LargePostBodyLength, "large POST sample records bounded response body");
         Expect(results.HttpConcurrentAsync.StatusCode == 3, "concurrent async sample completes all operations");
         Expect(NT_SUCCESS(results.HttpAsyncWaitTimeout.Status), "async wait timeout sample observes timeout");
         Expect(results.HttpAsyncWaitTimeout.BodyLength == 1, "async wait timeout sample drains canceled operation");
@@ -841,6 +1057,9 @@ namespace
         Expect(capture.HttpsUnsupportedAlpnCalls == 0, "unsupported ALPN is rejected before transport");
         Expect(NT_SUCCESS(results.WebSocketClose.Status), "websocket close sample succeeds");
         Expect(NT_SUCCESS(results.WebSocketFragmentSend.Status), "websocket fragment send sample succeeds");
+        Expect(
+            capture.WebSocketPostmanSha1CompatibilityCalls == 2,
+            "advanced Postman websocket samples pass explicit TLS 1.2 SHA1 signature compatibility policy");
         Expect(capture.WebSocketNonFinalSendCalls == 1, "websocket fragment sample sends a non-final frame");
         Expect(capture.WebSocketContinuationSendCalls == 1, "websocket fragment sample completes with a continuation frame");
         Expect(capture.WebSocketCloseCalls >= 2, "advanced websocket samples close handles");
@@ -858,7 +1077,7 @@ namespace
         static const UCHAR requestBody[] = { 'x' };
 
         KernelHttp::khttp::SessionConfig config = KernelHttp::khttp::DefaultSessionConfig();
-        config.MaxResponseBytes = 128 * 1024;
+        config.MaxResponseBytes = 256 * 1024;
         KernelHttp::khttp::Session* session = nullptr;
         NTSTATUS status = KernelHttp::khttp::SessionCreate(
             reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
@@ -904,6 +1123,216 @@ namespace
         KernelHttp::khttp::SessionClose(session);
 
         KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHighLevelHttp11DecodedBodyGrowsBeyondInitialBuffer() noexcept
+    {
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(ChunkedLargeResponseHttpTransport, nullptr);
+
+        static const char url[] = "https://httpbin.dev/get";
+
+        KernelHttp::khttp::SessionConfig config = KernelHttp::khttp::DefaultSessionConfig();
+        config.MaxResponseBytes = 256 * 1024;
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for HTTP/1.1 decoded-body grow test");
+
+        KernelHttp::khttp::Response* response = nullptr;
+        status = KernelHttp::khttp::Get(session, url, sizeof(url) - 1, &response);
+        Expect(
+            NT_SUCCESS(status),
+            "khttp::Get grows DecodedBody for HTTP/1.1 chunked response larger than initial buffer");
+        Expect(
+            KernelHttp::khttp::ResponseBodyLength(response) == ChunkedLargeBodyLength,
+            "khttp::Get HTTP/1.1 decoded body length matches the chunked payload");
+        KernelHttp::khttp::ResponseRelease(response);
+        KernelHttp::khttp::SessionClose(session);
+
+        config = KernelHttp::khttp::DefaultSessionConfig();
+        config.MaxResponseBytes = 16 * 1024;
+        session = nullptr;
+        status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for limited HTTP/1.1 decoded-body test");
+
+        response = nullptr;
+        status = KernelHttp::khttp::Get(session, url, sizeof(url) - 1, &response);
+        Expect(
+            status == STATUS_BUFFER_TOO_SMALL,
+            "khttp::Get rejects HTTP/1.1 decoded body above MaxResponseBytes");
+        Expect(response == nullptr, "limited HTTP/1.1 decoded-body request leaves response null");
+        KernelHttp::khttp::ResponseRelease(response);
+        KernelHttp::khttp::SessionClose(session);
+
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHighLevelHttp11CloseDelimitedDecodedBodyGrowsBeyondInitialBuffer() noexcept
+    {
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+        KernelHttp::khttp::test::SetHttpTransport(CloseDelimitedLargeResponseHttpTransport, nullptr);
+
+        static const char url[] = "http://example.test/close-delimited";
+
+        KernelHttp::khttp::SessionConfig config = KernelHttp::khttp::DefaultSessionConfig();
+        config.MaxResponseBytes = 256 * 1024;
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for close-delimited decoded-body grow test");
+
+        KernelHttp::khttp::Response* response = nullptr;
+        status = KernelHttp::khttp::Get(session, url, sizeof(url) - 1, &response);
+        Expect(
+            NT_SUCCESS(status),
+            "khttp::Get grows DecodedBody for HTTP/1.1 close-delimited response");
+        Expect(
+            KernelHttp::khttp::ResponseBodyLength(response) == CloseDelimitedLargeBodyLength,
+            "khttp::Get close-delimited decoded body length matches payload");
+        KernelHttp::khttp::ResponseRelease(response);
+        KernelHttp::khttp::SessionClose(session);
+
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHighLevelHttpsProtocolAutodetectUsesNegotiatedAlpn() noexcept
+    {
+        KernelHttp::khttp::test::SetAsyncAutoRun(true);
+
+        static const char url[] = "https://example.test/get";
+
+        ProtocolAutodetectCapture capture = {};
+        capture.NegotiatedAlpn = "h2";
+        capture.NegotiatedAlpnLength = 2;
+        KernelHttp::khttp::test::SetHttpTransport(ProtocolAutodetectTransport, &capture);
+
+        KernelHttp::khttp::SessionConfig config = KernelHttp::khttp::DefaultSessionConfig();
+        KernelHttp::khttp::Session* session = nullptr;
+        NTSTATUS status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for HTTPS autodetect h2 test");
+
+        KernelHttp::khttp::Response* response = nullptr;
+        status = KernelHttp::khttp::Get(session, url, sizeof(url) - 1, &response);
+        Expect(NT_SUCCESS(status), "default HTTPS request succeeds when h2 is negotiated");
+        Expect(KernelHttp::khttp::ResponseStatusCode(response) == 200, "h2 negotiated response returns success status");
+        Expect(capture.DefaultOfferCalls == 1, "default HTTPS request offers h2 and HTTP/1.1");
+        KernelHttp::khttp::ResponseRelease(response);
+        KernelHttp::khttp::SessionClose(session);
+
+        capture = {};
+        capture.NegotiatedAlpn = "http/1.1";
+        capture.NegotiatedAlpnLength = 8;
+        KernelHttp::khttp::test::SetHttpTransport(ProtocolAutodetectTransport, &capture);
+
+        session = nullptr;
+        status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for HTTPS autodetect HTTP/1.1 test");
+
+        response = nullptr;
+        status = KernelHttp::khttp::Get(session, url, sizeof(url) - 1, &response);
+        Expect(NT_SUCCESS(status), "default HTTPS request falls back to HTTP/1.1 when negotiated");
+        Expect(KernelHttp::khttp::ResponseStatusCode(response) == 204, "HTTP/1.1 negotiated response is parsed");
+        Expect(capture.DefaultOfferCalls == 1, "HTTP/1.1 fallback still uses default ALPN offer");
+        KernelHttp::khttp::ResponseRelease(response);
+        KernelHttp::khttp::SessionClose(session);
+
+        capture = {};
+        capture.NegotiatedAlpn = "http/1.1";
+        capture.NegotiatedAlpnLength = 8;
+        KernelHttp::khttp::test::SetHttpTransport(ProtocolAutodetectTransport, &capture);
+
+        session = nullptr;
+        status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for explicit HTTP/1.1 ALPN test");
+
+        KernelHttp::khttp::Request* request = nullptr;
+        status = KernelHttp::khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for explicit HTTP/1.1 ALPN test");
+        KernelHttp::khttp::TlsConfig tls = KernelHttp::khttp::DefaultTlsConfig();
+        tls.Alpn = "http/1.1";
+        tls.AlpnLength = 8;
+        if (NT_SUCCESS(status)) {
+            status = KernelHttp::khttp::RequestSetUrl(request, url, sizeof(url) - 1);
+        }
+        if (NT_SUCCESS(status)) {
+            status = KernelHttp::khttp::RequestSetTls(request, &tls);
+        }
+        response = nullptr;
+        if (NT_SUCCESS(status)) {
+            status = KernelHttp::khttp::Send(session, request, &response);
+        }
+        Expect(NT_SUCCESS(status), "explicit HTTP/1.1 ALPN request succeeds");
+        Expect(capture.ExplicitHttp11Calls == 1, "explicit HTTP/1.1 request offers only HTTP/1.1");
+        Expect(capture.DefaultOfferCalls == 0, "explicit HTTP/1.1 request does not use automatic ALPN list");
+        KernelHttp::khttp::ResponseRelease(response);
+        KernelHttp::khttp::RequestRelease(request);
+        KernelHttp::khttp::SessionClose(session);
+
+        config = KernelHttp::khttp::DefaultSessionConfig();
+        config.Tls.PreferHttp2 = false;
+        capture = {};
+        capture.NegotiatedAlpn = nullptr;
+        capture.NegotiatedAlpnLength = 0;
+        KernelHttp::khttp::test::SetHttpTransport(ProtocolAutodetectTransport, &capture);
+
+        session = nullptr;
+        status = KernelHttp::khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds when PreferHttp2 is disabled");
+
+        response = nullptr;
+        status = KernelHttp::khttp::Get(session, url, sizeof(url) - 1, &response);
+        Expect(NT_SUCCESS(status), "HTTPS request succeeds without automatic ALPN offer when disabled");
+        Expect(capture.NoOfferCalls == 1, "PreferHttp2=false sends no automatic ALPN offer");
+        KernelHttp::khttp::ResponseRelease(response);
+        KernelHttp::khttp::SessionClose(session);
+
+        KernelHttp::khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHighLevelTlsVersionFallbackPolicy() noexcept
+    {
+        using KernelHttp::engine::KhTlsVersion;
+        constexpr ULONG TlsFailureVersionNegotiation = 1;
+        constexpr ULONG TlsFailurePeerAlert = 7;
+
+        Expect(
+            KernelHttp::khttp::test::IsHttpTls12ConfirmationCandidate(
+                KhTlsVersion::Tls12,
+                KhTlsVersion::Tls13,
+                TlsFailureVersionNegotiation),
+            "default TLS 1.2-1.3 policy treats version negotiation as TLS 1.2 confirmation candidate");
+        Expect(
+            !KernelHttp::khttp::test::IsHttpTls12ConfirmationCandidate(
+                KhTlsVersion::Tls13,
+                KhTlsVersion::Tls13,
+                TlsFailureVersionNegotiation),
+            "TLS 1.3-only policy does not trigger TLS 1.2 fallback");
+        Expect(
+            !KernelHttp::khttp::test::IsHttpTls12ConfirmationCandidate(
+                KhTlsVersion::Tls12,
+                KhTlsVersion::Tls13,
+                TlsFailurePeerAlert),
+            "non-version TLS failures do not trigger TLS 1.2 fallback");
     }
 
     void TestWebSocketReceiveHonorsPerCallMessageLimit() noexcept
@@ -1024,6 +1453,10 @@ int main() noexcept
     TestLoadTimeSamplesIgnorePublicWebSocketNoMatchFailures();
     TestAdvancedScenarioSamplesCoverMissingSurface();
     TestHighLevelPostLargeResponseHonorsMaxResponseBytes();
+    TestHighLevelHttp11DecodedBodyGrowsBeyondInitialBuffer();
+    TestHighLevelHttp11CloseDelimitedDecodedBodyGrowsBeyondInitialBuffer();
+    TestHighLevelHttpsProtocolAutodetectUsesNegotiatedAlpn();
+    TestHighLevelTlsVersionFallbackPolicy();
     TestWebSocketReceiveHonorsPerCallMessageLimit();
     TestHighLevelWebSocketPublicValidation();
 

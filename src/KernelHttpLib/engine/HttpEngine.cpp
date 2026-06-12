@@ -72,6 +72,9 @@ namespace engine
         char Host[KhMaxHostLength + 1] = {};
     };
 
+    _Must_inspect_result_
+    NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ KhWorkspace& workspace) noexcept;
+
     class WorkspaceGuard final
     {
     public:
@@ -283,6 +286,27 @@ namespace engine
             TextEqualsLiteral(alpn, alpnLength, "http/1.1");
     }
 
+    bool IsHttpsRequest(const KhRequest& request) noexcept
+    {
+        return TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https");
+    }
+
+    bool IsAutomaticHttpAlpnMode(const KhRequest& request) noexcept
+    {
+        return IsHttpsRequest(request) &&
+            request.Tls.PreferHttp2 &&
+            request.Tls.Alpn == nullptr &&
+            request.Tls.AlpnLength == 0;
+    }
+
+    void RefreshResponseParseDecodedBuffers(
+        _In_ const KhWorkspace& workspace,
+        _Inout_ http::HttpParseOptions& parseOptions) noexcept
+    {
+        parseOptions.DecodedBody = reinterpret_cast<char*>(workspace.DecodedBody.Data);
+        parseOptions.DecodedBodyCapacity = workspace.DecodedBody.Length;
+    }
+
     bool IsTlsVersionAllowed(
         KhTlsVersion minimum,
         KhTlsVersion maximum,
@@ -447,7 +471,8 @@ namespace engine
         key->CertificateStore = request.Tls.CertificateStore;
         key->ClientCredential = request.Tls.ClientCredential;
         key->Policy = request.Tls.Policy;
-        const bool useTlsIdentity = TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https");
+        key->AutomaticAlpn = IsAutomaticHttpAlpnMode(request);
+        const bool useTlsIdentity = IsHttpsRequest(request);
         const char* tlsServerName = request.Tls.ServerName != nullptr ? request.Tls.ServerName : request.Host;
         const SIZE_T tlsServerNameLength = request.Tls.ServerName != nullptr ?
             request.Tls.ServerNameLength :
@@ -755,6 +780,15 @@ namespace engine
                 parseLength,
                 parseOptions,
                 *parsed);
+            if (status == STATUS_BUFFER_TOO_SMALL) {
+                status = GrowDecodedBodyAfterBufferTooSmall(workspace);
+                if (!NT_SUCCESS(status)) {
+                    workspace.ResponseLength = parseLength;
+                    return status;
+                }
+                RefreshResponseParseDecodedBuffers(workspace, parseOptions);
+                continue;
+            }
             if (status != STATUS_SUCCESS) {
                 workspace.ResponseLength = parseLength;
                 return status;
@@ -877,34 +911,6 @@ namespace engine
         }
 
         return KhWorkspaceAppendResponse(workspace, data, dataLength);
-    }
-
-    _Must_inspect_result_
-    NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ KhWorkspace& workspace) noexcept
-    {
-        const SIZE_T currentLength = workspace.DecodedBody.Length;
-        if (workspace.MaxResponseBytes != 0 && currentLength >= workspace.MaxResponseBytes) {
-            return STATUS_BUFFER_TOO_SMALL;
-        }
-
-        SIZE_T requiredCapacity = currentLength == 0 ?
-            KhWorkspaceDecodedBodyBytes :
-            currentLength * 2;
-        if (currentLength != 0 &&
-            requiredCapacity < currentLength) {
-            return STATUS_BUFFER_TOO_SMALL;
-        }
-
-        if (workspace.MaxResponseBytes != 0 &&
-            requiredCapacity > workspace.MaxResponseBytes) {
-            requiredCapacity = workspace.MaxResponseBytes;
-        }
-
-        if (requiredCapacity <= currentLength) {
-            return STATUS_BUFFER_TOO_SMALL;
-        }
-
-        return KhWorkspaceEnsureDecodedBodyCapacity(&workspace, requiredCapacity);
     }
 
     _Must_inspect_result_
@@ -1095,6 +1101,34 @@ namespace engine
 #endif
 
     _Must_inspect_result_
+    NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ KhWorkspace& workspace) noexcept
+    {
+        const SIZE_T currentLength = workspace.DecodedBody.Length;
+        if (workspace.MaxResponseBytes != 0 && currentLength >= workspace.MaxResponseBytes) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        SIZE_T requiredCapacity = currentLength == 0 ?
+            KhWorkspaceDecodedBodyBytes :
+            currentLength * 2;
+        if (currentLength != 0 &&
+            requiredCapacity < currentLength) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        if (workspace.MaxResponseBytes != 0 &&
+            requiredCapacity > workspace.MaxResponseBytes) {
+            requiredCapacity = workspace.MaxResponseBytes;
+        }
+
+        if (requiredCapacity <= currentLength) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        return KhWorkspaceEnsureDecodedBodyCapacity(&workspace, requiredCapacity);
+    }
+
+    _Must_inspect_result_
     NTSTATUS BuildRequestBytes(
         const KhRequest& request,
         _Inout_ KhWorkspace& workspace,
@@ -1234,6 +1268,19 @@ namespace engine
                 return STATUS_SUCCESS;
             }
 
+            // Content decoding (gzip/deflate/br) and chunked transfer-decoding write into the
+            // workspace DecodedBody buffer, which starts at KhWorkspaceDecodedBodyBytes. A decoded
+            // body larger than the current buffer surfaces as STATUS_BUFFER_TOO_SMALL here. Grow the
+            // buffer (bounded by MaxResponseBytes) and re-parse, mirroring the HTTP/2 decode path.
+            if (status == STATUS_BUFFER_TOO_SMALL) {
+                status = GrowDecodedBodyAfterBufferTooSmall(workspace);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                RefreshResponseParseDecodedBuffers(workspace, parseOptions);
+                continue;
+            }
+
             if (status != STATUS_MORE_PROCESSING_REQUIRED) {
                 return status;
             }
@@ -1275,6 +1322,14 @@ namespace engine
                         responseLength,
                         parseOptions,
                         *parsed);
+                    if (status == STATUS_BUFFER_TOO_SMALL) {
+                        status = GrowDecodedBodyAfterBufferTooSmall(workspace);
+                        if (!NT_SUCCESS(status)) {
+                            return status;
+                        }
+                        RefreshResponseParseDecodedBuffers(workspace, parseOptions);
+                        continue;
+                    }
                     if (!NT_SUCCESS(status)) {
                         return status;
                     }
@@ -1304,6 +1359,14 @@ namespace engine
                         responseLength,
                         parseOptions,
                         *parsed);
+                    if (status == STATUS_BUFFER_TOO_SMALL) {
+                        status = GrowDecodedBodyAfterBufferTooSmall(workspace);
+                        if (!NT_SUCCESS(status)) {
+                            return status;
+                        }
+                        RefreshResponseParseDecodedBuffers(workspace, parseOptions);
+                        continue;
+                    }
                     if (!NT_SUCCESS(status)) {
                         return status;
                     }
@@ -1554,7 +1617,11 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        tls::TlsAlpnProtocol alpn = {};
+        tls::TlsAlpnProtocol explicitAlpn = {};
+        static const tls::TlsAlpnProtocol automaticAlpnProtocols[] = {
+            { "h2", 2 },
+            { "http/1.1", 8 }
+        };
         tls::TlsClientConnectionOptions tlsOptions = {};
         core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
         core::WorkspaceScratchAllocator* certificateScratch = nullptr;
@@ -1588,10 +1655,15 @@ namespace engine
         tlsOptions.EnableSessionResumption = true;
 
         if (request.Tls.Alpn != nullptr && request.Tls.AlpnLength != 0) {
-            alpn.Name = request.Tls.Alpn;
-            alpn.NameLength = request.Tls.AlpnLength;
-            tlsOptions.AlpnProtocols = &alpn;
+            explicitAlpn.Name = request.Tls.Alpn;
+            explicitAlpn.NameLength = request.Tls.AlpnLength;
+            tlsOptions.AlpnProtocols = &explicitAlpn;
             tlsOptions.AlpnProtocolCount = 1;
+        }
+        else if (IsAutomaticHttpAlpnMode(request)) {
+            tlsOptions.AlpnProtocols = automaticAlpnProtocols;
+            tlsOptions.AlpnProtocolCount =
+                sizeof(automaticAlpnProtocols) / sizeof(automaticAlpnProtocols[0]);
         }
 
         net::WskCancellationToken cancellation = {};
@@ -1768,7 +1840,7 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https") &&
+        if (IsHttpsRequest(request) &&
             request.Tls.Alpn != nullptr &&
             request.Tls.AlpnLength != 0 &&
             !IsSupportedHttpAlpn(request.Tls.Alpn, request.Tls.AlpnLength)) {
@@ -1799,6 +1871,14 @@ namespace engine
         testRequest.ClientCredential = request.Tls.ClientCredential;
         testRequest.Alpn = request.Tls.Alpn;
         testRequest.AlpnLength = request.Tls.AlpnLength;
+        if (IsAutomaticHttpAlpnMode(request)) {
+            testRequest.OfferedAlpn = "h2,http/1.1";
+            testRequest.OfferedAlpnLength = 11;
+        }
+        else if (request.Tls.Alpn != nullptr && request.Tls.AlpnLength != 0) {
+            testRequest.OfferedAlpn = request.Tls.Alpn;
+            testRequest.OfferedAlpnLength = request.Tls.AlpnLength;
+        }
         testRequest.Policy = request.Tls.Policy;
         testRequest.PoolableConnection = request.ConnectionPolicy != KhConnectionPolicy::NoPool;
         testRequest.ReusedConnection = reusedConnection;
@@ -1808,6 +1888,23 @@ namespace engine
         NTSTATUS status = g_testHttpTransport(g_testHttpTransportContext, &testRequest, &testResponse);
         if (!NT_SUCCESS(status)) {
             return status;
+        }
+
+        if (TextEqualsLiteral(testResponse.NegotiatedAlpn, testResponse.NegotiatedAlpnLength, "h2")) {
+            parsed->MajorVersion = 2;
+            parsed->MinorVersion = 0;
+            parsed->StatusCode = 200;
+            workspace.ResponseLength = 0;
+            *rawResponseLength = 0;
+            *connectionReusable = false;
+            return STATUS_SUCCESS;
+        }
+
+        if (request.Tls.Alpn != nullptr &&
+            request.Tls.AlpnLength != 0 &&
+            TextEqualsLiteral(request.Tls.Alpn, request.Tls.AlpnLength, "h2") &&
+            !TextEqualsLiteral(testResponse.NegotiatedAlpn, testResponse.NegotiatedAlpnLength, "h2")) {
+            return STATUS_NOT_SUPPORTED;
         }
 
         if (testResponse.RawResponse == nullptr || testResponse.RawResponseLength == 0) {
@@ -1847,7 +1944,7 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https")) {
+        if (IsHttpsRequest(request)) {
             if (request.Tls.CertificatePolicy == KhCertificatePolicy::Verify &&
                 request.Tls.CertificateStore == nullptr) {
                 return STATUS_INVALID_PARAMETER;
@@ -1863,7 +1960,7 @@ namespace engine
         }
 
         tls::TlsConnection* tlsConnection = nullptr;
-        if (TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https")) {
+        if (IsHttpsRequest(request)) {
             status = EnsureTlsConnected(
                 session,
                 request,
@@ -1877,14 +1974,40 @@ namespace engine
             tlsConnection = pooledConnection->Tls;
         }
 
+        if (tlsConnection != nullptr && IsAutomaticHttpAlpnMode(request)) {
+            const char* negotiatedAlpn = tlsConnection->NegotiatedAlpn();
+            const SIZE_T negotiatedAlpnLength = tlsConnection->NegotiatedAlpnLength();
+            if (negotiatedAlpnLength != 0) {
+                NTSTATUS keyStatus = CopyExactText(
+                    negotiatedAlpn,
+                    negotiatedAlpnLength,
+                    pooledConnection->Key.Alpn,
+                    sizeof(pooledConnection->Key.Alpn),
+                    &pooledConnection->Key.AlpnLength);
+                if (!NT_SUCCESS(keyStatus)) {
+                    return keyStatus;
+                }
+            }
+        }
+
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         WskCancellationScope cancellationScope(pooledConnection->RawTransport, cancellationOperation);
 #else
         UNREFERENCED_PARAMETER(cancellationOperation);
 #endif
 
-        if (tlsConnection != nullptr &&
-            TextEqualsLiteral(request.Tls.Alpn, request.Tls.AlpnLength, "h2")) {
+        const bool h2ExplicitlyRequested =
+            request.Tls.Alpn != nullptr &&
+            request.Tls.AlpnLength != 0 &&
+            TextEqualsLiteral(request.Tls.Alpn, request.Tls.AlpnLength, "h2");
+        const bool h2Negotiated =
+            tlsConnection != nullptr &&
+            TextEqualsLiteral(
+                tlsConnection->NegotiatedAlpn(),
+                tlsConnection->NegotiatedAlpnLength(),
+                "h2");
+
+        if (h2Negotiated || h2ExplicitlyRequested) {
             if (pooledConnection->Transport == nullptr) {
                 return STATUS_INVALID_DEVICE_STATE;
             }
@@ -3217,7 +3340,20 @@ namespace engine
         return STATUS_SUCCESS;
     }
 
-
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+    bool KhTestIsHttpTls12ConfirmationCandidate(
+        KhTlsVersion minVersion,
+        KhTlsVersion maxVersion,
+        ULONG category) noexcept
+    {
+        KhRequest request = {};
+        request.Tls.MinVersion = minVersion;
+        request.Tls.MaxVersion = maxVersion;
+        tls::TlsHandshakeFailure failure = {};
+        failure.Category = static_cast<tls::TlsHandshakeFailureCategory>(category);
+        return IsHttpTls12ConfirmationCandidate(request, failure);
+    }
+#endif
 
 NTSTATUS KhHttpSendSync(
     KH_SESSION session,

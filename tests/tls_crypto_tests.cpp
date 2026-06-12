@@ -3,6 +3,7 @@
 #endif
 
 #include <KernelHttp/crypto/Aead.h>
+#include <KernelHttp/crypto/CngProvider.h>
 #include <KernelHttp/crypto/KeyExchange.h>
 
 #include <stdio.h>
@@ -12,12 +13,15 @@ using KernelHttp::crypto::Aead;
 using KernelHttp::crypto::AeadAlgorithm;
 using KernelHttp::crypto::AeadKey;
 using KernelHttp::crypto::AeadParameters;
+using KernelHttp::crypto::CngKey;
+using KernelHttp::crypto::CngProvider;
 using KernelHttp::crypto::KeyExchange;
 using KernelHttp::crypto::KeyExchangeGroup;
 using KernelHttp::crypto::KeyExchangeKeyPair;
 using KernelHttp::crypto::KeyExchangeFfdhe2048Length;
 using KernelHttp::crypto::KeyExchangeX25519KeyLength;
 using KernelHttp::crypto::KeyExchangeX448KeyLength;
+using KernelHttp::crypto::SignatureAlgorithm;
 
 namespace
 {
@@ -611,6 +615,44 @@ namespace
             &written);
         ExpectStatus(status, STATUS_INVALID_SIGNATURE, "AES-CCM rejects tampered ciphertext");
     }
+
+    void TestSha1SignatureAlgorithmsAreCallable()
+    {
+        static const UCHAR sha1Digest[20] = {
+            0x2f, 0xd4, 0xe1, 0xc6, 0x7a, 0x2d, 0x28, 0xfc,
+            0xed, 0x84, 0x9e, 0xe1, 0xbb, 0x76, 0xe7, 0x39,
+            0x1b, 0x93, 0xeb, 0x12
+        };
+        static const UCHAR signature[64] = {
+            0x30, 0x2e, 0x02, 0x15, 0x00, 0xd1, 0x5f, 0x9a,
+            0x65, 0x51, 0x4a, 0x3f, 0x81, 0xba, 0xe2, 0x69,
+            0xb1, 0x8b, 0x3f, 0x5a, 0x90, 0x4c, 0x8b, 0x02,
+            0x15, 0x00, 0xb7, 0x8d, 0x8e, 0xab, 0x48, 0x15,
+            0x6f, 0x7f, 0x41, 0x16, 0x43, 0x9d, 0xba, 0x9b,
+            0xd2, 0x22, 0x12, 0xb0, 0x00, 0xaa, 0xaa, 0xaa,
+            0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,
+            0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa
+        };
+
+        CngKey publicKey;
+        NTSTATUS status = CngProvider::VerifySignature(
+            SignatureAlgorithm::RsaPkcs1Sha1,
+            publicKey,
+            sha1Digest,
+            sizeof(sha1Digest),
+            signature,
+            sizeof(signature));
+        ExpectStatus(status, STATUS_SUCCESS, "RSA PKCS1 SHA1 signature algorithm is callable");
+
+        status = CngProvider::VerifySignature(
+            SignatureAlgorithm::EcdsaSha1,
+            publicKey,
+            sha1Digest,
+            sizeof(sha1Digest),
+            signature,
+            sizeof(signature));
+        ExpectStatus(status, STATUS_SUCCESS, "ECDSA SHA1 signature algorithm is callable");
+    }
 }
 
 int main()
@@ -624,6 +666,7 @@ int main()
     TestChaCha20Poly1305Rfc8439Vector();
     TestAesCcm8Rfc3610Vector();
     TestAesCcmRoundTripAndTamper();
+    TestSha1SignatureAlgorithmsAreCallable();
 
     if (g_failed) {
         return 1;

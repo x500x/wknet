@@ -52,6 +52,7 @@ namespace samples
         constexpr const char* WebSocketUrl = "wss://ws.postman-echo.com/raw";
         constexpr const char* WebSocketText = "kernel-http advanced websocket";
         constexpr SIZE_T LargeBodyBytes = 64 * 1024;
+        constexpr SIZE_T LargePostMaxResponseBytes = 256 * 1024;
         constexpr ULONG AsyncWaitImmediateMs = 0;
         constexpr ULONG AsyncWaitForeverMs = 0xffffffffUL;
 
@@ -62,6 +63,12 @@ namespace samples
                 ++length;
             }
             return length;
+        }
+
+        void EnablePostmanWebSocketTlsCompatibility(_Inout_ khttp::TlsConfig& config) noexcept
+        {
+            config.Policy.Profile = tls::TlsSecurityProfile::CompatibilityExplicit;
+            config.Policy.EnableTls12Sha1Signatures = true;
         }
 
         void MergeSampleStatus(
@@ -409,6 +416,8 @@ namespace samples
             config.Url = WebSocketUrl;
             config.UrlLength = LiteralLength(WebSocketUrl);
             config.Tls = tlsConfig;
+            EnablePostmanWebSocketTlsCompatibility(config.Tls);
+            kprintf("[高级场景] WebSocket Close TLS策略=CompatibilityExplicit SHA1签名=启用(endpoint兼容)\r\n");
 
             khttp::WebSocket* websocket = nullptr;
             NTSTATUS status = khttp::WsConnectEx(session, &config, &websocket);
@@ -430,6 +439,8 @@ namespace samples
             config.Url = WebSocketUrl;
             config.UrlLength = LiteralLength(WebSocketUrl);
             config.Tls = tlsConfig;
+            EnablePostmanWebSocketTlsCompatibility(config.Tls);
+            kprintf("[高级场景] WebSocket FragmentSend TLS策略=CompatibilityExplicit SHA1签名=启用(endpoint兼容)\r\n");
 
             khttp::WebSocket* websocket = nullptr;
             NTSTATUS status = khttp::WsConnectEx(session, &config, &websocket);
@@ -497,7 +508,7 @@ namespace samples
 
         khttp::SessionConfig config = khttp::DefaultSessionConfig();
         config.RequestBufferBytes = 96 * 1024;
-        config.MaxResponseBytes = 128 * 1024;
+        config.MaxResponseBytes = LargePostMaxResponseBytes;
         config.PoolCapacity = 8;
         config.MaxConnsPerHost = 3;
         config.Tls.Store = &trustStore.Store;

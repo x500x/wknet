@@ -44,6 +44,7 @@ namespace engine
         SIZE_T TlsServerNameLength = 0;
         char Alpn[KhPoolMaxAlpnLength + 1] = {};
         SIZE_T AlpnLength = 0;
+        bool AutomaticAlpn = false;
     };
 
     struct KhPooledConnection final
@@ -85,6 +86,11 @@ namespace engine
 
     _Must_inspect_result_
     bool KhConnectionPoolKeysEqual(
+        _In_ const KhConnectionPoolKey& left,
+        _In_ const KhConnectionPoolKey& right) noexcept;
+
+    _Must_inspect_result_
+    bool KhConnectionPoolKeysEqualForAutoAlpnAcquire(
         _In_ const KhConnectionPoolKey& left,
         _In_ const KhConnectionPoolKey& right) noexcept;
 

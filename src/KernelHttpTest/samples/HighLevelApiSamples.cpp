@@ -442,12 +442,19 @@ namespace
         khttp::AddressFamily family,
         khttp::ConnPolicy policy) noexcept
     {
+        const bool isHttps = url != nullptr &&
+            LiteralLength(url) >= LiteralLength("https://") &&
+            RtlCompareMemory(url, "https://", LiteralLength("https://")) == LiteralLength("https://");
         const char* certPolicy = tlsConfig != nullptr ? CertPolicyName(tlsConfig->Certificate) : "使用会话默认";
-        const char* alpn = "使用会话默认";
+        const char* alpn = isHttps ? "自动(h2,http/1.1)" : "使用会话默认";
         SIZE_T alpnLength = LiteralLength(alpn);
         if (tlsConfig != nullptr && tlsConfig->Alpn != nullptr && tlsConfig->AlpnLength != 0) {
             alpn = tlsConfig->Alpn;
             alpnLength = tlsConfig->AlpnLength;
+        }
+        else if (tlsConfig != nullptr && !tlsConfig->PreferHttp2) {
+            alpn = "不自动";
+            alpnLength = LiteralLength(alpn);
         }
         KHTTP_SAMPLE_LOG(
             "[HTTP请求] 示例=%s 入口=%s 方法=%s URL=%s 请求体=%s 长度=%Iu 证书策略=%s TLS ALPN=%.*s 地址族=%s 连接策略=%s\r\n",
@@ -1328,6 +1335,21 @@ namespace
         return config;
     }
 
+    bool IsPostmanWebSocketUrl(const char* url) noexcept
+    {
+        return url != nullptr &&
+            LiteralLength(url) == LiteralLength(WebSocketSecureEchoUrl) &&
+            RtlCompareMemory(url, WebSocketSecureEchoUrl, LiteralLength(WebSocketSecureEchoUrl)) ==
+                LiteralLength(WebSocketSecureEchoUrl);
+    }
+
+    void EnablePostmanWebSocketTlsCompatibility(_Inout_ khttp::TlsConfig& config) noexcept
+    {
+        config.MaxVersion = khttp::TlsVersion::Tls12;
+        config.Policy.Profile = tls::TlsSecurityProfile::CompatibilityExplicit;
+        config.Policy.EnableTls12Sha1Signatures = true;
+    }
+
     void LogWebSocketRequest(
         const char* sampleName,
         WsConnectVariant connectVariant,
@@ -1336,7 +1358,7 @@ namespace
         SIZE_T sendLength) noexcept
     {
         KHTTP_SAMPLE_LOG(
-            "[WebSocket请求] 示例=%s 入口=%s URL=%s 子协议=%.*s 发送=%s 发送长度=%Iu 地址族=%s 证书策略=%s 自动Ping响应=%s 最大消息=%Iu\r\n",
+            "[WebSocket请求] 示例=%s 入口=%s URL=%s 子协议=%.*s 发送=%s 发送长度=%Iu 地址族=%s 证书策略=%s 自动Ping响应=%s 最大消息=%Iu TLS策略=%s SHA1签名=%s\r\n",
             sampleName,
             WsConnectVariantName(connectVariant),
             config.Url != nullptr ? config.Url : "",
@@ -1347,7 +1369,9 @@ namespace
             AddressFamilyName(config.Family),
             CertPolicyName(config.Tls.Certificate),
             BoolName(config.AutoReplyPing),
-            config.MaxMessageBytes);
+            config.MaxMessageBytes,
+            config.Tls.Policy.Profile == tls::TlsSecurityProfile::CompatibilityExplicit ? "CompatibilityExplicit" : "ModernDefault",
+            config.Tls.Policy.EnableTls12Sha1Signatures ? "启用(endpoint兼容)" : "关闭");
     }
 
     void LogWebSocketResponse(
@@ -1535,6 +1559,9 @@ namespace
         if (connectVariant == WsConnectVariant::Url) {
             config = MakeWsConfig(url, nullptr, khttp::AddressFamily::Any);
         }
+        if (IsPostmanWebSocketUrl(url)) {
+            EnablePostmanWebSocketTlsCompatibility(config.Tls);
+        }
 
         LogWebSocketRequest(
             sampleName,
@@ -1612,6 +1639,9 @@ namespace
         khttp::WsConnectConfig config = MakeWsConfig(url, tlsConfig, DefaultWebSocketSampleAddressFamily);
         if (connectVariant == WsConnectVariant::Url) {
             config = MakeWsConfig(url, nullptr, khttp::AddressFamily::Any);
+        }
+        if (IsPostmanWebSocketUrl(url)) {
+            EnablePostmanWebSocketTlsCompatibility(config.Tls);
         }
 
         LogWebSocketRequest(
@@ -1706,6 +1736,7 @@ namespace
 
     NTSTATUS RunHighLevelApiSamplesOnSession(
         khttp::Session* session,
+        khttp::Session* postmanUrlSession,
         const char* certificateBundlePath,
         HighLevelApiSampleResults* results) noexcept
     {
@@ -1743,7 +1774,6 @@ namespace
 
         khttp::TlsConfig webSocketTls = khttp::DefaultTlsConfig();
         webSocketTls.Store = &trustStore.Store;
-        webSocketTls.MaxVersion = khttp::TlsVersion::Tls12;
 
         // HTTP 快捷函数示例：这些入口直接创建并发送请求。
         status = RunShortcutHttp(session, "HTTP GET 快捷函数", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpShortcutGet);
@@ -1818,8 +1848,8 @@ namespace
         status = RunAsyncCancelSample(session, results->HttpAsyncCancel);
         MergeSampleStatus(aggregate, status);
 
-        status = RunSimpleSync(session, "HTTPS GET 校验证书", khttp::Method::Get, HttpsGetUrl, nullptr, 0, "无", results->HttpsVerifyGet, &ngHttp2Tls);
-        MergePublicHttpSampleStatus(aggregate, status, "HTTPS GET 校验证书");
+        status = RunSimpleSync(session, "HTTPS GET 自动协议", khttp::Method::Get, HttpsGetUrl, nullptr, 0, "无", results->HttpsVerifyGet, &ngHttp2Tls);
+        MergePublicHttpSampleStatus(aggregate, status, "HTTPS GET 自动协议");
         status = RunSimpleSync(session, "HTTPS GET 不校验证书", khttp::Method::Get, HttpsGetUrl, nullptr, 0, "无", results->HttpsNoVerifyGet, &noVerifyTls);
         MergePublicHttpSampleStatus(aggregate, status, "HTTPS GET 不校验证书");
         status = RunHttpsRequestBuilder(session, results->HttpsRequestBuilder, ngHttp2Tls);
@@ -1832,7 +1862,15 @@ namespace
         status = RunWebSocketSample(session, "WebSocket Echo", WsConnectVariant::Config, WsSendVariant::Text, false, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketEcho);
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket Echo");
         results->WebSocketConfigConnect = results->WebSocketEcho;
-        status = RunWebSocketSample(session, "WebSocket URL 直连", WsConnectVariant::Url, WsSendVariant::Text, false, WebSocketSecureEchoUrl, nullptr, results->WebSocketUrlConnect);
+        status = RunWebSocketSample(
+            postmanUrlSession != nullptr ? postmanUrlSession : session,
+            "WebSocket URL 直连",
+            WsConnectVariant::Url,
+            WsSendVariant::Text,
+            false,
+            WebSocketSecureEchoUrl,
+            nullptr,
+            results->WebSocketUrlConnect);
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket URL 直连");
         status = RunWebSocketSample(session, "WebSocket ConnectEx", WsConnectVariant::Ex, WsSendVariant::Text, false, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketConnectEx);
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket ConnectEx");
@@ -1844,7 +1882,13 @@ namespace
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket 二进制发送 Ex");
         status = RunWebSocketSample(session, "WebSocket 接收 Ex 回调", WsConnectVariant::Ex, WsSendVariant::Text, true, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketReceiveEx);
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket 接收 Ex 回调");
-        status = RunWebSocketAsyncSample(session, "WebSocket 异步 URL 直连", WsConnectVariant::Url, WebSocketSecureEchoUrl, nullptr, results->WebSocketConnectAsync);
+        status = RunWebSocketAsyncSample(
+            postmanUrlSession != nullptr ? postmanUrlSession : session,
+            "WebSocket 异步 URL 直连",
+            WsConnectVariant::Url,
+            WebSocketSecureEchoUrl,
+            nullptr,
+            results->WebSocketConnectAsync);
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket 异步 URL 直连");
         status = RunWebSocketAsyncSample(session, "WebSocket 异步配置连接", WsConnectVariant::Config, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketConfigConnectAsync);
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket 异步配置连接");
@@ -1884,7 +1928,7 @@ NTSTATUS RunHighLevelApiSamples(
     LogSessionConfig("自定义 SessionConfig 写法说明", customConfig);
     CaptureStatus(results->SessionCustomConfig, STATUS_SUCCESS, 1, customConfig.MaxResponseBytes);
 
-    return RunHighLevelApiSamplesOnSession(session, certificateBundlePath, results);
+    return RunHighLevelApiSamplesOnSession(session, nullptr, certificateBundlePath, results);
 }
 
 NTSTATUS RunHighLevelApiSamples(net::WskClient* wskClient, HighLevelApiSampleResults* results) noexcept
@@ -1926,8 +1970,27 @@ NTSTATUS RunHighLevelApiSamples(
     MergeSampleStatus(aggregate, status);
 
     if (NT_SUCCESS(status)) {
-        status = RunHighLevelApiSamplesOnSession(session, certificateBundlePath, results);
+        khttp::Session* postmanUrlSession = nullptr;
+        khttp::SessionConfig postmanUrlConfig = defaultConfig;
+        EnablePostmanWebSocketTlsCompatibility(postmanUrlConfig.Tls);
+        NTSTATUS postmanUrlStatus = khttp::SessionCreate(wskClient, &postmanUrlConfig, &postmanUrlSession);
+        if (!NT_SUCCESS(postmanUrlStatus)) {
+            KHTTP_SAMPLE_LOG(
+                "[WebSocket请求] Postman URL直连兼容Session创建失败 NTSTATUS=0x%08X\r\n",
+                static_cast<ULONG>(postmanUrlStatus));
+            MergeSampleStatus(aggregate, postmanUrlStatus);
+        }
+
+        status = RunHighLevelApiSamplesOnSession(
+            session,
+            NT_SUCCESS(postmanUrlStatus) ? postmanUrlSession : nullptr,
+            certificateBundlePath,
+            results);
         MergeSampleStatus(aggregate, status);
+        if (postmanUrlSession != nullptr) {
+            khttp::SessionClose(postmanUrlSession);
+            KHTTP_SAMPLE_LOG("[WebSocket请求] Postman URL直连兼容SessionClose 已调用\r\n");
+        }
         khttp::SessionClose(session);
         KHTTP_SAMPLE_LOG("[会话示例] 默认会话请求矩阵结束，SessionClose 已调用\r\n");
     }

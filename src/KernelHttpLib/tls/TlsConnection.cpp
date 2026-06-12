@@ -342,6 +342,9 @@ namespace tls
             }
 
             switch (scheme) {
+            case TlsSignatureScheme::RsaPkcs1Sha1:
+                *algorithm = crypto::SignatureAlgorithm::RsaPkcs1Sha1;
+                return STATUS_SUCCESS;
             case TlsSignatureScheme::RsaPkcs1Sha256:
                 *algorithm = crypto::SignatureAlgorithm::RsaPkcs1Sha256;
                 return STATUS_SUCCESS;
@@ -362,6 +365,9 @@ namespace tls
             case TlsSignatureScheme::RsaPssRsaeSha512:
             case TlsSignatureScheme::RsaPssPssSha512:
                 *algorithm = crypto::SignatureAlgorithm::RsaPssSha512;
+                return STATUS_SUCCESS;
+            case TlsSignatureScheme::EcdsaSha1:
+                *algorithm = crypto::SignatureAlgorithm::EcdsaSha1;
                 return STATUS_SUCCESS;
             case TlsSignatureScheme::EcdsaSecp256r1Sha256:
                 *algorithm = crypto::SignatureAlgorithm::EcdsaSha256;
@@ -387,6 +393,9 @@ namespace tls
         crypto::HashAlgorithm HashForSignature(TlsSignatureScheme scheme) noexcept
         {
             switch (scheme) {
+            case TlsSignatureScheme::RsaPkcs1Sha1:
+            case TlsSignatureScheme::EcdsaSha1:
+                return crypto::HashAlgorithm::Sha1;
             case TlsSignatureScheme::RsaPkcs1Sha512:
             case TlsSignatureScheme::RsaPssRsaeSha512:
             case TlsSignatureScheme::RsaPssPssSha512:
@@ -412,6 +421,7 @@ namespace tls
             switch (publicKeyAlgorithm) {
             case CertificatePublicKeyAlgorithm::Rsa:
                 switch (scheme) {
+                case TlsSignatureScheme::RsaPkcs1Sha1:
                 case TlsSignatureScheme::RsaPkcs1Sha256:
                 case TlsSignatureScheme::RsaPkcs1Sha384:
                 case TlsSignatureScheme::RsaPkcs1Sha512:
@@ -423,11 +433,14 @@ namespace tls
                     return false;
                 }
             case CertificatePublicKeyAlgorithm::EcdsaP256:
-                return scheme == TlsSignatureScheme::EcdsaSecp256r1Sha256;
+                return scheme == TlsSignatureScheme::EcdsaSha1 ||
+                    scheme == TlsSignatureScheme::EcdsaSecp256r1Sha256;
             case CertificatePublicKeyAlgorithm::EcdsaP384:
-                return scheme == TlsSignatureScheme::EcdsaSecp384r1Sha384;
+                return scheme == TlsSignatureScheme::EcdsaSha1 ||
+                    scheme == TlsSignatureScheme::EcdsaSecp384r1Sha384;
             case CertificatePublicKeyAlgorithm::EcdsaP521:
-                return scheme == TlsSignatureScheme::EcdsaSecp521r1Sha512;
+                return scheme == TlsSignatureScheme::EcdsaSha1 ||
+                    scheme == TlsSignatureScheme::EcdsaSecp521r1Sha512;
             default:
                 return false;
             }
@@ -445,6 +458,7 @@ namespace tls
             switch (credential.KeyAlgorithm) {
             case TlsClientCredentialKeyAlgorithm::Rsa:
                 switch (scheme) {
+                case TlsSignatureScheme::RsaPkcs1Sha1:
                 case TlsSignatureScheme::RsaPkcs1Sha256:
                 case TlsSignatureScheme::RsaPkcs1Sha384:
                 case TlsSignatureScheme::RsaPkcs1Sha512:
@@ -460,11 +474,14 @@ namespace tls
                     scheme == TlsSignatureScheme::RsaPssPssSha384 ||
                     scheme == TlsSignatureScheme::RsaPssPssSha512;
             case TlsClientCredentialKeyAlgorithm::EcdsaP256:
-                return scheme == TlsSignatureScheme::EcdsaSecp256r1Sha256;
+                return scheme == TlsSignatureScheme::EcdsaSha1 ||
+                    scheme == TlsSignatureScheme::EcdsaSecp256r1Sha256;
             case TlsClientCredentialKeyAlgorithm::EcdsaP384:
-                return scheme == TlsSignatureScheme::EcdsaSecp384r1Sha384;
+                return scheme == TlsSignatureScheme::EcdsaSha1 ||
+                    scheme == TlsSignatureScheme::EcdsaSecp384r1Sha384;
             case TlsClientCredentialKeyAlgorithm::EcdsaP521:
-                return scheme == TlsSignatureScheme::EcdsaSecp521r1Sha512;
+                return scheme == TlsSignatureScheme::EcdsaSha1 ||
+                    scheme == TlsSignatureScheme::EcdsaSecp521r1Sha512;
             case TlsClientCredentialKeyAlgorithm::Ed25519:
                 return scheme == TlsSignatureScheme::Ed25519;
             case TlsClientCredentialKeyAlgorithm::Ed448:
@@ -501,7 +518,9 @@ namespace tls
             TlsSignatureScheme::RsaPssPssSha512,
             TlsSignatureScheme::RsaPkcs1Sha256,
             TlsSignatureScheme::RsaPkcs1Sha384,
-            TlsSignatureScheme::RsaPkcs1Sha512
+            TlsSignatureScheme::RsaPkcs1Sha512,
+            TlsSignatureScheme::RsaPkcs1Sha1,
+            TlsSignatureScheme::EcdsaSha1
         };
 
         _Must_inspect_result_

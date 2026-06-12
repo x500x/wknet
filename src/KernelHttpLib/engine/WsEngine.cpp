@@ -677,6 +677,7 @@ namespace engine
             !options.Tls.Policy.EnableTls12RsaKeyExchange &&
             !options.Tls.Policy.EnableTls12Cbc &&
             !options.Tls.Policy.EnableTls12Renegotiation &&
+            !options.Tls.Policy.EnableTls12Sha1Signatures &&
             !options.Tls.Policy.EnablePostHandshakeClientAuth &&
             !options.Tls.Policy.RequireRevocationCheck &&
             options.Tls.HandshakeReceiveTimeoutMilliseconds == KhDefaultTlsHandshakeReceiveTimeoutMilliseconds) {

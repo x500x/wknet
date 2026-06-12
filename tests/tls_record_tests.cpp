@@ -4569,6 +4569,46 @@ namespace
         signatureOptions.SignatureSchemeCount = sizeof(signatureSchemes) / sizeof(signatureSchemes[0]);
         status = TlsHandshake12::ValidateServerKeyExchangeOffer(keyExchange, signatureOptions);
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "TLS 1.2 rejects unoffered ServerKeyExchange signature scheme");
+
+        TlsContext sha1Context;
+        status = sha1Context.InitializeClient({ 3, 3 });
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 context initializes for SHA1 ServerKeyExchange offer validation");
+
+        offset = 0;
+        body[offset++] = 3;
+        WriteUint16ForTest(body, &offset, static_cast<USHORT>(TlsNamedGroup::Secp256r1));
+        body[offset++] = sizeof(point);
+        memcpy(body + offset, point, sizeof(point));
+        offset += sizeof(point);
+        WriteUint16ForTest(body, &offset, static_cast<USHORT>(TlsSignatureScheme::RsaPkcs1Sha1));
+        WriteUint16ForTest(body, &offset, 4);
+        body[offset++] = 1;
+        body[offset++] = 2;
+        body[offset++] = 3;
+        body[offset++] = 4;
+
+        message.BodyLength = offset;
+        keyExchange = {};
+        status = TlsHandshake12::ParseServerKeyExchange(sha1Context, message, keyExchange);
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 rsa_pkcs1_sha1 ServerKeyExchange parses structurally");
+        Expect(
+            keyExchange.SignatureScheme == TlsSignatureScheme::RsaPkcs1Sha1,
+            "TLS 1.2 rsa_pkcs1_sha1 ServerKeyExchange signature scheme parses");
+
+        TlsClientHelloOptions modernOptions = {};
+        status = TlsHandshake12::ValidateServerKeyExchangeOffer(keyExchange, modernOptions);
+        Expect(
+            status == STATUS_INVALID_NETWORK_RESPONSE,
+            "TLS 1.2 modern offer rejects unoffered rsa_pkcs1_sha1 ServerKeyExchange");
+
+        const TlsSignatureScheme sha1SignatureSchemes[] = {
+            TlsSignatureScheme::RsaPkcs1Sha1
+        };
+        TlsClientHelloOptions sha1Options = {};
+        sha1Options.SignatureSchemes = sha1SignatureSchemes;
+        sha1Options.SignatureSchemeCount = sizeof(sha1SignatureSchemes) / sizeof(sha1SignatureSchemes[0]);
+        status = TlsHandshake12::ValidateServerKeyExchangeOffer(keyExchange, sha1Options);
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 accepts offered rsa_pkcs1_sha1 ServerKeyExchange");
     }
 
     void TestParseCertificateListState()
@@ -6022,7 +6062,11 @@ namespace
         Expect(KernelHttp::tls::TlsIsKnownNamedGroup(TlsNamedGroup::X448), "X448 is a known named group");
         Expect(KernelHttp::tls::TlsIsKnownCipherSuite(TlsCipherSuite::TlsChaCha20Poly1305Sha256), "TLS 1.3 ChaCha20-Poly1305 is known");
         Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::Ed25519), "Ed25519 is a known signature scheme");
+        Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::RsaPkcs1Sha1), "TLS 1.2 rsa_pkcs1_sha1 is known");
+        Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::EcdsaSha1), "TLS 1.2 ecdsa_sha1 is known");
         Expect(KernelHttp::tls::TlsIsDefaultEnabledNamedGroup(TlsNamedGroup::X25519), "X25519 is default-enabled");
+        Expect(!KernelHttp::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::RsaPkcs1Sha1), "rsa_pkcs1_sha1 is not modern-default");
+        Expect(!KernelHttp::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::EcdsaSha1), "ecdsa_sha1 is not modern-default");
         Expect(!KernelHttp::tls::TlsIsDefaultEnabledTls12KeyExchange(Tls12KeyExchangeKind::Rsa), "TLS 1.2 RSA key exchange is not default-enabled");
     }
 
@@ -6033,20 +6077,31 @@ namespace
         Expect(KernelHttp::tls::TlsPolicyAllowsNamedGroup(policy, TlsNamedGroup::X25519), "modern default policy allows X25519");
         Expect(KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsChaCha20Poly1305Sha256), "modern default policy allows ChaCha20-Poly1305");
         Expect(!KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128GcmSha256), "modern default policy rejects RSA key exchange");
+        Expect(!KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::RsaPkcs1Sha1), "modern policy rejects rsa_pkcs1_sha1");
+        Expect(!KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "modern policy rejects ecdsa_sha1");
 
         policy.EnableTls12RsaKeyExchange = true;
         ExpectStatus(KernelHttp::tls::TlsValidatePolicy(policy), STATUS_INVALID_PARAMETER, "modern default policy rejects legacy RSA opt-in");
 
         policy = {};
+        policy.EnableTls12Sha1Signatures = true;
+        ExpectStatus(KernelHttp::tls::TlsValidatePolicy(policy), STATUS_INVALID_PARAMETER, "modern default policy rejects SHA1 signature opt-in");
+
+        policy = {};
         policy.Profile = TlsSecurityProfile::CompatibilityExplicit;
+        Expect(!KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::RsaPkcs1Sha1), "compatibility policy keeps rsa_pkcs1_sha1 off by default");
+        Expect(!KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "compatibility policy keeps ecdsa_sha1 off by default");
         policy.EnableTls12RsaKeyExchange = true;
         policy.EnableTls12Cbc = true;
         policy.EnableTls12Renegotiation = true;
+        policy.EnableTls12Sha1Signatures = true;
         ExpectStatus(KernelHttp::tls::TlsValidatePolicy(policy), STATUS_SUCCESS, "compatibility policy validates");
         Expect(KernelHttp::tls::TlsPolicyAllowsTls12KeyExchange(policy, Tls12KeyExchangeKind::Rsa), "compatibility policy allows TLS 1.2 RSA");
         Expect(KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128GcmSha256), "compatibility policy allows RSA GCM");
         Expect(KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128CbcSha256), "compatibility policy allows RSA CBC");
         Expect(KernelHttp::tls::TlsPolicyAllowsTls12Renegotiation(policy), "compatibility policy allows renegotiation");
+        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::RsaPkcs1Sha1), "compatibility policy allows rsa_pkcs1_sha1 when explicitly enabled");
+        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "compatibility policy allows ecdsa_sha1 when explicitly enabled");
         Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::Ed25519), "compatibility policy still allows modern signatures");
     }
 }

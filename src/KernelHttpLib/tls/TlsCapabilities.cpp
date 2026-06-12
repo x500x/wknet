@@ -334,7 +334,9 @@ namespace tls
             { TlsSignatureScheme::RsaPssPssSha512, TlsCapabilityDisposition::Optional, TlsCapabilityDisposition::Optional },
             { TlsSignatureScheme::RsaPkcs1Sha256, TlsCapabilityDisposition::Legacy, TlsCapabilityDisposition::Legacy },
             { TlsSignatureScheme::RsaPkcs1Sha384, TlsCapabilityDisposition::Legacy, TlsCapabilityDisposition::Legacy },
-            { TlsSignatureScheme::RsaPkcs1Sha512, TlsCapabilityDisposition::Legacy, TlsCapabilityDisposition::Legacy }
+            { TlsSignatureScheme::RsaPkcs1Sha512, TlsCapabilityDisposition::Legacy, TlsCapabilityDisposition::Legacy },
+            { TlsSignatureScheme::RsaPkcs1Sha1, TlsCapabilityDisposition::Legacy, TlsCapabilityDisposition::Legacy },
+            { TlsSignatureScheme::EcdsaSha1, TlsCapabilityDisposition::Legacy, TlsCapabilityDisposition::Legacy }
         };
 
         _Must_inspect_result_

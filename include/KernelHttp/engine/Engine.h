@@ -152,6 +152,7 @@ namespace engine
         SIZE_T ServerNameLength = 0;
         const char* Alpn = nullptr;
         SIZE_T AlpnLength = 0;
+        bool PreferHttp2 = true;
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
         ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;
@@ -512,6 +513,8 @@ namespace engine
         const tls::CertificateStore* CertificateStore = nullptr;
         const char* Alpn = nullptr;
         SIZE_T AlpnLength = 0;
+        const char* OfferedAlpn = nullptr;
+        SIZE_T OfferedAlpnLength = 0;
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
         bool PoolableConnection = false;
@@ -523,6 +526,8 @@ namespace engine
     {
         const char* RawResponse = nullptr;
         SIZE_T RawResponseLength = 0;
+        const char* NegotiatedAlpn = nullptr;
+        SIZE_T NegotiatedAlpnLength = 0;
         bool ConnectionReusable = true;
     };
 
@@ -606,6 +611,10 @@ namespace engine
 
     void KhTestSetCurrentIrql(ULONG irql) noexcept;
     void KhTestResetCurrentIrql() noexcept;
+    bool KhTestIsHttpTls12ConfirmationCandidate(
+        KhTlsVersion minVersion,
+        KhTlsVersion maxVersion,
+        ULONG category) noexcept;
     bool KhTestSessionHasWorkspace(KH_SESSION session) noexcept;
     bool KhTestSessionHasProviderCache(KH_SESSION session) noexcept;
 #endif

@@ -176,6 +176,9 @@ namespace khttp
 
     struct TlsConfig final
     {
+        // Defaults to Min=TLS 1.2 and Max=TLS 1.3: prefer TLS 1.3 and reconnect with TLS 1.2
+        // only when the peer proves it cannot negotiate 1.3. Set MinVersion=MaxVersion=Tls13
+        // to require TLS 1.3 only.
         TlsVersion MinVersion = TlsVersion::Tls12;
         TlsVersion MaxVersion = TlsVersion::Tls13;
         CertPolicy Certificate = CertPolicy::Verify;
@@ -184,6 +187,7 @@ namespace khttp
         SIZE_T ServerNameLength = 0;
         const char* Alpn = nullptr;
         SIZE_T AlpnLength = 0;
+        bool PreferHttp2 = true;
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
         ULONG HandshakeTimeoutMs = DefaultTlsHandshakeTimeoutMs;

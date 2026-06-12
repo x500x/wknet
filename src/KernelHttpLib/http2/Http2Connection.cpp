@@ -34,6 +34,22 @@ namespace http2
             return left > static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) - right;
         }
 
+        void LogRequestBodyFlowControlFailure(
+            NTSTATUS status,
+            SIZE_T bodyOffset,
+            SIZE_T bodyLength,
+            LONG connectionWindow,
+            LONG streamWindow) noexcept
+        {
+            kprintf(
+                "Http2Connection request body flow-control failed: status=0x%08X bodyOffset=%Iu bodyLength=%Iu connWindow=%ld streamWindow=%ld\r\n",
+                static_cast<ULONG>(status),
+                bodyOffset,
+                bodyLength,
+                connectionWindow,
+                streamWindow);
+        }
+
         NTSTATUS AppendFixedResponseBody(
             void* context,
             const UCHAR* data,
@@ -567,8 +583,8 @@ namespace http2
         }
 
         // Send DATA frame(s) if body present
+        SIZE_T bodyOffset = 0;
         if (!endStream && body != nullptr && bodyLength > 0) {
-            SIZE_T bodyOffset = 0;
             while (bodyOffset < bodyLength) {
                 SIZE_T chunkLen = bodyLength - bodyOffset;
                 if (chunkLen > maxPayload) chunkLen = maxPayload;
@@ -580,7 +596,15 @@ namespace http2
                 if (available <= 0) {
                     if (sendOffset != 0) {
                         status = SendRaw(transport, sendBuf, sendOffset);
-                        if (!NT_SUCCESS(status)) return status;
+                        if (!NT_SUCCESS(status)) {
+                            LogRequestBodyFlowControlFailure(
+                                status,
+                                bodyOffset,
+                                bodyLength,
+                                connectionSendWindow_,
+                                stream.RemoteWindow());
+                            return status;
+                        }
                         sendOffset = 0;
                     }
 
@@ -589,12 +613,27 @@ namespace http2
                     UCHAR* fp = framePayload_;
                     SIZE_T fpLen = 0;
                     status = ReadFrame(transport, &fh, fp, framePayloadCapacity_, &fpLen);
-                    if (!NT_SUCCESS(status)) return HandleReadFrameFailure(transport, status);
+                    if (!NT_SUCCESS(status)) {
+                        status = HandleReadFrameFailure(transport, status);
+                        LogRequestBodyFlowControlFailure(
+                            status,
+                            bodyOffset,
+                            bodyLength,
+                            connectionSendWindow_,
+                            stream.RemoteWindow());
+                        return status;
+                    }
                     if (!IsValidFrameTarget(fh)) {
                         const NTSTATUS goAwayStatus = SendGoAway(
                             transport,
                             static_cast<ULONG>(Http2ErrorCode::ProtocolError));
                         UNREFERENCED_PARAMETER(goAwayStatus);
+                        LogRequestBodyFlowControlFailure(
+                            STATUS_INVALID_NETWORK_RESPONSE,
+                            bodyOffset,
+                            bodyLength,
+                            connectionSendWindow_,
+                            stream.RemoteWindow());
                         return STATUS_INVALID_NETWORK_RESPONSE;
                     }
                     if (fh.Type == Http2FrameType::WindowUpdate && fh.StreamId == streamId) {
@@ -608,6 +647,12 @@ namespace http2
                                     ? static_cast<ULONG>(Http2ErrorCode::ProtocolError)
                                     : static_cast<ULONG>(Http2ErrorCode::FrameSizeError));
                             UNREFERENCED_PARAMETER(rstStatus);
+                            LogRequestBodyFlowControlFailure(
+                                status,
+                                bodyOffset,
+                                bodyLength,
+                                connectionSendWindow_,
+                                stream.RemoteWindow());
                             return status;
                         }
                         status = stream.IncreaseRemoteWindow(increment);
@@ -617,6 +662,12 @@ namespace http2
                                 fh.StreamId,
                                 static_cast<ULONG>(Http2ErrorCode::FlowControlError));
                             UNREFERENCED_PARAMETER(rstStatus);
+                            LogRequestBodyFlowControlFailure(
+                                status,
+                                bodyOffset,
+                                bodyLength,
+                                connectionSendWindow_,
+                                stream.RemoteWindow());
                             return status;
                         }
                     }
@@ -631,12 +682,26 @@ namespace http2
                                     ? static_cast<ULONG>(Http2ErrorCode::ProtocolError)
                                     : static_cast<ULONG>(Http2ErrorCode::FrameSizeError));
                             UNREFERENCED_PARAMETER(rstStatus);
+                            LogRequestBodyFlowControlFailure(
+                                status,
+                                bodyOffset,
+                                bodyLength,
+                                connectionSendWindow_,
+                                stream.RemoteWindow());
                             return status;
                         }
                     }
                     else {
                         status = HandleConnectionFrame(transport, fh, fp, fpLen, &stream);
-                        if (!NT_SUCCESS(status)) return status;
+                        if (!NT_SUCCESS(status)) {
+                            LogRequestBodyFlowControlFailure(
+                                status,
+                                bodyOffset,
+                                bodyLength,
+                                connectionSendWindow_,
+                                stream.RemoteWindow());
+                            return status;
+                        }
                     }
                     continue;
                 }
@@ -650,7 +715,15 @@ namespace http2
                 if (Http2FrameHeaderLength + chunkLen > SendBufferCapacity) return STATUS_BUFFER_TOO_SMALL;
                 if (sendOffset + Http2FrameHeaderLength + chunkLen > SendBufferCapacity) {
                     status = SendRaw(transport, sendBuf, sendOffset);
-                    if (!NT_SUCCESS(status)) return status;
+                    if (!NT_SUCCESS(status)) {
+                        LogRequestBodyFlowControlFailure(
+                            status,
+                            bodyOffset,
+                            bodyLength,
+                            connectionSendWindow_,
+                            stream.RemoteWindow());
+                        return status;
+                    }
                     sendOffset = 0;
                 }
 
@@ -658,9 +731,25 @@ namespace http2
                 status = Http2FrameCodec::EncodeData(
                     streamId, body + bodyOffset, chunkLen, lastData,
                     sendBuf + sendOffset, SendBufferCapacity - sendOffset, &written);
-                if (!NT_SUCCESS(status)) return status;
+                if (!NT_SUCCESS(status)) {
+                    LogRequestBodyFlowControlFailure(
+                        status,
+                        bodyOffset,
+                        bodyLength,
+                        connectionSendWindow_,
+                        stream.RemoteWindow());
+                    return status;
+                }
                 status = stream.SendData(chunkLen, lastData);
-                if (!NT_SUCCESS(status)) return status;
+                if (!NT_SUCCESS(status)) {
+                    LogRequestBodyFlowControlFailure(
+                        status,
+                        bodyOffset,
+                        bodyLength,
+                        connectionSendWindow_,
+                        stream.RemoteWindow());
+                    return status;
+                }
                 sendOffset += written;
                 bodyOffset += chunkLen;
                 connectionSendWindow_ -= static_cast<LONG>(chunkLen);
@@ -674,6 +763,14 @@ namespace http2
                 static_cast<ULONG>(status),
                 streamId,
                 sendOffset);
+            if (bodyLength > 0) {
+                LogRequestBodyFlowControlFailure(
+                    status,
+                    bodyOffset,
+                    bodyLength,
+                    connectionSendWindow_,
+                    stream.RemoteWindow());
+            }
             return status;
         }
 

@@ -344,6 +344,17 @@ namespace client
         SIZE_T alpnLen = tlsConnection->NegotiatedAlpnLength();
 
         if (options.PreferHttp2 && AlpnIsH2(alpn, alpnLen)) {
+            if (buffers.HeaderNameValueBuffer == nullptr ||
+                buffers.HeaderNameValueBufferLength == 0) {
+                kprintf("HttpsClient H2 missing header name/value buffer\r\n");
+                FreeNonPagedObject(tlsTransport);
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
+                const NTSTATUS closeStatus = socket->Close();
+                UNREFERENCED_PARAMETER(closeStatus);
+                return STATUS_INVALID_PARAMETER;
+            }
+
             auto* h2conn = AllocateNonPagedObject<http2::Http2Connection>();
             if (h2conn == nullptr) {
                 FreeNonPagedObject(tlsTransport);
@@ -443,8 +454,8 @@ namespace client
                 buffers.ResponseBuffer, buffers.ResponseBufferLength,
                 &respBodyLen,
                 &respStatusCode,
-                buffers.DecodedBodyBuffer,
-                buffers.DecodedBodyBufferLength);
+                buffers.HeaderNameValueBuffer,
+                buffers.HeaderNameValueBufferLength);
 
             http::HttpContentDecodeResult decoded = {};
             if (NT_SUCCESS(status)) {
