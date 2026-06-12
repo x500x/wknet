@@ -229,6 +229,12 @@ namespace samples
 
             const bool expected = status == STATUS_BUFFER_TOO_SMALL;
             CaptureStatus(result, expected ? STATUS_SUCCESS : status, 0, 64);
+            kprintf(
+                "[高级场景] 负面样本=HTTP ResponseLimit %s 实际=0x%08X 预期=0x%08X MaxResponseBytes=%Iu\r\n",
+                expected ? "命中预期，按通过处理" : "未命中预期，按失败处理",
+                static_cast<ULONG>(status),
+                static_cast<ULONG>(STATUS_BUFFER_TOO_SMALL),
+                options.MaxResponseBytes);
             khttp::ResponseRelease(response);
             khttp::RequestRelease(request);
             return result.Status;

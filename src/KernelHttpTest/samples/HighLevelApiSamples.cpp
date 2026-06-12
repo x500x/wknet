@@ -83,6 +83,8 @@ namespace
     constexpr UCHAR RawBody[] = { 0x6B, 0x68, 0x74, 0x74, 0x70 };
     constexpr const char* WsHelloMessage = "hello-from-khttp";
     constexpr UCHAR WsBinaryMessage[] = { 0x01, 0x02, 0x03, 0x04 };
+    constexpr SIZE_T TextLogChunkBytes = 256;
+    constexpr SIZE_T MaxLoggedTextBytes = 8 * 1024;
     constexpr ULONG MaxWebSocketEchoReceiveFrames = 4;
     constexpr khttp::AddressFamily DefaultHttpSampleAddressFamily = khttp::AddressFamily::Any;
     constexpr khttp::AddressFamily DefaultWebSocketSampleAddressFamily = khttp::AddressFamily::Any;
@@ -153,6 +155,11 @@ namespace
         return left < right ? left : right;
     }
 
+    SIZE_T ClampLoggedBytes(SIZE_T dataLength) noexcept
+    {
+        return MinSize(dataLength, MaxLoggedTextBytes);
+    }
+
     bool IsTextPayload(const UCHAR* data, SIZE_T dataLength) noexcept
     {
         for (SIZE_T i = 0; i < dataLength; ++i) {
@@ -166,6 +173,363 @@ namespace
             return false;
         }
         return true;
+    }
+
+    void LogTextChunks(
+        const char* prefix,
+        const char* sampleName,
+        const char* label,
+        const char* data,
+        SIZE_T dataLength) noexcept
+    {
+        const char* safeSampleName = sampleName != nullptr ? sampleName : "";
+        const char* safeLabel = label != nullptr ? label : "内容";
+        if (data == nullptr || dataLength == 0) {
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s %s=<空>\r\n",
+                prefix,
+                safeSampleName,
+                safeLabel);
+            return;
+        }
+
+        const SIZE_T loggedBytes = ClampLoggedBytes(dataLength);
+        const bool truncated = loggedBytes < dataLength;
+        if (!truncated && dataLength <= TextLogChunkBytes) {
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s %s长度=%Iu %s=%.*s\r\n",
+                prefix,
+                safeSampleName,
+                safeLabel,
+                dataLength,
+                safeLabel,
+                PrintLength(dataLength),
+                data);
+            return;
+        }
+
+        KHTTP_SAMPLE_LOG(
+            "%s 示例=%s %s长度=%Iu 分块输出=%Iu%s\r\n",
+            prefix,
+            safeSampleName,
+            safeLabel,
+            dataLength,
+            loggedBytes,
+            truncated ? " <truncated>" : "");
+        for (SIZE_T offset = 0; offset < loggedBytes; offset += TextLogChunkBytes) {
+            const SIZE_T chunkLength = MinSize(loggedBytes - offset, TextLogChunkBytes);
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s %s偏移=%Iu 长度=%Iu %s=%.*s\r\n",
+                prefix,
+                safeSampleName,
+                safeLabel,
+                offset,
+                chunkLength,
+                safeLabel,
+                PrintLength(chunkLength),
+                data + offset);
+        }
+        if (truncated) {
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s %s=<truncated> 已输出=%Iu 总长度=%Iu\r\n",
+                prefix,
+                safeSampleName,
+                safeLabel,
+                loggedBytes,
+                dataLength);
+        }
+    }
+
+    void LogHexChunk(
+        const char* prefix,
+        const char* sampleName,
+        const UCHAR* data,
+        SIZE_T offset,
+        SIZE_T chunkLength) noexcept
+    {
+        const unsigned int b0 = chunkLength > 0 ? static_cast<unsigned int>(data[offset + 0]) : 0U;
+        const unsigned int b1 = chunkLength > 1 ? static_cast<unsigned int>(data[offset + 1]) : 0U;
+        const unsigned int b2 = chunkLength > 2 ? static_cast<unsigned int>(data[offset + 2]) : 0U;
+        const unsigned int b3 = chunkLength > 3 ? static_cast<unsigned int>(data[offset + 3]) : 0U;
+        const unsigned int b4 = chunkLength > 4 ? static_cast<unsigned int>(data[offset + 4]) : 0U;
+        const unsigned int b5 = chunkLength > 5 ? static_cast<unsigned int>(data[offset + 5]) : 0U;
+        const unsigned int b6 = chunkLength > 6 ? static_cast<unsigned int>(data[offset + 6]) : 0U;
+        const unsigned int b7 = chunkLength > 7 ? static_cast<unsigned int>(data[offset + 7]) : 0U;
+        const unsigned int b8 = chunkLength > 8 ? static_cast<unsigned int>(data[offset + 8]) : 0U;
+        const unsigned int b9 = chunkLength > 9 ? static_cast<unsigned int>(data[offset + 9]) : 0U;
+        const unsigned int b10 = chunkLength > 10 ? static_cast<unsigned int>(data[offset + 10]) : 0U;
+        const unsigned int b11 = chunkLength > 11 ? static_cast<unsigned int>(data[offset + 11]) : 0U;
+        const unsigned int b12 = chunkLength > 12 ? static_cast<unsigned int>(data[offset + 12]) : 0U;
+        const unsigned int b13 = chunkLength > 13 ? static_cast<unsigned int>(data[offset + 13]) : 0U;
+        const unsigned int b14 = chunkLength > 14 ? static_cast<unsigned int>(data[offset + 14]) : 0U;
+        const unsigned int b15 = chunkLength > 15 ? static_cast<unsigned int>(data[offset + 15]) : 0U;
+
+        switch (chunkLength) {
+        case 1:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0);
+            break;
+        case 2:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1);
+            break;
+        case 3:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2);
+            break;
+        case 4:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3);
+            break;
+        case 5:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4);
+            break;
+        case 6:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5);
+            break;
+        case 7:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6);
+            break;
+        case 8:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7);
+            break;
+        case 9:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8);
+            break;
+        case 10:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9);
+            break;
+        case 11:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10);
+            break;
+        case 12:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10,
+                b11);
+            break;
+        case 13:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10,
+                b11,
+                b12);
+            break;
+        case 14:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10,
+                b11,
+                b12,
+                b13);
+            break;
+        case 15:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10,
+                b11,
+                b12,
+                b13,
+                b14);
+            break;
+        default:
+            KHTTP_SAMPLE_LOG(
+                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                prefix,
+                sampleName,
+                offset,
+                chunkLength,
+                b0,
+                b1,
+                b2,
+                b3,
+                b4,
+                b5,
+                b6,
+                b7,
+                b8,
+                b9,
+                b10,
+                b11,
+                b12,
+                b13,
+                b14,
+                b15);
+            break;
+        }
     }
 
     void LogBytePayload(
@@ -183,13 +547,12 @@ namespace
         }
 
         if (IsTextPayload(data, dataLength)) {
-            KHTTP_SAMPLE_LOG(
-                "%s 示例=%s 内容长度=%Iu 内容=%.*s\r\n",
+            LogTextChunks(
                 prefix,
                 sampleName,
-                dataLength,
-                PrintLength(dataLength),
-                reinterpret_cast<const char*>(data));
+                "内容",
+                reinterpret_cast<const char*>(data),
+                dataLength);
             return;
         }
 
@@ -200,28 +563,122 @@ namespace
             dataLength);
         for (SIZE_T offset = 0; offset < dataLength; offset += 16) {
             const SIZE_T chunkLength = MinSize(dataLength - offset, 16);
+            LogHexChunk(prefix, sampleName, data, offset, chunkLength);
+        }
+    }
+
+    void LogResponseHeaderValue(
+        const char* sampleName,
+        SIZE_T index,
+        const char* headerName,
+        SIZE_T headerNameLength,
+        const char* headerValue,
+        SIZE_T headerValueLength) noexcept
+    {
+        const char* safeSampleName = sampleName != nullptr ? sampleName : "";
+        const char* safeHeaderName = headerName != nullptr ? headerName : "";
+        if (headerValue == nullptr || headerValueLength == 0) {
             KHTTP_SAMPLE_LOG(
-                "%s 示例=%s HEX偏移=%Iu 长度=%Iu %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
-                prefix,
-                sampleName,
+                "[HTTP响应] 示例=%s 响应头[%Iu] %.*s: <空>\r\n",
+                safeSampleName,
+                index,
+                PrintLength(headerNameLength),
+                safeHeaderName);
+            return;
+        }
+
+        const SIZE_T loggedBytes = ClampLoggedBytes(headerValueLength);
+        const bool truncated = loggedBytes < headerValueLength;
+        if (!truncated && headerValueLength <= TextLogChunkBytes) {
+            KHTTP_SAMPLE_LOG(
+                "[HTTP响应] 示例=%s 响应头[%Iu] %.*s: %.*s\r\n",
+                safeSampleName,
+                index,
+                PrintLength(headerNameLength),
+                safeHeaderName,
+                PrintLength(headerValueLength),
+                headerValue);
+            return;
+        }
+
+        KHTTP_SAMPLE_LOG(
+            "[HTTP响应] 示例=%s 响应头[%Iu] %.*s: 值长度=%Iu 分块输出=%Iu%s\r\n",
+            safeSampleName,
+            index,
+            PrintLength(headerNameLength),
+            safeHeaderName,
+            headerValueLength,
+            loggedBytes,
+            truncated ? " <truncated>" : "");
+        for (SIZE_T offset = 0; offset < loggedBytes; offset += TextLogChunkBytes) {
+            const SIZE_T chunkLength = MinSize(loggedBytes - offset, TextLogChunkBytes);
+            KHTTP_SAMPLE_LOG(
+                "[HTTP响应] 示例=%s 响应头[%Iu] 值偏移=%Iu 长度=%Iu 内容=%.*s\r\n",
+                safeSampleName,
+                index,
                 offset,
                 chunkLength,
-                chunkLength > 0 ? data[offset + 0] : 0,
-                chunkLength > 1 ? data[offset + 1] : 0,
-                chunkLength > 2 ? data[offset + 2] : 0,
-                chunkLength > 3 ? data[offset + 3] : 0,
-                chunkLength > 4 ? data[offset + 4] : 0,
-                chunkLength > 5 ? data[offset + 5] : 0,
-                chunkLength > 6 ? data[offset + 6] : 0,
-                chunkLength > 7 ? data[offset + 7] : 0,
-                chunkLength > 8 ? data[offset + 8] : 0,
-                chunkLength > 9 ? data[offset + 9] : 0,
-                chunkLength > 10 ? data[offset + 10] : 0,
-                chunkLength > 11 ? data[offset + 11] : 0,
-                chunkLength > 12 ? data[offset + 12] : 0,
-                chunkLength > 13 ? data[offset + 13] : 0,
-                chunkLength > 14 ? data[offset + 14] : 0,
-                chunkLength > 15 ? data[offset + 15] : 0);
+                PrintLength(chunkLength),
+                headerValue + offset);
+        }
+        if (truncated) {
+            KHTTP_SAMPLE_LOG(
+                "[HTTP响应] 示例=%s 响应头[%Iu] <truncated> 已输出=%Iu 总长度=%Iu\r\n",
+                safeSampleName,
+                index,
+                loggedBytes,
+                headerValueLength);
+        }
+    }
+
+    void LogCallbackHeaderValue(
+        const char* headerName,
+        SIZE_T headerNameLength,
+        const char* headerValue,
+        SIZE_T headerValueLength) noexcept
+    {
+        const char* safeHeaderName = headerName != nullptr ? headerName : "";
+        if (headerValue == nullptr || headerValueLength == 0) {
+            KHTTP_SAMPLE_LOG(
+                "[HTTP回调] 收到响应头 %.*s: <空>\r\n",
+                PrintLength(headerNameLength),
+                safeHeaderName);
+            return;
+        }
+
+        const SIZE_T loggedBytes = ClampLoggedBytes(headerValueLength);
+        const bool truncated = loggedBytes < headerValueLength;
+        if (!truncated && headerValueLength <= TextLogChunkBytes) {
+            KHTTP_SAMPLE_LOG(
+                "[HTTP回调] 收到响应头 %.*s: %.*s\r\n",
+                PrintLength(headerNameLength),
+                safeHeaderName,
+                PrintLength(headerValueLength),
+                headerValue);
+            return;
+        }
+
+        KHTTP_SAMPLE_LOG(
+            "[HTTP回调] 收到响应头 %.*s: 值长度=%Iu 分块输出=%Iu%s\r\n",
+            PrintLength(headerNameLength),
+            safeHeaderName,
+            headerValueLength,
+            loggedBytes,
+            truncated ? " <truncated>" : "");
+        for (SIZE_T offset = 0; offset < loggedBytes; offset += TextLogChunkBytes) {
+            const SIZE_T chunkLength = MinSize(loggedBytes - offset, TextLogChunkBytes);
+            KHTTP_SAMPLE_LOG(
+                "[HTTP回调] 响应头值偏移=%Iu 长度=%Iu 内容=%.*s\r\n",
+                offset,
+                chunkLength,
+                PrintLength(chunkLength),
+                headerValue + offset);
+        }
+        if (truncated) {
+            KHTTP_SAMPLE_LOG(
+                "[HTTP回调] 响应头 <truncated> 已输出=%Iu 总长度=%Iu\r\n",
+                loggedBytes,
+                headerValueLength);
         }
     }
 
@@ -507,14 +964,13 @@ namespace
                 &headerValue,
                 &headerValueLength);
             if (NT_SUCCESS(headerAtStatus)) {
-                KHTTP_SAMPLE_LOG(
-                    "[HTTP响应] 示例=%s 响应头[%Iu] %.*s: %.*s\r\n",
+                LogResponseHeaderValue(
                     sampleName,
                     index,
-                    PrintLength(headerNameLength),
-                    headerName != nullptr ? headerName : "",
-                    PrintLength(headerValueLength),
-                    headerValue != nullptr ? headerValue : "");
+                    headerName,
+                    headerNameLength,
+                    headerValue,
+                    headerValueLength);
             }
         }
 
@@ -572,12 +1028,7 @@ namespace
         }
 
         ++stats->HeaderCount;
-        KHTTP_SAMPLE_LOG(
-            "[HTTP回调] 收到响应头 %.*s: %.*s\r\n",
-            PrintLength(nameLength),
-            name != nullptr ? name : "",
-            PrintLength(valueLength),
-            value != nullptr ? value : "");
+        LogCallbackHeaderValue(name, nameLength, value, valueLength);
         return STATUS_SUCCESS;
     }
 
