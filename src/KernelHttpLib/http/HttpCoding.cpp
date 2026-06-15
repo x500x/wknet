@@ -36,6 +36,13 @@ namespace http
         constexpr SIZE_T CompressInitialBits = 9;
         constexpr SIZE_T CompressMinBits = 9;
         constexpr SIZE_T CompressMaxBits = 16;
+        constexpr UCHAR DeflateProbeRaw[] = {
+            0x01, 0x05, 0x00, 0xfa, 0xff, 'k', 'h', 't', 't', 'p'
+        };
+        constexpr char DeflateProbePlain[] = { 'k', 'h', 't', 't', 'p' };
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        volatile LONG g_deflateRuntimeProbeState = 0;
+#endif
 
         using RtlGetCompressionWorkSpaceSizeFn = NTSTATUS(NTAPI*)(
             USHORT compressionFormatAndEngine,
@@ -223,7 +230,7 @@ namespace http
 #endif
 
         _Must_inspect_result_
-        NTSTATUS DecodeRawDeflate(
+        NTSTATUS DecodeRawDeflateUnchecked(
             const UCHAR* compressed,
             SIZE_T compressedLength,
             char* destination,
@@ -297,6 +304,45 @@ namespace http
 
             *decodedLength = finalSize;
             return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        bool ProbeDeflateRuntime() noexcept
+        {
+            char output[sizeof(DeflateProbePlain)] = {};
+            SIZE_T decodedLength = 0;
+            const NTSTATUS status = DecodeRawDeflateUnchecked(
+                DeflateProbeRaw,
+                sizeof(DeflateProbeRaw),
+                output,
+                sizeof(output),
+                &decodedLength);
+            return NT_SUCCESS(status) &&
+                decodedLength == sizeof(DeflateProbePlain) &&
+                RtlCompareMemory(output, DeflateProbePlain, sizeof(DeflateProbePlain)) == sizeof(DeflateProbePlain);
+        }
+
+        _Must_inspect_result_
+        NTSTATUS DecodeRawDeflate(
+            const UCHAR* compressed,
+            SIZE_T compressedLength,
+            char* destination,
+            SIZE_T destinationCapacity,
+            SIZE_T* decodedLength) noexcept
+        {
+            if (!HttpCodingCodec::DeflateRuntimeAvailable()) {
+                if (decodedLength != nullptr) {
+                    *decodedLength = 0;
+                }
+                return STATUS_NOT_SUPPORTED;
+            }
+
+            return DecodeRawDeflateUnchecked(
+                compressed,
+                compressedLength,
+                destination,
+                destinationCapacity,
+                decodedLength);
         }
 
         _Must_inspect_result_
@@ -890,6 +936,42 @@ namespace http
                 return;
             }
         }
+    }
+
+    bool HttpCodingCodec::DeflateRuntimeAvailable() noexcept
+    {
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        static bool probed = false;
+        static bool available = false;
+        if (!probed) {
+            available = ProbeDeflateRuntime();
+            probed = true;
+        }
+        return available;
+#else
+        LONG state = InterlockedCompareExchange(&g_deflateRuntimeProbeState, 0, 0);
+        if (state == 1) {
+            return true;
+        }
+        if (state == 2) {
+            return false;
+        }
+        if (InterlockedCompareExchange(&g_deflateRuntimeProbeState, 3, 0) == 0) {
+            const bool available = ProbeDeflateRuntime();
+            InterlockedExchange(&g_deflateRuntimeProbeState, available ? 1 : 2);
+            return available;
+        }
+
+        LARGE_INTEGER delay = {};
+        delay.QuadPart = -10 * 1000;
+        do {
+            const NTSTATUS delayStatus = KeDelayExecutionThread(KernelMode, FALSE, &delay);
+            UNREFERENCED_PARAMETER(delayStatus);
+            state = InterlockedCompareExchange(&g_deflateRuntimeProbeState, 0, 0);
+        } while (state == 3);
+
+        return state == 1;
+#endif
     }
 
     NTSTATUS HttpCodingCodec::DecodeOne(

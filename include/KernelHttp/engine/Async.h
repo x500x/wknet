@@ -49,6 +49,7 @@ namespace engine
         KhAsyncCompletionCallback CompletionCallback = nullptr;
         void* CompletionContext = nullptr;
         volatile LONG Queued = 0;
+        KhAsyncOperation* QueueNext = nullptr;
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         bool CompletionSignaled = false;
         bool TestWorkerReferenceHeld = false;

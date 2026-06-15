@@ -1,7 +1,12 @@
 #include <KernelHttp/client/WebSocketClient.h>
+#include <KernelHttp/core/Irql.h>
 #include <KernelHttp/core/WorkspaceScratchAllocator.h>
 #include <KernelHttp/core/WskTransport.h>
 #include <KernelHttp/http/HttpRequest.h>
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+#include <time.h>
+#endif
 
 namespace KernelHttp
 {
@@ -549,6 +554,68 @@ namespace client
                 frameBufferLength - websocket::WebSocketFrameHeaderMaxLength :
                 0;
         }
+
+        _Must_inspect_result_
+        ULONGLONG CurrentMilliseconds() noexcept
+        {
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+            return static_cast<ULONGLONG>(time(nullptr)) * 1000ULL;
+#else
+            LARGE_INTEGER now = {};
+            KeQuerySystemTimePrecise(&now);
+            return static_cast<ULONGLONG>(now.QuadPart / 10000LL);
+#endif
+        }
+
+        _Must_inspect_result_
+        bool AddMilliseconds(ULONGLONG value, ULONG delta, _Out_ ULONGLONG* result) noexcept
+        {
+            if (result == nullptr) {
+                return false;
+            }
+
+            const ULONGLONG addend = static_cast<ULONGLONG>(delta);
+            if (value > (~0ULL - addend)) {
+                return false;
+            }
+
+            *result = value + addend;
+            return true;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS RemainingTimeoutMilliseconds(
+            ULONGLONG deadlineMilliseconds,
+            _Out_ ULONG* timeoutMilliseconds) noexcept
+        {
+            if (timeoutMilliseconds == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            const ULONGLONG now = CurrentMilliseconds();
+            if (now >= deadlineMilliseconds) {
+                *timeoutMilliseconds = 0;
+                return STATUS_IO_TIMEOUT;
+            }
+
+            ULONGLONG remaining = deadlineMilliseconds - now;
+            if (remaining == 0) {
+                *timeoutMilliseconds = 0;
+                return STATUS_IO_TIMEOUT;
+            }
+            if (remaining > WskCloseTimeoutMilliseconds) {
+                remaining = WskCloseTimeoutMilliseconds;
+            }
+            if (remaining > static_cast<ULONGLONG>(0xffffffffUL)) {
+                remaining = 0xffffffffUL;
+            }
+
+            *timeoutMilliseconds = static_cast<ULONG>(remaining);
+            if (*timeoutMilliseconds == 0) {
+                *timeoutMilliseconds = 1;
+            }
+            return STATUS_SUCCESS;
+        }
     }
 
     WebSocketClient::~WebSocketClient() noexcept
@@ -571,6 +638,14 @@ namespace client
         const WebSocketIoBuffers& buffers,
         USHORT* statusCode) noexcept
     {
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            if (statusCode != nullptr) {
+                *statusCode = 0;
+            }
+            return status;
+        }
+
         if (statusCode != nullptr) {
             *statusCode = 0;
         }
@@ -613,7 +688,7 @@ namespace client
         }
 
         SIZE_T clientKeyLength = 0;
-        NTSTATUS status = websocket::WebSocketCodec::GenerateClientKey(
+        status = websocket::WebSocketCodec::GenerateClientKey(
             clientKey.Get(),
             clientKey.Count(),
             &clientKeyLength);
@@ -870,6 +945,11 @@ namespace client
         const WebSocketIoBuffers& buffers,
         bool finalFragment) noexcept
     {
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         return SendFrame(
             websocket::WebSocketOpcode::Text,
             reinterpret_cast<const UCHAR*>(message),
@@ -884,6 +964,11 @@ namespace client
         const WebSocketIoBuffers& buffers,
         bool finalFragment) noexcept
     {
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         return SendFrame(
             websocket::WebSocketOpcode::Binary,
             message,
@@ -898,6 +983,11 @@ namespace client
         const WebSocketIoBuffers& buffers,
         bool finalFragment) noexcept
     {
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         return SendFrame(
             websocket::WebSocketOpcode::Continuation,
             message,
@@ -911,6 +1001,11 @@ namespace client
         SIZE_T payloadLength,
         const WebSocketIoBuffers& buffers) noexcept
     {
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         return SendControlFrame(websocket::WebSocketOpcode::Ping, payload, payloadLength, buffers);
     }
 
@@ -919,6 +1014,11 @@ namespace client
         SIZE_T payloadLength,
         const WebSocketIoBuffers& buffers) noexcept
     {
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         return SendControlFrame(websocket::WebSocketOpcode::Pong, payload, payloadLength, buffers);
     }
 
@@ -1064,6 +1164,17 @@ namespace client
         SIZE_T* bytesReceived,
         bool autoReplyPing) noexcept
     {
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            if (opcode != nullptr) {
+                *opcode = websocket::WebSocketOpcode::Continuation;
+            }
+            if (bytesReceived != nullptr) {
+                *bytesReceived = 0;
+            }
+            return status;
+        }
+
         if (opcode != nullptr) {
             *opcode = websocket::WebSocketOpcode::Continuation;
         }
@@ -1104,7 +1215,7 @@ namespace client
             receiveFrameCapacity = bufferedFrameLength_;
         }
 
-        NTSTATUS status = EnsureBufferedFrameCapacity(receiveFrameCapacity);
+        status = EnsureBufferedFrameCapacity(receiveFrameCapacity);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1400,8 +1511,193 @@ namespace client
         }
     }
 
+    NTSTATUS WebSocketClient::WaitForPeerClose(const WebSocketIoBuffers& buffers) noexcept
+    {
+        UNREFERENCED_PARAMETER(buffers);
+
+        if (!connected_ || closeReceived_) {
+            return STATUS_SUCCESS;
+        }
+
+        const SIZE_T closeFrameCapacity =
+            websocket::WebSocketFrameHeaderMaxLength + websocket::WebSocketMaxControlPayloadLength;
+        NTSTATUS status = EnsureBufferedFrameCapacity(closeFrameCapacity);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        if (!receiveFrameHeader_.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        ULONGLONG deadline = 0;
+        if (!AddMilliseconds(CurrentMilliseconds(), WskCloseTimeoutMilliseconds, &deadline)) {
+            return STATUS_IO_TIMEOUT;
+        }
+
+        websocket::WebSocketFrameHeader& header = *receiveFrameHeader_.Get();
+        for (;;) {
+            ULONG timeoutMilliseconds = 0;
+            status = RemainingTimeoutMilliseconds(deadline, &timeoutMilliseconds);
+            if (!NT_SUCCESS(status)) {
+                return STATUS_SUCCESS;
+            }
+
+            bool headerDecoded = false;
+            bool complete = false;
+            RtlZeroMemory(&header, sizeof(header));
+            status = TryDecodeCompleteFrame(
+                bufferedFrame_,
+                bufferedFrameLength_,
+                &header,
+                &headerDecoded,
+                &complete);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            if (!headerDecoded) {
+                if (bufferedFrameLength_ >= bufferedFrameCapacity_) {
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+
+                SIZE_T received = 0;
+                status = ReceiveRaw(
+                    bufferedFrame_ + bufferedFrameLength_,
+                    bufferedFrameCapacity_ - bufferedFrameLength_,
+                    &received,
+                    timeoutMilliseconds);
+                if (!NT_SUCCESS(status)) {
+                    return IsConnectionTerminalStatus(status) ? STATUS_SUCCESS : status;
+                }
+                if (received == 0) {
+                    return STATUS_SUCCESS;
+                }
+                bufferedFrameLength_ += received;
+                continue;
+            }
+
+            if (header.Masked) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            const SIZE_T payloadLength = static_cast<SIZE_T>(header.PayloadLength);
+            if (payloadLength > static_cast<SIZE_T>(-1) - header.HeaderLength) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            const SIZE_T frameLength = header.HeaderLength + payloadLength;
+            const bool controlFrame =
+                header.Opcode == websocket::WebSocketOpcode::Ping ||
+                header.Opcode == websocket::WebSocketOpcode::Pong ||
+                header.Opcode == websocket::WebSocketOpcode::Close;
+
+            if (controlFrame) {
+                if (frameLength > bufferedFrameCapacity_) {
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+
+                while (!complete) {
+                    status = RemainingTimeoutMilliseconds(deadline, &timeoutMilliseconds);
+                    if (!NT_SUCCESS(status)) {
+                        return STATUS_SUCCESS;
+                    }
+                    if (bufferedFrameLength_ >= frameLength) {
+                        complete = true;
+                        break;
+                    }
+
+                    SIZE_T received = 0;
+                    status = ReceiveRaw(
+                        bufferedFrame_ + bufferedFrameLength_,
+                        frameLength - bufferedFrameLength_,
+                        &received,
+                        timeoutMilliseconds);
+                    if (!NT_SUCCESS(status)) {
+                        return IsConnectionTerminalStatus(status) ? STATUS_SUCCESS : status;
+                    }
+                    if (received == 0) {
+                        return STATUS_SUCCESS;
+                    }
+                    bufferedFrameLength_ += received;
+                    complete = payloadLength <= (bufferedFrameLength_ - header.HeaderLength);
+                }
+
+                const UCHAR* payload = bufferedFrame_ + header.HeaderLength;
+                if (header.Opcode == websocket::WebSocketOpcode::Close) {
+                    if (payloadLength == 1) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    if (payloadLength >= 2) {
+                        const USHORT closeStatus = static_cast<USHORT>(
+                            (static_cast<USHORT>(payload[0]) << 8) | payload[1]);
+                        if (!IsValidCloseStatus(closeStatus) ||
+                            !IsValidUtf8(payload + 2, payloadLength - 2)) {
+                            return STATUS_INVALID_NETWORK_RESPONSE;
+                        }
+                    }
+
+                    closeReceived_ = true;
+                    connected_ = false;
+                    const NTSTATUS closeStatus = CloseTransport();
+                    return IsConnectionTerminalStatus(closeStatus) ? STATUS_SUCCESS : closeStatus;
+                }
+
+                const SIZE_T remaining = bufferedFrameLength_ - frameLength;
+                if (remaining != 0) {
+                    RtlMoveMemory(bufferedFrame_, bufferedFrame_ + frameLength, remaining);
+                }
+                bufferedFrameLength_ = remaining;
+                continue;
+            }
+
+            const SIZE_T bufferedPayload =
+                bufferedFrameLength_ > header.HeaderLength ?
+                bufferedFrameLength_ - header.HeaderLength :
+                0;
+            if (bufferedPayload >= payloadLength) {
+                const SIZE_T remaining = bufferedFrameLength_ - frameLength;
+                if (remaining != 0) {
+                    RtlMoveMemory(bufferedFrame_, bufferedFrame_ + frameLength, remaining);
+                }
+                bufferedFrameLength_ = remaining;
+                continue;
+            }
+
+            SIZE_T remainingPayload = payloadLength - bufferedPayload;
+            bufferedFrameLength_ = 0;
+            while (remainingPayload != 0) {
+                status = RemainingTimeoutMilliseconds(deadline, &timeoutMilliseconds);
+                if (!NT_SUCCESS(status)) {
+                    return STATUS_SUCCESS;
+                }
+
+                const SIZE_T chunk =
+                    remainingPayload > bufferedFrameCapacity_ ?
+                    bufferedFrameCapacity_ :
+                    remainingPayload;
+                SIZE_T received = 0;
+                status = ReceiveRaw(bufferedFrame_, chunk, &received, timeoutMilliseconds);
+                if (!NT_SUCCESS(status)) {
+                    return IsConnectionTerminalStatus(status) ? STATUS_SUCCESS : status;
+                }
+                if (received == 0) {
+                    return STATUS_SUCCESS;
+                }
+                if (received > remainingPayload) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                remainingPayload -= received;
+            }
+        }
+    }
+
     NTSTATUS WebSocketClient::Close(const WebSocketIoBuffers& buffers) noexcept
     {
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        NTSTATUS waitStatus = STATUS_SUCCESS;
         if (connected_ &&
             !closeSent_ &&
             !closeReceived_ &&
@@ -1409,6 +1705,9 @@ namespace client
             buffers.FrameBufferLength >= 6) {
             const NTSTATUS sendStatus = SendCloseFrame(nullptr, 0, buffers);
             UNREFERENCED_PARAMETER(sendStatus);
+            if (NT_SUCCESS(sendStatus)) {
+                waitStatus = WaitForPeerClose(buffers);
+            }
         }
 
         connected_ = false;
@@ -1423,6 +1722,12 @@ namespace client
         const NTSTATUS closeStatus = CloseTransport();
         selectedSubprotocol_.Reset();
         selectedSubprotocolLength_ = 0;
+        if (NT_SUCCESS(closeStatus) &&
+            !NT_SUCCESS(waitStatus) &&
+            !IsConnectionTerminalStatus(waitStatus) &&
+            waitStatus != STATUS_IO_TIMEOUT) {
+            return waitStatus;
+        }
         return closeStatus;
     }
 
@@ -1432,6 +1737,11 @@ namespace client
         SIZE_T reasonLength,
         const WebSocketIoBuffers& buffers) noexcept
     {
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         if (!IsValidCloseStatus(statusCode) ||
             (reason == nullptr && reasonLength != 0) ||
             reasonLength > websocket::WebSocketMaxControlPayloadLength - 2 ||
@@ -1451,7 +1761,7 @@ namespace client
         }
 
         if (connected_ && !closeSent_ && !closeReceived_) {
-            const NTSTATUS status = SendCloseFrame(payload.Get(), payload.Count(), buffers);
+            status = SendCloseFrame(payload.Get(), payload.Count(), buffers);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -1476,11 +1786,16 @@ namespace client
     {
         result = {};
 
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         if (buffers.PayloadBuffer == nullptr || buffers.PayloadBufferLength == 0) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        NTSTATUS status = SendText(message, messageLength, buffers);
+        status = SendText(message, messageLength, buffers);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1717,16 +2032,20 @@ namespace client
         return socket_.Send(data, length, bytesSent);
     }
 
-    NTSTATUS WebSocketClient::ReceiveRaw(void* data, SIZE_T length, SIZE_T* bytesReceived) noexcept
+    NTSTATUS WebSocketClient::ReceiveRaw(
+        void* data,
+        SIZE_T length,
+        SIZE_T* bytesReceived,
+        ULONG timeoutMilliseconds) noexcept
     {
         if (useTls_) {
             if (tls_ == nullptr || rawTransport_ == nullptr) {
                 return STATUS_INVALID_DEVICE_STATE;
             }
-            return tls_->Receive(*rawTransport_, data, length, bytesReceived);
+            return tls_->Receive(*rawTransport_, data, length, bytesReceived, timeoutMilliseconds);
         }
 
-        return socket_.Receive(data, length, bytesReceived);
+        return socket_.Receive(data, length, bytesReceived, 0, timeoutMilliseconds);
     }
 
     NTSTATUS WebSocketClient::ReadHandshakeResponse(

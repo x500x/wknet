@@ -30,6 +30,7 @@ namespace
     constexpr USHORT ExtensionSignatureAlgorithms = 13;
     constexpr USHORT ExtensionSignatureAlgorithmsCert = 50;
     constexpr USHORT ExtensionSupportedGroups = 10;
+    constexpr USHORT ExtensionEcPointFormats = 11;
     constexpr USHORT ExtensionSupportedVersions = 43;
     constexpr USHORT ExtensionKeyShare = 51;
 
@@ -237,6 +238,21 @@ namespace
             memcmp(left, right, leftLength) == 0;
     }
 
+    bool ExtensionPayloadEqualsBytes(
+        const UCHAR* clientHello,
+        SIZE_T clientHelloLength,
+        USHORT extensionType,
+        const UCHAR* expected,
+        SIZE_T expectedLength)
+    {
+        const UCHAR* extension = nullptr;
+        SIZE_T extensionLength = 0;
+        return expected != nullptr &&
+            FindExtension(clientHello, clientHelloLength, extensionType, &extension, &extensionLength) &&
+            extensionLength == expectedLength &&
+            memcmp(extension, expected, expectedLength) == 0;
+    }
+
     bool ClientHelloOffersSignatureScheme(
         const UCHAR* clientHello,
         SIZE_T clientHelloLength,
@@ -332,11 +348,11 @@ namespace
             ClientHelloOffersCipherSuite(message, written, TlsCipherSuite::TlsChaCha20Poly1305Sha256),
             "TLS 1.3 ClientHello offers CHACHA20_POLY1305_SHA256");
         Expect(
-            ClientHelloOffersCipherSuite(message, written, TlsCipherSuite::TlsAes128CcmSha256),
-            "TLS 1.3 ClientHello offers AES_128_CCM_SHA256");
+            !ClientHelloOffersCipherSuite(message, written, TlsCipherSuite::TlsAes128CcmSha256),
+            "TLS 1.3 default ClientHello does not offer AES_128_CCM_SHA256");
         Expect(
-            ClientHelloOffersCipherSuite(message, written, TlsCipherSuite::TlsAes128Ccm8Sha256),
-            "TLS 1.3 ClientHello offers AES_128_CCM_8_SHA256");
+            !ClientHelloOffersCipherSuite(message, written, TlsCipherSuite::TlsAes128Ccm8Sha256),
+            "TLS 1.3 default ClientHello does not offer AES_128_CCM_8_SHA256");
         Expect(
             ExtensionPayloadEquals(message, written, ExtensionSignatureAlgorithms, ExtensionSignatureAlgorithmsCert),
             "TLS 1.3 ClientHello sends signature_algorithms_cert matching signature_algorithms");
@@ -718,6 +734,16 @@ namespace
         Expect(ClientHelloOffersSignatureScheme(message, written, TlsSignatureScheme::EcdsaSecp521r1Sha512), "TLS 1.2 ClientHello offers ECDSA P-521 SHA512");
         Expect(ClientHelloOffersSignatureScheme(message, written, TlsSignatureScheme::Ed25519), "TLS 1.2 ClientHello offers Ed25519");
         Expect(ClientHelloOffersSignatureScheme(message, written, TlsSignatureScheme::Ed448), "TLS 1.2 ClientHello offers Ed448");
+
+        const UCHAR ecPointFormats[] = { 0x01, 0x00 };
+        Expect(
+            ExtensionPayloadEqualsBytes(
+                message,
+                written,
+                ExtensionEcPointFormats,
+                ecPointFormats,
+                sizeof(ecPointFormats)),
+            "TLS 1.2 ClientHello offers uncompressed EC point format");
     }
 
     void TestTls12ClientHelloSignatureSha1Matrix()

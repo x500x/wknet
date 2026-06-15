@@ -5,6 +5,7 @@
 #include <KernelHttp/client/Http2Client.h>
 #include <KernelHttp/engine/EngineImpl.h>
 #include <KernelHttp/engine/HandleAlloc.h>
+#include <KernelHttp/http/HttpCoding.h>
 #include <KernelHttp/http/HttpContentEncoding.h>
 #include <KernelHttp/http/HttpParser.h>
 #include <KernelHttp/http/HttpRequest.h>
@@ -34,6 +35,8 @@ namespace engine
         KhHttpResponseTrailerScratchBytes +
         KhHttpHostHeaderScratchBytes;
     constexpr char KhDefaultAcceptEncoding[] = "gzip, deflate, br, identity";
+    constexpr char KhDeflateUnavailableAcceptEncoding[] = "br, identity";
+    constexpr SIZE_T KhWorkspaceCacheMaxRetainedBytes = 256 * 1024;
 
     constexpr SIZE_T KhHttp2HeaderScratchBytes =
         sizeof(http::HttpHeader) * client::Http2MaxRequestHeaders;
@@ -75,6 +78,128 @@ namespace engine
     _Must_inspect_result_
     NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ KhWorkspace& workspace) noexcept;
 
+    http::HttpText DefaultAcceptEncoding() noexcept
+    {
+        return http::MakeText(
+            http::HttpCodingCodec::DeflateRuntimeAvailable() ?
+                KhDefaultAcceptEncoding :
+                KhDeflateUnavailableAcceptEncoding);
+    }
+
+    _Ret_maybenull_
+    KhWorkspace* ExchangeSessionWorkspace(_In_ KH_SESSION session, _In_opt_ KhWorkspace* workspace) noexcept
+    {
+        if (session == nullptr) {
+            return nullptr;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        KhWorkspace* previous = session->Workspace;
+        session->Workspace = workspace;
+        return previous;
+#else
+        return static_cast<KhWorkspace*>(InterlockedExchangePointer(
+            reinterpret_cast<PVOID volatile*>(&session->Workspace),
+            workspace));
+#endif
+    }
+
+    _Ret_maybenull_
+    KhWorkspace* CompareExchangeSessionWorkspace(
+        _In_ KH_SESSION session,
+        _In_opt_ KhWorkspace* workspace,
+        _In_opt_ KhWorkspace* expected) noexcept
+    {
+        if (session == nullptr) {
+            return nullptr;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        KhWorkspace* previous = session->Workspace;
+        if (previous == expected) {
+            session->Workspace = workspace;
+        }
+        return previous;
+#else
+        return static_cast<KhWorkspace*>(InterlockedCompareExchangePointer(
+            reinterpret_cast<PVOID volatile*>(&session->Workspace),
+            workspace,
+            expected));
+#endif
+    }
+
+    SIZE_T WorkspaceRetainedBytes(_In_ const KhWorkspace& workspace) noexcept
+    {
+        return workspace.Request.Length +
+            workspace.Response.Length +
+            workspace.DecodedBody.Length +
+            workspace.HttpHeaderScratch.Length +
+            workspace.Http2HeaderScratch.Length +
+            workspace.TlsHandshakeScratch.Length +
+            workspace.CertificateScratch.Length +
+            workspace.WebSocketFrameScratch.Length +
+            workspace.WebSocketPayloadScratch.Length;
+    }
+
+    bool CanCacheRequestWorkspace(
+        _In_ const KhWorkspace& workspace,
+        SIZE_T requestBufferBytes) noexcept
+    {
+        return workspace.PoolType == KhPoolType::NonPaged &&
+            workspace.Request.Length >= requestBufferBytes &&
+            WorkspaceRetainedBytes(workspace) <= KhWorkspaceCacheMaxRetainedBytes;
+    }
+
+    NTSTATUS AcquireRequestWorkspace(
+        _In_ KH_SESSION session,
+        SIZE_T maxResponseBytes,
+        _Outptr_ KhWorkspace** workspace) noexcept
+    {
+        if (session == nullptr || workspace == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *workspace = nullptr;
+
+        KhWorkspace* cached = ExchangeSessionWorkspace(session, nullptr);
+        if (cached != nullptr) {
+            if (cached->Request.Length >= session->Options.RequestBufferBytes) {
+                cached->MaxResponseBytes = maxResponseBytes;
+                KhWorkspaceReset(cached);
+                *workspace = cached;
+                return STATUS_SUCCESS;
+            }
+
+            KhWorkspaceRelease(cached);
+        }
+
+        KhWorkspaceOptions workspaceOptions = {};
+        workspaceOptions.PoolType = KhPoolType::NonPaged;
+        workspaceOptions.RequestBufferBytes = session->Options.RequestBufferBytes;
+        workspaceOptions.MaxResponseBytes = maxResponseBytes;
+        return KhWorkspaceCreate(&workspaceOptions, workspace);
+    }
+
+    void ReleaseRequestWorkspace(_In_ KH_SESSION session, _In_opt_ KhWorkspace* workspace) noexcept
+    {
+        if (workspace == nullptr) {
+            return;
+        }
+
+        if (session == nullptr ||
+            !CanCacheRequestWorkspace(*workspace, session->Options.RequestBufferBytes)) {
+            KhWorkspaceRelease(workspace);
+            return;
+        }
+
+        workspace->MaxResponseBytes = session->Options.MaxResponseBytes;
+        KhWorkspaceReset(workspace);
+
+        if (CompareExchangeSessionWorkspace(session, workspace, nullptr) != nullptr) {
+            KhWorkspaceRelease(workspace);
+        }
+    }
+
     class WorkspaceGuard final
     {
     public:
@@ -100,10 +225,24 @@ namespace engine
             return KhWorkspaceCreate(&workspaceOptions, &workspace_);
         }
 
+        _Must_inspect_result_
+        NTSTATUS CreateForSession(_In_ KH_SESSION session, SIZE_T maxResponseBytes) noexcept
+        {
+            Reset();
+            session_ = session;
+            return AcquireRequestWorkspace(session, maxResponseBytes, &workspace_);
+        }
+
         void Reset() noexcept
         {
-            KhWorkspaceRelease(workspace_);
+            if (session_ != nullptr) {
+                ReleaseRequestWorkspace(session_, workspace_);
+            }
+            else {
+                KhWorkspaceRelease(workspace_);
+            }
             workspace_ = nullptr;
+            session_ = nullptr;
         }
 
         _Ret_maybenull_
@@ -119,6 +258,7 @@ namespace engine
         }
 
     private:
+        KH_SESSION session_ = nullptr;
         KhWorkspace* workspace_ = nullptr;
     };
 
@@ -335,6 +475,7 @@ namespace engine
     bool IsFreshConnectionRetryStatus(NTSTATUS status) noexcept
     {
         return IsConnectionCloseStatus(status) ||
+            status == STATUS_RETRY ||
             status == STATUS_IO_TIMEOUT;
     }
 
@@ -411,7 +552,7 @@ namespace engine
             }
 
             headers[extraHeaderCount].Name = http::MakeText("Accept-Encoding");
-            headers[extraHeaderCount].Value = http::MakeText(KhDefaultAcceptEncoding);
+            headers[extraHeaderCount].Value = DefaultAcceptEncoding();
             ++extraHeaderCount;
         }
 
@@ -964,7 +1105,8 @@ namespace engine
     NTSTATUS SendHttp2ViaTransport(
         const KhRequest& request,
         KhWorkspace& workspace,
-        _Inout_ core::ITransport& transport,
+        _Inout_ KhPooledConnection& pooledConnection,
+        SIZE_T maxHeaderBlockBytes,
         _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
         _Out_ http::HttpResponse* parsed,
@@ -1023,16 +1165,23 @@ namespace engine
             return status;
         }
 
-        auto* h2Connection = AllocateNonPagedObject<http2::Http2Connection>();
-        if (h2Connection == nullptr) {
-            return STATUS_INSUFFICIENT_RESOURCES;
+        if (pooledConnection.Transport == nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
         }
 
-        status = h2Connection->Initialize(transport);
-        if (!NT_SUCCESS(status)) {
-            kprintf("High-level HTTP/2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            FreeNonPagedObject(h2Connection);
-            return status;
+        if (pooledConnection.Http2 == nullptr) {
+            auto* h2Connection = AllocateNonPagedObject<http2::Http2Connection>();
+            if (h2Connection == nullptr) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            status = h2Connection->Initialize(*pooledConnection.Transport, maxHeaderBlockBytes);
+            if (!NT_SUCCESS(status)) {
+                kprintf("High-level HTTP/2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                FreeNonPagedObject(h2Connection);
+                return status;
+            }
+            pooledConnection.Http2 = h2Connection;
         }
 
         SIZE_T responseHeaderCount = 0;
@@ -1042,8 +1191,8 @@ namespace engine
         responseBodySink.Append = AppendHttp2ResponseBodyToWorkspace;
         responseBodySink.Context = &workspace;
 
-        status = h2Connection->SendRequest(
-            transport,
+        status = pooledConnection.Http2->SendRequest(
+            *pooledConnection.Transport,
             h2Scratch.Headers,
             h2HeaderCount,
             request.Body,
@@ -1059,9 +1208,6 @@ namespace engine
 
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            const NTSTATUS shutdownStatus = h2Connection->Shutdown(transport);
-            UNREFERENCED_PARAMETER(shutdownStatus);
-            FreeNonPagedObject(h2Connection);
             return status;
         }
 
@@ -1075,9 +1221,6 @@ namespace engine
             &decoded);
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            const NTSTATUS shutdownStatus = h2Connection->Shutdown(transport);
-            UNREFERENCED_PARAMETER(shutdownStatus);
-            FreeNonPagedObject(h2Connection);
             return status;
         }
 
@@ -1092,10 +1235,6 @@ namespace engine
         parsed->BodyKind = http::HttpBodyKind::ContentLength;
         workspace.ResponseLength = responseBodyLength;
         *rawResponseLength = responseBodyLength;
-
-        const NTSTATUS shutdownStatus = h2Connection->Shutdown(transport);
-        UNREFERENCED_PARAMETER(shutdownStatus);
-        FreeNonPagedObject(h2Connection);
         return STATUS_SUCCESS;
     }
 #endif
@@ -1456,8 +1595,23 @@ namespace engine
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
     static bool IsHttpAsyncCancellationRequested(_In_opt_ void* context) noexcept;
 
+    void ReleaseHttp2Layer(_Inout_ KhPooledConnection& connection) noexcept
+    {
+        if (connection.Http2 == nullptr) {
+            return;
+        }
+
+        if (connection.Transport != nullptr) {
+            const NTSTATUS shutdownStatus = connection.Http2->Shutdown(*connection.Transport);
+            UNREFERENCED_PARAMETER(shutdownStatus);
+        }
+        FreeNonPagedObject(connection.Http2);
+        connection.Http2 = nullptr;
+    }
+
     void ReleaseTlsLayer(_Inout_ KhPooledConnection& connection) noexcept
     {
+        ReleaseHttp2Layer(connection);
         if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
             FreeNonPagedObject(connection.Transport);
             connection.Transport = connection.RawTransport;
@@ -1504,14 +1658,17 @@ namespace engine
         }
 
         if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
+            ReleaseHttp2Layer(connection);
             FreeNonPagedObject(connection.Transport);
             connection.Transport = nullptr;
         }
         if (connection.Tls != nullptr) {
+            ReleaseHttp2Layer(connection);
             FreeNonPagedObject(connection.Tls);
             connection.Tls = nullptr;
         }
         if (connection.RawTransport != nullptr) {
+            ReleaseHttp2Layer(connection);
             FreeNonPagedObject(connection.RawTransport);
             connection.RawTransport = nullptr;
         }
@@ -2024,7 +2181,8 @@ namespace engine
             status = SendHttp2ViaTransport(
                 request,
                 workspace,
-                *pooledConnection->Transport,
+                *pooledConnection,
+                session->Options.Http2MaxHeaderBlockBytes,
                 requestHeaders,
                 requestHeaderCount,
                 parsed,
@@ -2035,7 +2193,9 @@ namespace engine
                 return status;
             }
 
-            *connectionReusable = false;
+            *connectionReusable =
+                pooledConnection->Http2 != nullptr &&
+                pooledConnection->Http2->IsReusable();
             return STATUS_SUCCESS;
         }
 
@@ -2840,6 +3000,7 @@ namespace engine
         }
 
         bool connectionReusable = false;
+        const SIZE_T responseHeaderCapacity = session->Options.MaxResponseHeaders;
         status = SendViaTransport(
             session,
             request,
@@ -2851,7 +3012,7 @@ namespace engine
             requestHeaderCount,
             parsed,
             headerScratch.ResponseHeaders,
-            KhMaxHeadersPerResponse,
+            responseHeaderCapacity,
             headerScratch.ResponseTrailers,
             KhMaxTrailersPerResponse,
             rawResponseLength,
@@ -2861,8 +3022,9 @@ namespace engine
         const bool shouldRetryWithFreshConnection =
             !NT_SUCCESS(status) &&
             request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate &&
-            IsSafeFreshConnectionRetryMethod(request.Method) &&
-            IsFreshConnectionRetryStatus(status);
+            ((status == STATUS_RETRY) ||
+                (IsSafeFreshConnectionRetryMethod(request.Method) &&
+                    IsFreshConnectionRetryStatus(status)));
 
         if (shouldRetryWithFreshConnection) {
             KhConnectionPoolClose(&session->ConnectionPool, pooledConnection);
@@ -2909,7 +3071,7 @@ namespace engine
                     requestHeaderCount,
                     parsed,
                     headerScratch.ResponseHeaders,
-                    KhMaxHeadersPerResponse,
+                    responseHeaderCapacity,
                     headerScratch.ResponseTrailers,
                     KhMaxTrailersPerResponse,
                     rawResponseLength,
@@ -3141,7 +3303,7 @@ namespace engine
         const SIZE_T maxResponseBytes =
             EffectiveMaxResponseBytes(options, session->Options.MaxResponseBytes);
         WorkspaceGuard requestWorkspace;
-        status = requestWorkspace.Create(maxResponseBytes, session->Options.RequestBufferBytes);
+        status = requestWorkspace.CreateForSession(session, maxResponseBytes);
         if (!NT_SUCCESS(status) || !requestWorkspace.IsValid()) {
             return !NT_SUCCESS(status) ? status : STATUS_INSUFFICIENT_RESOURCES;
         }

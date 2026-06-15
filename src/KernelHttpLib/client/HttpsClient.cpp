@@ -1,4 +1,5 @@
 #include <KernelHttp/client/HttpsClient.h>
+#include <KernelHttp/core/Irql.h>
 #include <KernelHttp/core/TlsTransport.h>
 #include <KernelHttp/core/WorkspaceScratchAllocator.h>
 #include <KernelHttp/core/WskTransport.h>
@@ -162,8 +163,14 @@ namespace client
         const HttpsResponseBuffers& buffers,
         http::HttpResponse& response) noexcept
     {
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            response = {};
+            return status;
+        }
+
         bool tls12ConfirmationCandidate = false;
-        NTSTATUS status = SendRequestOnce(
+        status = SendRequestOnce(
             wskClient,
             options,
             buffers,

@@ -36,6 +36,9 @@ namespace http
         HttpCodingCodec() = delete;
 
         _Must_inspect_result_
+        static bool DeflateRuntimeAvailable() noexcept;
+
+        _Must_inspect_result_
         static NTSTATUS DecodeOne(
             HttpCoding coding,
             _In_reads_bytes_(sourceLength) const char* source,

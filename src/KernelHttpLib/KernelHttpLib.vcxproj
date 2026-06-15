@@ -136,6 +136,7 @@
     <ClInclude Include="..\..\include\KernelHttp\client\WebSocketClient.h" />
     <ClInclude Include="..\..\include\KernelHttp\core\IScratchAllocator.h" />
     <ClInclude Include="..\..\include\KernelHttp\core\ITransport.h" />
+    <ClInclude Include="..\..\include\KernelHttp\core\Irql.h" />
     <ClInclude Include="..\..\include\KernelHttp\core\TlsTransport.h" />
     <ClInclude Include="..\..\include\KernelHttp\core\WorkspaceScratchAllocator.h" />
     <ClInclude Include="..\..\include\KernelHttp\core\WskTransport.h" />

@@ -41,6 +41,17 @@ namespace tls
         constexpr SIZE_T TlsScratchRequiredLength =
             TlsScratchHandshakeBufferOffset + TlsScratchHandshakeBufferLength;
 
+        LONG ExchangeTlsFlag(_Inout_ volatile LONG* target, LONG value) noexcept
+        {
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+            const LONG previous = *target;
+            *target = value;
+            return previous;
+#else
+            return InterlockedExchange(target, value);
+#endif
+        }
+
         _Must_inspect_result_
         Tls12KeyExchangeKind Tls12KeyExchangeForCipherSuite(TlsCipherSuite cipherSuite) noexcept
         {
@@ -733,6 +744,9 @@ namespace tls
         constexpr UCHAR Tls13DowngradeSentinelTls12[8] = {
             'D', 'O', 'W', 'N', 'G', 'R', 'D', 0x01
         };
+        constexpr UCHAR Tls13DowngradeSentinelTls11[8] = {
+            'D', 'O', 'W', 'N', 'G', 'R', 'D', 0x00
+        };
 
         enum class Tls13ServerHelloVersionSelection : ULONG
         {
@@ -759,14 +773,23 @@ namespace tls
         }
 
         _Must_inspect_result_
-        bool HasTls13Tls12DowngradeSentinel(const TlsServerHelloView& serverHello) noexcept
+        bool HasTls13DowngradeSentinel(const TlsServerHelloView& serverHello) noexcept
         {
-            return serverHello.Random != nullptr &&
-                serverHello.RandomLength >= sizeof(Tls13DowngradeSentinelTls12) &&
-                RtlCompareMemory(
-                    serverHello.Random + serverHello.RandomLength - sizeof(Tls13DowngradeSentinelTls12),
+            if (serverHello.Random == nullptr ||
+                serverHello.RandomLength < sizeof(Tls13DowngradeSentinelTls12)) {
+                return false;
+            }
+
+            const UCHAR* sentinel =
+                serverHello.Random + serverHello.RandomLength - sizeof(Tls13DowngradeSentinelTls12);
+            return RtlCompareMemory(
+                    sentinel,
                     Tls13DowngradeSentinelTls12,
-                    sizeof(Tls13DowngradeSentinelTls12)) == sizeof(Tls13DowngradeSentinelTls12);
+                    sizeof(Tls13DowngradeSentinelTls12)) == sizeof(Tls13DowngradeSentinelTls12) ||
+                RtlCompareMemory(
+                    sentinel,
+                    Tls13DowngradeSentinelTls11,
+                    sizeof(Tls13DowngradeSentinelTls11)) == sizeof(Tls13DowngradeSentinelTls11);
         }
 
         _Must_inspect_result_
@@ -790,7 +813,7 @@ namespace tls
                 return Tls13ServerHelloVersionSelection::NotTls12;
             }
 
-            if (HasTls13Tls12DowngradeSentinel(tls12ServerHello)) {
+            if (HasTls13DowngradeSentinel(tls12ServerHello)) {
                 return Tls13ServerHelloVersionSelection::RejectedDowngrade;
             }
 
@@ -1662,6 +1685,7 @@ namespace tls
         tls13RecordProtection_ = false;
         tls13RecordPaddingLength_ = 0;
         tls13PostHandshakeClientAuthAllowed_ = false;
+        ExchangeTlsFlag(&tls13PeerRequestedKeyUpdate_, 0);
         clientCredential_ = nullptr;
         tls12SessionCache_ = nullptr;
         tls13ExternalSessionCache_ = nullptr;
@@ -3552,9 +3576,16 @@ namespace tls
             const SIZE_T fragmentLimit =
                 tls13RecordProtection_ ? TlsMaxPlaintextLength - tls13RecordPaddingLength_ : TlsMaxPlaintextLength;
             const SIZE_T chunk = (length - sent) > fragmentLimit ? fragmentLimit : (length - sent);
-            NTSTATUS status = tls13RecordProtection_ ?
-                SendProtectedRecord13(transport, TlsContentType::ApplicationData, bytes + sent, chunk) :
-                SendProtectedRecord(transport, TlsContentType::ApplicationData, bytes + sent, chunk);
+            NTSTATUS status = STATUS_SUCCESS;
+            if (tls13RecordProtection_) {
+                status = SendPendingTls13KeyUpdate(transport);
+                if (NT_SUCCESS(status)) {
+                    status = SendProtectedRecord13(transport, TlsContentType::ApplicationData, bytes + sent, chunk);
+                }
+            }
+            else {
+                status = SendProtectedRecord(transport, TlsContentType::ApplicationData, bytes + sent, chunk);
+            }
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -3834,6 +3865,31 @@ namespace tls
         status = SendAll(transport, outputBuffer_, written);
         RtlSecureZeroMemory(outputBuffer_, TlsIoBufferLength);
         return status;
+    }
+
+    NTSTATUS TlsConnection::SendPendingTls13KeyUpdate(core::ITransport& transport) noexcept
+    {
+        if (ExchangeTlsFlag(&tls13PeerRequestedKeyUpdate_, 0) == 0) {
+            return STATUS_SUCCESS;
+        }
+
+        SIZE_T messageLength = 0;
+        NTSTATUS status = TlsHandshake13::EncodeKeyUpdate(
+            Tls13KeyUpdateRequest::UpdateNotRequested,
+            tls13KeyUpdateMessage_,
+            sizeof(tls13KeyUpdateMessage_),
+            &messageLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = SendProtectedRecord13(transport, TlsContentType::Handshake, tls13KeyUpdateMessage_, messageLength);
+        RtlSecureZeroMemory(tls13KeyUpdateMessage_, sizeof(tls13KeyUpdateMessage_));
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        return context_.UpdateTls13ApplicationTrafficSecret(true, clientWriteState_);
     }
 
     NTSTATUS TlsConnection::SendProtectedRecord13(
@@ -4546,10 +4602,7 @@ namespace tls
                     return status;
                 }
                 if (keyUpdate.Request == Tls13KeyUpdateRequest::UpdateRequested) {
-                    status = context_.UpdateTls13ApplicationTrafficSecret(true, clientWriteState_);
-                    if (!NT_SUCCESS(status)) {
-                        return status;
-                    }
+                    ExchangeTlsFlag(&tls13PeerRequestedKeyUpdate_, 1);
                 }
             }
             else if (message.Type == TlsHandshakeType::CertificateRequest) {

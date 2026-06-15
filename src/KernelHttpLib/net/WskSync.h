@@ -49,7 +49,33 @@ namespace net
         void* CleanupContext = nullptr;
         WskSyncCompletionCleanupRoutine CompletionCleanupRoutine = nullptr;
         void* CompletionCleanupContext = nullptr;
+        bool BorrowedIrp = false;
     };
+
+    _Ret_maybenull_
+    WskSyncIrpContext* WskSyncAllocateIrpContext() noexcept;
+
+    void WskSyncFreeIrpContext(_In_opt_ WskSyncIrpContext* context) noexcept;
+
+    _Ret_maybenull_
+    WskBuffer* WskSyncAllocateBufferObject() noexcept;
+
+    void WskSyncFreeBufferObject(_In_opt_ WskBuffer* buffer) noexcept;
+
+    void WskSyncTrackContextAllocated() noexcept;
+
+    void WskSyncTrackContextReleased() noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS WskSyncWaitForOutstandingContexts(ULONG timeoutMilliseconds) noexcept;
+
+    void WskSyncTrackSocketOpened(_In_opt_ PWSK_SOCKET socket) noexcept;
+
+    void WskSyncTrackSocketCloseStarted(_In_opt_ PWSK_SOCKET socket) noexcept;
+
+    void WskSyncTrackSocketClosed(_In_opt_ PWSK_SOCKET socket, NTSTATUS closeStatus) noexcept;
+
+    void WskSyncLogOutstandingSockets() noexcept;
 
     inline void WskSyncReleaseContext(_In_opt_ WskSyncIrpContext* context) noexcept
     {
@@ -80,12 +106,14 @@ namespace net
             context->CleanupContext = nullptr;
         }
 
-        if (context->Irp != nullptr) {
+        if (context->Irp != nullptr &&
+            (!context->BorrowedIrp || completionOwnedCleanup)) {
             IoFreeIrp(context->Irp);
-            context->Irp = nullptr;
         }
+        context->Irp = nullptr;
 
-        FreeNonPagedObject(context);
+        WskSyncFreeIrpContext(context);
+        WskSyncTrackContextReleased();
     }
 
     _Function_class_(IO_COMPLETION_ROUTINE)
@@ -109,26 +137,26 @@ namespace net
     }
 
     _Must_inspect_result_
-    inline NTSTATUS WskSyncAllocateIrp(_Outptr_ WskSyncIrpContext** context) noexcept
+    inline NTSTATUS WskSyncInitializeIrpContext(
+        _In_ PIRP irp,
+        bool borrowedIrp,
+        _Outptr_ WskSyncIrpContext** context) noexcept
     {
-        if (context == nullptr) {
+        if (irp == nullptr || context == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
         *context = nullptr;
 
-        auto* sync = AllocateNonPagedObject<WskSyncIrpContext>();
+        auto* sync = WskSyncAllocateIrpContext();
         if (sync == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        sync->Irp = IoAllocateIrp(1, FALSE);
-        if (sync->Irp == nullptr) {
-            FreeNonPagedObject(sync);
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
-
+        sync->Irp = irp;
+        sync->BorrowedIrp = borrowedIrp;
         sync->ReferenceCount = 2;
+        WskSyncTrackContextAllocated();
         KeInitializeEvent(&sync->Event, NotificationEvent, FALSE);
         IoSetCompletionRoutine(
             sync->Irp,
@@ -140,6 +168,27 @@ namespace net
 
         *context = sync;
         return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    inline NTSTATUS WskSyncAllocateIrp(_Outptr_ WskSyncIrpContext** context) noexcept
+    {
+        if (context == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *context = nullptr;
+
+        PIRP irp = IoAllocateIrp(1, FALSE);
+        if (irp == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        NTSTATUS status = WskSyncInitializeIrpContext(irp, false, context);
+        if (!NT_SUCCESS(status)) {
+            IoFreeIrp(irp);
+        }
+        return status;
     }
 
     inline void WskSyncDropCompletionReferenceIfNotCompleted(_In_ WskSyncIrpContext* context) noexcept

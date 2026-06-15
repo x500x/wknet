@@ -280,6 +280,9 @@
     <ClInclude Include="..\..\include\KernelHttp\core\ITransport.h">
       <Filter>Header Files\core</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\core\Irql.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\core\TlsTransport.h">
       <Filter>Header Files\core</Filter>
     </ClInclude>

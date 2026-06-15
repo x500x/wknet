@@ -241,6 +241,13 @@ namespace tls
             _Out_ Tls13KeyUpdateView& keyUpdate) noexcept;
 
         _Must_inspect_result_
+        static NTSTATUS EncodeKeyUpdate(
+            Tls13KeyUpdateRequest request,
+            _Out_writes_bytes_(destinationCapacity) UCHAR* destination,
+            SIZE_T destinationCapacity,
+            _Out_opt_ SIZE_T* bytesWritten) noexcept;
+
+        _Must_inspect_result_
         static NTSTATUS ParseNewSessionTicket(
             _In_ const TlsHandshakeMessageView& message,
             _Out_ Tls13NewSessionTicketView& ticket) noexcept;

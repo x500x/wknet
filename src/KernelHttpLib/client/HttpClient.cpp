@@ -1,4 +1,5 @@
 #include <KernelHttp/client/HttpClient.h>
+#include <KernelHttp/core/Irql.h>
 
 namespace KernelHttp
 {
@@ -53,6 +54,11 @@ namespace client
     {
         response = {};
 
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         if (options.ServerName == nullptr ||
             options.ServerName[0] == L'\0' ||
             options.ServiceName == nullptr ||
@@ -67,7 +73,7 @@ namespace client
         }
 
         SIZE_T requestLength = 0;
-        NTSTATUS status = http::HttpRequestBuilder::Build(
+        status = http::HttpRequestBuilder::Build(
             options.Request,
             buffers.RequestBuffer,
             buffers.RequestBufferLength,

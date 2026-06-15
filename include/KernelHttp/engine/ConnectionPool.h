@@ -20,6 +20,11 @@ namespace tls
     class TlsConnection;
 }
 
+namespace http2
+{
+    class Http2Connection;
+}
+
 namespace engine
 {
     constexpr SIZE_T KhPoolMaxHostLength = 255;
@@ -59,6 +64,7 @@ namespace engine
         core::WskTransport* RawTransport = nullptr;
         core::ITransport* Transport = nullptr;
         tls::TlsConnection* Tls = nullptr;
+        http2::Http2Connection* Http2 = nullptr;
 #endif
     };
 

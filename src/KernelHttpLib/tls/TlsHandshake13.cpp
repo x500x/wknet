@@ -29,9 +29,7 @@ namespace tls
         const TlsCipherSuite DefaultCipherSuites[] = {
             TlsCipherSuite::TlsAes128GcmSha256,
             TlsCipherSuite::TlsAes256GcmSha384,
-            TlsCipherSuite::TlsChaCha20Poly1305Sha256,
-            TlsCipherSuite::TlsAes128CcmSha256,
-            TlsCipherSuite::TlsAes128Ccm8Sha256
+            TlsCipherSuite::TlsChaCha20Poly1305Sha256
         };
 
         const TlsNamedGroup DefaultNamedGroups[] = {
@@ -1954,6 +1952,47 @@ namespace tls
         }
 
         keyUpdate.Request = static_cast<Tls13KeyUpdateRequest>(request);
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS TlsHandshake13::EncodeKeyUpdate(
+        Tls13KeyUpdateRequest request,
+        UCHAR* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* bytesWritten) noexcept
+    {
+        if (bytesWritten != nullptr) {
+            *bytesWritten = 0;
+        }
+
+        if (request != Tls13KeyUpdateRequest::UpdateNotRequested &&
+            request != Tls13KeyUpdateRequest::UpdateRequested) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const SIZE_T required = TlsHandshakeHeaderLength + 1;
+        if (destination == nullptr || destinationCapacity < required) {
+            if (bytesWritten != nullptr) {
+                *bytesWritten = required;
+            }
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        SIZE_T offset = 0;
+        NTSTATUS status = WriteByte(static_cast<UCHAR>(TlsHandshakeType::KeyUpdate), destination, destinationCapacity, &offset);
+        if (NT_SUCCESS(status)) {
+            status = WriteUint24(1, destination, destinationCapacity, &offset);
+        }
+        if (NT_SUCCESS(status)) {
+            status = WriteByte(static_cast<UCHAR>(request), destination, destinationCapacity, &offset);
+        }
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (bytesWritten != nullptr) {
+            *bytesWritten = offset;
+        }
         return STATUS_SUCCESS;
     }
 

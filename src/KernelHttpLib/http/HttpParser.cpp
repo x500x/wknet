@@ -527,7 +527,41 @@ namespace http
                 }
 
                 if (data[cursor] == ' ' || data[cursor] == '\t') {
-                    return STATUS_INVALID_NETWORK_RESPONSE;
+                    if (*headerCount == 0 || headers == nullptr) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+
+                    SIZE_T foldStart = cursor;
+                    while (foldStart < lineEnd && IsOptionalWhitespace(data[foldStart])) {
+                        ++foldStart;
+                    }
+
+                    HttpHeader& previous = headers[*headerCount - 1];
+                    const SIZE_T valueStart =
+                        static_cast<SIZE_T>(previous.Value.Data - data);
+                    SIZE_T valueEnd = valueStart + previous.Value.Length;
+                    if (valueStart > dataLength ||
+                        valueEnd > dataLength ||
+                        valueEnd >= foldStart) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+
+                    char* mutableData = const_cast<char*>(data);
+                    mutableData[valueEnd] = ' ';
+                    ++valueEnd;
+
+                    const SIZE_T foldLength = lineEnd - foldStart;
+                    if (foldLength != 0) {
+                        RtlMoveMemory(mutableData + valueEnd, data + foldStart, foldLength);
+                    }
+
+                    previous.Value.Length = valueEnd - valueStart + foldLength;
+                    if (!IsValidHeaderValue(previous.Value)) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+
+                    cursor = lineEnd + 2;
+                    continue;
                 }
 
                 SIZE_T colon = InvalidOffset;

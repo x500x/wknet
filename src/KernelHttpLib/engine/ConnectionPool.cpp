@@ -1,6 +1,7 @@
 #include <KernelHttp/engine/ConnectionPool.h>
 #include <KernelHttp/core/TlsTransport.h>
 #include <KernelHttp/core/WskTransport.h>
+#include <KernelHttp/http2/Http2Connection.h>
 #include <KernelHttp/net/WskSocket.h>
 #include <KernelHttp/tls/TlsConnection.h>
 
@@ -21,6 +22,7 @@ namespace
         core::WskTransport* RawTransport = nullptr;
         core::ITransport* Transport = nullptr;
         tls::TlsConnection* Tls = nullptr;
+        http2::Http2Connection* Http2 = nullptr;
 #endif
     };
 
@@ -140,8 +142,24 @@ namespace
         return connection.Socket != nullptr ||
             connection.RawTransport != nullptr ||
             connection.Transport != nullptr ||
-            connection.Tls != nullptr;
+            connection.Tls != nullptr ||
+            connection.Http2 != nullptr;
 #else
+        return false;
+#endif
+    }
+
+    _Must_inspect_result_
+    bool HasDetachedConnectionResources(_In_ const KhDetachedConnectionResources& detached) noexcept
+    {
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        return detached.Socket != nullptr ||
+            detached.RawTransport != nullptr ||
+            detached.Transport != nullptr ||
+            detached.Tls != nullptr ||
+            detached.Http2 != nullptr;
+#else
+        UNREFERENCED_PARAMETER(detached);
         return false;
 #endif
     }
@@ -216,6 +234,7 @@ namespace
         detached->RawTransport = connection.RawTransport;
         detached->Transport = connection.Transport;
         detached->Tls = connection.Tls;
+        detached->Http2 = connection.Http2;
 #endif
         RtlZeroMemory(&connection, sizeof(connection));
     }
@@ -227,6 +246,14 @@ namespace
         }
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (detached->Http2 != nullptr) {
+            if (detached->Transport != nullptr) {
+                const NTSTATUS shutdownStatus = detached->Http2->Shutdown(*detached->Transport);
+                UNREFERENCED_PARAMETER(shutdownStatus);
+            }
+            FreeNonPagedObject(detached->Http2);
+            detached->Http2 = nullptr;
+        }
         if (detached->Transport != nullptr &&
             detached->Transport != detached->RawTransport) {
             FreeNonPagedObject(detached->Transport);
@@ -321,7 +348,8 @@ namespace
         RtlZeroMemory(pool, sizeof(*pool));
     }
 
-    bool KhConnectionPoolKeysEqual(
+    _Must_inspect_result_
+    bool KhConnectionPoolKeysEqualExceptAlpn(
         const KhConnectionPoolKey& left,
         const KhConnectionPoolKey& right) noexcept
     {
@@ -342,7 +370,14 @@ namespace
             left.AutomaticAlpn == right.AutomaticAlpn &&
             TextEquals(left.Scheme, left.SchemeLength, right.Scheme, right.SchemeLength) &&
             TextEquals(left.Host, left.HostLength, right.Host, right.HostLength) &&
-            TextEquals(left.TlsServerName, left.TlsServerNameLength, right.TlsServerName, right.TlsServerNameLength) &&
+            TextEquals(left.TlsServerName, left.TlsServerNameLength, right.TlsServerName, right.TlsServerNameLength);
+    }
+
+    bool KhConnectionPoolKeysEqual(
+        const KhConnectionPoolKey& left,
+        const KhConnectionPoolKey& right) noexcept
+    {
+        return KhConnectionPoolKeysEqualExceptAlpn(left, right) &&
             TextEquals(left.Alpn, left.AlpnLength, right.Alpn, right.AlpnLength);
     }
 
@@ -358,10 +393,7 @@ namespace
             return KhConnectionPoolKeysEqual(left, right);
         }
 
-        KhConnectionPoolKey normalizedRight = right;
-        RtlZeroMemory(normalizedRight.Alpn, sizeof(normalizedRight.Alpn));
-        normalizedRight.AlpnLength = 0;
-        return KhConnectionPoolKeysEqual(left, normalizedRight);
+        return KhConnectionPoolKeysEqualExceptAlpn(left, right);
     }
 
     NTSTATUS KhConnectionPoolAcquire(
@@ -411,7 +443,10 @@ namespace
 
         if (selected == nullptr) {
             if (CountConnectionsForHostQuota(*pool, key) >= pool->MaxConnectionsPerHost) {
-                const bool idleDetached = DetachIdleConnectionForHostQuotaLocked(*pool, key, &detached);
+                bool idleDetached = HasDetachedConnectionResources(detached);
+                if (!idleDetached) {
+                    idleDetached = DetachIdleConnectionForHostQuotaLocked(*pool, key, &detached);
+                }
                 if (!idleDetached ||
                     CountConnectionsForHostQuota(*pool, key) >= pool->MaxConnectionsPerHost) {
                     UnlockPool(pool);
@@ -423,7 +458,12 @@ namespace
             for (ULONG index = 0; index < pool->Capacity; ++index) {
                 KhPooledConnection& candidate = pool->Entries[index];
                 if (!candidate.Connected && !candidate.InUse) {
-                    DetachConnectionResources(candidate, &detached);
+                    if (HasConnectionState(candidate)) {
+                        if (HasDetachedConnectionResources(detached)) {
+                            continue;
+                        }
+                        DetachConnectionResources(candidate, &detached);
+                    }
                     candidate.InUse = true;
                     candidate.Connected = true;
                     candidate.Key = key;
@@ -444,7 +484,12 @@ namespace
                 KhPooledConnection& candidate = pool->Entries[index];
                 if (!candidate.InUse) {
                     const bool wasConnected = candidate.Connected;
-                    DetachConnectionResources(candidate, &detached);
+                    if (HasConnectionState(candidate)) {
+                        if (HasDetachedConnectionResources(detached)) {
+                            continue;
+                        }
+                        DetachConnectionResources(candidate, &detached);
+                    }
                     candidate.InUse = true;
                     candidate.Connected = true;
                     candidate.Key = key;

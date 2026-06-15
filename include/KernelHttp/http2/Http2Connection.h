@@ -9,6 +9,11 @@ namespace KernelHttp
 {
 namespace http2
 {
+    constexpr SIZE_T Http2DefaultHeaderBlockCapacity = 32 * 1024;
+    constexpr SIZE_T Http2MaxHeaderBlockCapacity = 256 * 1024;
+
+    struct Http2ResponseFrameState;
+
     class Http2Transport
     {
     public:
@@ -87,9 +92,13 @@ namespace http2
         Http2Connection(const Http2Connection&) = delete;
         Http2Connection& operator=(const Http2Connection&) = delete;
 
-        NTSTATUS Initialize(_Inout_ Http2Transport& transport) noexcept;
+        NTSTATUS Initialize(
+            _Inout_ Http2Transport& transport,
+            SIZE_T maxHeaderBlockBytes = Http2DefaultHeaderBlockCapacity) noexcept;
 
-        NTSTATUS Initialize(_Inout_ core::ITransport& transport) noexcept;
+        NTSTATUS Initialize(
+            _Inout_ core::ITransport& transport,
+            SIZE_T maxHeaderBlockBytes = Http2DefaultHeaderBlockCapacity) noexcept;
 
         NTSTATUS InitializeAfterUpgrade(_Inout_ Http2Transport& transport) noexcept;
 
@@ -187,6 +196,8 @@ namespace http2
 
         NTSTATUS Shutdown(_Inout_ core::ITransport& transport) noexcept;
 
+        bool IsReusable() const noexcept;
+
     private:
         // Send raw bytes through transport
         NTSTATUS SendRaw(
@@ -244,6 +255,19 @@ namespace http2
             _Out_writes_bytes_(nameValueCapacity) char* nameValueBuffer,
             SIZE_T nameValueCapacity) noexcept;
 
+        NTSTATUS ReceiveResponseFramesWithState(
+            _Inout_ Http2Transport& transport,
+            _Inout_ Http2Stream& stream,
+            _Inout_ Http2ResponseFrameState& state) noexcept;
+
+        NTSTATUS ProcessResponseFrame(
+            _Inout_ Http2Transport& transport,
+            _Inout_ Http2Stream& stream,
+            _In_ const Http2FrameHeader& header,
+            _In_reads_bytes_(payloadLen) const UCHAR* payload,
+            SIZE_T payloadLen,
+            _Inout_ Http2ResponseFrameState& state) noexcept;
+
         ULONG AllocateStreamId() noexcept;
 
         NTSTATUS HandleReadFrameFailure(
@@ -281,6 +305,7 @@ namespace http2
         bool settingsAckReceived_ = false;
         ULONG readFrameErrorCode_ = static_cast<ULONG>(Http2ErrorCode::NoError);
         SIZE_T framePayloadCapacity_ = 0;
+        SIZE_T headerBlockCapacity_ = Http2DefaultHeaderBlockCapacity;
 
         HpackEncoder encoder_ = {};
         HpackDecoder decoder_ = {};

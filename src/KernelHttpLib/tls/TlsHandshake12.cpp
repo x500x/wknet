@@ -11,6 +11,7 @@ namespace tls
         constexpr UCHAR NullCompressionMethod = 0;
         constexpr USHORT ExtensionServerName = 0;
         constexpr USHORT ExtensionSupportedGroups = 10;
+        constexpr USHORT ExtensionEcPointFormats = 11;
         constexpr USHORT ExtensionSignatureAlgorithms = 13;
         constexpr USHORT ExtensionStatusRequest = 5;
         constexpr USHORT ExtensionEncryptThenMac = 22;
@@ -562,6 +563,25 @@ namespace tls
         }
 
         _Must_inspect_result_
+        NTSTATUS BuildEcPointFormatsExtension(
+            _Out_writes_bytes_(capacity) UCHAR* destination,
+            SIZE_T capacity,
+            _Inout_ SIZE_T* offset) noexcept
+        {
+            NTSTATUS status = WriteUint16(ExtensionEcPointFormats, destination, capacity, offset);
+            if (NT_SUCCESS(status)) {
+                status = WriteUint16(2, destination, capacity, offset);
+            }
+            if (NT_SUCCESS(status)) {
+                status = WriteByte(1, destination, capacity, offset);
+            }
+            if (NT_SUCCESS(status)) {
+                status = WriteByte(0, destination, capacity, offset);
+            }
+            return status;
+        }
+
+        _Must_inspect_result_
         NTSTATUS BuildEmptyExtension(
             USHORT extensionType,
             _Out_writes_bytes_(capacity) UCHAR* destination,
@@ -1086,6 +1106,11 @@ namespace tls
             extensions.Get(),
             extensions.Count(),
             &extensionOffset);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = BuildEcPointFormatsExtension(extensions.Get(), extensions.Count(), &extensionOffset);
         if (!NT_SUCCESS(status)) {
             return status;
         }

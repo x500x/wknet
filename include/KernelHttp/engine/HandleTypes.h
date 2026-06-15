@@ -11,7 +11,7 @@ namespace KernelHttp
 namespace engine
 {
     constexpr SIZE_T KhMaxHeadersPerRequest = 16;
-    constexpr SIZE_T KhMaxHeadersPerResponse = 32;
+    constexpr SIZE_T KhMaxHeadersPerResponse = KhMaxConfigurableResponseHeaders;
     constexpr SIZE_T KhMaxTrailersPerResponse = 16;
     constexpr SIZE_T KhMaxHeaderNameLength = 128;
     constexpr SIZE_T KhMaxHeaderValueLength = 512;

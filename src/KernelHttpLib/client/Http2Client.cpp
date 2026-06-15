@@ -1,4 +1,5 @@
 #include <KernelHttp/client/Http2Client.h>
+#include <KernelHttp/core/Irql.h>
 #include <KernelHttp/core/TlsTransport.h>
 #include <KernelHttp/core/WskTransport.h>
 #include <KernelHttp/tls/TlsConnection.h>
@@ -538,6 +539,11 @@ namespace client
     {
         response = {};
 
+        NTSTATUS status = core::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         http::HttpText authority = {};
         if (options.RemoteAddress == nullptr ||
             options.Path.Data == nullptr ||
@@ -565,7 +571,7 @@ namespace client
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        NTSTATUS status = socket->Connect(wskClient, options.RemoteAddress);
+        status = socket->Connect(wskClient, options.RemoteAddress);
         if (!NT_SUCCESS(status)) {
             kprintf("Http2Client connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;

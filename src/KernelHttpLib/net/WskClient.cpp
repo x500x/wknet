@@ -77,6 +77,15 @@ namespace net
 #else
         FAST_MUTEX g_resolveCacheLock = {};
         volatile LONG g_resolveCacheLockState = 0;
+        KEVENT g_wskOutstandingContextEvent = {};
+        volatile LONG g_wskOutstandingContextEventState = 0;
+        volatile LONG g_wskOutstandingContextCount = 0;
+        volatile LONG g_wskOpenSocketCount = 0;
+        volatile LONG g_wskClosePendingSocketCount = 0;
+        PWSK_SOCKET g_wskLastOpenedSocket = nullptr;
+        PWSK_SOCKET g_wskLastCloseStartedSocket = nullptr;
+        PWSK_SOCKET g_wskLastClosedSocket = nullptr;
+        NTSTATUS g_wskLastSocketCloseStatus = STATUS_SUCCESS;
 
         void EnsureResolveCacheLockInitialized() noexcept
         {
@@ -103,6 +112,26 @@ namespace net
         void ReleaseResolveCacheLock() noexcept
         {
             ExReleaseFastMutex(&g_resolveCacheLock);
+        }
+
+        void EnsureWskOutstandingContextEventInitialized() noexcept
+        {
+            if (InterlockedCompareExchange(&g_wskOutstandingContextEventState, 0, 0) == 2) {
+                return;
+            }
+
+            if (InterlockedCompareExchange(&g_wskOutstandingContextEventState, 1, 0) == 0) {
+                KeInitializeEvent(&g_wskOutstandingContextEvent, NotificationEvent, TRUE);
+                InterlockedExchange(&g_wskOutstandingContextEventState, 2);
+                return;
+            }
+
+            while (InterlockedCompareExchange(&g_wskOutstandingContextEventState, 2, 2) != 2) {
+                LARGE_INTEGER delay = {};
+                delay.QuadPart = -10000LL;
+                const NTSTATUS status = KeDelayExecutionThread(KernelMode, FALSE, &delay);
+                UNREFERENCED_PARAMETER(status);
+            }
         }
 #endif
 
@@ -441,6 +470,156 @@ namespace net
 #endif
     }
 
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    WskSyncIrpContext* WskSyncAllocateIrpContext() noexcept
+    {
+        return AllocateNonPagedObject<WskSyncIrpContext>();
+    }
+
+    void WskSyncFreeIrpContext(_In_opt_ WskSyncIrpContext* context) noexcept
+    {
+        if (context == nullptr) {
+            return;
+        }
+
+        FreeNonPagedObject(context);
+    }
+
+    WskBuffer* WskSyncAllocateBufferObject() noexcept
+    {
+        return AllocateNonPagedObject<WskBuffer>();
+    }
+
+    void WskSyncFreeBufferObject(_In_opt_ WskBuffer* buffer) noexcept
+    {
+        if (buffer == nullptr) {
+            return;
+        }
+
+        FreeNonPagedObject(buffer);
+    }
+
+    void WskSyncTrackContextAllocated() noexcept
+    {
+        EnsureWskOutstandingContextEventInitialized();
+        const LONG count = InterlockedIncrement(&g_wskOutstandingContextCount);
+        if (count == 1) {
+            KeClearEvent(&g_wskOutstandingContextEvent);
+        }
+    }
+
+    void WskSyncTrackContextReleased() noexcept
+    {
+        const LONG count = InterlockedDecrement(&g_wskOutstandingContextCount);
+        if (count == 0) {
+            EnsureWskOutstandingContextEventInitialized();
+            KeSetEvent(&g_wskOutstandingContextEvent, IO_NO_INCREMENT, FALSE);
+        }
+        else if (count < 0) {
+            NT_ASSERT(false);
+            InterlockedExchange(&g_wskOutstandingContextCount, 0);
+            EnsureWskOutstandingContextEventInitialized();
+            KeSetEvent(&g_wskOutstandingContextEvent, IO_NO_INCREMENT, FALSE);
+        }
+    }
+
+    NTSTATUS WskSyncWaitForOutstandingContexts(ULONG timeoutMilliseconds) noexcept
+    {
+        EnsureWskOutstandingContextEventInitialized();
+
+        const LONG count = InterlockedCompareExchange(&g_wskOutstandingContextCount, 0, 0);
+        if (count == 0) {
+            return STATUS_SUCCESS;
+        }
+
+        kprintf("等待 WSK IRP context 完成: outstanding=%ld\r\n", static_cast<long>(count));
+
+        LARGE_INTEGER timeout = {};
+        LARGE_INTEGER* timeoutPointer = nullptr;
+        if (timeoutMilliseconds != 0xffffffffUL) {
+            timeout.QuadPart = -static_cast<LONGLONG>(timeoutMilliseconds) * 10000LL;
+            timeoutPointer = &timeout;
+        }
+
+        const NTSTATUS status = KeWaitForSingleObject(
+            &g_wskOutstandingContextEvent,
+            Executive,
+            KernelMode,
+            FALSE,
+            timeoutPointer);
+        if (NT_SUCCESS(status)) {
+            kprintf("WSK IRP context 已完成\r\n");
+        }
+        else {
+            const LONG remaining = InterlockedCompareExchange(&g_wskOutstandingContextCount, 0, 0);
+            kprintf("等待 WSK IRP context 失败: 0x%08X outstanding=%ld\r\n",
+                static_cast<ULONG>(status),
+                static_cast<long>(remaining));
+        }
+        return status;
+    }
+
+    void WskSyncTrackSocketOpened(_In_opt_ PWSK_SOCKET socket) noexcept
+    {
+        if (socket == nullptr) {
+            return;
+        }
+
+        g_wskLastOpenedSocket = socket;
+        const LONG count = InterlockedIncrement(&g_wskOpenSocketCount);
+        kprintf("WSK socket opened: socket=%p open=%ld\r\n", socket, static_cast<long>(count));
+    }
+
+    void WskSyncTrackSocketCloseStarted(_In_opt_ PWSK_SOCKET socket) noexcept
+    {
+        if (socket == nullptr) {
+            return;
+        }
+
+        g_wskLastCloseStartedSocket = socket;
+        const LONG pending = InterlockedIncrement(&g_wskClosePendingSocketCount);
+        kprintf("WSK socket close started: socket=%p pending=%ld\r\n", socket, static_cast<long>(pending));
+    }
+
+    void WskSyncTrackSocketClosed(_In_opt_ PWSK_SOCKET socket, NTSTATUS closeStatus) noexcept
+    {
+        if (socket == nullptr) {
+            return;
+        }
+
+        g_wskLastClosedSocket = socket;
+        g_wskLastSocketCloseStatus = closeStatus;
+        const LONG pending = InterlockedDecrement(&g_wskClosePendingSocketCount);
+        LONG open = InterlockedCompareExchange(&g_wskOpenSocketCount, 0, 0);
+        if (NT_SUCCESS(closeStatus) && open > 0) {
+            open = InterlockedDecrement(&g_wskOpenSocketCount);
+        }
+
+        kprintf(
+            "WSK socket close completed: socket=%p status=0x%08X open=%ld pending=%ld\r\n",
+            socket,
+            static_cast<ULONG>(closeStatus),
+            static_cast<long>(open),
+            static_cast<long>(pending));
+    }
+
+    void WskSyncLogOutstandingSockets() noexcept
+    {
+        const LONG open = InterlockedCompareExchange(&g_wskOpenSocketCount, 0, 0);
+        const LONG pending = InterlockedCompareExchange(&g_wskClosePendingSocketCount, 0, 0);
+        const LONG contexts = InterlockedCompareExchange(&g_wskOutstandingContextCount, 0, 0);
+        kprintf(
+            "WSK shutdown state: openSockets=%ld closePending=%ld irpContexts=%ld lastOpen=%p lastCloseStart=%p lastClosed=%p lastCloseStatus=0x%08X\r\n",
+            static_cast<long>(open),
+            static_cast<long>(pending),
+            static_cast<long>(contexts),
+            g_wskLastOpenedSocket,
+            g_wskLastCloseStartedSocket,
+            g_wskLastClosedSocket,
+            static_cast<ULONG>(g_wskLastSocketCloseStatus));
+    }
+#endif
+
     WskClient::WskClient() noexcept
     {
         clientNpi_.ClientContext = this;
@@ -515,16 +694,29 @@ namespace net
             return;
         }
 
+        if (providerCaptured_ || registered_) {
+            const NTSTATUS drainStatus = WskSyncWaitForOutstandingContexts(0xffffffffUL);
+            if (!NT_SUCCESS(drainStatus)) {
+                kprintf("WSK IRP context 收敛失败: 0x%08X\r\n", static_cast<ULONG>(drainStatus));
+                return;
+            }
+            WskSyncLogOutstandingSockets();
+        }
+
         if (providerCaptured_) {
+            kprintf("开始释放 WSK provider NPI\r\n");
             WskReleaseProviderNPI(&registration_);
             providerCaptured_ = false;
             RtlZeroMemory(&providerNpi_, sizeof(providerNpi_));
+            kprintf("WSK provider NPI 已释放\r\n");
         }
 
         if (registered_) {
+            kprintf("开始注销 WSK client\r\n");
             WskDeregister(&registration_);
             registered_ = false;
             RtlZeroMemory(&registration_, sizeof(registration_));
+            kprintf("WSK client 已注销\r\n");
         }
 
         ClearResolveCache();

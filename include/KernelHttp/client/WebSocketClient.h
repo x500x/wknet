@@ -163,7 +163,11 @@ namespace client
         NTSTATUS ReceiveRaw(
             _Out_writes_bytes_(length) void* data,
             SIZE_T length,
-            _Out_opt_ SIZE_T* bytesReceived = nullptr) noexcept;
+            _Out_opt_ SIZE_T* bytesReceived = nullptr,
+            ULONG timeoutMilliseconds = WskOperationTimeoutMilliseconds) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS WaitForPeerClose(_In_ const WebSocketIoBuffers& buffers) noexcept;
 
         _Must_inspect_result_
         NTSTATUS EnsureBufferedFrameCapacity(SIZE_T capacity) noexcept;

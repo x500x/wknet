@@ -179,6 +179,10 @@ namespace tls
             SIZE_T fragmentLength) noexcept;
 
         _Must_inspect_result_
+        NTSTATUS SendPendingTls13KeyUpdate(
+            _Inout_ core::ITransport& transport) noexcept;
+
+        _Must_inspect_result_
         NTSTATUS ReadRecord(
             _Inout_ core::ITransport& transport,
             _Out_ TlsMutablePlaintextRecord& record,
@@ -292,6 +296,7 @@ namespace tls
         UCHAR* inputBuffer_ = nullptr;
         UCHAR* outputBuffer_ = nullptr;
         UCHAR* tls13InnerPlaintextBuffer_ = nullptr;
+        UCHAR tls13KeyUpdateMessage_[TlsHandshakeHeaderLength + 1] = {};
         SIZE_T inputLength_ = 0;
         UCHAR* plaintextBuffer_ = nullptr;
         SIZE_T plaintextLength_ = 0;
@@ -306,6 +311,7 @@ namespace tls
         bool tls13RecordProtection_ = false;
         SIZE_T tls13RecordPaddingLength_ = 0;
         bool tls13PostHandshakeClientAuthAllowed_ = false;
+        volatile LONG tls13PeerRequestedKeyUpdate_ = 0;
         const TlsClientCredential* clientCredential_ = nullptr;
         Tls12SessionCache* tls12SessionCache_ = nullptr;
         Tls13SessionCache* tls13ExternalSessionCache_ = nullptr;

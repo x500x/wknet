@@ -27,7 +27,12 @@ namespace KernelHttp
 namespace engine
 {
     constexpr ULONG KhMaxConnectionPoolCapacity = 1024;
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
     volatile LONG g_activeHandleTableLock = 0;
+#else
+    FAST_MUTEX g_activeHandleTableLock = {};
+    volatile LONG g_activeHandleTableLockState = 0;
+#endif
     KhHandleHeader* g_activeSessions = nullptr;
     KhHandleHeader* g_activeWebSockets = nullptr;
 
@@ -55,6 +60,27 @@ namespace
         return reinterpret_cast<KhHandleHeader*>(websocket);
     }
 
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    void EnsureActiveHandleTableLockInitialized() noexcept
+    {
+        if (InterlockedCompareExchange(&g_activeHandleTableLockState, 0, 0) == 2) {
+            return;
+        }
+
+        if (InterlockedCompareExchange(&g_activeHandleTableLockState, 1, 0) == 0) {
+            ExInitializeFastMutex(&g_activeHandleTableLock);
+            InterlockedExchange(&g_activeHandleTableLockState, 2);
+            return;
+        }
+
+        LARGE_INTEGER delay = {};
+        delay.QuadPart = -10 * 1000;
+        while (InterlockedCompareExchange(&g_activeHandleTableLockState, 0, 0) != 2) {
+            KeDelayExecutionThread(KernelMode, FALSE, &delay);
+        }
+    }
+#endif
+
     void AcquireActiveHandleTableLock() noexcept
     {
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -62,8 +88,8 @@ namespace
         }
         g_activeHandleTableLock = 1;
 #else
-        while (InterlockedCompareExchange(&g_activeHandleTableLock, 1, 0) != 0) {
-        }
+        EnsureActiveHandleTableLockInitialized();
+        ExAcquireFastMutex(&g_activeHandleTableLock);
 #endif
     }
 
@@ -72,7 +98,7 @@ namespace
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         g_activeHandleTableLock = 0;
 #else
-        InterlockedExchange(&g_activeHandleTableLock, 0);
+        ExReleaseFastMutex(&g_activeHandleTableLock);
 #endif
     }
 
@@ -178,6 +204,30 @@ namespace
         ReleaseActiveHandleTableLock();
         return closed;
     }
+
+    _Ret_maybenull_
+    KH_WEBSOCKET FirstActiveWebSocketHandle() noexcept
+    {
+        KH_WEBSOCKET websocket = nullptr;
+        AcquireActiveHandleTableLock();
+        if (g_activeWebSockets != nullptr) {
+            websocket = reinterpret_cast<KH_WEBSOCKET>(g_activeWebSockets);
+        }
+        ReleaseActiveHandleTableLock();
+        return websocket;
+    }
+
+    _Ret_maybenull_
+    KH_SESSION FirstActiveSessionHandle() noexcept
+    {
+        KH_SESSION session = nullptr;
+        AcquireActiveHandleTableLock();
+        if (g_activeSessions != nullptr) {
+            session = reinterpret_cast<KH_SESSION>(g_activeSessions);
+        }
+        ReleaseActiveHandleTableLock();
+        return session;
+    }
 }
 
     bool IsPassiveLevel() noexcept
@@ -198,6 +248,16 @@ namespace
     {
         UNREFERENCED_PARAMETER(value);
         return true;
+    }
+
+    bool IsValidMaxResponseHeaders(SIZE_T value) noexcept
+    {
+        return value != 0 && value <= KhMaxConfigurableResponseHeaders;
+    }
+
+    bool IsValidHttp2MaxHeaderBlockBytes(SIZE_T value) noexcept
+    {
+        return value != 0 && value <= KhMaxHttp2HeaderBlockBytes;
     }
 
     bool IsValidMaxMessageBytes(SIZE_T value) noexcept
@@ -339,6 +399,14 @@ namespace
         }
 
         if (!IsValidMaxResponseBytes(options.MaxResponseBytes)) {
+            return false;
+        }
+
+        if (!IsValidMaxResponseHeaders(options.MaxResponseHeaders)) {
+            return false;
+        }
+
+        if (!IsValidHttp2MaxHeaderBlockBytes(options.Http2MaxHeaderBlockBytes)) {
             return false;
         }
 
@@ -1830,9 +1898,54 @@ namespace
             FreeHandle(session->ProviderCache);
             session->ProviderCache = nullptr;
         }
-        KhWorkspaceRelease(session->Workspace);
+        KhWorkspace* workspace = nullptr;
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        workspace = session->Workspace;
         session->Workspace = nullptr;
+#else
+        workspace = static_cast<KhWorkspace*>(InterlockedExchangePointer(
+            reinterpret_cast<PVOID volatile*>(&session->Workspace),
+            nullptr));
+#endif
+        KhWorkspaceRelease(workspace);
         FreeHandle(session);
+    }
+
+    void KhEngineCloseActiveHandles() noexcept
+    {
+        if (!NT_SUCCESS(CheckPassiveLevel())) {
+            return;
+        }
+
+        for (;;) {
+            KH_WEBSOCKET websocket = FirstActiveWebSocketHandle();
+            if (websocket == nullptr) {
+                break;
+            }
+
+            const NTSTATUS status = KhWebSocketCloseSyncImpl(websocket);
+            if (!NT_SUCCESS(status)) {
+                kprintf("卸载扫尾关闭 WebSocket 失败: 0x%08X\r\n", static_cast<ULONG>(status));
+                break;
+            }
+            if (FirstActiveWebSocketHandle() == websocket) {
+                kprintf("卸载扫尾关闭 WebSocket 未推进\r\n");
+                break;
+            }
+        }
+
+        for (;;) {
+            KH_SESSION session = FirstActiveSessionHandle();
+            if (session == nullptr) {
+                break;
+            }
+
+            KhSessionClose(session);
+            if (FirstActiveSessionHandle() == session) {
+                kprintf("卸载扫尾关闭 session 未推进\r\n");
+                break;
+            }
+        }
     }
 
     NTSTATUS KhHttpRequestCreate(KH_SESSION session, KH_REQUEST* request) noexcept

@@ -22,13 +22,20 @@ namespace
     volatile LONG g_asyncInFlight = 0;
 #else
     volatile LONG g_asyncInFlight = 0;
-    volatile LONG g_asyncDrainState = 0;
+    volatile LONG g_asyncRuntimeState = 0;
     KEVENT g_asyncDrainEvent = {};
-    constexpr ULONG KhMaxAsyncThreads = 256;
-    FAST_MUTEX g_asyncThreadTableLock = {};
-    volatile LONG g_asyncThreadTableLockState = 0;
-    PETHREAD g_asyncThreads[KhMaxAsyncThreads] = {};
-    bool g_asyncThreadReservations[KhMaxAsyncThreads] = {};
+    constexpr ULONG KhAsyncWorkerCount = 4;
+    constexpr ULONG KhMaxAsyncQueueDepth = 256;
+    FAST_MUTEX g_asyncQueueLock = {};
+    KSEMAPHORE g_asyncQueueSemaphore = {};
+    KEVENT g_asyncWorkersExitedEvent = {};
+    volatile LONG g_asyncQueueStopped = 0;
+    volatile LONG g_asyncQueueDepth = 0;
+    volatile LONG g_asyncWorkerExitCount = 0;
+    KhAsyncOperation* g_asyncQueueHead = nullptr;
+    KhAsyncOperation* g_asyncQueueTail = nullptr;
+    PETHREAD g_asyncWorkers[KhAsyncWorkerCount] = {};
+    KhAsyncOperation* g_asyncWorkerOperations[KhAsyncWorkerCount] = {};
 #endif
 
     _Ret_maybenull_
@@ -128,151 +135,327 @@ namespace
 #endif
     }
 
+    void CompleteOperation(_In_ KhAsyncOperation* operation, NTSTATUS status) noexcept;
+    NTSTATUS RunOperation(_In_ KhAsyncOperation* operation) noexcept;
+    void EndAsyncOperation() noexcept;
+
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
-    void EnsureAsyncThreadTableLockInitialized() noexcept
+    void AcquireAsyncQueueLock() noexcept
     {
-        if (InterlockedCompareExchange(&g_asyncThreadTableLockState, 0, 0) == 2) {
-            return;
-        }
-
-        if (InterlockedCompareExchange(&g_asyncThreadTableLockState, 1, 0) == 0) {
-            ExInitializeFastMutex(&g_asyncThreadTableLock);
-            InterlockedExchange(&g_asyncThreadTableLockState, 2);
-            return;
-        }
-
-        LARGE_INTEGER delay = {};
-        delay.QuadPart = -10 * 1000;
-        while (InterlockedCompareExchange(&g_asyncThreadTableLockState, 0, 0) != 2) {
-            KeDelayExecutionThread(KernelMode, FALSE, &delay);
-        }
+        ExAcquireFastMutex(&g_asyncQueueLock);
     }
 
-    void AcquireAsyncThreadTableLock() noexcept
+    void ReleaseAsyncQueueLock() noexcept
     {
-        EnsureAsyncThreadTableLockInitialized();
-        ExAcquireFastMutex(&g_asyncThreadTableLock);
+        ExReleaseFastMutex(&g_asyncQueueLock);
     }
 
-    void ReleaseAsyncThreadTableLock() noexcept
+    void UnlinkAllQueuedOperationsLocked(_Out_ KhAsyncOperation** head) noexcept
     {
-        ExReleaseFastMutex(&g_asyncThreadTableLock);
-    }
-
-    void ReclaimCompletedAsyncThreadsLocked() noexcept
-    {
-        LARGE_INTEGER zeroTimeout = {};
-        for (ULONG index = 0; index < KhMaxAsyncThreads; ++index) {
-            PETHREAD thread = g_asyncThreads[index];
-            if (thread != nullptr &&
-                KeWaitForSingleObject(thread, Executive, KernelMode, FALSE, &zeroTimeout) == STATUS_SUCCESS) {
-                g_asyncThreads[index] = nullptr;
-                ObDereferenceObject(thread);
-            }
+        if (head != nullptr) {
+            *head = g_asyncQueueHead;
         }
+        g_asyncQueueHead = nullptr;
+        g_asyncQueueTail = nullptr;
+        InterlockedExchange(&g_asyncQueueDepth, 0);
     }
 
     _Must_inspect_result_
-    NTSTATUS ReserveAsyncThreadSlot(_Out_ ULONG* slotIndex) noexcept
+    NTSTATUS EnqueueAsyncOperation(_In_ KhAsyncOperation* operation) noexcept
     {
-        if (slotIndex == nullptr) {
+        if (operation == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        *slotIndex = KhMaxAsyncThreads;
-        NTSTATUS status = STATUS_INSUFFICIENT_RESOURCES;
-        AcquireAsyncThreadTableLock();
-        ReclaimCompletedAsyncThreadsLocked();
-        for (ULONG index = 0; index < KhMaxAsyncThreads; ++index) {
-            if (g_asyncThreads[index] == nullptr && !g_asyncThreadReservations[index]) {
-                g_asyncThreadReservations[index] = true;
-                *slotIndex = index;
-                status = STATUS_SUCCESS;
-                break;
+        NTSTATUS status = STATUS_SUCCESS;
+        AcquireAsyncQueueLock();
+        if (InterlockedCompareExchange(&g_asyncQueueStopped, 0, 0) != 0) {
+            status = STATUS_DEVICE_NOT_READY;
+        }
+        else if (InterlockedCompareExchange(&g_asyncQueueDepth, 0, 0) >= static_cast<LONG>(KhMaxAsyncQueueDepth)) {
+            status = STATUS_INSUFFICIENT_RESOURCES;
+        }
+        else {
+            operation->QueueNext = nullptr;
+            if (g_asyncQueueTail != nullptr) {
+                g_asyncQueueTail->QueueNext = operation;
             }
+            else {
+                g_asyncQueueHead = operation;
+            }
+            g_asyncQueueTail = operation;
+            InterlockedIncrement(&g_asyncQueueDepth);
         }
-        ReleaseAsyncThreadTableLock();
-        return status;
-    }
+        ReleaseAsyncQueueLock();
 
-    void CancelAsyncThreadSlotReservation(ULONG slotIndex) noexcept
-    {
-        if (slotIndex >= KhMaxAsyncThreads) {
-            return;
+        if (NT_SUCCESS(status)) {
+            KeReleaseSemaphore(&g_asyncQueueSemaphore, IO_NO_INCREMENT, 1, FALSE);
         }
-
-        AcquireAsyncThreadTableLock();
-        g_asyncThreadReservations[slotIndex] = false;
-        ReleaseAsyncThreadTableLock();
-    }
-
-    _Must_inspect_result_
-    NTSTATUS CommitAsyncThreadSlot(ULONG slotIndex, _In_ PETHREAD thread) noexcept
-    {
-        if (slotIndex >= KhMaxAsyncThreads || thread == nullptr) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        NTSTATUS status = STATUS_INVALID_DEVICE_STATE;
-        AcquireAsyncThreadTableLock();
-        if (g_asyncThreadReservations[slotIndex] &&
-            g_asyncThreads[slotIndex] == nullptr) {
-            g_asyncThreads[slotIndex] = thread;
-            g_asyncThreadReservations[slotIndex] = false;
-            status = STATUS_SUCCESS;
-        }
-        ReleaseAsyncThreadTableLock();
         return status;
     }
 
     _Ret_maybenull_
-    PETHREAD TakeAsyncThreadForJoin() noexcept
+    KhAsyncOperation* DequeueAsyncOperation(ULONG workerIndex) noexcept
     {
-        PETHREAD thread = nullptr;
-        AcquireAsyncThreadTableLock();
-        for (ULONG index = 0; index < KhMaxAsyncThreads; ++index) {
-            if (g_asyncThreads[index] != nullptr) {
-                thread = g_asyncThreads[index];
-                g_asyncThreads[index] = nullptr;
-                break;
+        KhAsyncOperation* operation = nullptr;
+        AcquireAsyncQueueLock();
+        operation = g_asyncQueueHead;
+        if (operation != nullptr) {
+            g_asyncQueueHead = operation->QueueNext;
+            if (g_asyncQueueHead == nullptr) {
+                g_asyncQueueTail = nullptr;
+            }
+            operation->QueueNext = nullptr;
+            InterlockedDecrement(&g_asyncQueueDepth);
+            if (workerIndex < KhAsyncWorkerCount) {
+                g_asyncWorkerOperations[workerIndex] = operation;
             }
         }
-        ReleaseAsyncThreadTableLock();
-        return thread;
+        ReleaseAsyncQueueLock();
+        return operation;
     }
 
-    void EnsureAsyncDrainInitialized() noexcept
+    void CompleteQueuedOperationsForShutdown() noexcept
     {
-        if (InterlockedCompareExchange(&g_asyncDrainState, 0, 0) == 2) {
+        KhAsyncOperation* head = nullptr;
+        AcquireAsyncQueueLock();
+        UnlinkAllQueuedOperationsLocked(&head);
+        ReleaseAsyncQueueLock();
+
+        while (head != nullptr) {
+            KhAsyncOperation* operation = head;
+            head = head->QueueNext;
+            operation->QueueNext = nullptr;
+            CompleteOperation(operation, STATUS_CANCELLED);
+            ReleaseRef(operation);
+            EndAsyncOperation();
+        }
+    }
+
+    void ClearWorkerOperation(ULONG workerIndex) noexcept
+    {
+        if (workerIndex >= KhAsyncWorkerCount) {
             return;
         }
 
-        if (InterlockedCompareExchange(&g_asyncDrainState, 1, 0) == 0) {
+        AcquireAsyncQueueLock();
+        g_asyncWorkerOperations[workerIndex] = nullptr;
+        ReleaseAsyncQueueLock();
+    }
+
+    void CancelRunningOperationsForShutdown() noexcept
+    {
+        AcquireAsyncQueueLock();
+        for (ULONG index = 0; index < KhAsyncWorkerCount; ++index) {
+            KhAsyncOperation* operation = g_asyncWorkerOperations[index];
+            if (operation != nullptr) {
+                InterlockedExchange(&operation->Canceled, 1);
+            }
+        }
+        ReleaseAsyncQueueLock();
+    }
+
+    void WakeAsyncWorkers() noexcept
+    {
+        KeReleaseSemaphore(
+            &g_asyncQueueSemaphore,
+            IO_NO_INCREMENT,
+            static_cast<LONG>(KhAsyncWorkerCount),
+            FALSE);
+    }
+
+    NTSTATUS WaitForAsyncInFlightToDrain(_In_opt_ LARGE_INTEGER* timeout) noexcept
+    {
+        if (InterlockedCompareExchange(&g_asyncInFlight, 0, 0) == 0) {
+            return STATUS_SUCCESS;
+        }
+
+        const NTSTATUS status = KeWaitForSingleObject(
+            &g_asyncDrainEvent,
+            Executive,
+            KernelMode,
+            FALSE,
+            timeout);
+        if (status == STATUS_SUCCESS) {
+            return STATUS_SUCCESS;
+        }
+
+        return status == STATUS_TIMEOUT ? STATUS_IO_TIMEOUT : status;
+    }
+
+    NTSTATUS JoinReferencedAsyncWorkers(_In_opt_ LARGE_INTEGER* timeout) noexcept
+    {
+        for (ULONG index = 0; index < KhAsyncWorkerCount; ++index) {
+            PETHREAD thread = g_asyncWorkers[index];
+            if (thread == nullptr) {
+                continue;
+            }
+
+            const NTSTATUS status = KeWaitForSingleObject(
+                thread,
+                Executive,
+                KernelMode,
+                FALSE,
+                timeout);
+            if (status != STATUS_SUCCESS) {
+                return status == STATUS_TIMEOUT ? STATUS_IO_TIMEOUT : status;
+            }
+
+            ObDereferenceObject(thread);
+            g_asyncWorkers[index] = nullptr;
+        }
+
+        RtlZeroMemory(g_asyncWorkerOperations, sizeof(g_asyncWorkerOperations));
+        return STATUS_SUCCESS;
+    }
+
+    void AsyncWorkerRoutine(_In_ void* context)
+    {
+        const ULONG workerIndex = static_cast<ULONG>(reinterpret_cast<ULONG_PTR>(context));
+
+        for (;;) {
+            NTSTATUS waitStatus = KeWaitForSingleObject(
+                &g_asyncQueueSemaphore,
+                Executive,
+                KernelMode,
+                FALSE,
+                nullptr);
+            if (!NT_SUCCESS(waitStatus)) {
+                break;
+            }
+
+            KhAsyncOperation* operation = DequeueAsyncOperation(workerIndex);
+            if (operation == nullptr) {
+                if (InterlockedCompareExchange(&g_asyncQueueStopped, 0, 0) != 0) {
+                    break;
+                }
+                continue;
+            }
+
+            const NTSTATUS status = RunOperation(operation);
+            UNREFERENCED_PARAMETER(status);
+            ClearWorkerOperation(workerIndex);
+            ReleaseRef(operation);
+            EndAsyncOperation();
+        }
+
+        if (InterlockedIncrement(&g_asyncWorkerExitCount) == static_cast<LONG>(KhAsyncWorkerCount)) {
+            KeSetEvent(&g_asyncWorkersExitedEvent, IO_NO_INCREMENT, FALSE);
+        }
+
+        PsTerminateSystemThread(STATUS_SUCCESS);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS StartAsyncWorkers() noexcept
+    {
+        for (ULONG index = 0; index < KhAsyncWorkerCount; ++index) {
+            if (g_asyncWorkers[index] != nullptr) {
+                continue;
+            }
+
+            HANDLE threadHandle = nullptr;
+            NTSTATUS status = PsCreateSystemThread(
+                &threadHandle,
+                THREAD_ALL_ACCESS,
+                nullptr,
+                nullptr,
+                nullptr,
+                AsyncWorkerRoutine,
+                reinterpret_cast<void*>(static_cast<ULONG_PTR>(index)));
+            if (!NT_SUCCESS(status)) {
+                InterlockedExchange(&g_asyncQueueStopped, 1);
+                WakeAsyncWorkers();
+                return status;
+            }
+
+            PETHREAD threadObject = nullptr;
+            status = ObReferenceObjectByHandle(
+                threadHandle,
+                THREAD_ALL_ACCESS,
+                *PsThreadType,
+                KernelMode,
+                reinterpret_cast<PVOID*>(&threadObject),
+                nullptr);
+            if (!NT_SUCCESS(status)) {
+                InterlockedExchange(&g_asyncQueueStopped, 1);
+                WakeAsyncWorkers();
+                LARGE_INTEGER timeout = {};
+                timeout.QuadPart = -static_cast<LONGLONG>(WskOperationTimeoutMilliseconds) * 10000LL;
+                const NTSTATUS waitStatus = ZwWaitForSingleObject(threadHandle, FALSE, &timeout);
+                UNREFERENCED_PARAMETER(waitStatus);
+                ZwClose(threadHandle);
+                return status;
+            }
+
+            ZwClose(threadHandle);
+            g_asyncWorkers[index] = threadObject;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS EnsureAsyncRuntimeInitialized() noexcept
+    {
+        if (InterlockedCompareExchange(&g_asyncRuntimeState, 0, 0) == 2) {
+            return STATUS_SUCCESS;
+        }
+
+        if (InterlockedCompareExchange(&g_asyncRuntimeState, 1, 0) == 0) {
+            ExInitializeFastMutex(&g_asyncQueueLock);
+            KeInitializeSemaphore(
+                &g_asyncQueueSemaphore,
+                0,
+                static_cast<LONG>(KhMaxAsyncQueueDepth + KhAsyncWorkerCount));
             KeInitializeEvent(&g_asyncDrainEvent, NotificationEvent, TRUE);
-            InterlockedExchange(&g_asyncDrainState, 2);
-            return;
+            KeInitializeEvent(&g_asyncWorkersExitedEvent, NotificationEvent, FALSE);
+            InterlockedExchange(&g_asyncQueueStopped, 0);
+            InterlockedExchange(&g_asyncQueueDepth, 0);
+            InterlockedExchange(&g_asyncWorkerExitCount, 0);
+            g_asyncQueueHead = nullptr;
+            g_asyncQueueTail = nullptr;
+            RtlZeroMemory(g_asyncWorkers, sizeof(g_asyncWorkers));
+            RtlZeroMemory(g_asyncWorkerOperations, sizeof(g_asyncWorkerOperations));
+
+            NTSTATUS status = StartAsyncWorkers();
+            if (!NT_SUCCESS(status)) {
+                WakeAsyncWorkers();
+                LARGE_INTEGER timeout = {};
+                timeout.QuadPart = -static_cast<LONGLONG>(WskOperationTimeoutMilliseconds) * 10000LL;
+                const NTSTATUS joinStatus = JoinReferencedAsyncWorkers(&timeout);
+                UNREFERENCED_PARAMETER(joinStatus);
+                InterlockedExchange(&g_asyncRuntimeState, 3);
+                return status;
+            }
+
+            InterlockedExchange(&g_asyncRuntimeState, 2);
+            return STATUS_SUCCESS;
         }
 
         LARGE_INTEGER delay = {};
         delay.QuadPart = -10 * 1000;
-        while (InterlockedCompareExchange(&g_asyncDrainState, 0, 0) != 2) {
+        LONG state = InterlockedCompareExchange(&g_asyncRuntimeState, 0, 0);
+        while (state == 1) {
             KeDelayExecutionThread(KernelMode, FALSE, &delay);
+            state = InterlockedCompareExchange(&g_asyncRuntimeState, 0, 0);
         }
+
+        return state == 2 ? STATUS_SUCCESS : STATUS_DEVICE_NOT_READY;
     }
 #endif
 
-    void BeginAsyncThread() noexcept
+    void BeginAsyncOperation() noexcept
     {
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         ++g_asyncInFlight;
 #else
-        EnsureAsyncDrainInitialized();
         InterlockedIncrement(&g_asyncInFlight);
         KeClearEvent(&g_asyncDrainEvent);
 #endif
     }
 
-    void EndAsyncThread() noexcept
+    void EndAsyncOperation() noexcept
     {
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         if (g_asyncInFlight > 0) {
@@ -346,20 +529,6 @@ namespace
         return operation->Status;
     }
 
-#if !defined(KERNEL_HTTP_USER_MODE_TEST)
-    void AsyncThreadRoutine(_In_ void* context)
-    {
-        auto* operation = static_cast<KhAsyncOperation*>(context);
-        if (operation != nullptr) {
-            const NTSTATUS status = RunOperation(operation);
-            UNREFERENCED_PARAMETER(status);
-            ReleaseRef(operation);
-            EndAsyncThread();
-        }
-
-        PsTerminateSystemThread(STATUS_SUCCESS);
-    }
-#endif
 }
 
     NTSTATUS KhAsyncOperationCreate(
@@ -420,6 +589,17 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+            return STATUS_INVALID_DEVICE_REQUEST;
+        }
+
+        NTSTATUS status = EnsureAsyncRuntimeInitialized();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+#endif
+
         if (ReadState(operation) != KhAsyncState::Pending ||
             !TryExchangeFlag(&operation->Queued, 1, 0)) {
             return STATUS_INVALID_DEVICE_STATE;
@@ -438,62 +618,20 @@ namespace
         else {
             AddRef(operation);
             operation->TestWorkerReferenceHeld = true;
-            BeginAsyncThread();
+            BeginAsyncOperation();
         }
         return STATUS_SUCCESS;
 #else
-        ULONG threadSlot = KhMaxAsyncThreads;
-        NTSTATUS status = ReserveAsyncThreadSlot(&threadSlot);
-        if (!NT_SUCCESS(status)) {
-            InterlockedExchange(&operation->Queued, 0);
-            return status;
-        }
-
-        BeginAsyncThread();
         AddRef(operation);
-        HANDLE threadHandle = nullptr;
-        status = PsCreateSystemThread(
-            &threadHandle,
-            THREAD_ALL_ACCESS,
-            nullptr,
-            nullptr,
-            nullptr,
-            AsyncThreadRoutine,
-            operation);
+        BeginAsyncOperation();
+        status = EnqueueAsyncOperation(operation);
         if (!NT_SUCCESS(status)) {
+            EndAsyncOperation();
             ReleaseRef(operation);
-            EndAsyncThread();
-            CancelAsyncThreadSlotReservation(threadSlot);
             InterlockedExchange(&operation->Queued, 0);
             return status;
         }
 
-        PETHREAD threadObject = nullptr;
-        status = ObReferenceObjectByHandle(
-            threadHandle,
-            THREAD_ALL_ACCESS,
-            *PsThreadType,
-            KernelMode,
-            reinterpret_cast<PVOID*>(&threadObject),
-            nullptr);
-        if (!NT_SUCCESS(status)) {
-            const NTSTATUS waitStatus = ZwWaitForSingleObject(threadHandle, FALSE, nullptr);
-            UNREFERENCED_PARAMETER(waitStatus);
-            CancelAsyncThreadSlotReservation(threadSlot);
-            ZwClose(threadHandle);
-            return status;
-        }
-
-        status = CommitAsyncThreadSlot(threadSlot, threadObject);
-        if (!NT_SUCCESS(status)) {
-            KeWaitForSingleObject(threadObject, Executive, KernelMode, FALSE, nullptr);
-            ObDereferenceObject(threadObject);
-            CancelAsyncThreadSlotReservation(threadSlot);
-            ZwClose(threadHandle);
-            return status;
-        }
-
-        ZwClose(threadHandle);
         return STATUS_SUCCESS;
 #endif
     }
@@ -503,6 +641,12 @@ namespace
         if (!IsOpenOperation(operation)) {
             return STATUS_INVALID_PARAMETER;
         }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+            return STATUS_INVALID_DEVICE_REQUEST;
+        }
+#endif
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         operation->Canceled = 1;
@@ -523,6 +667,12 @@ namespace
         if (!IsOpenOperation(operation)) {
             return STATUS_INVALID_PARAMETER;
         }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+            return STATUS_INVALID_DEVICE_REQUEST;
+        }
+#endif
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         UNREFERENCED_PARAMETER(timeoutMilliseconds);
@@ -554,6 +704,12 @@ namespace
         if (!IsOpenOperation(operation)) {
             return;
         }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+            return;
+        }
+#endif
 
         if (!TryExchangeFlag(&operation->Closed, 1, 0)) {
             return;
@@ -621,32 +777,47 @@ namespace
             return STATUS_INVALID_DEVICE_REQUEST;
         }
 
-        EnsureAsyncDrainInitialized();
+        LONG state = InterlockedCompareExchange(&g_asyncRuntimeState, 0, 0);
+        while (state == 1) {
+            LARGE_INTEGER delay = {};
+            delay.QuadPart = -10 * 1000;
+            KeDelayExecutionThread(KernelMode, FALSE, &delay);
+            state = InterlockedCompareExchange(&g_asyncRuntimeState, 0, 0);
+        }
+
+        if (state == 0) {
+            return InterlockedCompareExchange(&g_asyncInFlight, 0, 0) == 0
+                ? STATUS_SUCCESS
+                : STATUS_IO_TIMEOUT;
+        }
+
+        if (state != 2) {
+            return InterlockedCompareExchange(&g_asyncInFlight, 0, 0) == 0
+                ? STATUS_SUCCESS
+                : STATUS_IO_TIMEOUT;
+        }
+
+        InterlockedExchange(&g_asyncQueueStopped, 1);
+        CompleteQueuedOperationsForShutdown();
+        CancelRunningOperationsForShutdown();
+        WakeAsyncWorkers();
 
         LARGE_INTEGER timeout = {};
         timeout.QuadPart = -static_cast<LONGLONG>(WskOperationTimeoutMilliseconds) * 10000LL;
-        while (InterlockedCompareExchange(&g_asyncInFlight, 0, 0) != 0) {
-            const NTSTATUS status = KeWaitForSingleObject(
-                &g_asyncDrainEvent,
-                Executive,
-                KernelMode,
-                FALSE,
-                &timeout);
-            if (status != STATUS_SUCCESS && status != STATUS_TIMEOUT) {
-                return status;
-            }
+        const NTSTATUS drainStatus = WaitForAsyncInFlightToDrain(&timeout);
+        if (!NT_SUCCESS(drainStatus)) {
+            return drainStatus;
         }
 
-        for (;;) {
-            PETHREAD thread = TakeAsyncThreadForJoin();
-            if (thread == nullptr) {
-                break;
-            }
-
-            KeWaitForSingleObject(thread, Executive, KernelMode, FALSE, nullptr);
-            ObDereferenceObject(thread);
+        const NTSTATUS joinStatus = JoinReferencedAsyncWorkers(&timeout);
+        if (!NT_SUCCESS(joinStatus)) {
+            return joinStatus;
         }
 
+        InterlockedExchange(&g_asyncRuntimeState, 3);
+        InterlockedExchange(&g_asyncQueueDepth, 0);
+        g_asyncQueueHead = nullptr;
+        g_asyncQueueTail = nullptr;
         return STATUS_SUCCESS;
 #endif
     }
@@ -668,7 +839,7 @@ namespace
         const NTSTATUS status = RunOperation(operation);
         if (releaseWorkerReference) {
             ReleaseRef(operation);
-            EndAsyncThread();
+            EndAsyncOperation();
         }
         return status;
     }

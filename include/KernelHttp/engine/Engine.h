@@ -37,6 +37,10 @@ namespace engine
 
     constexpr SIZE_T KhDefaultRequestBufferBytes = 16 * 1024;
     constexpr SIZE_T KhDefaultMaxResponseBytes = 1024 * 1024;
+    constexpr SIZE_T KhDefaultMaxResponseHeaders = 64;
+    constexpr SIZE_T KhMaxConfigurableResponseHeaders = 256;
+    constexpr SIZE_T KhDefaultHttp2MaxHeaderBlockBytes = 32 * 1024;
+    constexpr SIZE_T KhMaxHttp2HeaderBlockBytes = 256 * 1024;
     constexpr ULONG KhDefaultConnectionPoolCapacity = 8;
     constexpr ULONG KhDefaultConnectionsPerHost = 2;
     constexpr ULONG KhDefaultIdleTimeoutMilliseconds = 30000;
@@ -164,6 +168,8 @@ namespace engine
         SIZE_T RequestBufferBytes = KhDefaultRequestBufferBytes;
         // SIZE_T is unsigned; 0 means no response-size limit.
         SIZE_T MaxResponseBytes = KhDefaultMaxResponseBytes;
+        SIZE_T MaxResponseHeaders = KhDefaultMaxResponseHeaders;
+        SIZE_T Http2MaxHeaderBlockBytes = KhDefaultHttp2MaxHeaderBlockBytes;
         ULONG ConnectionPoolCapacity = KhDefaultConnectionPoolCapacity;
         ULONG MaxConnectionsPerHost = KhDefaultConnectionsPerHost;
         ULONG IdleTimeoutMilliseconds = KhDefaultIdleTimeoutMilliseconds;
@@ -496,6 +502,8 @@ namespace engine
 
     _Must_inspect_result_
     NTSTATUS KhEngineDrainAsync() noexcept;
+
+    void KhEngineCloseActiveHandles() noexcept;
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
     struct KhTestHttpTransportRequest final

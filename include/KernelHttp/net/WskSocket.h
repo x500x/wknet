@@ -7,6 +7,8 @@ namespace KernelHttp
 {
 namespace net
 {
+    struct WskSyncIrpContext;
+
     typedef bool (*WskCancellationCheck)(_In_opt_ void* context);
 
     struct WskCancellationToken final
@@ -17,6 +19,7 @@ namespace net
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
     using PWSK_SOCKET = void*;
+    using PIRP = void*;
 
     struct WSK_PROVIDER_CONNECTION_DISPATCH
     {
@@ -75,7 +78,11 @@ namespace net
     class WskSocket final
     {
     public:
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
         WskSocket() noexcept = default;
+#else
+        WskSocket() noexcept;
+#endif
 
         WskSocket(const WskSocket&) = delete;
         WskSocket& operator=(const WskSocket&) = delete;
@@ -151,10 +158,33 @@ namespace net
         NTSTATUS CloseAfterCancelledOperation(
             bool completionOwnedCleanup) noexcept;
 
+        _Must_inspect_result_
+        bool AcquireIoRundown() noexcept;
+
+        void ReleaseIoRundown() noexcept;
+
+        void WaitForIoRundown() noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS PrepareReusableIrp(
+            _Inout_ PIRP* reusableIrp,
+            _Outptr_ WskSyncIrpContext** context) noexcept;
+
+        void AbandonReusableIrp(_Inout_ PIRP* reusableIrp) noexcept;
+
+        void ReleaseReusableIrps() noexcept;
+
         PWSK_SOCKET socket_ = nullptr;
         const WSK_PROVIDER_CONNECTION_DISPATCH* dispatch_ = nullptr;
         OwnershipState ownershipState_ = OwnershipState::Closed;
         volatile LONG closeIssued_ = 0;
+        WskBuffer sendScratch_ = {};
+        WskBuffer receiveScratch_ = {};
+        PIRP sendIrp_ = nullptr;
+        PIRP receiveIrp_ = nullptr;
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        EX_RUNDOWN_REF ioRundown_ = {};
+#endif
     };
 }
 }
