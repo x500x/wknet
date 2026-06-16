@@ -481,9 +481,11 @@ namespace engine
 
     bool ShouldRetryWithFreshConnection(
         _In_ const KhRequest& request,
-        NTSTATUS status) noexcept
+        NTSTATUS status,
+        bool reusedConnection) noexcept
     {
         return !NT_SUCCESS(status) &&
+            reusedConnection &&
             request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate &&
             IsSafeFreshConnectionRetryMethod(request.Method) &&
             IsFreshConnectionRetryStatus(status);
@@ -3064,7 +3066,8 @@ namespace engine
             &connectionReusable,
             cancellationOperation);
 
-        const bool shouldRetryWithFreshConnection = ShouldRetryWithFreshConnection(request, status);
+        const bool shouldRetryWithFreshConnection =
+            ShouldRetryWithFreshConnection(request, status, reusedConnection);
 
         if (shouldRetryWithFreshConnection) {
             KhConnectionPoolClose(&session->ConnectionPool, pooledConnection);

@@ -1532,6 +1532,41 @@ namespace
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
+    void TestReusedHeadTimeoutRetriesWithFreshConnection() noexcept
+    {
+        ReusedFailureCapture capture = {};
+        capture.FailureStatus = STATUS_IO_TIMEOUT;
+        khttp::test::SetHttpTransport(ReusedFailureTransport, &capture);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for reused HEAD timeout retry");
+
+        const char* url = "http://example.com/retry-head-timeout";
+        khttp::Response* resp = nullptr;
+        status = khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "first pooled Get succeeds before HEAD timeout");
+        khttp::ResponseRelease(resp);
+        resp = nullptr;
+
+        status = khttp::Head(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "stale pooled HEAD timeout retries with fresh connection");
+        Expect(capture.CallCount == 3, "HEAD timeout sees seed, failed reuse, and fresh retry");
+        Expect(capture.ReusedCallCount == 1, "HEAD timeout attempts one stale pooled connection");
+        Expect(capture.NewConnectionCallCount == 2, "HEAD timeout retry opens a fresh connection");
+        Expect(capture.FirstConnectionId != 0, "HEAD timeout first connection id captured");
+        Expect(capture.RetryConnectionId != 0, "HEAD timeout retry connection id captured");
+        Expect(capture.RetryConnectionId != capture.FirstConnectionId, "HEAD timeout retry uses a different pool entry");
+        Expect(khttp::ResponseStatusCode(resp) == 200, "HEAD timeout retry status code is 200");
+
+        khttp::ResponseRelease(resp);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
     void TestReusedConnectionPostFailureDoesNotRetry() noexcept
     {
         ReusedFailureCapture capture = {};
@@ -2473,7 +2508,7 @@ namespace
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
-    void TestFreshSafeConnectionTimeoutRetriesWithFreshConnection() noexcept
+    void TestFreshSafeConnectionTimeoutDoesNotRetry() noexcept
     {
         FreshTimeoutCapture capture = {};
         khttp::test::SetHttpTransport(FreshTimeoutTransport, &capture);
@@ -2488,14 +2523,13 @@ namespace
         const char* url = "http://example.com/fresh-timeout";
         khttp::Response* resp = nullptr;
         status = khttp::Get(session, url, Length(url), &resp);
-        Expect(NT_SUCCESS(status), "fresh GET timeout retries with a new connection");
-        Expect(capture.CallCount == 2, "fresh timeout retry makes two transport calls");
-        Expect(capture.ReusedCallCount == 0, "fresh timeout retry does not reuse a stale connection");
-        Expect(capture.NewConnectionCallCount == 2, "fresh timeout retry opens two connections");
+        Expect(status == STATUS_IO_TIMEOUT, "fresh GET timeout is returned without stale-pool retry");
+        Expect(capture.CallCount == 1, "fresh timeout makes one transport call");
+        Expect(capture.ReusedCallCount == 0, "fresh timeout does not reuse a stale connection");
+        Expect(capture.NewConnectionCallCount == 1, "fresh timeout opens one connection");
         Expect(capture.FirstConnectionId != 0, "fresh timeout first connection id captured");
-        Expect(capture.RetryConnectionId != 0, "fresh timeout retry connection id captured");
-        Expect(capture.RetryConnectionId != capture.FirstConnectionId, "fresh timeout retry uses a different connection id");
-        Expect(khttp::ResponseStatusCode(resp) == 200, "fresh timeout retry response status is 200");
+        Expect(capture.RetryConnectionId == 0, "fresh timeout has no retry connection id");
+        Expect(resp == nullptr, "fresh timeout does not allocate a response");
 
         khttp::ResponseRelease(resp);
         khttp::SessionClose(session);
@@ -3965,6 +3999,7 @@ int main() noexcept
     TestUrlRequestTargetAndHostSemantics();
     TestReusedConnectionFailureRetriesWithFreshConnection();
     TestSilentClosedPooledConnectionReconnectsWhenCalled();
+    TestReusedHeadTimeoutRetriesWithFreshConnection();
     TestReusedConnectionPostFailureDoesNotRetry();
     TestReusedConnectionPostRetrySignalDoesNotReplay();
     TestConnectionPoolHonorsMaxConnectionsPerHost();
@@ -3978,7 +4013,7 @@ int main() noexcept
     TestCloseDelimitedResponseDoesNotEnterPool();
     TestHttp10ConnectionReuseRules();
     TestSwitchingProtocolsDoesNotEnterHttpPool();
-    TestFreshSafeConnectionTimeoutRetriesWithFreshConnection();
+    TestFreshSafeConnectionTimeoutDoesNotRetry();
     TestFreshPostTimeoutDoesNotRetry();
     TestPostWithBody();
     TestChunkedRequestBody();
