@@ -794,9 +794,6 @@ namespace net
                 ownershipState_ = OwnershipState::Active;
                 InterlockedExchange(&closeIssued_, 0);
                 WskSyncTrackSocketOpened(socket_);
-#if !defined(KERNEL_HTTP_USER_MODE_TEST)
-                ExInitializeRundownProtection(&ioRundown_);
-#endif
             }
         }
 
@@ -858,7 +855,6 @@ namespace net
             return STATUS_DEVICE_NOT_READY;
         }
         status = dispatch_->WskSend(socket_, operationBuffer->WskBuf(), flags, context->Irp);
-        ReleaseIoRundown();
         status = WskSyncCompleteIrp(
             status,
             context,
@@ -866,6 +862,7 @@ namespace net
             &information,
             cancellation,
             &completion);
+        ReleaseIoRundown();
         if (status == STATUS_IO_TIMEOUT || status == STATUS_CANCELLED) {
             if (completion.CompletionOwnedCleanup) {
                 AbandonReusableIrp(&sendIrp_);
@@ -970,7 +967,6 @@ namespace net
             return STATUS_DEVICE_NOT_READY;
         }
         status = dispatch_->WskReceive(socket_, operationBuffer->WskBuf(), flags, context->Irp);
-        ReleaseIoRundown();
         status = WskSyncCompleteIrp(
             status,
             context,
@@ -978,6 +974,7 @@ namespace net
             &information,
             cancellation,
             &completion);
+        ReleaseIoRundown();
         if (status == STATUS_IO_TIMEOUT || status == STATUS_CANCELLED) {
             if (completion.CompletionOwnedCleanup) {
                 AbandonReusableIrp(&receiveIrp_);
@@ -1096,7 +1093,6 @@ namespace net
             return STATUS_DEVICE_NOT_READY;
         }
         status = dispatch_->WskDisconnect(socket_, nullptr, flags, context->Irp);
-        ReleaseIoRundown();
         WskSyncCompletionResult completion = {};
         status = WskSyncCompleteIrp(
             status,
@@ -1105,6 +1101,7 @@ namespace net
             nullptr,
             nullptr,
             &completion);
+        ReleaseIoRundown();
         if (status == STATUS_IO_TIMEOUT) {
             const NTSTATUS closeStatus = CloseAfterCancelledOperation(completion.CompletionOwnedCleanup);
             if (!NT_SUCCESS(closeStatus)) {

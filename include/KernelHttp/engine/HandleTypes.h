@@ -49,7 +49,6 @@ namespace engine
         KhConnectionPool ConnectionPool = {};
         volatile LONG InFlight = 0;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
-        FAST_MUTEX OperationLock = {};
         KEVENT DrainEvent = {};
 #endif
     };
@@ -93,6 +92,10 @@ namespace engine
         bool HasTlsOverride = false;
         KhConnectionPolicy ConnectionPolicy = KhConnectionPolicy::ReuseOrCreate;
         KhAddressFamily AddressFamily = KhAddressFamily::Any;
+        volatile LONG InFlight = 0;
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        KEVENT DrainEvent = {};
+#endif
     };
 
     struct KhResponse
@@ -115,6 +118,10 @@ namespace engine
         SIZE_T TrailerNameStorageLength = 0;
         char* TrailerValueStorage = nullptr;
         SIZE_T TrailerValueStorageLength = 0;
+        volatile LONG InFlight = 0;
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        KEVENT DrainEvent = {};
+#endif
     };
 
     struct KhWebSocket
@@ -148,7 +155,6 @@ namespace engine
         UCHAR SendTextUtf8Expected = 0;
         volatile LONG InFlight = 0;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
-        FAST_MUTEX OperationLock = {};
         KMUTEX SendLock = {};
         KMUTEX ReceiveLock = {};
         KEVENT DrainEvent = {};

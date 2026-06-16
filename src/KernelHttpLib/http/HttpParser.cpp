@@ -1,5 +1,6 @@
 #include <KernelHttp/http/HttpParser.h>
 
+#include <KernelHttp/KernelHttpConfig.h>
 #include <KernelHttp/http/HttpContentEncoding.h>
 #include <KernelHttp/http/HttpTransferCoding.h>
 
@@ -39,6 +40,20 @@ namespace http
         bool IsOptionalWhitespace(char value) noexcept
         {
             return value == ' ' || value == '\t';
+        }
+
+        bool ContainsChar(const char* text, SIZE_T textLength, char needle) noexcept
+        {
+            if (text == nullptr) {
+                return false;
+            }
+
+            for (SIZE_T index = 0; index < textLength; ++index) {
+                if (text[index] == needle) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         bool IsTchar(char value) noexcept
@@ -514,10 +529,16 @@ namespace http
 
             *headerCount = 0;
             SIZE_T cursor = headerStart;
+            if (headerEnd < headerStart || headerEnd - headerStart > KhHttpMaxHeaderBytes) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
 
             while (cursor < headerEnd - 2) {
                 const SIZE_T lineEnd = FindCrlf(data, dataLength, cursor);
                 if (lineEnd == InvalidOffset || lineEnd > headerEnd) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                if (lineEnd - cursor > KhHttpMaxHeaderLineBytes) {
                     return STATUS_INVALID_NETWORK_RESPONSE;
                 }
 
@@ -527,41 +548,7 @@ namespace http
                 }
 
                 if (data[cursor] == ' ' || data[cursor] == '\t') {
-                    if (*headerCount == 0 || headers == nullptr) {
-                        return STATUS_INVALID_NETWORK_RESPONSE;
-                    }
-
-                    SIZE_T foldStart = cursor;
-                    while (foldStart < lineEnd && IsOptionalWhitespace(data[foldStart])) {
-                        ++foldStart;
-                    }
-
-                    HttpHeader& previous = headers[*headerCount - 1];
-                    const SIZE_T valueStart =
-                        static_cast<SIZE_T>(previous.Value.Data - data);
-                    SIZE_T valueEnd = valueStart + previous.Value.Length;
-                    if (valueStart > dataLength ||
-                        valueEnd > dataLength ||
-                        valueEnd >= foldStart) {
-                        return STATUS_INVALID_NETWORK_RESPONSE;
-                    }
-
-                    char* mutableData = const_cast<char*>(data);
-                    mutableData[valueEnd] = ' ';
-                    ++valueEnd;
-
-                    const SIZE_T foldLength = lineEnd - foldStart;
-                    if (foldLength != 0) {
-                        RtlMoveMemory(mutableData + valueEnd, data + foldStart, foldLength);
-                    }
-
-                    previous.Value.Length = valueEnd - valueStart + foldLength;
-                    if (!IsValidHeaderValue(previous.Value)) {
-                        return STATUS_INVALID_NETWORK_RESPONSE;
-                    }
-
-                    cursor = lineEnd + 2;
-                    continue;
+                    return STATUS_INVALID_NETWORK_RESPONSE;
                 }
 
                 SIZE_T colon = InvalidOffset;
@@ -576,7 +563,9 @@ namespace http
                     return STATUS_INVALID_NETWORK_RESPONSE;
                 }
 
-                if (*headerCount >= headerCapacity || headers == nullptr) {
+                if (*headerCount >= KhHttpMaxHeaders ||
+                    *headerCount >= headerCapacity ||
+                    headers == nullptr) {
                     return STATUS_BUFFER_TOO_SMALL;
                 }
 
@@ -612,51 +601,20 @@ namespace http
                     continue;
                 }
 
-                bool headerFound = false;
                 SIZE_T parsed = 0;
-                SIZE_T cursor = 0;
-                while (cursor <= response.Headers[index].Value.Length) {
-                    const SIZE_T memberStart = cursor;
-                    while (cursor < response.Headers[index].Value.Length &&
-                        response.Headers[index].Value.Data[cursor] != ',') {
-                        ++cursor;
-                    }
-
-                    HttpText member = {
-                        response.Headers[index].Value.Data + memberStart,
-                        cursor - memberStart
-                    };
-                    member = TrimOptionalWhitespace(member);
-                    if (member.Length == 0) {
-                        return STATUS_INVALID_NETWORK_RESPONSE;
-                    }
-
-                    SIZE_T memberValue = 0;
-                    NTSTATUS status = ParseSize(member, &memberValue);
-                    if (!NT_SUCCESS(status)) {
-                        return status;
-                    }
-
-                    if (headerFound && memberValue != parsed) {
-                        return STATUS_INVALID_NETWORK_RESPONSE;
-                    }
-
-                    headerFound = true;
-                    parsed = memberValue;
-
-                    if (cursor == response.Headers[index].Value.Length) {
-                        break;
-                    }
-
-                    ++cursor;
-                }
-
-                if (!headerFound) {
+                HttpText value = TrimOptionalWhitespace(response.Headers[index].Value);
+                if (value.Length == 0 ||
+                    ContainsChar(value.Data, value.Length, ',')) {
                     return STATUS_INVALID_NETWORK_RESPONSE;
                 }
 
-                if (*found && parsed != *contentLength) {
+                if (*found) {
                     return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
+                NTSTATUS status = ParseSize(value, &parsed);
+                if (!NT_SUCCESS(status)) {
+                    return status;
                 }
 
                 *found = true;
@@ -751,6 +709,10 @@ namespace http
         const SIZE_T headerEnd = FindHeaderEnd(data, dataLength);
         if (headerEnd == InvalidOffset) {
             return STATUS_MORE_PROCESSING_REQUIRED;
+        }
+        if (headerEnd > KhHttpMaxHeaderBytes) {
+            response = {};
+            return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
         const SIZE_T statusLineEnd = FindCrlf(data, dataLength, 0);
@@ -929,11 +891,15 @@ namespace http
         }
 
         SIZE_T cursor = 0;
+        SIZE_T chunkCount = 0;
 
         for (;;) {
             const SIZE_T chunkLineEnd = FindCrlf(data, dataLength, cursor);
             if (chunkLineEnd == InvalidOffset) {
                 return STATUS_MORE_PROCESSING_REQUIRED;
+            }
+            if (chunkLineEnd - cursor > KhHttpMaxChunkSizeLineBytes) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
             SIZE_T chunkSizeEnd = chunkLineEnd;
@@ -974,6 +940,9 @@ namespace http
                     if (trailerLineEnd == InvalidOffset) {
                         return STATUS_MORE_PROCESSING_REQUIRED;
                     }
+                    if (trailerLineEnd - cursor > KhHttpMaxHeaderLineBytes) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
 
                     if (trailerLineEnd == cursor) {
                         *bytesConsumed = cursor + 2;
@@ -981,6 +950,9 @@ namespace http
                     }
 
                     HttpHeader* targetTrailer = nullptr;
+                    if (*trailerCount >= KhHttpMaxTrailers) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
                     if (trailers != nullptr) {
                         if (*trailerCount >= trailerCapacity) {
                             return STATUS_BUFFER_TOO_SMALL;
@@ -1000,6 +972,10 @@ namespace http
                     ++(*trailerCount);
                     cursor = trailerLineEnd + 2;
                 }
+            }
+
+            if (++chunkCount > KhHttpMaxChunks) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
             if (chunkSize > (dataLength - cursor)) {

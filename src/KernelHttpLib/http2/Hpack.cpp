@@ -181,6 +181,14 @@ namespace http2
 
         constexpr SIZE_T MaxSizeT = ~static_cast<SIZE_T>(0);
 
+        SIZE_T DynamicTableDataCapacityLimit(SIZE_T maxSize) noexcept
+        {
+            if (maxSize > (MaxSizeT - 1024) / 2) {
+                return MaxSizeT;
+            }
+            return (maxSize * 2) + 1024;
+        }
+
         _Must_inspect_result_
         bool AddHeaderListSize(
             SIZE_T nameLength,
@@ -350,9 +358,13 @@ namespace http2
         }
 
         ULONG m = 0;
+        SIZE_T continuationBytes = 0;
         for (;;) {
             if (offset >= length) {
                 return STATUS_MORE_PROCESSING_REQUIRED;
+            }
+            if (++continuationBytes > 5) {
+                return STATUS_INTEGER_OVERFLOW;
             }
 
             UCHAR b = src[offset++];
@@ -531,8 +543,7 @@ namespace http2
         maxSize_ = maxSize;
         if (maxSize == 0) return STATUS_SUCCESS;
 
-        // Allocate data buffer - generous initial size
-        dataCapacity_ = maxSize * 2;
+        dataCapacity_ = DynamicTableDataCapacityLimit(maxSize);
         if (dataCapacity_ < 1024) dataCapacity_ = 1024;
 
         dataBuffer_ = AllocateNonPagedArray<UCHAR>(dataCapacity_);
@@ -581,6 +592,11 @@ namespace http2
         const UCHAR* name, SIZE_T nameLen,
         const UCHAR* value, SIZE_T valueLen) noexcept
     {
+        if (nameLen > MaxSizeT - valueLen ||
+            nameLen + valueLen > MaxSizeT - HpackEntryOverhead) {
+            return STATUS_INTEGER_OVERFLOW;
+        }
+
         SIZE_T entrySize = nameLen + valueLen + HpackEntryOverhead;
 
         // If entry is larger than max table size, clear the table
@@ -599,6 +615,10 @@ namespace http2
 
         // Ensure data buffer has space
         SIZE_T dataNeeded = nameLen + valueLen;
+        const SIZE_T dataCapacityLimit = DynamicTableDataCapacityLimit(maxSize_);
+        if (dataNeeded > dataCapacityLimit) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
         if (dataUsed_ + dataNeeded > dataCapacity_) {
             const bool nameFromTable = PointerInRange(name, dataBuffer_, dataUsed_);
             const bool valueFromTable = PointerInRange(value, dataBuffer_, dataUsed_);
@@ -625,6 +645,12 @@ namespace http2
             SIZE_T newCapacity = dataCapacity_ * 2;
             if (newCapacity < dataUsed_ + dataNeeded + 1024) {
                 newCapacity = dataUsed_ + dataNeeded + 1024;
+            }
+            if (newCapacity > dataCapacityLimit) {
+                newCapacity = dataCapacityLimit;
+            }
+            if (dataUsed_ + dataNeeded > newCapacity) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
             }
             UCHAR* newBuffer = AllocateNonPagedArray<UCHAR>(newCapacity);
             if (newBuffer == nullptr) return STATUS_INSUFFICIENT_RESOURCES;
@@ -745,30 +771,10 @@ namespace http2
         }
 
         SIZE_T writeOffset = 0;
-        SIZE_T previousStart = 0;
-        bool havePreviousStart = false;
-
-        for (SIZE_T processed = 0; processed < entryCount_; ++processed) {
-            Entry* candidate = nullptr;
-            SIZE_T candidateStart = MaxSizeT;
-
-            for (SIZE_T i = 0; i < entryCount_; ++i) {
-                Entry& entry = entries_[(entryHead_ + i) % entryCapacity_];
-                const SIZE_T start = entry.NameOffset;
-                if (havePreviousStart && start <= previousStart) {
-                    continue;
-                }
-                if (start < candidateStart) {
-                    candidateStart = start;
-                    candidate = &entry;
-                }
-            }
-
-            if (candidate == nullptr) {
-                return;
-            }
-
-            const SIZE_T totalLength = candidate->NameLength + candidate->ValueLength;
+        for (SIZE_T remaining = entryCount_; remaining > 0; --remaining) {
+            Entry& entry = entries_[(entryHead_ + remaining - 1) % entryCapacity_];
+            const SIZE_T candidateStart = entry.NameOffset;
+            const SIZE_T totalLength = entry.NameLength + entry.ValueLength;
             if (totalLength != 0) {
                 MemMove(dataBuffer_ + writeOffset, dataBuffer_ + candidateStart, totalLength);
             }
@@ -782,11 +788,9 @@ namespace http2
                 *secondOffset < candidateStart + totalLength) {
                 *secondOffset = writeOffset + (*secondOffset - candidateStart);
             }
-            candidate->NameOffset = writeOffset;
-            candidate->ValueOffset = writeOffset + candidate->NameLength;
+            entry.NameOffset = writeOffset;
+            entry.ValueOffset = writeOffset + entry.NameLength;
             writeOffset += totalLength;
-            previousStart = candidateStart;
-            havePreviousStart = true;
         }
 
         dataUsed_ = writeOffset;

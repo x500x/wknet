@@ -11,7 +11,7 @@ namespace net
 {
     constexpr ULONG WskCancelCompletionTimeoutMilliseconds = 60000;
     constexpr ULONG WskCancellationPollMilliseconds = 50;
-    static volatile LONG g_wskAbandonedIrpCount = 0;
+    extern volatile LONG g_wskAbandonedIrpCount;
 
     typedef void (*WskSyncCleanupRoutine)(_In_opt_ void* context);
     typedef void (*WskSyncCompletionCleanupRoutine)(
@@ -92,6 +92,11 @@ namespace net
             InterlockedCompareExchange(&context->CompletionOwnedCleanup, 0, 0) != 0;
 
         if (completionOwnedCleanup && context->CompletionCleanupRoutine != nullptr) {
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+            NT_ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+#endif
+            // Completion-owned cleanup can run in an I/O completion context.
+            // Handlers installed here must remain DISPATCH-safe.
             context->CompletionCleanupRoutine(
                 context->CompletionCleanupContext,
                 context->Status,

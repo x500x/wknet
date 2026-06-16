@@ -1658,6 +1658,32 @@ namespace crypto
             return STATUS_INVALID_PARAMETER;
         }
 
+        SIZE_T modulusOffset = 0;
+        while (modulusOffset < modulusLength && modulus[modulusOffset] == 0) {
+            ++modulusOffset;
+        }
+        if (modulusOffset == modulusLength) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const UCHAR* normalizedModulus = modulus + modulusOffset;
+        const SIZE_T normalizedModulusLength = modulusLength - modulusOffset;
+        const SIZE_T modulusBits = normalizedModulusLength * 8;
+        if (modulusBits < KhMinRsaModulusBits || normalizedModulusLength > MAXULONG) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        ULONG exponentValue = 0;
+        for (SIZE_T index = 0; index < exponentLength; ++index) {
+            if (exponentValue > ((MAXULONG - exponent[index]) / 256)) {
+                return STATUS_NOT_SUPPORTED;
+            }
+            exponentValue = (exponentValue * 256) + exponent[index];
+        }
+        if (exponentValue < 3 || (exponentValue & 1UL) == 0) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
         HeapObject<CngAlgorithmProvider> provider;
         if (!provider.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -1678,7 +1704,7 @@ namespace crypto
             providerToUse = provider.Get();
         }
 
-        const SIZE_T blobLength = sizeof(BCRYPT_RSAKEY_BLOB) + exponentLength + modulusLength;
+        const SIZE_T blobLength = sizeof(BCRYPT_RSAKEY_BLOB) + exponentLength + normalizedModulusLength;
         if (blobLength > MAXULONG) {
             return STATUS_INTEGER_OVERFLOW;
         }
@@ -1690,14 +1716,17 @@ namespace crypto
 
         auto* header = reinterpret_cast<BCRYPT_RSAKEY_BLOB*>(blob);
         header->Magic = BCRYPT_RSAPUBLIC_MAGIC;
-        header->BitLength = static_cast<ULONG>(modulusLength * 8);
+        header->BitLength = static_cast<ULONG>(modulusBits);
         header->cbPublicExp = static_cast<ULONG>(exponentLength);
-        header->cbModulus = static_cast<ULONG>(modulusLength);
+        header->cbModulus = static_cast<ULONG>(normalizedModulusLength);
         header->cbPrime1 = 0;
         header->cbPrime2 = 0;
 
         RtlCopyMemory(blob + sizeof(BCRYPT_RSAKEY_BLOB), exponent, exponentLength);
-        RtlCopyMemory(blob + sizeof(BCRYPT_RSAKEY_BLOB) + exponentLength, modulus, modulusLength);
+        RtlCopyMemory(
+            blob + sizeof(BCRYPT_RSAKEY_BLOB) + exponentLength,
+            normalizedModulus,
+            normalizedModulusLength);
 
         status = publicKey.ImportPublicKey(*providerToUse, BCRYPT_RSAPUBLIC_BLOB, blob, blobLength);
         RtlSecureZeroMemory(blob, blobLength);
@@ -1733,6 +1762,29 @@ namespace crypto
             cache->MarkProviderUsed();
         }
 
+        ULONG keyBits = 0;
+        ULONG propertyLength = 0;
+        status = BCryptGetProperty(
+            privateKey.Handle(),
+            BCRYPT_KEY_LENGTH,
+            reinterpret_cast<PUCHAR>(&keyBits),
+            sizeof(keyBits),
+            &propertyLength,
+            0);
+        if (!NT_SUCCESS(status) || keyBits == 0) {
+            return NT_SUCCESS(status) ? STATUS_INVALID_PARAMETER : status;
+        }
+
+        const SIZE_T expectedLength = (static_cast<SIZE_T>(keyBits) + 7) / 8;
+        if (expectedLength == 0 || expectedLength > secretLength || expectedLength > MAXULONG) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        HeapArray<UCHAR> rawSecret(expectedLength);
+        if (!rawSecret.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
         BCRYPT_SECRET_HANDLE agreement = nullptr;
         status = BCryptSecretAgreement(privateKey.Handle(), peerPublicKey.Handle(), &agreement, 0);
         if (!NT_SUCCESS(status)) {
@@ -1744,8 +1796,8 @@ namespace crypto
             agreement,
             BCRYPT_KDF_RAW_SECRET,
             nullptr,
-            secret,
-            static_cast<ULONG>(secretLength),
+            rawSecret.Get(),
+            static_cast<ULONG>(rawSecret.Count()),
             &resultLength,
             0);
 
@@ -1754,17 +1806,22 @@ namespace crypto
         if (!NT_SUCCESS(status)) {
             return status;
         }
-
-        // BCRYPT_KDF_RAW_SECRET returns the shared secret in little-endian byte order.
-        // TLS requires big-endian (network byte order), so reverse the bytes in-place.
-        for (ULONG i = 0; i < resultLength / 2; ++i) {
-            const UCHAR temp = secret[i];
-            secret[i] = secret[resultLength - 1 - i];
-            secret[resultLength - 1 - i] = temp;
+        if (resultLength > expectedLength) {
+            RtlSecureZeroMemory(rawSecret.Get(), rawSecret.Count());
+            return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
+        const SIZE_T leadingZeroes = expectedLength - resultLength;
+        if (leadingZeroes != 0) {
+            RtlZeroMemory(secret, leadingZeroes);
+        }
+        for (SIZE_T index = 0; index < resultLength; ++index) {
+            secret[leadingZeroes + index] = rawSecret[resultLength - 1 - index];
+        }
+        RtlSecureZeroMemory(rawSecret.Get(), rawSecret.Count());
+
         if (bytesWritten != nullptr) {
-            *bytesWritten = resultLength;
+            *bytesWritten = expectedLength;
         }
 
         return status;

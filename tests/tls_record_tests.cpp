@@ -6033,6 +6033,116 @@ namespace
         Expect(status == STATUS_SUCCESS, "Finished verify data validates");
     }
 
+    void TestTls12NewSessionTicketAffectsServerFinishedTranscript()
+    {
+        TlsContext context;
+        NTSTATUS status = context.InitializeClient({ 3, 3 });
+        Expect(status == STATUS_SUCCESS, "TLS context initializes for NewSessionTicket transcript");
+
+        UCHAR serverRandom[32] = {};
+        for (SIZE_T index = 0; index < sizeof(serverRandom); ++index) {
+            serverRandom[index] = static_cast<UCHAR>(0x40 + index);
+        }
+
+        status = context.SetServerRandom(serverRandom);
+        Expect(status == STATUS_SUCCESS, "server random sets for NewSessionTicket transcript");
+
+        const UCHAR premaster[] = {
+            0x03, 0x03, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
+            0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d
+        };
+        status = context.DeriveMasterSecret(premaster, sizeof(premaster));
+        Expect(status == STATUS_SUCCESS, "master secret derives for NewSessionTicket transcript");
+
+        const UCHAR clientHello[] = { 1, 0, 0, 1, 0xa1 };
+        const UCHAR serverHello[] = { 2, 0, 0, 1, 0xb2 };
+        const UCHAR clientFinished[] = {
+            20, 0, 0, 12,
+            0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5,
+            0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xcb
+        };
+        const UCHAR newSessionTicket[] = {
+            4, 0, 0, 10,
+            0, 0, 0, 60,
+            0, 4,
+            0xd0, 0xd1, 0xd2, 0xd3
+        };
+
+        TlsTranscriptHash fullTranscript;
+        status = fullTranscript.Initialize(HashAlgorithm::Sha256);
+        Expect(status == STATUS_SUCCESS, "full transcript initializes");
+        status = fullTranscript.Update(clientHello, sizeof(clientHello));
+        if (NT_SUCCESS(status)) {
+            status = fullTranscript.Update(serverHello, sizeof(serverHello));
+        }
+        if (NT_SUCCESS(status)) {
+            status = fullTranscript.Update(clientFinished, sizeof(clientFinished));
+        }
+        if (NT_SUCCESS(status)) {
+            status = fullTranscript.Update(newSessionTicket, sizeof(newSessionTicket));
+        }
+        Expect(status == STATUS_SUCCESS, "full transcript includes NewSessionTicket");
+
+        UCHAR fullHash[32] = {};
+        SIZE_T fullHashLength = 0;
+        status = fullTranscript.Finish(fullHash, sizeof(fullHash), &fullHashLength);
+        Expect(status == STATUS_SUCCESS, "full transcript hash finishes");
+
+        UCHAR serverFinished[32] = {};
+        SIZE_T serverFinishedLength = 0;
+        status = TlsHandshake12::EncodeFinished(
+            context,
+            false,
+            fullHash,
+            fullHashLength,
+            serverFinished,
+            sizeof(serverFinished),
+            &serverFinishedLength);
+        Expect(status == STATUS_SUCCESS, "server Finished encodes with NewSessionTicket transcript");
+        Expect(serverFinishedLength == 4 + TlsVerifyDataLength, "server Finished length matches");
+
+        TlsTranscriptHash missingTicketTranscript;
+        status = missingTicketTranscript.Initialize(HashAlgorithm::Sha256);
+        Expect(status == STATUS_SUCCESS, "missing-ticket transcript initializes");
+        status = missingTicketTranscript.Update(clientHello, sizeof(clientHello));
+        if (NT_SUCCESS(status)) {
+            status = missingTicketTranscript.Update(serverHello, sizeof(serverHello));
+        }
+        if (NT_SUCCESS(status)) {
+            status = missingTicketTranscript.Update(clientFinished, sizeof(clientFinished));
+        }
+        Expect(status == STATUS_SUCCESS, "missing-ticket transcript omits NewSessionTicket");
+
+        UCHAR missingTicketHash[32] = {};
+        SIZE_T missingTicketHashLength = 0;
+        status = missingTicketTranscript.Finish(
+            missingTicketHash,
+            sizeof(missingTicketHash),
+            &missingTicketHashLength);
+        Expect(status == STATUS_SUCCESS, "missing-ticket transcript hash finishes");
+
+        status = TlsHandshake12::VerifyFinished(
+            context,
+            false,
+            missingTicketHash,
+            missingTicketHashLength,
+            serverFinished + 4,
+            TlsVerifyDataLength);
+        ExpectStatus(
+            status,
+            STATUS_INVALID_NETWORK_RESPONSE,
+            "server Finished rejects transcript that omits NewSessionTicket");
+
+        status = TlsHandshake12::VerifyFinished(
+            context,
+            false,
+            fullHash,
+            fullHashLength,
+            serverFinished + 4,
+            TlsVerifyDataLength);
+        Expect(status == STATUS_SUCCESS, "server Finished accepts transcript that includes NewSessionTicket");
+    }
+
     void TestTranscriptHash()
     {
         TlsTranscriptHash transcript;
@@ -6210,6 +6320,7 @@ int main()
     TestCertificateValidationRejectsNameConstraintsExtension();
     TestEncodeClientKeyExchange();
     TestFinishedVerifyData();
+    TestTls12NewSessionTicketAffectsServerFinishedTranscript();
     TestTranscriptHash();
     TestTlsCapabilityMatrix();
     TestTlsPolicyValidation();

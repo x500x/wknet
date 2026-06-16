@@ -565,6 +565,9 @@ namespace crypto
             if (privateKey == nullptr || peerPublicKey == nullptr || output == nullptr) {
                 return STATUS_INVALID_PARAMETER;
             }
+            if (IsAllZero(peerPublicKey, KeyExchangeX25519KeyLength)) {
+                return STATUS_INVALID_PARAMETER;
+            }
 
             X25519ScratchGuard scratchGuard;
             if (!scratchGuard.IsValid()) {
@@ -1352,6 +1355,9 @@ namespace crypto
             _Out_writes_bytes_(KeyExchangeX448KeyLength) UCHAR* output) noexcept
         {
             if (privateKey == nullptr || peerPublicKey == nullptr || output == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (IsAllZero(peerPublicKey, KeyExchangeX448KeyLength)) {
                 return STATUS_INVALID_PARAMETER;
             }
 

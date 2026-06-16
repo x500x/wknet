@@ -4501,6 +4501,7 @@ namespace tls
             handshakeLength_ += fragmentLength;
         }
 
+        SIZE_T messageCount = 0;
         for (;;) {
             TlsHandshakeMessageView parsed = {};
             NTSTATUS status = TlsHandshake12::ParseMessage(
@@ -4526,6 +4527,9 @@ namespace tls
             if (!NT_SUCCESS(status)) {
                 return status;
             }
+            if (++messageCount > KhTlsMaxPostHandshakeMessagesPerRecord) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
 
             Tls12NewSessionTicketView ticket = {};
             status = TlsHandshake12::ParseNewSessionTicket(parsed, ticket);
@@ -4544,6 +4548,8 @@ namespace tls
                 tls12PendingTicketLifetimeHintSeconds_ = ticket.LifetimeHintSeconds;
             }
 
+            // TLS 1.2 NewSessionTicket is sent before ChangeCipherSpec and remains
+            // part of the handshake transcript used by Finished.
             status = AppendTranscript(handshakeBuffer_ + handshakeConsumed_, parsed.BytesConsumed);
             if (!NT_SUCCESS(status)) {
                 return status;
@@ -4568,6 +4574,9 @@ namespace tls
         }
 
         SIZE_T offset = 0;
+        SIZE_T messageCount = 0;
+        bool keyUpdated = false;
+        bool updateRequested = false;
         while (offset < fragmentLength) {
             TlsHandshakeMessageView message = {};
             NTSTATUS status = TlsHandshake12::ParseMessage(
@@ -4576,6 +4585,9 @@ namespace tls
                 message);
             if (!NT_SUCCESS(status)) {
                 return status == STATUS_MORE_PROCESSING_REQUIRED ? STATUS_INVALID_NETWORK_RESPONSE : status;
+            }
+            if (++messageCount > KhTlsMaxPostHandshakeMessagesPerRecord) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
             if (message.Type == TlsHandshakeType::NewSessionTicket) {
@@ -4597,12 +4609,15 @@ namespace tls
                     return status;
                 }
 
-                status = context_.UpdateTls13ApplicationTrafficSecret(false, serverWriteState_);
-                if (!NT_SUCCESS(status)) {
-                    return status;
+                if (!keyUpdated) {
+                    status = context_.UpdateTls13ApplicationTrafficSecret(false, serverWriteState_);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                    keyUpdated = true;
                 }
                 if (keyUpdate.Request == Tls13KeyUpdateRequest::UpdateRequested) {
-                    ExchangeTlsFlag(&tls13PeerRequestedKeyUpdate_, 1);
+                    updateRequested = true;
                 }
             }
             else if (message.Type == TlsHandshakeType::CertificateRequest) {
@@ -4778,6 +4793,10 @@ namespace tls
             }
 
             offset += message.BytesConsumed;
+        }
+
+        if (updateRequested) {
+            ExchangeTlsFlag(&tls13PeerRequestedKeyUpdate_, 1);
         }
 
         return STATUS_SUCCESS;

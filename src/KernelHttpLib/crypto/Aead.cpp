@@ -432,6 +432,11 @@ namespace crypto
                 }
 
                 offset += chunk;
+                if (counterValue == static_cast<SIZE_T>(-1)) {
+                    RtlSecureZeroMemory(counter, sizeof(scratch.CcmCounter));
+                    RtlSecureZeroMemory(stream, sizeof(scratch.CcmStream));
+                    return STATUS_INTEGER_OVERFLOW;
+                }
                 ++counterValue;
             }
 

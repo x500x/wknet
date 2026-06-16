@@ -717,6 +717,20 @@ namespace
         s = stream.ReceiveData(16, false);
         Expect(s == STATUS_INVALID_NETWORK_RESPONSE, "Local window prevents oversized receive");
     }
+
+    void TestStreamRejectsNonPositiveWindows()
+    {
+        Http2Stream stream;
+        stream.Initialize(5, 0, 0);
+        NTSTATUS s = stream.SendHeaders(false);
+        Expect(NT_SUCCESS(s), "Stream zero-window setup");
+
+        s = stream.SendData(1, false);
+        Expect(s == STATUS_BUFFER_TOO_SMALL, "SendData rejects zero remote window");
+
+        s = stream.ReceiveData(1, false);
+        Expect(s == STATUS_INVALID_NETWORK_RESPONSE, "ReceiveData rejects zero local window");
+    }
 }
 
 int main()
@@ -759,6 +773,7 @@ int main()
     TestEncodeSettingsPayloadBase64UrlBufferTooSmall();
     TestStreamStateMachine();
     TestStreamFlowControl();
+    TestStreamRejectsNonPositiveWindows();
 
     if (g_failed) {
         printf("HTTP2 FRAME TESTS FAILED\n");

@@ -74,10 +74,22 @@ namespace engine
     NTSTATUS RegisterActiveSessionHandle(_In_ KH_SESSION session) noexcept;
 
     _Must_inspect_result_
+    NTSTATUS RegisterActiveRequestHandle(_In_ KH_REQUEST request) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS RegisterActiveResponseHandle(_In_ KH_RESPONSE response) noexcept;
+
+    _Must_inspect_result_
     NTSTATUS RegisterActiveWebSocketHandle(_In_ KH_WEBSOCKET websocket) noexcept;
 
     _Must_inspect_result_
     bool TryCloseActiveSessionHandle(_In_opt_ KH_SESSION session) noexcept;
+
+    _Must_inspect_result_
+    bool TryCloseActiveRequestHandle(_In_opt_ KH_REQUEST request) noexcept;
+
+    _Must_inspect_result_
+    bool TryCloseActiveResponseHandle(_In_opt_ KH_RESPONSE response) noexcept;
 
     _Must_inspect_result_
     bool TryCloseActiveWebSocketHandle(_In_opt_ KH_WEBSOCKET websocket) noexcept;
@@ -86,6 +98,16 @@ namespace engine
     bool KhSessionBeginOperation(_In_opt_ KH_SESSION session) noexcept;
 
     void KhSessionEndOperation(_In_opt_ KH_SESSION session) noexcept;
+
+    _Must_inspect_result_
+    bool KhRequestBeginOperation(_In_opt_ KH_REQUEST request) noexcept;
+
+    void KhRequestEndOperation(_In_opt_ KH_REQUEST request) noexcept;
+
+    _Must_inspect_result_
+    bool KhResponseBeginOperation(_In_opt_ KH_RESPONSE response) noexcept;
+
+    void KhResponseEndOperation(_In_opt_ KH_RESPONSE response) noexcept;
 
     _Must_inspect_result_
     bool KhWebSocketBeginOperation(_In_opt_ KH_WEBSOCKET websocket) noexcept;
@@ -119,6 +141,66 @@ namespace engine
 
     private:
         KH_SESSION session_ = nullptr;
+        bool active_ = false;
+    };
+
+    class KhRequestOperationScope final
+    {
+    public:
+        explicit KhRequestOperationScope(_In_opt_ KH_REQUEST request) noexcept :
+            request_(request),
+            active_(KhRequestBeginOperation(request))
+        {
+        }
+
+        ~KhRequestOperationScope() noexcept
+        {
+            if (active_) {
+                KhRequestEndOperation(request_);
+            }
+        }
+
+        KhRequestOperationScope(const KhRequestOperationScope&) = delete;
+        KhRequestOperationScope& operator=(const KhRequestOperationScope&) = delete;
+
+        _Must_inspect_result_
+        bool IsActive() const noexcept
+        {
+            return active_;
+        }
+
+    private:
+        KH_REQUEST request_ = nullptr;
+        bool active_ = false;
+    };
+
+    class KhResponseOperationScope final
+    {
+    public:
+        explicit KhResponseOperationScope(_In_opt_ KH_RESPONSE response) noexcept :
+            response_(response),
+            active_(KhResponseBeginOperation(response))
+        {
+        }
+
+        ~KhResponseOperationScope() noexcept
+        {
+            if (active_) {
+                KhResponseEndOperation(response_);
+            }
+        }
+
+        KhResponseOperationScope(const KhResponseOperationScope&) = delete;
+        KhResponseOperationScope& operator=(const KhResponseOperationScope&) = delete;
+
+        _Must_inspect_result_
+        bool IsActive() const noexcept
+        {
+            return active_;
+        }
+
+    private:
+        KH_RESPONSE response_ = nullptr;
         bool active_ = false;
     };
 

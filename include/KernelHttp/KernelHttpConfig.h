@@ -16,6 +16,15 @@ namespace KernelHttp
     constexpr ULONG WskOperationTimeoutMilliseconds = 30000;
     constexpr ULONG WskCloseTimeoutMilliseconds = 3000;
     constexpr ULONG TlsHandshakeReceiveTimeoutMilliseconds = 120000;
+    constexpr SIZE_T KhMinRsaModulusBits = 2048;
+    constexpr SIZE_T KhHttpMaxHeaderLineBytes = 8 * 1024;
+    constexpr SIZE_T KhHttpMaxHeaderBytes = 64 * 1024;
+    constexpr SIZE_T KhHttpMaxHeaders = 200;
+    constexpr SIZE_T KhHttpMaxChunks = 8192;
+    constexpr SIZE_T KhHttpMaxTrailers = 256;
+    constexpr SIZE_T KhHttpMaxChunkSizeLineBytes = 32;
+    constexpr SIZE_T KhWsMaxControlFramesPerReceive = 100;
+    constexpr SIZE_T KhTlsMaxPostHandshakeMessagesPerRecord = 8;
 }
 
 #ifdef DBG

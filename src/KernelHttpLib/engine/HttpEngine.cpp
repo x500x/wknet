@@ -667,6 +667,10 @@ namespace engine
 
         newResponse->Header = { KhHandleKind::Response, 0, nullptr };
         newResponse->StatusCode = parsed.StatusCode;
+        newResponse->InFlight = 0;
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        KeInitializeEvent(&newResponse->DrainEvent, NotificationEvent, TRUE);
+#endif
 
         if (rawResponse != nullptr && rawResponseLength != 0) {
             newResponse->RawResponse = AllocateTextCopy(rawResponse, rawResponseLength);
@@ -813,6 +817,13 @@ namespace engine
                 }
             }
             newResponse->TrailerCount = parsed.TrailerCount;
+        }
+
+        NTSTATUS status = RegisterActiveResponseHandle(newResponse);
+        if (!NT_SUCCESS(status)) {
+            ReleaseResponseStorage(*newResponse);
+            FreeHandle(newResponse);
+            return status;
         }
 
         *response = newResponse;
@@ -2886,6 +2897,14 @@ namespace engine
         const SIZE_T oldSchemeLength = request.SchemeLength;
         const SIZE_T oldHostLength = request.HostLength;
         const USHORT oldPort = request.Port;
+        const bool hadTlsOverride = request.HasTlsOverride;
+        const bool tlsServerNameMatchedOldHost =
+            request.Tls.ServerName == nullptr ||
+            TextEqualsIgnoreCase(
+                request.Tls.ServerName,
+                request.Tls.ServerNameLength,
+                request.Host,
+                request.HostLength);
         RtlCopyMemory(oldOrigin->Scheme, request.Scheme, sizeof(oldOrigin->Scheme));
         RtlCopyMemory(oldOrigin->Host, request.Host, sizeof(oldOrigin->Host));
 
@@ -2917,6 +2936,15 @@ namespace engine
             oldHostLength,
             oldPort,
             request)) {
+            if (hadTlsOverride && !tlsServerNameMatchedOldHost) {
+                return STATUS_NOT_SUPPORTED;
+            }
+            if (TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https")) {
+                FreeApiMemory(request.OwnedTlsServerName);
+                request.OwnedTlsServerName = nullptr;
+                request.Tls.ServerName = request.Host;
+                request.Tls.ServerNameLength = request.HostLength;
+            }
             RemoveRedirectSensitiveHeaders(request);
         }
 
@@ -3262,7 +3290,8 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (!IsRequestHandle(request) || request->Session != session) {
+        KhRequestOperationScope requestScope(request);
+        if (!requestScope.IsActive() || request->Session != session) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -3408,7 +3437,8 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (!IsRequestHandle(request) || operation == nullptr || request->Session != session) {
+        KhRequestOperationScope requestScope(request);
+        if (!requestScope.IsActive() || operation == nullptr || request->Session != session) {
             KhSessionEndOperation(session);
             return STATUS_INVALID_PARAMETER;
         }

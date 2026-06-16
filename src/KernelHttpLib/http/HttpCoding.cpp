@@ -120,11 +120,10 @@ namespace http
                 return decodedLength == 0;
             }
 
-            if (encodedLength > (static_cast<SIZE_T>(-1) / MaxDecodeExpansionRatio)) {
-                return true;
-            }
-
-            return decodedLength <= encodedLength * MaxDecodeExpansionRatio;
+            const SIZE_T ratioLimit = encodedLength > (MaxDecodedBytes / MaxDecodeExpansionRatio) ?
+                MaxDecodedBytes :
+                encodedLength * MaxDecodeExpansionRatio;
+            return decodedLength <= ratioLimit;
         }
 
         ULONG ComputeCrc32(const UCHAR* data, SIZE_T dataLength) noexcept
@@ -512,8 +511,9 @@ namespace http
             const ULONG expectedSize = ReadLittleEndian32(compressed + compressedLength - 4);
             const ULONG actualCrc = ComputeCrc32(reinterpret_cast<const UCHAR*>(destination), *decodedLength);
 
-            if (expectedCrc != actualCrc ||
-                expectedSize != static_cast<ULONG>(*decodedLength & 0xFFFFFFFFUL)) {
+            if (*decodedLength > 0xFFFFFFFFULL ||
+                expectedCrc != actualCrc ||
+                expectedSize != static_cast<ULONG>(*decodedLength)) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 

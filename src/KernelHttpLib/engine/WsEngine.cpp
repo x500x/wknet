@@ -610,7 +610,6 @@ namespace engine
         newWebSocket->AutoReplyPing = options.AutoReplyPing;
         newWebSocket->InFlight = 0;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
-        ExInitializeFastMutex(&newWebSocket->OperationLock);
         KeInitializeMutex(&newWebSocket->SendLock, 0);
         KeInitializeMutex(&newWebSocket->ReceiveLock, 0);
         KeInitializeEvent(&newWebSocket->DrainEvent, NotificationEvent, TRUE);

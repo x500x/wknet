@@ -177,6 +177,15 @@ namespace
         Expect(s == STATUS_INTEGER_OVERFLOW, "DecodeInteger rejects ULONG overflow");
     }
 
+    void TestDecodeIntegerRejectsTooManyContinuationBytes()
+    {
+        const unsigned char data[] = { 0x1f, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00 };
+        ULONG value = 0;
+        size_t consumed = 0;
+        NTSTATUS s = HpackDecodeInteger(data, sizeof(data), 5, &value, &consumed);
+        Expect(s == STATUS_INTEGER_OVERFLOW, "DecodeInteger rejects too many continuation bytes");
+    }
+
     void TestIntegerRoundTrip()
     {
         for (ULONG val : { 0u, 1u, 14u, 15u, 16u, 127u, 128u, 1337u, 100000u, 0x7fffffffu }) {
@@ -631,6 +640,7 @@ int main()
     TestDecodeIntegerSimple();
     TestDecodeIntegerMultibyte();
     TestDecodeIntegerRejectsOverflow();
+    TestDecodeIntegerRejectsTooManyContinuationBytes();
     TestIntegerRoundTrip();
     TestHuffmanEncodeExample();
     TestHuffmanEncodedLength();

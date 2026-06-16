@@ -136,6 +136,7 @@ namespace client
         constexpr const char WebSocketHttp11Alpn[] = "http/1.1";
         constexpr SIZE_T WebSocketHttp11AlpnLength = sizeof(WebSocketHttp11Alpn) - 1;
         constexpr USHORT WebSocketCloseProtocolError = 1002;
+        constexpr USHORT WebSocketClosePolicyViolation = 1008;
         constexpr USHORT WebSocketCloseMessageTooBig = 1009;
         constexpr USHORT WebSocketCloseInvalidPayload = 1007;
 
@@ -1224,6 +1225,7 @@ namespace client
         }
 
         websocket::WebSocketFrameHeader& header = *receiveFrameHeader_.Get();
+        SIZE_T controlFrameCount = 0;
 
         for (;;) {
             SIZE_T frameLength = bufferedFrameLength_;
@@ -1315,17 +1317,28 @@ namespace client
             }
 
             if (header.Opcode == websocket::WebSocketOpcode::Ping) {
+                if (++controlFrameCount > KhWsMaxControlFramesPerReceive) {
+                    return FailConnectionWithClose(
+                        WebSocketClosePolicyViolation,
+                        buffers,
+                        STATUS_INVALID_NETWORK_RESPONSE);
+                }
                 if (!autoReplyPing) {
-                    status = websocket::WebSocketCodec::DecodeFramePayload(
-                        header,
-                        bufferedFrame_,
-                        frameLength,
-                        output,
-                        outputCapacity,
-                        bytesReceived);
-                    if (!NT_SUCCESS(status)) {
-                        ResetReceiveFragment();
-                        return status;
+                    if (receiveFragmentOpen_) {
+                        *bytesReceived = 0;
+                    }
+                    else {
+                        status = websocket::WebSocketCodec::DecodeFramePayload(
+                            header,
+                            bufferedFrame_,
+                            frameLength,
+                            output,
+                            outputCapacity,
+                            bytesReceived);
+                        if (!NT_SUCCESS(status)) {
+                            ResetReceiveFragment();
+                            return status;
+                        }
                     }
 
                     if (remaining > 0) {
@@ -1354,16 +1367,27 @@ namespace client
             }
 
             if (header.Opcode == websocket::WebSocketOpcode::Pong) {
+                if (++controlFrameCount > KhWsMaxControlFramesPerReceive) {
+                    return FailConnectionWithClose(
+                        WebSocketClosePolicyViolation,
+                        buffers,
+                        STATUS_INVALID_NETWORK_RESPONSE);
+                }
                 if (!autoReplyPing) {
-                    status = websocket::WebSocketCodec::DecodeFramePayload(
-                        header,
-                        bufferedFrame_,
-                        frameLength,
-                        output,
-                        outputCapacity,
-                        bytesReceived);
-                    if (!NT_SUCCESS(status)) {
-                        return status;
+                    if (receiveFragmentOpen_) {
+                        *bytesReceived = 0;
+                    }
+                    else {
+                        status = websocket::WebSocketCodec::DecodeFramePayload(
+                            header,
+                            bufferedFrame_,
+                            frameLength,
+                            output,
+                            outputCapacity,
+                            bytesReceived);
+                        if (!NT_SUCCESS(status)) {
+                            return status;
+                        }
                     }
                 }
 

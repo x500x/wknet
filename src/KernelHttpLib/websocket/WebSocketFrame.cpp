@@ -18,6 +18,20 @@ namespace websocket
         }
 
         _Must_inspect_result_
+        bool ConstantTimeEquals(const char* left, const char* right, SIZE_T length) noexcept
+        {
+            if (left == nullptr || right == nullptr) {
+                return false;
+            }
+
+            UCHAR diff = 0;
+            for (SIZE_T index = 0; index < length; ++index) {
+                diff = static_cast<UCHAR>(diff | (left[index] ^ right[index]));
+            }
+            return diff == 0;
+        }
+
+        _Must_inspect_result_
         char Base64Char(UCHAR value) noexcept
         {
             static constexpr char alphabet[] =
@@ -503,11 +517,10 @@ namespace websocket
             return status;
         }
 
-            if (accept->Value.Length != expectedLength ||
-                accept->Value.Data == nullptr ||
-                RtlCompareMemory(accept->Value.Data, expected.Get(), expectedLength) != expectedLength) {
-                return STATUS_INVALID_NETWORK_RESPONSE;
-            }
+        if (accept->Value.Length != expectedLength ||
+            !ConstantTimeEquals(accept->Value.Data, expected.Get(), expectedLength)) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
 
         bool selectedPresent = false;
         http::HttpText negotiatedSubprotocol = {};
@@ -695,6 +708,9 @@ namespace websocket
         }
 
         const UCHAR* payload = data + header.HeaderLength;
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        NT_ASSERT(!header.Masked);
+#endif
         for (SIZE_T index = 0; index < payloadLength; ++index) {
             UCHAR byte = payload[index];
             if (header.Masked) {

@@ -2007,7 +2007,7 @@ namespace
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "conflicting Content-Length headers are rejected");
     }
 
-    void TestContentLengthEquivalentList()
+    void TestContentLengthEquivalentListRejected()
     {
         const char responseBytes[] =
             "HTTP/1.1 200 OK\r\n"
@@ -2028,10 +2028,7 @@ namespace
             options,
             response);
 
-        Expect(status == STATUS_SUCCESS, "equivalent Content-Length list is accepted");
-        Expect(response.BodyKind == HttpBodyKind::ContentLength, "equivalent Content-Length list selects ContentLength body");
-        Expect(MemoryEqualsLiteral(response.Body, response.BodyLength, "hello"), "equivalent Content-Length list body length is parsed");
-        Expect(response.BytesConsumed == strlen(responseBytes) - strlen("next"), "equivalent Content-Length list leaves pipelined bytes unread");
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "equivalent Content-Length list is rejected");
     }
 
     void TestContentLengthListConflict()
@@ -2141,6 +2138,30 @@ namespace
         Expect(!HeaderValueHasToken(MakeText("notchunked"), MakeText("chunked")), "header token matching does not match substrings");
         Expect(TextEqualsIgnoreCase(MakeText("Content-Length"), MakeText("content-length")), "case-insensitive text matching works");
     }
+
+    void TestObsFoldRejected()
+    {
+        const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "X-Test: a\r\n"
+            " b\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        HttpHeader headers[4] = {};
+        HttpParseOptions options = {};
+        options.Headers = headers;
+        options.HeaderCapacity = 4;
+
+        HttpResponse response = {};
+        const NTSTATUS status = HttpParser::ParseResponse(
+            responseBytes,
+            strlen(responseBytes),
+            options,
+            response);
+
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "obs-fold header continuation is rejected");
+    }
 }
 
 int main()
@@ -2200,12 +2221,13 @@ int main()
     TestIncompleteChunkedResponseNeedsMoreData();
     TestEmptyResponseNeedsMoreData();
     TestDuplicateContentLengthConflict();
-    TestContentLengthEquivalentList();
+    TestContentLengthEquivalentListRejected();
     TestContentLengthListConflict();
     TestNoBodyStatus();
     TestHeadResponseForbidsBody();
     TestSwitchingProtocolsLeavesWebSocketBytes();
     TestHeaderTokenMatching();
+    TestObsFoldRejected();
 
     if (g_failed) {
         return 1;

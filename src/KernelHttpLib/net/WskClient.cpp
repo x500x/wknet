@@ -8,6 +8,10 @@ namespace KernelHttp
 {
 namespace net
 {
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    volatile LONG g_wskAbandonedIrpCount = 0;
+#endif
+
     namespace
     {
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -552,6 +556,7 @@ namespace net
         }
         else {
             const LONG remaining = InterlockedCompareExchange(&g_wskOutstandingContextCount, 0, 0);
+            UNREFERENCED_PARAMETER(remaining);
             kprintf("等待 WSK IRP context 失败: 0x%08X outstanding=%ld\r\n",
                 static_cast<ULONG>(status),
                 static_cast<long>(remaining));
@@ -567,6 +572,7 @@ namespace net
 
         g_wskLastOpenedSocket = socket;
         const LONG count = InterlockedIncrement(&g_wskOpenSocketCount);
+        UNREFERENCED_PARAMETER(count);
         kprintf("WSK socket opened: socket=%p open=%ld\r\n", socket, static_cast<long>(count));
     }
 
@@ -578,6 +584,7 @@ namespace net
 
         g_wskLastCloseStartedSocket = socket;
         const LONG pending = InterlockedIncrement(&g_wskClosePendingSocketCount);
+        UNREFERENCED_PARAMETER(pending);
         kprintf("WSK socket close started: socket=%p pending=%ld\r\n", socket, static_cast<long>(pending));
     }
 
@@ -591,9 +598,11 @@ namespace net
         g_wskLastSocketCloseStatus = closeStatus;
         const LONG pending = InterlockedDecrement(&g_wskClosePendingSocketCount);
         LONG open = InterlockedCompareExchange(&g_wskOpenSocketCount, 0, 0);
+        UNREFERENCED_PARAMETER(pending);
         if (NT_SUCCESS(closeStatus) && open > 0) {
             open = InterlockedDecrement(&g_wskOpenSocketCount);
         }
+        UNREFERENCED_PARAMETER(open);
 
         kprintf(
             "WSK socket close completed: socket=%p status=0x%08X open=%ld pending=%ld\r\n",
@@ -608,6 +617,9 @@ namespace net
         const LONG open = InterlockedCompareExchange(&g_wskOpenSocketCount, 0, 0);
         const LONG pending = InterlockedCompareExchange(&g_wskClosePendingSocketCount, 0, 0);
         const LONG contexts = InterlockedCompareExchange(&g_wskOutstandingContextCount, 0, 0);
+        UNREFERENCED_PARAMETER(open);
+        UNREFERENCED_PARAMETER(pending);
+        UNREFERENCED_PARAMETER(contexts);
         kprintf(
             "WSK shutdown state: openSockets=%ld closePending=%ld irpContexts=%ld lastOpen=%p lastCloseStart=%p lastClosed=%p lastCloseStatus=0x%08X\r\n",
             static_cast<long>(open),
@@ -695,10 +707,9 @@ namespace net
         }
 
         if (providerCaptured_ || registered_) {
-            const NTSTATUS drainStatus = WskSyncWaitForOutstandingContexts(0xffffffffUL);
+            const NTSTATUS drainStatus = WskSyncWaitForOutstandingContexts(WskOperationTimeoutMilliseconds);
             if (!NT_SUCCESS(drainStatus)) {
                 kprintf("WSK IRP context 收敛失败: 0x%08X\r\n", static_cast<ULONG>(drainStatus));
-                return;
             }
             WskSyncLogOutstandingSockets();
         }

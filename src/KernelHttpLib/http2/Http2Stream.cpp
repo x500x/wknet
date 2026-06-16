@@ -63,7 +63,8 @@ namespace http2
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        if (length > static_cast<SIZE_T>(remoteWindow_)) {
+        if ((length != 0 && remoteWindow_ <= 0) ||
+            length > static_cast<SIZE_T>(remoteWindow_)) {
             return STATUS_BUFFER_TOO_SMALL;
         }
 
@@ -109,7 +110,8 @@ namespace http2
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        if (length > static_cast<SIZE_T>(localWindow_)) {
+        if ((length != 0 && localWindow_ <= 0) ||
+            length > static_cast<SIZE_T>(localWindow_)) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 

@@ -1440,6 +1440,9 @@ namespace tls
                     ++certificate.RsaModulus;
                     --certificate.RsaModulusLength;
                 }
+                if (certificate.RsaModulusLength * 8 < KhMinRsaModulusBits) {
+                    return STATUS_NOT_SUPPORTED;
+                }
 
                 certificate.RsaExponent = exponent.Value;
                 certificate.RsaExponentLength = exponent.ValueLength;
@@ -2143,10 +2146,6 @@ namespace tls
                 }
 
                 return STATUS_TRUST_FAILURE;
-            }
-
-            if (HostNameMatches(leaf.CommonName, leaf.CommonNameLength, hostName, hostNameLength)) {
-                return STATUS_SUCCESS;
             }
 
             return STATUS_TRUST_FAILURE;
