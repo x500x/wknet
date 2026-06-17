@@ -24,6 +24,9 @@ namespace samples
         constexpr SIZE_T SampleHeaderCapacity = 32;
         constexpr const wchar_t* NgHttp2ServerName = L"nghttp2.org";
         constexpr const wchar_t* NgHttp2ServiceName = L"80";
+        constexpr const wchar_t* NgHttp2HttpsServiceName = L"443";
+        constexpr const char* NgHttp2TlsServerName = "nghttp2.org";
+        constexpr SIZE_T NgHttp2TlsServerNameLength = sizeof("nghttp2.org") - 1;
         constexpr const char* NgHttp2HostName = "nghttp2.org";
         constexpr SIZE_T NgHttp2HostNameLength = sizeof("nghttp2.org") - 1;
         constexpr const wchar_t* HttpBinDevServerName = L"httpbin.dev";
@@ -720,8 +723,8 @@ namespace samples
 
         http::HttpRequestBuildOptions request = {};
         request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/get");
-        request.Host = http::MakeText(HttpBinDevHostName);
+        request.Path = http::MakeText("/httpbin/get");
+        request.Host = http::MakeText(NgHttp2HostName);
         request.UserAgent = http::MakeText("KernelHttp/0.1");
         request.Connection = http::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
@@ -730,10 +733,10 @@ namespace samples
         NTSTATUS status = STATUS_SUCCESS;
         NTSTATUS sampleStatus = SendHttpsSampleRequestWithTlsVersion(
             wskClient,
-            HttpBinDevServerName,
-            HttpBinDevHttpsServiceName,
-            HttpBinDevTlsServerName,
-            HttpBinDevTlsServerNameLength,
+            NgHttp2ServerName,
+            NgHttp2HttpsServiceName,
+            NgHttp2TlsServerName,
+            NgHttp2TlsServerNameLength,
             "HTTPS REMOTE IPv4",
             request,
             false,
@@ -748,10 +751,10 @@ namespace samples
 
         sampleStatus = SendHttpsSampleRequestWithTlsVersion(
             wskClient,
-            HttpBinDevServerName,
-            HttpBinDevHttpsServiceName,
-            HttpBinDevTlsServerName,
-            HttpBinDevTlsServerNameLength,
+            NgHttp2ServerName,
+            NgHttp2HttpsServiceName,
+            NgHttp2TlsServerName,
+            NgHttp2TlsServerNameLength,
             "HTTPS REMOTE IPv6",
             request,
             false,
