@@ -970,6 +970,54 @@ namespace
             "TLS1.3-only close_notify remains a peer alert");
     }
 
+    void TestTlsHandshakeFailureMarksTls13FirstServerHelloNetworkIo()
+    {
+        ScriptedTlsTransport transport(nullptr, 0);
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(
+            status,
+            STATUS_CONNECTION_DISCONNECTED,
+            "TLS connect returns first ServerHello transport disconnect");
+        const auto& failure = connection.LastHandshakeFailure();
+        Expect(
+            failure.Category == TlsHandshakeFailureCategory::NetworkIo,
+            "TLS first ServerHello disconnect records network I/O failure");
+        Expect(
+            failure.BeforeTls13FirstServerHello,
+            "TLS first ServerHello disconnect is marked as TLS1.2 confirmation stage");
+    }
+
+    void TestTlsHandshakeFailureDoesNotMarkTls13OnlyFirstServerHelloNetworkIo()
+    {
+        ScriptedTlsTransport transport(nullptr, 0);
+        TlsConnection connection;
+        TlsClientConnectionOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.VerifyCertificate = false;
+        options.MinimumProtocol = TlsProtocol::Tls13;
+        options.MaximumProtocol = TlsProtocol::Tls13;
+
+        const NTSTATUS status = connection.Connect(transport, options);
+        ExpectStatus(
+            status,
+            STATUS_CONNECTION_DISCONNECTED,
+            "TLS1.3-only connect returns first ServerHello transport disconnect");
+        const auto& failure = connection.LastHandshakeFailure();
+        Expect(
+            failure.Category == TlsHandshakeFailureCategory::NetworkIo,
+            "TLS1.3-only first ServerHello disconnect records network I/O failure");
+        Expect(
+            !failure.BeforeTls13FirstServerHello,
+            "TLS1.3-only first ServerHello disconnect is not a TLS1.2 confirmation candidate");
+    }
+
     void TestRecordNeedsMoreData()
     {
         const UCHAR partial[] = { 22, 3, 3, 0 };
@@ -6226,6 +6274,8 @@ int main()
     TestTlsHandshakeFailureDoesNotClassifyTls13OnlyHandshakeFailure();
     TestTlsHandshakeFailureRecordsTls13CloseNotifyAsVersionCandidate();
     TestTlsHandshakeFailureDoesNotClassifyTls13OnlyCloseNotify();
+    TestTlsHandshakeFailureMarksTls13FirstServerHelloNetworkIo();
+    TestTlsHandshakeFailureDoesNotMarkTls13OnlyFirstServerHelloNetworkIo();
     TestRecordNeedsMoreData();
     TestRecordRejectsInvalidHeader();
     TestPlainRecordSizeProbe();

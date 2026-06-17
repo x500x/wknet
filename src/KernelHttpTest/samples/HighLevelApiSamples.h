@@ -76,6 +76,7 @@ namespace samples
         HighLevelApiSampleResult WebSocketTextEx = {};
         HighLevelApiSampleResult WebSocketBinary = {};
         HighLevelApiSampleResult WebSocketBinaryEx = {};
+        HighLevelApiSampleResult WebSocketTls13Only = {};
         HighLevelApiSampleResult WebSocketReceiveEx = {};
         HighLevelApiSampleResult WebSocketConnectAsync = {};
         HighLevelApiSampleResult WebSocketConfigConnectAsync = {};

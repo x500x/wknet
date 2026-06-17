@@ -51,7 +51,7 @@ namespace samples
         constexpr const char* DelayUrl = "https://httpbin.dev/delay/5";
         constexpr const char* TrustFailureUrl = "https://httpbin.dev/status/204";
         constexpr const char* HttpsGetUrl = "https://httpbin.dev/get";
-        constexpr const char* WebSocketUrl = "wss://ws.postman-echo.com/raw";
+        constexpr const char* WebSocketUrl = "wss://websocket-echo.com";
         constexpr const char* WebSocketText = "kernel-http advanced websocket";
         constexpr SIZE_T LargeBodyBytes = 64 * 1024;
         constexpr SIZE_T LargePostMaxResponseBytes = 256 * 1024;
@@ -65,12 +65,6 @@ namespace samples
                 ++length;
             }
             return length;
-        }
-
-        void EnablePostmanWebSocketTlsCompatibility(_Inout_ khttp::TlsConfig& config) noexcept
-        {
-            config.Policy.Profile = tls::TlsSecurityProfile::CompatibilityExplicit;
-            config.Policy.EnableTls12Sha1Signatures = true;
         }
 
         void MergeSampleStatus(
@@ -430,8 +424,7 @@ namespace samples
             config.Url = WebSocketUrl;
             config.UrlLength = LiteralLength(WebSocketUrl);
             config.Tls = tlsConfig;
-            EnablePostmanWebSocketTlsCompatibility(config.Tls);
-            kprintf("[高级场景] WebSocket Close TLS策略=CompatibilityExplicit SHA1签名=启用(endpoint兼容)\r\n");
+            kprintf("[高级场景] WebSocket Close TLS策略=ModernDefault SHA1签名=关闭\r\n");
 
             kws::WebSocket* websocket = nullptr;
             NTSTATUS status = kws::ConnectEx(session, &config, &websocket);
@@ -453,8 +446,7 @@ namespace samples
             config.Url = WebSocketUrl;
             config.UrlLength = LiteralLength(WebSocketUrl);
             config.Tls = tlsConfig;
-            EnablePostmanWebSocketTlsCompatibility(config.Tls);
-            kprintf("[高级场景] WebSocket FragmentSend TLS策略=CompatibilityExplicit SHA1签名=启用(endpoint兼容)\r\n");
+            kprintf("[高级场景] WebSocket FragmentSend TLS策略=ModernDefault SHA1签名=关闭\r\n");
 
             kws::WebSocket* websocket = nullptr;
             NTSTATUS status = kws::ConnectEx(session, &config, &websocket);
@@ -594,7 +586,8 @@ namespace samples
 
         khttp::TlsConfig webSocketTls = khttp::DefaultTlsConfig();
         webSocketTls.Store = &trustStore.Store;
-        webSocketTls.MaxVersion = khttp::TlsVersion::Tls12;
+        webSocketTls.MinVersion = khttp::TlsVersion::Tls12;
+        webSocketTls.MaxVersion = khttp::TlsVersion::Tls13;
         status = RunWebSocketCloseSample(session, webSocketTls, results->WebSocketClose);
         MergePublicDiagnosticSampleStatus(aggregate, "WebSocket Close", status);
         status = RunWebSocketFragmentSample(session, webSocketTls, results->WebSocketFragmentSend);

@@ -155,10 +155,15 @@ namespace client
             const WebSocketConnectOptions& options,
             const tls::TlsHandshakeFailure& failure) noexcept
         {
+            const bool failureCanConfirmTls12 =
+                failure.Category == tls::TlsHandshakeFailureCategory::VersionNegotiation ||
+                (failure.Category == tls::TlsHandshakeFailureCategory::NetworkIo &&
+                    failure.BeforeTls13FirstServerHello &&
+                    failure.Status != STATUS_IO_TIMEOUT);
             return options.UseTls &&
                 IsTlsProtocolAllowed(options.MinimumTlsProtocol, options.MaximumTlsProtocol, tls::TlsProtocol::Tls12) &&
                 IsTlsProtocolAllowed(options.MinimumTlsProtocol, options.MaximumTlsProtocol, tls::TlsProtocol::Tls13) &&
-                failure.Category == tls::TlsHandshakeFailureCategory::VersionNegotiation;
+                failureCanConfirmTls12;
         }
 
         _Must_inspect_result_

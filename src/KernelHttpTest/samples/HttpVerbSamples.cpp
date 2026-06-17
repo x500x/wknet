@@ -38,23 +38,23 @@ namespace samples
         constexpr const wchar_t* HttpBunServerName = L"httpbun.com";
         constexpr const wchar_t* HttpBunServiceName = L"80";
         constexpr const char* HttpBunHostName = "httpbun.com";
-        constexpr const wchar_t* WebSocketEchoServerName = L"ws.postman-echo.com";
+        constexpr const wchar_t* WebSocketEchoServerName = L"websocket-echo.com";
         constexpr const wchar_t* WebSocketEchoServiceName = L"443";
-        constexpr const char* WebSocketEchoTlsServerName = "ws.postman-echo.com";
-        constexpr SIZE_T WebSocketEchoTlsServerNameLength = sizeof("ws.postman-echo.com") - 1;
-        constexpr const char* WebSocketEchoHostName = "ws.postman-echo.com";
-        constexpr SIZE_T WebSocketEchoHostNameLength = sizeof("ws.postman-echo.com") - 1;
+        constexpr const char* WebSocketEchoTlsServerName = "websocket-echo.com";
+        constexpr SIZE_T WebSocketEchoTlsServerNameLength = sizeof("websocket-echo.com") - 1;
+        constexpr const char* WebSocketEchoHostName = "websocket-echo.com";
+        constexpr SIZE_T WebSocketEchoHostNameLength = sizeof("websocket-echo.com") - 1;
         constexpr UCHAR WebSocketEchoLeafSpkiSha256[tls::CertificateSha256ThumbprintLength] = {
-            0xE2, 0x65, 0x15, 0x6D, 0x50, 0x18, 0x34, 0xDD,
-            0x6F, 0xF4, 0x19, 0xE7, 0x13, 0x85, 0x26, 0x34,
-            0xB5, 0x9F, 0xA2, 0x55, 0x0F, 0xC2, 0x3E, 0x31,
-            0xF3, 0xB3, 0xEB, 0x77, 0x2E, 0x63, 0x67, 0x24
+            0x71, 0xED, 0xC0, 0xE9, 0x91, 0x0F, 0x40, 0x9C,
+            0x0A, 0x9D, 0x28, 0x19, 0x51, 0x2E, 0x7C, 0xB5,
+            0x37, 0x6D, 0xC4, 0x5D, 0x81, 0xAD, 0xC2, 0xDE,
+            0x1C, 0xF2, 0x4E, 0x89, 0x92, 0x67, 0x57, 0xBC
         };
-        constexpr UCHAR WebSocketEchoAmazonRsaM04SpkiSha256[tls::CertificateSha256ThumbprintLength] = {
-            0x1B, 0xD2, 0xCD, 0x34, 0x0A, 0xA5, 0xF3, 0xDE,
-            0xDE, 0x81, 0x8B, 0x1A, 0x6D, 0xAB, 0x21, 0x93,
-            0x35, 0x02, 0x4C, 0x42, 0x64, 0x58, 0x1C, 0xE0,
-            0xA0, 0x4B, 0x64, 0xF1, 0x7F, 0xFA, 0xEF, 0xC7
+        constexpr UCHAR WebSocketEchoIntermediateSpkiSha256[tls::CertificateSha256ThumbprintLength] = {
+            0x91, 0x9C, 0x0D, 0xF7, 0xA7, 0x87, 0xB5, 0x97,
+            0xED, 0x05, 0x6A, 0xCE, 0x65, 0x4B, 0x1D, 0xE9,
+            0xC0, 0x38, 0x7A, 0xCF, 0x34, 0x9F, 0x73, 0x73,
+            0x4A, 0x4F, 0xD7, 0xB5, 0x8C, 0xF6, 0x12, 0xA4
         };
         struct SampleIoBuffers final
         {
@@ -103,12 +103,6 @@ namespace samples
                 http::TextEqualsIgnoreCase(request.Host, http::MakeText(NgHttp2HostName))) ||
                 (request.Host.Length == HttpBinDevHostNameLength &&
                     http::TextEqualsIgnoreCase(request.Host, http::MakeText(HttpBinDevHostName)));
-        }
-
-        void EnablePostmanWebSocketTlsCompatibility(_Inout_ tls::TlsPolicy& policy) noexcept
-        {
-            policy.Profile = tls::TlsSecurityProfile::CompatibilityExplicit;
-            policy.EnableTls12Sha1Signatures = true;
         }
 
         void LogHttpText(_In_opt_ const char* label, http::HttpText value) noexcept
@@ -531,8 +525,8 @@ namespace samples
             _Out_ tls::CertificatePin& pin) noexcept
         {
             return InitializePinnedCertificateStore(
-                WebSocketEchoAmazonRsaM04SpkiSha256,
-                sizeof(WebSocketEchoAmazonRsaM04SpkiSha256),
+                WebSocketEchoIntermediateSpkiSha256,
+                sizeof(WebSocketEchoIntermediateSpkiSha256),
                 WebSocketEchoLeafSpkiSha256,
                 sizeof(WebSocketEchoLeafSpkiSha256),
                 WebSocketEchoTlsServerName,
@@ -584,17 +578,16 @@ namespace samples
         options.TlsServerNameLength = WebSocketEchoTlsServerNameLength;
         options.Host = WebSocketEchoHostName;
         options.HostLength = WebSocketEchoHostNameLength;
-        options.Path = "/raw";
-        options.PathLength = sizeof("/raw") - 1;
+        options.Path = "/";
+        options.PathLength = sizeof("/") - 1;
         options.CertificateStore = certificateStore;
         options.MinimumTlsProtocol = tls::TlsProtocol::Tls12;
-        options.MaximumTlsProtocol = tls::TlsProtocol::Tls12;
-        EnablePostmanWebSocketTlsCompatibility(options.Policy);
+        options.MaximumTlsProtocol = tls::TlsProtocol::Tls13;
         options.UseTls = true;
         options.VerifyCertificate = verifyCertificate;
 
         kprintf(
-            "[%s] TLS策略=CompatibilityExplicit SHA1签名=启用(endpoint兼容)\r\n",
+            "[%s] TLS策略=ModernDefault SHA1签名=关闭\r\n",
             sampleName);
 
         HeapObject<client::WebSocketClient> webSocket;

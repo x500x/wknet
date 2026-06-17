@@ -51,9 +51,16 @@ namespace test
     bool IsHttpTls12ConfirmationCandidate(
         ::KernelHttp::engine::KhTlsVersion minVersion,
         ::KernelHttp::engine::KhTlsVersion maxVersion,
-        ULONG category) noexcept
+        ULONG category,
+        NTSTATUS status,
+        bool beforeTls13FirstServerHello) noexcept
     {
-        return ::KernelHttp::engine::KhTestIsHttpTls12ConfirmationCandidate(minVersion, maxVersion, category);
+        return ::KernelHttp::engine::KhTestIsHttpTls12ConfirmationCandidate(
+            minVersion,
+            maxVersion,
+            category,
+            status,
+            beforeTls13FirstServerHello);
     }
 }
 #endif

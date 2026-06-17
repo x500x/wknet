@@ -51,7 +51,7 @@ namespace
     constexpr const char* HttpOptionsUrl = "http://nghttp2.org/httpbin/";
     constexpr const char* HttpsGetUrl = "https://httpbin.dev/get";
     constexpr const char* HttpsBuilderUrl = "https://httpbin.dev/anything";
-    constexpr const char* WebSocketSecureEchoUrl = "wss://ws.postman-echo.com/raw";
+    constexpr const char* WebSocketSecureEchoUrl = "wss://websocket-echo.com";
     constexpr const char* WebSocketBinaryEchoUrl = "wss://websocket-echo.com";
     constexpr const char* AlpnHttp11 = "http/1.1";
     constexpr const char* AlpnH2 = "h2";
@@ -1770,21 +1770,6 @@ namespace
         return config;
     }
 
-    bool IsPostmanWebSocketUrl(const char* url) noexcept
-    {
-        return url != nullptr &&
-            LiteralLength(url) == LiteralLength(WebSocketSecureEchoUrl) &&
-            RtlCompareMemory(url, WebSocketSecureEchoUrl, LiteralLength(WebSocketSecureEchoUrl)) ==
-                LiteralLength(WebSocketSecureEchoUrl);
-    }
-
-    void EnablePostmanWebSocketTlsCompatibility(_Inout_ khttp::TlsConfig& config) noexcept
-    {
-        config.MaxVersion = khttp::TlsVersion::Tls12;
-        config.Policy.Profile = tls::TlsSecurityProfile::CompatibilityExplicit;
-        config.Policy.EnableTls12Sha1Signatures = true;
-    }
-
     void LogWebSocketRequest(
         const char* sampleName,
         WsConnectVariant connectVariant,
@@ -1994,9 +1979,6 @@ namespace
         if (connectVariant == WsConnectVariant::Url) {
             config = MakeWsConfig(url, nullptr, khttp::AddressFamily::Any);
         }
-        if (IsPostmanWebSocketUrl(url)) {
-            EnablePostmanWebSocketTlsCompatibility(config.Tls);
-        }
 
         LogWebSocketRequest(
             sampleName,
@@ -2074,9 +2056,6 @@ namespace
         kws::ConnectConfig config = MakeWsConfig(url, tlsConfig, DefaultWebSocketSampleAddressFamily);
         if (connectVariant == WsConnectVariant::Url) {
             config = MakeWsConfig(url, nullptr, khttp::AddressFamily::Any);
-        }
-        if (IsPostmanWebSocketUrl(url)) {
-            EnablePostmanWebSocketTlsCompatibility(config.Tls);
         }
 
         LogWebSocketRequest(
@@ -2171,7 +2150,7 @@ namespace
 
     NTSTATUS RunHighLevelApiSamplesOnSession(
         khttp::Session* session,
-        khttp::Session* postmanUrlSession,
+        khttp::Session* urlConnectSession,
         const char* certificateBundlePath,
         HighLevelApiSampleResults* results) noexcept
     {
@@ -2209,6 +2188,10 @@ namespace
 
         khttp::TlsConfig webSocketTls = khttp::DefaultTlsConfig();
         webSocketTls.Store = &trustStore.Store;
+
+        khttp::TlsConfig webSocketTls13Only = webSocketTls;
+        webSocketTls13Only.MinVersion = khttp::TlsVersion::Tls13;
+        webSocketTls13Only.MaxVersion = khttp::TlsVersion::Tls13;
 
         // HTTP 快捷函数示例：这些入口直接创建并发送请求。
         status = RunShortcutHttp(session, "HTTP GET 快捷函数", khttp::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpShortcutGet);
@@ -2298,7 +2281,7 @@ namespace
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket Echo");
         results->WebSocketConfigConnect = results->WebSocketEcho;
         status = RunWebSocketSample(
-            postmanUrlSession != nullptr ? postmanUrlSession : session,
+            urlConnectSession != nullptr ? urlConnectSession : session,
             "WebSocket URL 直连",
             WsConnectVariant::Url,
             WsSendVariant::Text,
@@ -2315,10 +2298,12 @@ namespace
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket 二进制发送");
         status = RunWebSocketSample(session, "WebSocket 二进制发送 Ex", WsConnectVariant::Ex, WsSendVariant::BinaryEx, false, WebSocketBinaryEchoUrl, &webSocketTls, results->WebSocketBinaryEx);
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket 二进制发送 Ex");
+        status = RunWebSocketSample(session, "WebSocket TLS1.3 Echo", WsConnectVariant::Config, WsSendVariant::Text, false, WebSocketBinaryEchoUrl, &webSocketTls13Only, results->WebSocketTls13Only);
+        MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket TLS1.3 Echo");
         status = RunWebSocketSample(session, "WebSocket 接收 Ex 回调", WsConnectVariant::Ex, WsSendVariant::Text, true, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketReceiveEx);
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket 接收 Ex 回调");
         status = RunWebSocketAsyncSample(
-            postmanUrlSession != nullptr ? postmanUrlSession : session,
+            urlConnectSession != nullptr ? urlConnectSession : session,
             "WebSocket 异步 URL 直连",
             WsConnectVariant::Url,
             WebSocketSecureEchoUrl,
@@ -2405,27 +2390,12 @@ NTSTATUS RunHighLevelApiSamples(
     MergeSampleStatus(aggregate, status);
 
     if (NT_SUCCESS(status)) {
-        khttp::Session* postmanUrlSession = nullptr;
-        khttp::SessionConfig postmanUrlConfig = defaultConfig;
-        EnablePostmanWebSocketTlsCompatibility(postmanUrlConfig.Tls);
-        NTSTATUS postmanUrlStatus = khttp::SessionCreate(wskClient, &postmanUrlConfig, &postmanUrlSession);
-        if (!NT_SUCCESS(postmanUrlStatus)) {
-            KHTTP_SAMPLE_LOG(
-                "[WebSocket请求] Postman URL直连兼容Session创建失败 NTSTATUS=0x%08X\r\n",
-                static_cast<ULONG>(postmanUrlStatus));
-            MergeSampleStatus(aggregate, postmanUrlStatus);
-        }
-
         status = RunHighLevelApiSamplesOnSession(
             session,
-            NT_SUCCESS(postmanUrlStatus) ? postmanUrlSession : nullptr,
+            nullptr,
             certificateBundlePath,
             results);
         MergeSampleStatus(aggregate, status);
-        if (postmanUrlSession != nullptr) {
-            khttp::SessionClose(postmanUrlSession);
-            KHTTP_SAMPLE_LOG("[WebSocket请求] Postman URL直连兼容SessionClose 已调用\r\n");
-        }
         khttp::SessionClose(session);
         KHTTP_SAMPLE_LOG("[会话示例] 默认会话请求矩阵结束，SessionClose 已调用\r\n");
     }

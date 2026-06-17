@@ -460,9 +460,14 @@ namespace engine
         const KhRequest& request,
         const tls::TlsHandshakeFailure& failure) noexcept
     {
+        const bool failureCanConfirmTls12 =
+            failure.Category == tls::TlsHandshakeFailureCategory::VersionNegotiation ||
+            (failure.Category == tls::TlsHandshakeFailureCategory::NetworkIo &&
+                failure.BeforeTls13FirstServerHello &&
+                failure.Status != STATUS_IO_TIMEOUT);
         return IsTlsVersionAllowed(request.Tls.MinVersion, request.Tls.MaxVersion, KhTlsVersion::Tls12) &&
             IsTlsVersionAllowed(request.Tls.MinVersion, request.Tls.MaxVersion, KhTlsVersion::Tls13) &&
-            failure.Category == tls::TlsHandshakeFailureCategory::VersionNegotiation;
+            failureCanConfirmTls12;
     }
 
     bool IsSafeFreshConnectionRetryMethod(KhHttpMethod method) noexcept
@@ -3551,13 +3556,17 @@ namespace engine
     bool KhTestIsHttpTls12ConfirmationCandidate(
         KhTlsVersion minVersion,
         KhTlsVersion maxVersion,
-        ULONG category) noexcept
+        ULONG category,
+        NTSTATUS status,
+        bool beforeTls13FirstServerHello) noexcept
     {
         KhRequest request = {};
         request.Tls.MinVersion = minVersion;
         request.Tls.MaxVersion = maxVersion;
         tls::TlsHandshakeFailure failure = {};
         failure.Category = static_cast<tls::TlsHandshakeFailureCategory>(category);
+        failure.Status = status;
+        failure.BeforeTls13FirstServerHello = beforeTls13FirstServerHello;
         return IsHttpTls12ConfirmationCandidate(request, failure);
     }
 #endif

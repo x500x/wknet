@@ -622,7 +622,9 @@ namespace engine
     bool KhTestIsHttpTls12ConfirmationCandidate(
         KhTlsVersion minVersion,
         KhTlsVersion maxVersion,
-        ULONG category) noexcept;
+        ULONG category,
+        NTSTATUS status,
+        bool beforeTls13FirstServerHello) noexcept;
     bool KhTestSessionHasWorkspace(KH_SESSION session) noexcept;
     bool KhTestSessionHasProviderCache(KH_SESSION session) noexcept;
 #endif

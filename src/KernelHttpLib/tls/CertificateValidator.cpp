@@ -3524,7 +3524,8 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS CertificateValidator::ValidateChain(
+    _Must_inspect_result_
+    static NTSTATUS ValidateChainImpl(
         const CertificateChainView& chain,
         const CertificateValidationOptions& options,
         CertificateValidationResult* result) noexcept
@@ -3560,7 +3561,7 @@ namespace tls
             SIZE_T derLength = 0;
             status = ReadNextCertificate(chain, &offset, &der, &derLength);
             if (NT_SUCCESS(status)) {
-                status = ParseCertificate(der, derLength, parsed[index]);
+                status = CertificateValidator::ParseCertificate(der, derLength, parsed[index]);
             }
             if (!NT_SUCCESS(status)) {
                 ReleaseCertificateValidationScratch(scratch);
@@ -3803,6 +3804,61 @@ namespace tls
         RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
         ReleaseCertificateValidationScratch(scratch);
         return STATUS_SUCCESS;
+    }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    namespace
+    {
+        struct ValidateChainCalloutContext final
+        {
+            const CertificateChainView* Chain = nullptr;
+            const CertificateValidationOptions* Options = nullptr;
+            CertificateValidationResult* Result = nullptr;
+            NTSTATUS Status = STATUS_UNSUCCESSFUL;
+        };
+
+        void NTAPI ValidateChainExpandedStackCallout(_In_opt_ PVOID parameter)
+        {
+            ValidateChainCalloutContext* const context = static_cast<ValidateChainCalloutContext*>(parameter);
+            if (context == nullptr || context->Chain == nullptr || context->Options == nullptr) {
+                return;
+            }
+
+            context->Status = ValidateChainImpl(*context->Chain, *context->Options, context->Result);
+        }
+    }
+#endif
+
+    NTSTATUS CertificateValidator::ValidateChain(
+        const CertificateChainView& chain,
+        const CertificateValidationOptions& options,
+        CertificateValidationResult* result) noexcept
+    {
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        return ValidateChainImpl(chain, options, result);
+#else
+        HeapObject<ValidateChainCalloutContext> context;
+        if (!context.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        context->Chain = &chain;
+        context->Options = &options;
+        context->Result = result;
+        context->Status = STATUS_UNSUCCESSFUL;
+
+        const NTSTATUS status = KeExpandKernelStackAndCalloutEx(
+            ValidateChainExpandedStackCallout,
+            context.Get(),
+            MAXIMUM_EXPANSION_SIZE,
+            TRUE,
+            nullptr);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        return context->Status;
+#endif
     }
 
     NTSTATUS CertificateValidator::ImportSubjectPublicKey(

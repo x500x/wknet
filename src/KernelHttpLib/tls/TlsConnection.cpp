@@ -3756,16 +3756,18 @@ namespace tls
         const TlsClientConnectionOptions& options,
         NTSTATUS status) noexcept
     {
-        if (!CanConfirmTls12FromTls13Attempt(options) ||
-            status != STATUS_INVALID_NETWORK_RESPONSE ||
-            !lastHandshakeFailure_.HasPeerAlert ||
-            (lastHandshakeFailure_.PeerAlert.Description != TlsAlertDescription::HandshakeFailure &&
-                !lastHandshakeFailure_.PeerAlert.CloseNotify)) {
+        if (!CanConfirmTls12FromTls13Attempt(options)) {
             return;
         }
 
-        lastHandshakeFailure_.Category = TlsHandshakeFailureCategory::VersionNegotiation;
-        lastHandshakeFailure_.Status = status;
+        lastHandshakeFailure_.BeforeTls13FirstServerHello = true;
+        if (status == STATUS_INVALID_NETWORK_RESPONSE &&
+            lastHandshakeFailure_.HasPeerAlert &&
+            (lastHandshakeFailure_.PeerAlert.Description == TlsAlertDescription::HandshakeFailure ||
+                lastHandshakeFailure_.PeerAlert.CloseNotify)) {
+            lastHandshakeFailure_.Category = TlsHandshakeFailureCategory::VersionNegotiation;
+            lastHandshakeFailure_.Status = status;
+        }
     }
 
     void TlsConnection::ClearHandshakeFailure() noexcept

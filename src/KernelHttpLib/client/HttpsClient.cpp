@@ -34,9 +34,14 @@ namespace client
             const HttpsRequestOptions& options,
             const tls::TlsHandshakeFailure& failure) noexcept
         {
+            const bool failureCanConfirmTls12 =
+                failure.Category == tls::TlsHandshakeFailureCategory::VersionNegotiation ||
+                (failure.Category == tls::TlsHandshakeFailureCategory::NetworkIo &&
+                    failure.BeforeTls13FirstServerHello &&
+                    failure.Status != STATUS_IO_TIMEOUT);
             return IsTlsProtocolAllowed(options.MinimumTlsProtocol, options.MaximumTlsProtocol, tls::TlsProtocol::Tls12) &&
                 IsTlsProtocolAllowed(options.MinimumTlsProtocol, options.MaximumTlsProtocol, tls::TlsProtocol::Tls13) &&
-                failure.Category == tls::TlsHandshakeFailureCategory::VersionNegotiation;
+                failureCanConfirmTls12;
         }
 
         bool IsOrderlyConnectionCloseStatus(NTSTATUS status) noexcept

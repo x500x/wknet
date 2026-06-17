@@ -103,11 +103,11 @@ namespace
         SIZE_T WebSocketPlainCalls = 0;
         SIZE_T WebSocketSecureCalls = 0;
         SIZE_T WebSocketEchoHostCalls = 0;
-        SIZE_T WebSocketBinaryEchoHostCalls = 0;
         SIZE_T WebSocketVerifyCalls = 0;
         SIZE_T WebSocketVerifyWithStoreCalls = 0;
-        SIZE_T WebSocketTls12MaxCalls = 0;
-        SIZE_T WebSocketPostmanSha1CompatibilityCalls = 0;
+        SIZE_T WebSocketTls12ToTls13Calls = 0;
+        SIZE_T WebSocketTls13OnlyCalls = 0;
+        SIZE_T WebSocketSha1CompatibilityCalls = 0;
         SIZE_T WebSocketBinaryModernPolicyCalls = 0;
         SIZE_T WebSocketSendCalls = 0;
         SIZE_T WebSocketTextSendCalls = 0;
@@ -538,18 +538,14 @@ namespace
         if (TextEqualsLiteral(request->Scheme, request->SchemeLength, "wss")) {
             ++capture->WebSocketSecureCalls;
         }
-        if (TextEqualsLiteral(request->Host, request->HostLength, "ws.postman-echo.com")) {
-            ++capture->WebSocketEchoHostCalls;
-            if (request->Policy.Profile == KernelHttp::tls::TlsSecurityProfile::CompatibilityExplicit &&
-                request->Policy.EnableTls12Sha1Signatures) {
-                ++capture->WebSocketPostmanSha1CompatibilityCalls;
-            }
-        }
         if (TextEqualsLiteral(request->Host, request->HostLength, "websocket-echo.com")) {
-            ++capture->WebSocketBinaryEchoHostCalls;
+            ++capture->WebSocketEchoHostCalls;
             if (request->Policy.Profile == KernelHttp::tls::TlsSecurityProfile::ModernDefault &&
                 !request->Policy.EnableTls12Sha1Signatures) {
                 ++capture->WebSocketBinaryModernPolicyCalls;
+            }
+            if (request->Policy.EnableTls12Sha1Signatures) {
+                ++capture->WebSocketSha1CompatibilityCalls;
             }
         }
         if (TextEqualsLiteral(request->Scheme, request->SchemeLength, "wss") &&
@@ -558,8 +554,15 @@ namespace
             if (request->CertificateStore != nullptr) {
                 ++capture->WebSocketVerifyWithStoreCalls;
             }
-            if (request->MaxTlsVersion == KernelHttp::engine::KhTlsVersion::Tls12) {
-                ++capture->WebSocketTls12MaxCalls;
+            if (TextEqualsLiteral(request->Host, request->HostLength, "websocket-echo.com") &&
+                request->MinTlsVersion == KernelHttp::engine::KhTlsVersion::Tls12 &&
+                request->MaxTlsVersion == KernelHttp::engine::KhTlsVersion::Tls13) {
+                ++capture->WebSocketTls12ToTls13Calls;
+            }
+            if (TextEqualsLiteral(request->Host, request->HostLength, "websocket-echo.com") &&
+                request->MinTlsVersion == KernelHttp::engine::KhTlsVersion::Tls13 &&
+                request->MaxTlsVersion == KernelHttp::engine::KhTlsVersion::Tls13) {
+                ++capture->WebSocketTls13OnlyCalls;
             }
         }
 
@@ -759,34 +762,38 @@ namespace
         Expect(capture.HttpsHttp2AlpnCalls == 1, "HTTPS HTTP/2 ALPN sample is issued");
         Expect(capture.HttpsDefaultAlpnOfferCalls >= 2, "HTTPS default samples offer h2 and HTTP/1.1 automatically");
 
-        Expect(capture.WebSocketConnectCalls == 10, "all websocket connect variants are issued");
+        Expect(capture.WebSocketConnectCalls == 11, "all websocket connect variants are issued");
         Expect(capture.WebSocketIpv4Calls == 0, "websocket samples do not force IPv4");
-        Expect(capture.WebSocketAnyCalls == 10, "websocket samples use system default address family");
+        Expect(capture.WebSocketAnyCalls == 11, "websocket samples use system default address family");
         Expect(capture.WebSocketPlainCalls == 0, "plain ws URL samples are not part of the success matrix");
-        Expect(capture.WebSocketSecureCalls == 10, "secure wss samples are issued");
-        Expect(capture.WebSocketEchoHostCalls == 8, "websocket text samples use the Postman raw echo endpoint");
-        Expect(capture.WebSocketBinaryEchoHostCalls == 2, "websocket binary samples use the binary echo endpoint");
+        Expect(capture.WebSocketSecureCalls == 11, "secure wss samples are issued");
+        Expect(capture.WebSocketEchoHostCalls == 11, "websocket samples use the modern echo endpoint");
         Expect(
-            capture.WebSocketPostmanSha1CompatibilityCalls == capture.WebSocketEchoHostCalls,
-            "Postman websocket samples pass explicit TLS 1.2 SHA1 signature compatibility policy");
+            capture.WebSocketSha1CompatibilityCalls == 0,
+            "websocket samples do not enable endpoint-specific SHA1 compatibility");
         Expect(
-            capture.WebSocketBinaryModernPolicyCalls == capture.WebSocketBinaryEchoHostCalls,
-            "non-Postman websocket samples keep modern TLS policy");
-        Expect(capture.WebSocketVerifyCalls == 10, "verified websocket samples are issued");
-        Expect(capture.WebSocketVerifyWithStoreCalls == 10, "verified websocket samples provide a certificate store");
-        Expect(capture.WebSocketTls12MaxCalls == 8, "explicit websocket secure samples cap TLS at 1.2 for endpoint compatibility");
-        Expect(capture.WebSocketSendCalls == 7, "websocket send variants are issued");
-        Expect(capture.WebSocketTextSendCalls == 5, "websocket text send variants are issued");
+            capture.WebSocketTls12ToTls13Calls == 10,
+            "websocket samples keep the default TLS 1.2 through 1.3 range except the TLS 1.3-only case");
+        Expect(
+            capture.WebSocketBinaryModernPolicyCalls == capture.WebSocketEchoHostCalls,
+            "websocket samples keep modern TLS policy");
+        Expect(capture.WebSocketTls13OnlyCalls == 1, "TLS 1.3-only websocket sample targets a TLS 1.3-capable endpoint");
+        Expect(capture.WebSocketVerifyCalls == 11, "verified websocket samples are issued");
+        Expect(capture.WebSocketVerifyWithStoreCalls == 11, "verified websocket samples provide a certificate store");
+        Expect(capture.WebSocketSendCalls == 8, "websocket send variants are issued");
+        Expect(capture.WebSocketTextSendCalls == 6, "websocket text send variants are issued");
         Expect(capture.WebSocketBinarySendCalls == 2, "websocket binary send variants are issued");
         Expect(capture.WebSocketContinuationSendCalls == 0, "regular websocket samples do not need continuation frames");
         Expect(capture.WebSocketNonFinalSendCalls == 0, "websocket Ex send options keep sample messages complete");
-        Expect(capture.WebSocketReceiveCalls == 14, "websocket receive skips greeting frames and reads echo frames");
-        Expect(capture.WebSocketCloseCalls == 10, "each websocket connect path closes its handle");
+        Expect(capture.WebSocketReceiveCalls == 16, "websocket receive skips greeting frames and reads echo frames");
+        Expect(capture.WebSocketCloseCalls == 11, "each websocket connect path closes its handle");
         Expect(results.WebSocketEcho.BodyLength == capture.WebSocketEchoLength, "websocket echo sample receives body");
         Expect(results.WebSocketBinary.BodyLength == 4, "websocket binary sample receives binary echo body");
         Expect(NT_SUCCESS(results.WebSocketBinary.Status), "websocket binary sample validates binary echo body");
         Expect(results.WebSocketBinaryEx.BodyLength == 4, "websocket binary Ex sample receives binary echo body");
         Expect(NT_SUCCESS(results.WebSocketBinaryEx.Status), "websocket binary Ex sample validates binary echo body");
+        Expect(results.WebSocketTls13Only.BodyLength == capture.WebSocketEchoLength, "TLS 1.3 websocket sample receives text echo body");
+        Expect(NT_SUCCESS(results.WebSocketTls13Only.Status), "TLS 1.3 websocket sample validates text echo body");
         Expect(results.WebSocketReceiveEx.BodyLength == capture.WebSocketEchoLength, "websocket receive callback records body");
         Expect(results.HttpAsyncCancel.StatusCode == 1, "async cancel sample marks operation canceled");
         Expect(results.HttpAsyncCancel.BodyLength == 1, "async cancel sample waits for terminal operation state");
@@ -974,7 +981,7 @@ namespace
         Expect(
             results.WebSocketConnectEx.Status == STATUS_HOST_UNREACHABLE,
             "repeated websocket ConnectEx stores transient failure");
-        Expect(capture.WebSocketConnectCalls == 10, "all websocket connect samples are still issued");
+        Expect(capture.WebSocketConnectCalls == 11, "all websocket connect samples are still issued");
         Expect(capture.WebSocketSendCalls == 1, "only validated websocket sample sends a message");
         Expect(capture.WebSocketCloseCalls == 1, "only validated websocket sample closes a live handle");
 
@@ -1007,7 +1014,7 @@ namespace
         Expect(results.WebSocketEcho.Status == STATUS_NO_MATCH, "first websocket sample records DNS no-match");
         Expect(results.WebSocketUrlConnect.Status == STATUS_NO_MATCH, "URL websocket sample records DNS no-match");
         Expect(results.WebSocketConnectEx.Status == STATUS_NO_MATCH, "ConnectEx websocket sample records DNS no-match");
-        Expect(capture.WebSocketConnectCalls == 10, "all websocket connect samples are still issued after DNS no-match");
+        Expect(capture.WebSocketConnectCalls == 11, "all websocket connect samples are still issued after DNS no-match");
         Expect(capture.WebSocketSendCalls == 0, "websocket DNS no-match samples do not send messages");
         Expect(capture.WebSocketCloseCalls == 0, "websocket DNS no-match samples do not close absent handles");
 
@@ -1063,8 +1070,9 @@ namespace
         Expect(NT_SUCCESS(results.WebSocketClose.Status), "websocket close sample succeeds");
         Expect(NT_SUCCESS(results.WebSocketFragmentSend.Status), "websocket fragment send sample succeeds");
         Expect(
-            capture.WebSocketPostmanSha1CompatibilityCalls == 2,
-            "advanced Postman websocket samples pass explicit TLS 1.2 SHA1 signature compatibility policy");
+            capture.WebSocketBinaryModernPolicyCalls == 2,
+            "advanced websocket samples keep modern TLS policy");
+        Expect(capture.WebSocketSha1CompatibilityCalls == 0, "advanced websocket samples do not enable SHA1 compatibility");
         Expect(capture.WebSocketNonFinalSendCalls == 1, "websocket fragment sample sends a non-final frame");
         Expect(capture.WebSocketContinuationSendCalls == 1, "websocket fragment sample completes with a continuation frame");
         Expect(capture.WebSocketCloseCalls >= 2, "advanced websocket samples close handles");
@@ -1358,25 +1366,64 @@ namespace
     {
         using KernelHttp::engine::KhTlsVersion;
         constexpr ULONG TlsFailureVersionNegotiation = 1;
+        constexpr ULONG TlsFailureNetworkIo = 4;
         constexpr ULONG TlsFailurePeerAlert = 7;
 
         Expect(
             khttp::test::IsHttpTls12ConfirmationCandidate(
                 KhTlsVersion::Tls12,
                 KhTlsVersion::Tls13,
-                TlsFailureVersionNegotiation),
+                TlsFailureVersionNegotiation,
+                STATUS_NOT_SUPPORTED,
+                false),
             "default TLS 1.2-1.3 policy treats version negotiation as TLS 1.2 confirmation candidate");
         Expect(
-            !khttp::test::IsHttpTls12ConfirmationCandidate(
+            khttp::test::IsHttpTls12ConfirmationCandidate(
+                KhTlsVersion::Tls12,
                 KhTlsVersion::Tls13,
-                KhTlsVersion::Tls13,
-                TlsFailureVersionNegotiation),
-            "TLS 1.3-only policy does not trigger TLS 1.2 fallback");
+                TlsFailureNetworkIo,
+                STATUS_CONNECTION_DISCONNECTED,
+                true),
+            "TLS 1.3 first ServerHello network failure can confirm TLS 1.2 when both versions are allowed");
         Expect(
             !khttp::test::IsHttpTls12ConfirmationCandidate(
                 KhTlsVersion::Tls12,
                 KhTlsVersion::Tls13,
-                TlsFailurePeerAlert),
+                TlsFailureNetworkIo,
+                STATUS_IO_TIMEOUT,
+                true),
+            "TLS 1.3 first ServerHello timeout does not trigger TLS 1.2 confirmation");
+        Expect(
+            !khttp::test::IsHttpTls12ConfirmationCandidate(
+                KhTlsVersion::Tls12,
+                KhTlsVersion::Tls13,
+                TlsFailureNetworkIo,
+                STATUS_CONNECTION_DISCONNECTED,
+                false),
+            "generic network I/O failure does not trigger TLS 1.2 confirmation");
+        Expect(
+            !khttp::test::IsHttpTls12ConfirmationCandidate(
+                KhTlsVersion::Tls13,
+                KhTlsVersion::Tls13,
+                TlsFailureVersionNegotiation,
+                STATUS_NOT_SUPPORTED,
+                false),
+            "TLS 1.3-only policy does not trigger TLS 1.2 fallback");
+        Expect(
+            !khttp::test::IsHttpTls12ConfirmationCandidate(
+                KhTlsVersion::Tls12,
+                KhTlsVersion::Tls12,
+                TlsFailureNetworkIo,
+                STATUS_CONNECTION_DISCONNECTED,
+                true),
+            "TLS 1.2-only policy does not need TLS 1.2 confirmation");
+        Expect(
+            !khttp::test::IsHttpTls12ConfirmationCandidate(
+                KhTlsVersion::Tls12,
+                KhTlsVersion::Tls13,
+                TlsFailurePeerAlert,
+                STATUS_INVALID_NETWORK_RESPONSE,
+                true),
             "non-version TLS failures do not trigger TLS 1.2 fallback");
     }
 
@@ -1407,7 +1454,7 @@ namespace
 
         kws::WebSocket* ws = nullptr;
         kws::ConnectConfig wsConfig = kws::DefaultConnectConfig();
-        wsConfig.Url = "wss://ws.postman-echo.com/raw";
+        wsConfig.Url = "wss://websocket-echo.com";
         wsConfig.UrlLength = strlen(wsConfig.Url);
         status = kws::Connect(session, &wsConfig, &ws);
         Expect(NT_SUCCESS(status), "WsConnect succeeds for websocket receive limit test");
@@ -1448,7 +1495,7 @@ namespace
 
         kws::WebSocket* ws = nullptr;
         kws::ConnectConfig invalidConfig = kws::DefaultConnectConfig();
-        invalidConfig.Url = "wss://ws.postman-echo.com/raw";
+        invalidConfig.Url = "wss://websocket-echo.com";
         invalidConfig.UrlLength = strlen(invalidConfig.Url);
         invalidConfig.Subprotocol = "bad token";
         invalidConfig.SubprotocolLength = strlen(invalidConfig.Subprotocol);
@@ -1458,7 +1505,7 @@ namespace
         Expect(capture.WebSocketConnectCalls == 0, "high-level invalid subprotocol does not hit transport");
 
         kws::ConnectConfig validConfig = kws::DefaultConnectConfig();
-        validConfig.Url = "wss://ws.postman-echo.com/raw";
+        validConfig.Url = "wss://websocket-echo.com";
         validConfig.UrlLength = strlen(validConfig.Url);
         status = kws::Connect(session, &validConfig, &ws);
         Expect(NT_SUCCESS(status), "high-level WsConnect succeeds for validation");

@@ -48,6 +48,7 @@ namespace tls
         NTSTATUS Status = STATUS_SUCCESS;
         TlsAlert PeerAlert = {};
         bool HasPeerAlert = false;
+        bool BeforeTls13FirstServerHello = false;
     };
 
     struct TlsClientConnectionOptions final
