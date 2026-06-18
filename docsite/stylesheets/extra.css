@@ -62,8 +62,15 @@
   font-feature-settings: "kern", "liga", "tnum";
   line-height: 1.72;
 }
-/* 仅约束正文阅读宽度；header/footer 维持 Material 默认满宽，避免宽屏右侧留白 */
+/* 正文保持居中阅读宽度，便于长行阅读 */
 .md-main__inner.md-grid { max-width: 64rem; }
+
+/* 顶栏与页脚铺满全宽（Material 默认会按 61rem 居中，宽屏下右侧留白）：
+   让 logo/搜索/Wiki/仓库链接真正贴到页面两侧边缘 */
+.md-header__inner.md-grid,
+.md-footer__inner.md-grid {
+  max-width: none;
+}
 
 .md-typeset h1 { font-weight: 800; letter-spacing: -0.01em; }
 .md-typeset h2 {
