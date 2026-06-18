@@ -19,8 +19,8 @@
 
 1. 克隆仓库
    ```bash
-   git clone https://github.com/x500x/win_kernel_http.git
-   cd win_kernel_http
+   git clone https://github.com/x500x/khttp.git
+   cd khttp
    ```
 2. 用 Visual Studio 打开 `KernelHttp.sln`，选择配置（Debug/Release）与平台（x64/ARM64），按 `Ctrl+Shift+B` 构建。
 3. 或用命令行：
@@ -91,8 +91,8 @@ NTSTATUS SimpleHttpGet(net::WskClient& wskClient) {
 
 1. Clone:
    ```bash
-   git clone https://github.com/x500x/win_kernel_http.git
-   cd win_kernel_http
+   git clone https://github.com/x500x/khttp.git
+   cd khttp
    ```
 2. Open `KernelHttp.sln` in Visual Studio, pick a configuration (Debug/Release) and platform (x64/ARM64), then `Ctrl+Shift+B`.
 3. Or from the command line:

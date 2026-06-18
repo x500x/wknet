@@ -45,7 +45,7 @@ struct kws::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subpr
 ### 分片（**已支持**）
 
 - **发送**：`kws::SendContinuation(Ex)` 续帧；`SendText/SendBinary` 的 `*Ex` 可带 `FinalFragment=false` 开启分片。客户端会按帧缓冲自动分块（首帧用真实 opcode，后续用 Continuation），并对文本消息**跨分片增量 UTF-8 校验**，最终片不完整码点 → `STATUS_INVALID_PARAMETER`。
-- **接收**：`ReceiveOptions.OnMessage` 回调可逐消息/逐分片暴露；否则默认聚合为完整消息（`Message.Data` 指向内部缓冲，下次收/关前有效）。
+- **接收**：`ReceiveOptions.OnMessage` 回调或默认返回式，二者都返回**客户端已重组的完整消息**（内核路径上回调的 `finalFragment` 恒为 true，即按消息回调，而非逐 wire 分片）。`Message.Data` 指向内部缓冲，下次收/关前有效。
 
 ### 行为与时序
 
@@ -80,6 +80,6 @@ if (NT_SUCCESS(kws::Connect(session, "wss://echo.example/ws", 21, &ws))) {
 
 Framing in `KernelHttp::websocket`, high-level API in `KernelHttp::kws`. `WebSocketOpcode` Continuation/Text/Binary/Close/Ping/Pong. `WebSocketCodec`: `GenerateClientKey` (16 random bytes→base64, wiped), `ComputeAcceptValue` (SHA-1 of key+GUID), `ValidateServerHandshake` (requires 101/HTTP1.1/Upgrade, exactly one `Sec-WebSocket-Accept` compared **constant-time**, **rejects any `Sec-WebSocket-Extensions`**), `EncodeClientFrame` (always masked), `DecodeFrameHeader` (reserved bits must be 0; **masked server frame → error**).
 
-**Fragmentation is supported**: send via `kws::SendContinuation(Ex)` / `FinalFragment=false` (auto-chunked to the frame buffer, with incremental cross-fragment UTF-8 validation of text); receive via `ReceiveOptions.OnMessage` callback (per message/fragment) or aggregated whole-message (`Message.Data` valid until next receive/close).
+**Fragmentation**: send is fully granular via `kws::SendContinuation(Ex)` / `FinalFragment=false` (auto-chunked to the frame buffer, with incremental cross-fragment UTF-8 validation of text). Receive (via `ReceiveOptions.OnMessage` callback or the default return form) always delivers a **client-reassembled complete message** — on the kernel path the callback's `finalFragment` is always true (per-message, not per-wire-fragment). `Message.Data` is valid until the next receive/close.
 
 Behavior: auto-Pong (toggleable); >100 control frames per receive → close **1002** lineage (masked/fragment-state errors), **1007** (bad UTF-8), **1008** (control flood), **1009** (over `MaxMessageBytes`). Valid incoming close codes 1000–1014 (minus 1004/1005/1006) or 3000–4999. Active close sends an empty close then waits for peer close (3 s timeout, swallowed as success); passive close echoes then closes. WS handshake ALPN is forced to `http/1.1`. Never run `Close` concurrently with new I/O on the same handle. Boundaries: HTTP/1.1 Upgrade only, no custom opening headers, no extension negotiation, no RFC 8441, no handshake redirect/401 following.

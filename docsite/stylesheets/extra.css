@@ -62,7 +62,8 @@
   font-feature-settings: "kern", "liga", "tnum";
   line-height: 1.72;
 }
-.md-grid { max-width: 62rem; }
+/* 仅约束正文阅读宽度；header/footer 维持 Material 默认满宽，避免宽屏右侧留白 */
+.md-main__inner.md-grid { max-width: 64rem; }
 
 .md-typeset h1 { font-weight: 800; letter-spacing: -0.01em; }
 .md-typeset h2 {

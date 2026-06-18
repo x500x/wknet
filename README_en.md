@@ -84,8 +84,8 @@ For certificate host validation, IP literals match only iPAddress SAN entries an
 
 1. **Clone Repository**
    ```bash
-   git clone https://github.com/x500x/win_kernel_http.git
-   cd win_kernel_http
+   git clone https://github.com/x500x/khttp.git
+   cd khttp
    ```
 
 2. **Build with Visual Studio**
@@ -792,7 +792,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) file for 
 
 For questions or suggestions, please contact us through:
 
-- Submit an [Issue](https://github.com/x500x/win_kernel_http/issues) to the project repository
+- Submit an [Issue](https://github.com/x500x/khttp/issues) to the project repository
 - View project documentation and example code
 - Reference related technical documentation
 
