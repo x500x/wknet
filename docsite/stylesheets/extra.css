@@ -69,7 +69,7 @@
    让 logo/搜索/Wiki/仓库链接真正贴到页面两侧边缘 */
 .md-header__inner.md-grid,
 .md-footer__inner.md-grid {
-  max-width: none;
+  max-width: none !important;
 }
 
 .md-typeset h1 { font-weight: 800; letter-spacing: -0.01em; }
