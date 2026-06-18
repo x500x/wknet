@@ -37,6 +37,16 @@ namespace khttp
         _In_ Request* request,
         RequestBodyMode mode) noexcept;
 
+    // Adds a trailer field sent after the final chunk. Only honored with
+    // RequestBodyMode::Chunked; rejects forbidden trailer fields and invalid tokens.
+    _Must_inspect_result_
+    NTSTATUS RequestAddTrailer(
+        _In_ Request* request,
+        _In_reads_bytes_(nameLength) const char* name,
+        SIZE_T nameLength,
+        _In_reads_bytes_(valueLength) const char* value,
+        SIZE_T valueLength) noexcept;
+
     _Must_inspect_result_
     NTSTATUS RequestClearBody(_In_ Request* request) noexcept;
 

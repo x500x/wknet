@@ -6260,7 +6260,8 @@ namespace
         Expect(KernelHttp::tls::TlsPolicyAllowsTls12Renegotiation(policy), "compatibility policy allows renegotiation");
         Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::RsaPkcs1Sha1), "compatibility policy allows rsa_pkcs1_sha1 when explicitly enabled");
         Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "compatibility policy allows ecdsa_sha1 when explicitly enabled");
-        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::Ed25519), "compatibility policy still allows modern signatures");
+        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSecp256r1Sha256), "compatibility policy still allows modern signatures");
+        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::Ed25519), "Ed25519 is offered after software verify implementation");
     }
 }
 

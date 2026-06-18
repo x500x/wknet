@@ -388,6 +388,20 @@ namespace crypto
             _In_reads_bytes_(signatureLength) const UCHAR* signature,
             SIZE_T signatureLength) noexcept;
 
+        // Ed25519 (RFC 8032) verification. Unlike VerifySignature, this takes the
+        // raw 32-byte public key and the FULL message (not a digest) because
+        // EdDSA hashes the message internally. Implemented in software in both
+        // kernel and user-mode builds. Returns STATUS_INVALID_SIGNATURE on any
+        // verification failure or malformed input.
+        _Must_inspect_result_
+        static NTSTATUS VerifyEd25519(
+            _In_reads_bytes_(publicKeyLength) const UCHAR* publicKey,
+            SIZE_T publicKeyLength,
+            _In_reads_bytes_(messageLength) const UCHAR* message,
+            SIZE_T messageLength,
+            _In_reads_bytes_(signatureLength) const UCHAR* signature,
+            SIZE_T signatureLength) noexcept;
+
         _Must_inspect_result_
         static NTSTATUS EncryptRsaPkcs1(
             _In_opt_ const CngProviderCache* cache,

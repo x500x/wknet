@@ -598,6 +598,59 @@ namespace
         ExpectHandshakeHost("::1", 8080, L"8080", "[::1]:8080");
     }
 
+    void TestHandshakeCustomHeaders()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        HttpHeader extra[2] = {};
+        extra[0] = { { "Origin", strlen("Origin") }, { "https://example.test", strlen("https://example.test") } };
+        extra[1] = { { "Authorization", strlen("Authorization") }, { "Bearer token123", strlen("Bearer token123") } };
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.ExtraHeaders = extra;
+        options.ExtraHeaderCount = 2;
+
+        NTSTATUS status = client.Connect(wskClient, options, buffers);
+        Expect(NT_SUCCESS(status), "websocket connect succeeds with custom headers");
+
+        size_t valueLength = 0;
+        const char* origin = FindHeaderValue(server.LastHandshakeRequest, "Origin", &valueLength);
+        Expect(origin != nullptr &&
+            valueLength == strlen("https://example.test") &&
+            memcmp(origin, "https://example.test", valueLength) == 0,
+            "custom Origin header is emitted on the wire");
+
+        const char* authorization = FindHeaderValue(server.LastHandshakeRequest, "Authorization", &valueLength);
+        Expect(authorization != nullptr &&
+            valueLength == strlen("Bearer token123") &&
+            memcmp(authorization, "Bearer token123", valueLength) == 0,
+            "custom Authorization header is emitted on the wire");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
     void TestHandshakeBufferedFrameSurvivesSendScratchReuse()
     {
         FakeWebSocketServer server;
@@ -2653,6 +2706,7 @@ namespace net
 int main()
 {
     TestHandshakeHostHeaderFormatting();
+    TestHandshakeCustomHeaders();
     TestHandshakeBufferedFrameSurvivesSendScratchReuse();
     TestSendTextCanEmitNonFinalFrame();
     TestSendAllowsEmptyMessagesAndRejectsInvalidUtf8();

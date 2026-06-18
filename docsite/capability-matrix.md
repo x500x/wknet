@@ -63,7 +63,7 @@
 | HTTP/1.1 | 拒绝用户设置 `Transfer-Encoding`；无 request trailer；无入站 parser/server；无 proxy/CONNECT/TRACE；`Range`/条件请求仅透传；响应先缓冲（无流式上传）；`Expect:100-continue` 带 body 被拒；`br` 仅 Content-Encoding（TE 中 `br` → `STATUS_NOT_SUPPORTED`） |
 | HTTP/2 | 单流串行，无多路复用；**不复用 h2 连接**（每请求新建，结束 GOAWAY）；不发 PRIORITY/主动 PING；高层 khttp 不暴露 h2c（仅 `Http2Client`） |
 | WebSocket | HTTP/1.1 Upgrade only；无自定义 opening headers；无扩展协商（permessage-deflate 等拒绝）；不支持 RFC 8441；不跟随握手 redirect/401 |
-| TLS | 默认不启用 TLS1.2 RSA kx/CBC/renegotiation/SHA-1（需 `CompatibilityExplicit`）；**EdDSA 验签未实现**（`STATUS_NOT_SUPPORTED`，仅作 mTLS 签名方案）；不在线抓取 OCSP/CRL；0-RTT 默认关闭 |
+| TLS | 默认不启用 TLS1.2 RSA kx/CBC/renegotiation/SHA-1（需 `CompatibilityExplicit`）；Ed25519 验签为内核内软件实现；Ed448 验签未实现且不主动宣称；不在线抓取 OCSP/CRL；0-RTT 默认关闭 |
 
 ### 默认关闭、需显式开启
 
@@ -71,7 +71,7 @@
 
 ### 明确非目标
 
-HTTP/3·QUIC、服务端/入站解析、HTTP 代理/CONNECT、管线化、`Expect:100-continue`、流式请求体上传、request trailer、WebSocket permessage-deflate / over HTTP/2、在线 OCSP/CRL 抓取、EdDSA 验签。详见 [路线图与非目标](roadmap.md)。
+HTTP/3·QUIC、服务端/入站解析、HTTP 代理/CONNECT、管线化、`Expect:100-continue`、流式请求体上传、request trailer、WebSocket permessage-deflate / over HTTP/2、在线 OCSP/CRL 抓取、Ed448 验签。详见 [路线图与非目标](roadmap.md)。
 
 ### 关键默认行为
 
@@ -92,6 +92,6 @@ This page is grounded in the actual `src/KernelHttpLib/` implementation.
 
 **WebSocket**: handshake with **constant-time** accept comparison, **rejects any Sec-WebSocket-Extensions**, subprotocol negotiation; client frames always masked (masked server frame → 1002); **fragment send (`kws::SendContinuation` + `FinalFragment`)** with incremental cross-fragment UTF-8 validation; **receive-fragment callback (`ReceiveOptions.OnMessage`)** or aggregated whole-message; auto-Pong (toggleable), ≤100 control frames per receive (1008), UTF-8 validation (1007), max-message (1009); active and passive close handshakes.
 
-**TLS 1.2/1.3**: single-version path (no in-handshake fallback — failures classified as `VersionNegotiation` for an explicit caller retry at 1.2); cipher/group/sig split into default / optional / legacy; TLS1.2 enforces EMS + secure-reneg indication + Encrypt-then-MAC for CBC; TLS1.3 HelloRetryRequest, reactive-only KeyUpdate, NewSessionTicket, record padding, `signature_algorithms_cert`, OCSP stapling parse; resumption bound to policy identity + SNI + ALPN + cipher + version. Certificate validation (on an expanded kernel stack): chain ≤8, exact-DN linking, signature/validity/basic-constraints/pathLen/KU/EKU/name-constraints/cert-policies/trust-anchor; rejects duplicate and unknown-critical extensions; hostname match with single-label wildcard, IP literals match iPAddress SAN only, **never falls back to CN**; revocation offline + table-driven, **fail-closed** when required-but-absent; SPKI pinning (fail-open for un-pinned hosts); mTLS via caller `Sign` callback (private key never enters the library). Crypto: ChaCha20-Poly1305/AES-CCM/X25519/X448/FFDHE are in-kernel **software**; min RSA modulus 2048; **EdDSA verification is `STATUS_NOT_SUPPORTED`** (offered only as an mTLS signing scheme).
+**TLS 1.2/1.3**: single-version path (no in-handshake fallback — failures classified as `VersionNegotiation` for an explicit caller retry at 1.2); cipher/group/sig split into default / optional / legacy; TLS1.2 enforces EMS + secure-reneg indication + Encrypt-then-MAC for CBC; TLS1.3 HelloRetryRequest, reactive-only KeyUpdate, NewSessionTicket, record padding, `signature_algorithms_cert`, OCSP stapling parse; resumption bound to policy identity + SNI + ALPN + cipher + version. Certificate validation (on an expanded kernel stack): chain ≤8, exact-DN linking, signature/validity/basic-constraints/pathLen/KU/EKU/name-constraints/cert-policies/trust-anchor; rejects duplicate and unknown-critical extensions; hostname match with single-label wildcard, IP literals match iPAddress SAN only, **never falls back to CN**; revocation offline + table-driven, **fail-closed** when required-but-absent; SPKI pinning (fail-open for un-pinned hosts); mTLS via caller `Sign` callback (private key never enters the library). Crypto: ChaCha20-Poly1305/AES-CCM/X25519/X448/FFDHE/Ed25519 verification are in-kernel **software**; min RSA modulus 2048; Ed448 verification is not implemented and is not advertised.
 
 **Boundaries / non-goals**: single-stream HTTP/2 with no connection reuse; no proxy/CONNECT/pipelining/streaming upload/request trailers; WebSocket HTTP/1.1-Upgrade only (no extensions, no RFC 8441); TLS 1.2 RSA-kx/CBC/renegotiation/SHA-1 off by default (`CompatibilityExplicit`); no online OCSP/CRL fetch; 0-RTT off by default; HTTP/3·QUIC and server role out of scope. Redirect exhaustion returns the 3xx response (no error). See [Roadmap](roadmap.md).

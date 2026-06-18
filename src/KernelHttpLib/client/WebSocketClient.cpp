@@ -450,8 +450,9 @@ namespace client
                 return status;
             }
 
-            const SIZE_T headerCount =
+            const SIZE_T baseHeaderCount =
                 options.Subprotocol != nullptr && options.SubprotocolLength != 0 ? 4 : 3;
+            const SIZE_T headerCount = baseHeaderCount + options.ExtraHeaderCount;
             HeapArray<http::HttpHeader> headers(headerCount);
             if (!headers.IsValid()) {
                 return STATUS_INSUFFICIENT_RESOURCES;
@@ -466,6 +467,10 @@ namespace client
                     http::MakeText("Sec-WebSocket-Protocol"),
                     { options.Subprotocol, options.SubprotocolLength }
                 };
+            }
+
+            for (SIZE_T index = 0; index < options.ExtraHeaderCount; ++index) {
+                headers[nextHeader++] = options.ExtraHeaders[index];
             }
 
             http::HttpRequestBuildOptions request = {};

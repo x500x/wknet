@@ -530,6 +530,185 @@ namespace
         Expect(status == STATUS_NOT_SUPPORTED, "request builder rejects body with Expect: 100-continue");
     }
 
+    void TestBuildChunkedRequestWithTrailers()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+        const char body[] = "alpha=beta";
+
+        const HttpHeader extra[] = {
+            { MakeText("Trailer"), MakeText("Expires, X-Checksum") }
+        };
+        const HttpHeader trailers[] = {
+            { MakeText("Expires"), MakeText("Wed, 21 Oct 2015 07:28:00 GMT") },
+            { MakeText("X-Checksum"), MakeText("abc123") }
+        };
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Post;
+        options.Path = MakeText("/submit");
+        options.Host = MakeText("example.com");
+        options.ContentType = MakeText("application/x-www-form-urlencoded");
+        options.Body = body;
+        options.BodyLength = strlen(body);
+        options.BodyMode = HttpRequestBodyMode::Chunked;
+        options.ExtraHeaders = extra;
+        options.ExtraHeaderCount = 1;
+        options.Trailers = trailers;
+        options.TrailerCount = sizeof(trailers) / sizeof(trailers[0]);
+
+        const NTSTATUS status = HttpRequestBuilder::Build(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+
+        const char expected[] =
+            "POST /submit HTTP/1.1\r\n"
+            "Host: example.com\r\n"
+            "Content-Type: application/x-www-form-urlencoded\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "Trailer: Expires, X-Checksum\r\n"
+            "\r\n"
+            "a\r\n"
+            "alpha=beta\r\n"
+            "0\r\n"
+            "Expires: Wed, 21 Oct 2015 07:28:00 GMT\r\n"
+            "X-Checksum: abc123\r\n"
+            "\r\n";
+
+        Expect(status == STATUS_SUCCESS, "chunked request with trailers builds successfully");
+        Expect(written == strlen(expected), "chunked trailers request reports exact byte count");
+        Expect(memcmp(buffer, expected, strlen(expected)) == 0, "chunked trailers request bytes match expected output");
+    }
+
+    void TestBuildChunkedRequestWithEmptyBodyTrailers()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+
+        const HttpHeader trailers[] = {
+            { MakeText("X-Checksum"), MakeText("deadbeef") }
+        };
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Post;
+        options.Path = MakeText("/submit");
+        options.Host = MakeText("example.com");
+        options.IncludeContentLength = true;
+        options.BodyMode = HttpRequestBodyMode::Chunked;
+        options.Trailers = trailers;
+        options.TrailerCount = 1;
+
+        const NTSTATUS status = HttpRequestBuilder::Build(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+
+        const char expected[] =
+            "POST /submit HTTP/1.1\r\n"
+            "Host: example.com\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "\r\n"
+            "0\r\n"
+            "X-Checksum: deadbeef\r\n"
+            "\r\n";
+
+        Expect(status == STATUS_SUCCESS, "empty-body chunked request with trailers builds successfully");
+        Expect(written == strlen(expected), "empty-body trailers request reports exact byte count");
+        Expect(memcmp(buffer, expected, strlen(expected)) == 0, "empty-body trailers request bytes match expected output");
+    }
+
+    void TestRequestBuilderTrailerValidation()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+        const char body[] = "alpha=beta";
+
+        HttpRequestBuildOptions base = {};
+        base.Method = HttpMethod::Post;
+        base.Path = MakeText("/submit");
+        base.Host = MakeText("example.com");
+        base.Body = body;
+        base.BodyLength = strlen(body);
+        base.BodyMode = HttpRequestBodyMode::Chunked;
+
+        const HttpHeader good[] = {
+            { MakeText("X-Checksum"), MakeText("abc123") }
+        };
+
+        // Trailers require chunked transfer; reject in Content-Length mode.
+        {
+            HttpRequestBuildOptions options = base;
+            options.BodyMode = HttpRequestBodyMode::ContentLength;
+            options.Trailers = good;
+            options.TrailerCount = 1;
+            const NTSTATUS status = HttpRequestBuilder::Build(options, buffer, sizeof(buffer), &written);
+            Expect(status == STATUS_NOT_SUPPORTED, "trailers rejected without chunked transfer");
+        }
+
+        // Chunked mode but no framing emitted (no body, no Content-Length opt-in).
+        {
+            HttpRequestBuildOptions options = base;
+            options.Body = nullptr;
+            options.BodyLength = 0;
+            options.Trailers = good;
+            options.TrailerCount = 1;
+            const NTSTATUS status = HttpRequestBuilder::Build(options, buffer, sizeof(buffer), &written);
+            Expect(status == STATUS_NOT_SUPPORTED, "trailers rejected when no chunked framing is emitted");
+        }
+
+        // Non-null count with null pointer.
+        {
+            HttpRequestBuildOptions options = base;
+            options.Trailers = nullptr;
+            options.TrailerCount = 1;
+            const NTSTATUS status = HttpRequestBuilder::Build(options, buffer, sizeof(buffer), &written);
+            Expect(status == STATUS_INVALID_PARAMETER, "null trailer pointer with non-zero count rejected");
+        }
+
+        // Forbidden trailer fields (framing / auth / cookie).
+        const char* forbidden[] = {
+            "Content-Length", "Transfer-Encoding", "Host",
+            "Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie"
+        };
+        for (size_t i = 0; i < sizeof(forbidden) / sizeof(forbidden[0]); ++i) {
+            const HttpHeader trailer[] = {
+                { MakeText(forbidden[i]), MakeText("x") }
+            };
+            HttpRequestBuildOptions options = base;
+            options.Trailers = trailer;
+            options.TrailerCount = 1;
+            const NTSTATUS status = HttpRequestBuilder::Build(options, buffer, sizeof(buffer), &written);
+            Expect(status == STATUS_NOT_SUPPORTED, "forbidden trailer field rejected");
+        }
+
+        // Invalid trailer name (illegal token character).
+        {
+            const HttpHeader trailer[] = {
+                { MakeText("Bad Name"), MakeText("x") }
+            };
+            HttpRequestBuildOptions options = base;
+            options.Trailers = trailer;
+            options.TrailerCount = 1;
+            const NTSTATUS status = HttpRequestBuilder::Build(options, buffer, sizeof(buffer), &written);
+            Expect(status == STATUS_INVALID_PARAMETER, "invalid trailer name rejected");
+        }
+
+        // CRLF injection in a trailer value.
+        {
+            const HttpHeader trailer[] = {
+                { MakeText("X-Checksum"), MakeText("ok\r\nInjected: yes") }
+            };
+            HttpRequestBuildOptions options = base;
+            options.Trailers = trailer;
+            options.TrailerCount = 1;
+            const NTSTATUS status = HttpRequestBuilder::Build(options, buffer, sizeof(buffer), &written);
+            Expect(status == STATUS_INVALID_PARAMETER, "CRLF injection in trailer value rejected");
+        }
+    }
+
     void TestRequestBuilderAllowsEmptyHeaderValue()
     {
         char buffer[256] = {};
@@ -2162,6 +2341,94 @@ namespace
 
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "obs-fold header continuation is rejected");
     }
+
+    void TestContentRangeParsing()
+    {
+        using KernelHttp::http::HttpContentRange;
+
+        HttpHeader headers[2] = {};
+        headers[0].Name = MakeText("Content-Range");
+        headers[0].Value = MakeText("bytes 0-499/1234");
+        headers[1].Name = MakeText("Content-Length");
+        headers[1].Value = MakeText("500");
+
+        HttpResponse response = {};
+        response.StatusCode = 206;
+        response.Headers = headers;
+        response.HeaderCount = 2;
+
+        Expect(response.IsPartialContent(), "206 reports partial content");
+
+        HttpContentRange range = {};
+        Expect(response.GetContentRange(&range), "well-formed Content-Range parses");
+        Expect(range.HasRange && range.FirstBytePos == 0 && range.LastBytePos == 499, "range bounds parse");
+        Expect(range.HasCompleteLength && range.CompleteLength == 1234, "complete length parses");
+    }
+
+    void TestContentRangeUnknownAndUnsatisfied()
+    {
+        using KernelHttp::http::HttpContentRange;
+
+        {
+            HttpHeader headers[1] = {};
+            headers[0].Name = MakeText("Content-Range");
+            headers[0].Value = MakeText("bytes 100-200/*");
+            HttpResponse response = {};
+            response.Headers = headers;
+            response.HeaderCount = 1;
+
+            HttpContentRange range = {};
+            Expect(response.GetContentRange(&range), "range with unknown complete length parses");
+            Expect(range.HasRange && range.FirstBytePos == 100 && range.LastBytePos == 200, "bounds parse with unknown length");
+            Expect(!range.HasCompleteLength, "unknown complete length is flagged");
+        }
+
+        {
+            HttpHeader headers[1] = {};
+            headers[0].Name = MakeText("Content-Range");
+            headers[0].Value = MakeText("bytes */1234");
+            HttpResponse response = {};
+            response.Headers = headers;
+            response.HeaderCount = 1;
+
+            HttpContentRange range = {};
+            Expect(response.GetContentRange(&range), "unsatisfied range parses");
+            Expect(!range.HasRange, "unsatisfied range has no bounds");
+            Expect(range.HasCompleteLength && range.CompleteLength == 1234, "unsatisfied range carries complete length");
+        }
+    }
+
+    void TestContentRangeRejectsMalformed()
+    {
+        using KernelHttp::http::HttpContentRange;
+
+        const char* badValues[] = {
+            "bytes 500-499/1234",
+            "bytes 0-1234/1234",
+            "items 0-1/2",
+            "bytes 0-1",
+            "bytes 0500/1234",
+            "bytes 0-1/1234  extra",
+            "bytes -1/1234",
+            ""
+        };
+
+        for (size_t i = 0; i < sizeof(badValues) / sizeof(badValues[0]); ++i) {
+            HttpHeader headers[1] = {};
+            headers[0].Name = MakeText("Content-Range");
+            headers[0].Value = MakeText(badValues[i]);
+            HttpResponse response = {};
+            response.Headers = headers;
+            response.HeaderCount = 1;
+
+            HttpContentRange range = {};
+            Expect(!response.GetContentRange(&range), "malformed Content-Range is rejected");
+        }
+
+        HttpResponse empty = {};
+        HttpContentRange range = {};
+        Expect(!empty.GetContentRange(&range), "absent Content-Range returns false");
+    }
 }
 
 int main()
@@ -2173,6 +2440,9 @@ int main()
     TestRequestBuilderRejectsInjectionText();
     TestRequestBuilderRejectsTransferEncoding();
     TestRequestBuilderRejectsUnsupportedRequestFraming();
+    TestBuildChunkedRequestWithTrailers();
+    TestBuildChunkedRequestWithEmptyBodyTrailers();
+    TestRequestBuilderTrailerValidation();
     TestRequestBuilderAllowsEmptyHeaderValue();
     TestBuildPutRequest();
     TestBuildRealHostGetRequest();
@@ -2228,6 +2498,9 @@ int main()
     TestSwitchingProtocolsLeavesWebSocketBytes();
     TestHeaderTokenMatching();
     TestObsFoldRejected();
+    TestContentRangeParsing();
+    TestContentRangeUnknownAndUnsatisfied();
+    TestContentRangeRejectsMalformed();
 
     if (g_failed) {
         return 1;

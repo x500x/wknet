@@ -2671,6 +2671,133 @@ namespace
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
+    void TestChunkedRequestTrailers() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 201 Created\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for chunked trailers");
+
+        khttp::Request* request = nullptr;
+        status = khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for chunked trailers");
+
+        const char* url = "http://example.com/upload";
+        status = khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for chunked trailers");
+
+        status = khttp::RequestSetMethod(request, khttp::Method::Post);
+        Expect(NT_SUCCESS(status), "RequestSetMethod succeeds for chunked trailers");
+
+        const char* body = "payload-bytes";
+        status = khttp::RequestSetBody(
+            request,
+            reinterpret_cast<const UCHAR*>(body),
+            Length(body));
+        Expect(NT_SUCCESS(status), "RequestSetBody succeeds for chunked trailers");
+
+        status = khttp::RequestSetBodyMode(request, khttp::RequestBodyMode::Chunked);
+        Expect(NT_SUCCESS(status), "RequestSetBodyMode enables chunked for trailers");
+
+        // Forbidden trailer fields are rejected at add time.
+        status = khttp::RequestAddTrailer(request, "Content-Length", Length("Content-Length"), "5", 1);
+        Expect(status == STATUS_NOT_SUPPORTED, "RequestAddTrailer rejects forbidden trailer field");
+
+        // CRLF injection in the trailer value is rejected.
+        const char* injected = "ok\r\nX-Injected: 1";
+        status = khttp::RequestAddTrailer(request, "X-Checksum", Length("X-Checksum"), injected, Length(injected));
+        Expect(status == STATUS_INVALID_PARAMETER, "RequestAddTrailer rejects CRLF injection");
+
+        // Valid trailers are accepted and emitted, order preserved.
+        const char* checksum = "abc123";
+        status = khttp::RequestAddTrailer(request, "X-Checksum", Length("X-Checksum"), checksum, Length(checksum));
+        Expect(NT_SUCCESS(status), "RequestAddTrailer accepts a valid trailer");
+
+        const char* expires = "Wed, 21 Oct 2015 07:28:00 GMT";
+        status = khttp::RequestAddTrailer(request, "Expires", Length("Expires"), expires, Length(expires));
+        Expect(NT_SUCCESS(status), "RequestAddTrailer accepts a second valid trailer");
+
+        khttp::Response* resp = nullptr;
+        status = khttp::Send(session, request, nullptr, &resp);
+        Expect(NT_SUCCESS(status), "chunked trailers send succeeds");
+        Expect(khttp::ResponseStatusCode(resp) == 201, "chunked trailers response status is 201");
+        Expect(BufferContainsLiteral(
+            captured.BuiltRequest,
+            captured.BuiltRequestLength,
+            "\r\nd\r\npayload-bytes\r\n0\r\n"
+            "X-Checksum: abc123\r\n"
+            "Expires: Wed, 21 Oct 2015 07:28:00 GMT\r\n"
+            "\r\n"), "chunked request emits trailers after the final chunk");
+
+        khttp::ResponseRelease(resp);
+        khttp::RequestRelease(request);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestTrailersRejectedWithoutChunked() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for non-chunked trailer rejection");
+
+        khttp::Request* request = nullptr;
+        status = khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for non-chunked trailer rejection");
+
+        const char* url = "http://example.com/upload";
+        status = khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for non-chunked trailer rejection");
+
+        status = khttp::RequestSetMethod(request, khttp::Method::Post);
+        Expect(NT_SUCCESS(status), "RequestSetMethod succeeds for non-chunked trailer rejection");
+
+        const char* body = "payload-bytes";
+        status = khttp::RequestSetBody(
+            request,
+            reinterpret_cast<const UCHAR*>(body),
+            Length(body));
+        Expect(NT_SUCCESS(status), "RequestSetBody succeeds for non-chunked trailer rejection");
+
+        // A trailer can be staged regardless of body mode...
+        const char* checksum = "abc123";
+        status = khttp::RequestAddTrailer(request, "X-Checksum", Length("X-Checksum"), checksum, Length(checksum));
+        Expect(NT_SUCCESS(status), "RequestAddTrailer stages trailer before send-time mode check");
+
+        // ...but the default Content-Length mode has nowhere to emit it, so send fails.
+        khttp::Response* resp = nullptr;
+        status = khttp::Send(session, request, nullptr, &resp);
+        Expect(status == STATUS_NOT_SUPPORTED, "trailers without chunked transfer fail at send");
+        Expect(resp == nullptr, "no response produced when trailers are rejected");
+
+        khttp::RequestRelease(request);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
     void TestSessionRequestBufferBytesLimitsRequestBody() noexcept
     {
         static UCHAR body[20 * 1024] = {};
@@ -3897,6 +4024,58 @@ namespace
         Expect(ws == nullptr, "invalid subprotocol does not allocate websocket");
         Expect(capture.ConnectCount == 0, "invalid subprotocol does not reach test transport");
 
+        kws::Header controlledHeader = {};
+        controlledHeader.Name = "Sec-WebSocket-Key";
+        controlledHeader.NameLength = Length(controlledHeader.Name);
+        controlledHeader.Value = "injected";
+        controlledHeader.ValueLength = Length(controlledHeader.Value);
+        kws::ConnectConfig controlledConfig = kws::DefaultConnectConfig();
+        controlledConfig.Url = url;
+        controlledConfig.UrlLength = Length(url);
+        controlledConfig.Headers = &controlledHeader;
+        controlledConfig.HeaderCount = 1;
+        status = kws::Connect(session, &controlledConfig, &ws);
+        Expect(status == STATUS_INVALID_PARAMETER, "WsConnect rejects override of controlled header");
+        Expect(ws == nullptr, "controlled header override does not allocate websocket");
+        Expect(capture.ConnectCount == 0, "controlled header override does not reach test transport");
+
+        kws::Header injectionHeader = {};
+        injectionHeader.Name = "Origin";
+        injectionHeader.NameLength = Length(injectionHeader.Name);
+        injectionHeader.Value = "evil\r\nX-Injected: 1";
+        injectionHeader.ValueLength = Length(injectionHeader.Value);
+        kws::ConnectConfig injectionConfig = kws::DefaultConnectConfig();
+        injectionConfig.Url = url;
+        injectionConfig.UrlLength = Length(url);
+        injectionConfig.Headers = &injectionHeader;
+        injectionConfig.HeaderCount = 1;
+        status = kws::Connect(session, &injectionConfig, &ws);
+        Expect(status == STATUS_INVALID_PARAMETER, "WsConnect rejects CRLF injection in header value");
+        Expect(capture.ConnectCount == 0, "CRLF injection does not reach test transport");
+
+        kws::Header okHeader = {};
+        okHeader.Name = "Origin";
+        okHeader.NameLength = Length(okHeader.Name);
+        okHeader.Value = "https://example.com";
+        okHeader.ValueLength = Length(okHeader.Value);
+        kws::ConnectConfig customConfig = kws::DefaultConnectConfig();
+        customConfig.Url = url;
+        customConfig.UrlLength = Length(url);
+        customConfig.Headers = &okHeader;
+        customConfig.HeaderCount = 1;
+        status = kws::Connect(session, &customConfig, &ws);
+        Expect(NT_SUCCESS(status), "WsConnect accepts valid custom header");
+        Expect(capture.ConnectCount == 1, "valid custom header reaches test transport");
+        if (NT_SUCCESS(status)) {
+            status = kws::Close(ws);
+            Expect(NT_SUCCESS(status), "WsClose succeeds after custom header connect");
+            ws = nullptr;
+        }
+        // Reset counters so the remaining assertions observe a clean sequence.
+        capture.ConnectCount = 0;
+        capture.CloseCount = 0;
+        capture.SendCount = 0;
+
         kws::ConnectConfig validConfig = kws::DefaultConnectConfig();
         validConfig.Url = url;
         validConfig.UrlLength = Length(url);
@@ -4017,6 +4196,8 @@ int main() noexcept
     TestFreshPostTimeoutDoesNotRetry();
     TestPostWithBody();
     TestChunkedRequestBody();
+    TestChunkedRequestTrailers();
+    TestTrailersRejectedWithoutChunked();
     TestSessionRequestBufferBytesLimitsRequestBody();
     TestRequestBuilder();
     TestRequestTransferEncodingRejected();

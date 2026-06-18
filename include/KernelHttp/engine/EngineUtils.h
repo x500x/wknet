@@ -22,6 +22,17 @@ namespace engine
     bool IsValidSendOptions(const KhHttpSendOptions& options, const KhSession& session) noexcept;
     bool IsValidWebSocketConnectOptions(const KhWebSocketConnectOptions& options) noexcept;
     bool IsValidReceiveOptions(const KhWebSocketReceiveOptions& options) noexcept;
+
+    // Validates and deep-copies caller-supplied opening-handshake headers into the
+    // WebSocket handle. Rejects (STATUS_INVALID_PARAMETER) any header whose name
+    // collides with a library-controlled handshake header, and validates name/value
+    // text to prevent CRLF injection. On failure the handle's header storage is left
+    // empty (caller frees the handle via ReleaseWebSocketStorage).
+    _Must_inspect_result_
+    NTSTATUS CopyWebSocketHeaders(
+        const KhWebSocketHeader* headers,
+        SIZE_T headerCount,
+        _Inout_ KhWebSocket& websocket) noexcept;
     bool IsValidAddressFamily(KhAddressFamily addressFamily) noexcept;
     net::WskAddressFamily ToWskAddressFamily(KhAddressFamily addressFamily) noexcept;
 

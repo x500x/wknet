@@ -39,6 +39,8 @@ namespace client
         SIZE_T PathLength = 1;
         const char* Subprotocol = nullptr;
         SIZE_T SubprotocolLength = 0;
+        const http::HttpHeader* ExtraHeaders = nullptr;
+        SIZE_T ExtraHeaderCount = 0;
         const tls::CertificateStore* CertificateStore = nullptr;
         engine::KhWorkspace* Workspace = nullptr;
         const crypto::CngProviderCache* ProviderCache = nullptr;

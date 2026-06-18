@@ -266,10 +266,28 @@ namespace http
             return TextEqualsIgnoreCase(header.Name, name);
         }
 
+        bool IsForbiddenTrailerField(HttpText name) noexcept
+        {
+            return TextEqualsIgnoreCase(name, MakeText("Content-Length")) ||
+                TextEqualsIgnoreCase(name, MakeText("Transfer-Encoding")) ||
+                TextEqualsIgnoreCase(name, MakeText("Host")) ||
+                TextEqualsIgnoreCase(name, MakeText("Authorization")) ||
+                TextEqualsIgnoreCase(name, MakeText("Proxy-Authorization")) ||
+                TextEqualsIgnoreCase(name, MakeText("Cookie")) ||
+                TextEqualsIgnoreCase(name, MakeText("Set-Cookie"));
+        }
+
+        bool RequestEmitsChunkedFraming(const HttpRequestBuildOptions& options) noexcept
+        {
+            return options.BodyMode == HttpRequestBodyMode::Chunked &&
+                (options.BodyLength != 0 || options.IncludeContentLength);
+        }
+
         _Must_inspect_result_
         NTSTATUS ValidateExtraHeaders(const HttpRequestBuildOptions& options) noexcept
         {
             const bool hasBodyBytes = options.BodyLength != 0;
+            const bool chunkedFraming = RequestEmitsChunkedFraming(options);
 
             for (SIZE_T index = 0; index < options.ExtraHeaderCount; ++index) {
                 const HttpHeader& header = options.ExtraHeaders[index];
@@ -277,8 +295,13 @@ namespace http
                     return STATUS_NOT_SUPPORTED;
                 }
 
-                if (HeaderNameEquals(header, MakeText("TE")) ||
-                    HeaderNameEquals(header, MakeText("Trailer"))) {
+                if (HeaderNameEquals(header, MakeText("TE"))) {
+                    return STATUS_NOT_SUPPORTED;
+                }
+
+                // `Trailer` advertises which trailer fields will follow; it is only
+                // meaningful when the request actually emits chunked framing.
+                if (HeaderNameEquals(header, MakeText("Trailer")) && !chunkedFraming) {
                     return STATUS_NOT_SUPPORTED;
                 }
 
@@ -292,6 +315,37 @@ namespace http
                     HeaderNameEquals(header, MakeText("Content-Length")) ||
                     HeaderNameEquals(header, MakeText("Connection"))) {
                     return STATUS_INVALID_PARAMETER;
+                }
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ValidateTrailers(const HttpRequestBuildOptions& options) noexcept
+        {
+            if (options.TrailerCount == 0) {
+                return STATUS_SUCCESS;
+            }
+
+            if (options.Trailers == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            // Trailers ride in the chunked trailer section, so the request must
+            // actually emit chunked framing for there to be a place to put them.
+            if (!RequestEmitsChunkedFraming(options)) {
+                return STATUS_NOT_SUPPORTED;
+            }
+
+            for (SIZE_T index = 0; index < options.TrailerCount; ++index) {
+                const HttpHeader& trailer = options.Trailers[index];
+                if (!IsValidHeaderName(trailer.Name) || !IsValidHeaderValue(trailer.Value)) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+
+                if (IsForbiddenTrailerField(trailer.Name)) {
+                    return STATUS_NOT_SUPPORTED;
                 }
             }
 
@@ -315,7 +369,12 @@ namespace http
         }
 
         _Must_inspect_result_
-        NTSTATUS AppendChunkedBody(BufferWriter& writer, const char* body, SIZE_T bodyLength) noexcept
+        NTSTATUS AppendChunkedBody(
+            BufferWriter& writer,
+            const char* body,
+            SIZE_T bodyLength,
+            const HttpHeader* trailers,
+            SIZE_T trailerCount) noexcept
         {
             if (body == nullptr && bodyLength != 0) {
                 return STATUS_INVALID_PARAMETER;
@@ -343,7 +402,19 @@ namespace http
                 }
             }
 
-            return writer.AppendLiteral("0\r\n\r\n");
+            NTSTATUS status = writer.AppendLiteral("0\r\n");
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            for (SIZE_T index = 0; index < trailerCount; ++index) {
+                status = writer.AppendHeader(trailers[index].Name, trailers[index].Value);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
+            return writer.AppendLiteral("\r\n");
         }
     }
 
@@ -379,6 +450,11 @@ namespace http
         }
 
         NTSTATUS status = ValidateExtraHeaders(options);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = ValidateTrailers(options);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -478,7 +554,12 @@ namespace http
 
         if (hasBody) {
             if (options.BodyMode == HttpRequestBodyMode::Chunked) {
-                status = AppendChunkedBody(writer, options.Body, options.BodyLength);
+                status = AppendChunkedBody(
+                    writer,
+                    options.Body,
+                    options.BodyLength,
+                    options.Trailers,
+                    options.TrailerCount);
                 if (!NT_SUCCESS(status)) {
                     return status;
                 }

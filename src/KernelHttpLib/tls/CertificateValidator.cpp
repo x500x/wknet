@@ -46,6 +46,9 @@ namespace tls
         const UCHAR OidSecp521r1[] = { 0x2b, 0x81, 0x04, 0x00, 0x23 };
         const UCHAR OidEcdsaWithSha256[] = { 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02 };
         const UCHAR OidEcdsaWithSha384[] = { 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x03 };
+        // id-Ed25519 = 1.3.101.112 (RFC 8410); used for both the SPKI algorithm
+        // and the certificate signature algorithm (no parameters).
+        const UCHAR OidEd25519[] = { 0x2b, 0x65, 0x70 };
         const UCHAR OidBasicConstraints[] = { 0x55, 0x1d, 0x13 };
         const UCHAR OidKeyUsage[] = { 0x55, 0x1d, 0x0f };
         const UCHAR OidSubjectAltName[] = { 0x55, 0x1d, 0x11 };
@@ -532,11 +535,17 @@ namespace tls
                 else if (OidEquals(oid, OidEcdsaWithSha384, sizeof(OidEcdsaWithSha384))) {
                     *signatureAlgorithm = CertificateSignatureAlgorithm::EcdsaSha384;
                 }
+                else if (OidEquals(oid, OidEd25519, sizeof(OidEd25519))) {
+                    *signatureAlgorithm = CertificateSignatureAlgorithm::Ed25519;
+                }
             }
 
             if (publicKeyAlgorithm != nullptr) {
                 if (OidEquals(oid, OidRsaEncryption, sizeof(OidRsaEncryption))) {
                     *publicKeyAlgorithm = CertificatePublicKeyAlgorithm::Rsa;
+                }
+                else if (OidEquals(oid, OidEd25519, sizeof(OidEd25519))) {
+                    *publicKeyAlgorithm = CertificatePublicKeyAlgorithm::Ed25519;
                 }
                 else if (OidEquals(oid, OidEcPublicKey, sizeof(OidEcPublicKey))) {
                     DerElement curve = {};
@@ -2188,6 +2197,24 @@ namespace tls
             _In_ const ParsedCertificate& certificate,
             _In_ const ParsedCertificate& issuer) noexcept
         {
+            // Ed25519 (RFC 8032/8410): PureEdDSA verifies the full TBSCertificate
+            // bytes directly (no external hash) against the issuer's raw 32-byte
+            // key, so it bypasses HashForSignature / ImportSubjectPublicKey.
+            if (certificate.SignatureAlgorithm == CertificateSignatureAlgorithm::Ed25519) {
+                if (issuer.PublicKeyAlgorithm != CertificatePublicKeyAlgorithm::Ed25519) {
+                    return STATUS_INVALID_SIGNATURE;
+                }
+
+                NTSTATUS status = crypto::CngProvider::VerifyEd25519(
+                    issuer.PublicKey,
+                    issuer.PublicKeyLength,
+                    certificate.TbsCertificate,
+                    certificate.TbsCertificateLength,
+                    certificate.Signature,
+                    certificate.SignatureLength);
+                return NT_SUCCESS(status) ? STATUS_SUCCESS : STATUS_INVALID_SIGNATURE;
+            }
+
             HeapObject<crypto::CngKey> issuerKey;
             if (!issuerKey.IsValid()) {
                 return STATUS_INSUFFICIENT_RESOURCES;
@@ -2216,9 +2243,18 @@ namespace tls
                 return status;
             }
 
+            crypto::SignatureAlgorithm verifyAlgorithm = crypto::SignatureAlgorithm::RsaPkcs1Sha256;
+            status = CertificateValidator::ToSignatureAlgorithm(
+                certificate.SignatureAlgorithm,
+                &verifyAlgorithm);
+            if (!NT_SUCCESS(status)) {
+                RtlSecureZeroMemory(hash.Get(), hash.Count());
+                return status;
+            }
+
             status = crypto::CngProvider::VerifySignature(
                 providerCache,
-                CertificateValidator::ToSignatureAlgorithm(certificate.SignatureAlgorithm),
+                verifyAlgorithm,
                 *issuerKey.Get(),
                 hash.Get(),
                 hashLength,
@@ -3908,20 +3944,32 @@ namespace tls
         }
     }
 
-    crypto::SignatureAlgorithm CertificateValidator::ToSignatureAlgorithm(
-        CertificateSignatureAlgorithm algorithm) noexcept
+    NTSTATUS CertificateValidator::ToSignatureAlgorithm(
+        CertificateSignatureAlgorithm algorithm,
+        crypto::SignatureAlgorithm* signatureAlgorithm) noexcept
     {
+        if (signatureAlgorithm == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
         switch (algorithm) {
         case CertificateSignatureAlgorithm::RsaPkcs1Sha256:
-            return crypto::SignatureAlgorithm::RsaPkcs1Sha256;
+            *signatureAlgorithm = crypto::SignatureAlgorithm::RsaPkcs1Sha256;
+            return STATUS_SUCCESS;
         case CertificateSignatureAlgorithm::RsaPkcs1Sha384:
-            return crypto::SignatureAlgorithm::RsaPkcs1Sha384;
+            *signatureAlgorithm = crypto::SignatureAlgorithm::RsaPkcs1Sha384;
+            return STATUS_SUCCESS;
         case CertificateSignatureAlgorithm::EcdsaSha256:
-            return crypto::SignatureAlgorithm::EcdsaSha256;
+            *signatureAlgorithm = crypto::SignatureAlgorithm::EcdsaSha256;
+            return STATUS_SUCCESS;
         case CertificateSignatureAlgorithm::EcdsaSha384:
-            return crypto::SignatureAlgorithm::EcdsaSha384;
+            *signatureAlgorithm = crypto::SignatureAlgorithm::EcdsaSha384;
+            return STATUS_SUCCESS;
+        case CertificateSignatureAlgorithm::Ed25519:
+            *signatureAlgorithm = crypto::SignatureAlgorithm::Ed25519;
+            return STATUS_SUCCESS;
         default:
-            return crypto::SignatureAlgorithm::RsaPkcs1Sha256;
+            return STATUS_NOT_SUPPORTED;
         }
     }
 }

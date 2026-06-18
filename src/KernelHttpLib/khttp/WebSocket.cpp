@@ -8,6 +8,8 @@ namespace
 {
     void FillApiConnectOptions(
         const ConnectConfig& src,
+        ::KernelHttp::engine::KhWebSocketHeader* headerBuffer,
+        SIZE_T headerBufferCount,
         ::KernelHttp::engine::KhWebSocketConnectOptions& dst) noexcept
     {
         dst.Url = src.Url;
@@ -18,7 +20,22 @@ namespace
         dst.AddressFamily = khttp::detail::ToApiAddressFamily(src.Family);
         dst.MaxMessageBytes = src.MaxMessageBytes;
         dst.AutoReplyPing = src.AutoReplyPing;
+
+        if (src.Headers != nullptr && src.HeaderCount != 0 &&
+            headerBuffer != nullptr && src.HeaderCount <= headerBufferCount) {
+            for (SIZE_T index = 0; index < src.HeaderCount; ++index) {
+                headerBuffer[index].Name = src.Headers[index].Name;
+                headerBuffer[index].NameLength = src.Headers[index].NameLength;
+                headerBuffer[index].Value = src.Headers[index].Value;
+                headerBuffer[index].ValueLength = src.Headers[index].ValueLength;
+            }
+            dst.Headers = headerBuffer;
+            dst.HeaderCount = src.HeaderCount;
+        }
     }
+
+    // Mirrors engine::KhMaxHeadersPerRequest (the engine validates against the same cap).
+    constexpr SIZE_T kMaxConnectHeaders = 16;
 }
 
 NTSTATUS Connect(khttp::Session* session, const char* url, SIZE_T urlLength, WebSocket** websocket) noexcept
@@ -46,7 +63,8 @@ NTSTATUS ConnectEx(khttp::Session* session, const ConnectConfig* config, WebSock
     }
 
     ::KernelHttp::engine::KhWebSocketConnectOptions apiOptions = {};
-    FillApiConnectOptions(*config, apiOptions);
+    ::KernelHttp::engine::KhWebSocketHeader headerBuffer[kMaxConnectHeaders] = {};
+    FillApiConnectOptions(*config, headerBuffer, kMaxConnectHeaders, apiOptions);
 
     ::KernelHttp::engine::KH_WEBSOCKET apiWs = nullptr;
     NTSTATUS status = ::KernelHttp::engine::KhWebSocketConnectSync(
@@ -89,7 +107,8 @@ NTSTATUS ConnectAsyncEx(khttp::Session* session, const ConnectConfig* config, kh
     }
 
     ::KernelHttp::engine::KhWebSocketConnectOptions apiOptions = {};
-    FillApiConnectOptions(*config, apiOptions);
+    ::KernelHttp::engine::KhWebSocketHeader headerBuffer[kMaxConnectHeaders] = {};
+    FillApiConnectOptions(*config, headerBuffer, kMaxConnectHeaders, apiOptions);
 
     ::KernelHttp::engine::KH_ASYNC_OPERATION apiOp = nullptr;
     NTSTATUS status = ::KernelHttp::engine::KhWebSocketConnectAsync(

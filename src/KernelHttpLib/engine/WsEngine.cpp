@@ -66,7 +66,7 @@ namespace engine
             return status;
         }
 
-        HeapArray<http::HttpHeader> headers(4);
+        HeapArray<http::HttpHeader> headers(4 + KhMaxHeadersPerRequest);
         if (!headers.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -79,6 +79,14 @@ namespace engine
             headers[headerCount++] = {
                 http::MakeText("Sec-WebSocket-Protocol"),
                 { websocket.Subprotocol, websocket.SubprotocolLength }
+            };
+        }
+
+        for (SIZE_T index = 0; index < websocket.ExtraHeaderCount && index < KhMaxHeadersPerRequest; ++index) {
+            const KhStoredHeader& stored = websocket.ExtraHeaders[index];
+            headers[headerCount++] = {
+                { stored.Name, stored.NameLength },
+                { stored.Value, stored.ValueLength }
             };
         }
 
@@ -104,6 +112,9 @@ namespace engine
         KhWebSocketConnectOptions Options = {};
         char* Url = nullptr;
         char* Subprotocol = nullptr;
+        KhStoredHeader HeaderStorage[KhMaxHeadersPerRequest] = {};
+        KhWebSocketHeader HeaderViews[KhMaxHeadersPerRequest] = {};
+        SIZE_T HeaderCount = 0;
         KH_WEBSOCKET WebSocket = nullptr;
         volatile LONG SessionOperationEnded = 0;
     };
@@ -281,6 +292,11 @@ namespace engine
 
         FreeApiMemory(connectContext->Url);
         FreeApiMemory(connectContext->Subprotocol);
+        for (SIZE_T index = 0; index < connectContext->HeaderCount && index < KhMaxHeadersPerRequest; ++index) {
+            FreeApiMemory(connectContext->HeaderStorage[index].Name);
+            FreeApiMemory(connectContext->HeaderStorage[index].Value);
+        }
+        connectContext->HeaderCount = 0;
         KH_WEBSOCKET websocket = TakeAsyncWebSocketConnectResult(connectContext);
         if (websocket != nullptr) {
             const NTSTATUS status = KhWebSocketCloseSync(websocket);
@@ -663,6 +679,13 @@ namespace engine
             newWebSocket->SubprotocolLength = options.SubprotocolLength;
         }
 
+        status = CopyWebSocketHeaders(options.Headers, options.HeaderCount, *newWebSocket);
+        if (!NT_SUCCESS(status)) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return status;
+        }
+
         KhTlsOptions effectiveTls = options.Tls;
         if (options.Tls.CertificatePolicy == KhCertificatePolicy::Verify &&
             options.Tls.CertificateStore == nullptr &&
@@ -785,6 +808,20 @@ namespace engine
         buffers.HeaderCapacity = KhMaxHeadersPerResponse;
 
         client::WebSocketConnectOptions connectOptions = {};
+        HeapArray<http::HttpHeader> extraHeaderViews(KhMaxHeadersPerRequest);
+        if (!extraHeaderViews.IsValid()) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        SIZE_T extraHeaderViewCount = 0;
+        for (SIZE_T index = 0; index < newWebSocket->ExtraHeaderCount && index < KhMaxHeadersPerRequest; ++index) {
+            const KhStoredHeader& stored = newWebSocket->ExtraHeaders[index];
+            extraHeaderViews[extraHeaderViewCount++] = {
+                { stored.Name, stored.NameLength },
+                { stored.Value, stored.ValueLength }
+            };
+        }
         connectOptions.ServerName = serverName.Get();
         connectOptions.ServiceName = serviceName.Get();
         connectOptions.TlsServerName = effectiveTls.ServerName != nullptr ? effectiveTls.ServerName : newWebSocket->Host;
@@ -798,6 +835,8 @@ namespace engine
         connectOptions.PathLength = newWebSocket->PathLength;
         connectOptions.Subprotocol = newWebSocket->Subprotocol;
         connectOptions.SubprotocolLength = newWebSocket->SubprotocolLength;
+        connectOptions.ExtraHeaders = extraHeaderViewCount != 0 ? extraHeaderViews.Get() : nullptr;
+        connectOptions.ExtraHeaderCount = extraHeaderViewCount;
         connectOptions.CertificateStore = effectiveTls.CertificateStore;
         connectOptions.ClientCredential = effectiveTls.ClientCredential;
         connectOptions.Workspace = newWebSocket->Workspace;
@@ -956,6 +995,43 @@ namespace engine
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
             context->Options.Subprotocol = context->Subprotocol;
+        }
+
+        if (options->Headers != nullptr && options->HeaderCount != 0) {
+            if (options->HeaderCount > KhMaxHeadersPerRequest) {
+                CleanupAsyncWebSocketConnectContext(context);
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            for (SIZE_T index = 0; index < options->HeaderCount; ++index) {
+                const KhWebSocketHeader& src = options->Headers[index];
+                KhStoredHeader& dst = context->HeaderStorage[index];
+
+                dst.Name = AllocateTextCopy(src.Name, src.NameLength);
+                if (dst.Name == nullptr) {
+                    CleanupAsyncWebSocketConnectContext(context);
+                    return STATUS_INSUFFICIENT_RESOURCES;
+                }
+                dst.NameLength = src.NameLength;
+
+                if (src.ValueLength != 0) {
+                    dst.Value = AllocateTextCopy(src.Value, src.ValueLength);
+                    if (dst.Value == nullptr) {
+                        CleanupAsyncWebSocketConnectContext(context);
+                        return STATUS_INSUFFICIENT_RESOURCES;
+                    }
+                }
+                dst.ValueLength = src.ValueLength;
+
+                context->HeaderCount = index + 1;
+
+                context->HeaderViews[index].Name = dst.Name;
+                context->HeaderViews[index].NameLength = dst.NameLength;
+                context->HeaderViews[index].Value = dst.Value;
+                context->HeaderViews[index].ValueLength = dst.ValueLength;
+            }
+
+            context->Options.Headers = context->HeaderViews;
         }
 
         KhAsyncCreateOptions createOptions = {};

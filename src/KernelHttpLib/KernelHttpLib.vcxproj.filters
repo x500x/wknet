@@ -104,6 +104,9 @@
     <ClCompile Include="crypto\CngProviderCache.cpp">
       <Filter>Source Files\crypto</Filter>
     </ClCompile>
+    <ClCompile Include="crypto\Ed25519.cpp">
+      <Filter>Source Files\crypto</Filter>
+    </ClCompile>
     <ClCompile Include="crypto\KeyExchange.cpp">
       <Filter>Source Files\crypto</Filter>
     </ClCompile>
@@ -302,6 +305,9 @@
       <Filter>Header Files\crypto</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\crypto\CngProviderCache.h">
+      <Filter>Header Files\crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\crypto\Ed25519.h">
       <Filter>Header Files\crypto</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\crypto\KeyExchange.h">

@@ -222,12 +222,22 @@ namespace engine
         SIZE_T BodyLength = 0;
     };
 
+    struct KhWebSocketHeader final
+    {
+        const char* Name = nullptr;
+        SIZE_T NameLength = 0;
+        const char* Value = nullptr;
+        SIZE_T ValueLength = 0;
+    };
+
     struct KhWebSocketConnectOptions final
     {
         const char* Url = nullptr;
         SIZE_T UrlLength = 0;
         const char* Subprotocol = nullptr;
         SIZE_T SubprotocolLength = 0;
+        const KhWebSocketHeader* Headers = nullptr;
+        SIZE_T HeaderCount = 0;
         KhTlsOptions Tls = {};
         KhAddressFamily AddressFamily = KhAddressFamily::Any;
         SIZE_T MaxMessageBytes = KhDefaultMaxResponseBytes;
@@ -299,6 +309,18 @@ namespace engine
     NTSTATUS KhHttpRequestSetBodyMode(
         _In_ KH_REQUEST request,
         KhRequestBodyMode mode) noexcept;
+
+    // Adds a trailer field emitted after the final chunk. Only honored when the
+    // request uses KhRequestBodyMode::Chunked; the field name must be a valid token
+    // and must not be a forbidden trailer field (framing/auth/cookie headers), or
+    // the send fails. Order is preserved.
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestAddTrailer(
+        _In_ KH_REQUEST request,
+        _In_reads_bytes_(nameLength) const char* name,
+        SIZE_T nameLength,
+        _In_reads_bytes_(valueLength) const char* value,
+        SIZE_T valueLength) noexcept;
 
     _Must_inspect_result_
     NTSTATUS KhHttpRequestClearBody(_In_ KH_REQUEST request) noexcept;

@@ -23,6 +23,8 @@ namespace engine
 {
     constexpr SIZE_T KhHttpRequestHeaderScratchBytes =
         sizeof(http::HttpHeader) * KhMaxHeadersPerRequest;
+    constexpr SIZE_T KhHttpRequestTrailerScratchBytes =
+        sizeof(http::HttpHeader) * KhMaxHeadersPerRequest;
     constexpr SIZE_T KhHttpResponseHeaderScratchBytes =
         sizeof(http::HttpHeader) * KhMaxHeadersPerResponse;
     constexpr SIZE_T KhHttpResponseTrailerScratchBytes =
@@ -31,6 +33,7 @@ namespace engine
         KhMaxHostHeaderLength;
     constexpr SIZE_T KhHttpHeaderScratchRequiredBytes =
         KhHttpRequestHeaderScratchBytes +
+        KhHttpRequestTrailerScratchBytes +
         KhHttpResponseHeaderScratchBytes +
         KhHttpResponseTrailerScratchBytes +
         KhHttpHostHeaderScratchBytes;
@@ -63,6 +66,7 @@ namespace engine
     struct ApiHttpHeaderScratch final
     {
         http::HttpHeader* RequestHeaders = nullptr;
+        http::HttpHeader* RequestTrailers = nullptr;
         http::HttpHeader* ResponseHeaders = nullptr;
         http::HttpHeader* ResponseTrailers = nullptr;
         char* HostHeader = nullptr;
@@ -280,15 +284,21 @@ namespace engine
         RtlZeroMemory(workspace.HttpHeaderScratch.Data, workspace.HttpHeaderScratch.Length);
         scratch->RequestHeaders = reinterpret_cast<http::HttpHeader*>(
             workspace.HttpHeaderScratch.Data);
-        scratch->ResponseHeaders = reinterpret_cast<http::HttpHeader*>(
+        scratch->RequestTrailers = reinterpret_cast<http::HttpHeader*>(
             workspace.HttpHeaderScratch.Data + KhHttpRequestHeaderScratchBytes);
+        scratch->ResponseHeaders = reinterpret_cast<http::HttpHeader*>(
+            workspace.HttpHeaderScratch.Data +
+            KhHttpRequestHeaderScratchBytes +
+            KhHttpRequestTrailerScratchBytes);
         scratch->ResponseTrailers = reinterpret_cast<http::HttpHeader*>(
             workspace.HttpHeaderScratch.Data +
             KhHttpRequestHeaderScratchBytes +
+            KhHttpRequestTrailerScratchBytes +
             KhHttpResponseHeaderScratchBytes);
         scratch->HostHeader = reinterpret_cast<char*>(
             workspace.HttpHeaderScratch.Data +
             KhHttpRequestHeaderScratchBytes +
+            KhHttpRequestTrailerScratchBytes +
             KhHttpResponseHeaderScratchBytes +
             KhHttpResponseTrailerScratchBytes);
         scratch->HostHeaderCapacity = KhHttpHostHeaderScratchBytes;
@@ -503,6 +513,8 @@ namespace engine
         SIZE_T hostCapacity,
         _Out_ http::HttpHeader* headers,
         SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http::HttpHeader* trailers,
+        SIZE_T trailerCapacity,
         _Out_ http::HttpRequestBuildOptions* options,
         _Out_opt_ SIZE_T* requestHeaderCount = nullptr) noexcept
     {
@@ -514,7 +526,15 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
+        if (request.TrailerCount != 0 &&
+            (trailers == nullptr || request.TrailerCount > trailerCapacity)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
         RtlZeroMemory(headers, sizeof(http::HttpHeader) * headerCapacity);
+        if (trailers != nullptr && trailerCapacity != 0) {
+            RtlZeroMemory(trailers, sizeof(http::HttpHeader) * trailerCapacity);
+        }
         RtlZeroMemory(options, sizeof(*options));
 
         SIZE_T hostLength = 0;
@@ -525,14 +545,20 @@ namespace engine
 
         SIZE_T extraHeaderCount = 0;
         bool hasAcceptEncoding = false;
+        const bool chunkedRequest = request.BodyMode == KhRequestBodyMode::Chunked;
         for (SIZE_T index = 0; index < request.HeaderCount; ++index) {
             const KhStoredHeader& header = request.Headers[index];
             if (HeaderNameEquals(header, "Transfer-Encoding")) {
                 return STATUS_NOT_SUPPORTED;
             }
 
-            if (HeaderNameEquals(header, "TE") ||
-                HeaderNameEquals(header, "Trailer")) {
+            if (HeaderNameEquals(header, "TE")) {
+                return STATUS_NOT_SUPPORTED;
+            }
+
+            // `Trailer` declares which trailer fields will follow; only meaningful
+            // when the request emits chunked framing (see KhHttpRequestAddTrailer).
+            if (HeaderNameEquals(header, "Trailer") && !chunkedRequest) {
                 return STATUS_NOT_SUPPORTED;
             }
 
@@ -587,6 +613,17 @@ namespace engine
         options->BodyMode = request.BodyMode == KhRequestBodyMode::Chunked ?
             http::HttpRequestBodyMode::Chunked :
             http::HttpRequestBodyMode::ContentLength;
+
+        if (request.TrailerCount != 0) {
+            for (SIZE_T index = 0; index < request.TrailerCount; ++index) {
+                const KhStoredHeader& trailer = request.Trailers[index];
+                trailers[index].Name = { trailer.Name, trailer.NameLength };
+                trailers[index].Value = { trailer.Value, trailer.ValueLength };
+            }
+            options->Trailers = trailers;
+            options->TrailerCount = request.TrailerCount;
+        }
+
         if (requestHeaderCount != nullptr) {
             *requestHeaderCount = extraHeaderCount;
         }
@@ -1303,6 +1340,8 @@ namespace engine
         SIZE_T hostHeaderCapacity,
         _Out_writes_(headerCapacity) http::HttpHeader* requestHeaders,
         SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http::HttpHeader* requestTrailers,
+        SIZE_T trailerCapacity,
         _Out_ SIZE_T* requestLength,
         _Out_opt_ SIZE_T* requestHeaderCount = nullptr) noexcept
     {
@@ -1327,6 +1366,8 @@ namespace engine
             hostHeaderCapacity,
             requestHeaders,
             headerCapacity,
+            requestTrailers,
+            trailerCapacity,
             &buildOptions,
             requestHeaderCount);
         if (!NT_SUCCESS(status)) {
@@ -3023,6 +3064,8 @@ namespace engine
             headerScratch.HostHeaderCapacity,
             headerScratch.RequestHeaders,
             KhMaxHeadersPerRequest,
+            headerScratch.RequestTrailers,
+            KhMaxHeadersPerRequest,
             &builtRequestLength,
             &requestHeaderCount);
         if (!NT_SUCCESS(status)) {
@@ -3096,6 +3139,8 @@ namespace engine
                         headerScratch.HostHeader,
                         headerScratch.HostHeaderCapacity,
                         headerScratch.RequestHeaders,
+                        KhMaxHeadersPerRequest,
+                        headerScratch.RequestTrailers,
                         KhMaxHeadersPerRequest,
                         &builtRequestLength,
                         &requestHeaderCount);

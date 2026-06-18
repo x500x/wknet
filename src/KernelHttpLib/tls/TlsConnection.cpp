@@ -1,6 +1,7 @@
 #include <KernelHttp/tls/TlsConnection.h>
 
 #include <KernelHttp/crypto/CngProviderCache.h>
+#include <KernelHttp/crypto/Ed25519.h>
 #include <KernelHttp/crypto/KeyExchange.h>
 #include <KernelHttp/tls/TlsCapabilities.h>
 #include <KernelHttp/tls/TlsHandshake13.h>
@@ -452,6 +453,8 @@ namespace tls
             case CertificatePublicKeyAlgorithm::EcdsaP521:
                 return scheme == TlsSignatureScheme::EcdsaSha1 ||
                     scheme == TlsSignatureScheme::EcdsaSecp521r1Sha512;
+            case CertificatePublicKeyAlgorithm::Ed25519:
+                return scheme == TlsSignatureScheme::Ed25519;
             default:
                 return false;
             }
@@ -1692,6 +1695,8 @@ namespace tls
         tlsPolicy_ = {};
         tlsPolicyIdentity_ = 0;
         serverCertificatePublicKeyAlgorithm_ = CertificatePublicKeyAlgorithm::Unknown;
+        RtlSecureZeroMemory(serverEd25519PublicKey_, sizeof(serverEd25519PublicKey_));
+        serverEd25519PublicKeyLength_ = 0;
         if (tlsKeyBlockScratch_.IsValid()) {
             RtlSecureZeroMemory(tlsKeyBlockScratch_.Get(), sizeof(TlsKeyBlock));
         }
@@ -1900,6 +1905,8 @@ namespace tls
             (options.Policy.EnablePostHandshakeClientAuth ? 0x00000008UL : 0) |
             (options.Policy.RequireRevocationCheck ? 0x00000010UL : 0);
         serverCertificatePublicKeyAlgorithm_ = CertificatePublicKeyAlgorithm::Unknown;
+        RtlSecureZeroMemory(serverEd25519PublicKey_, sizeof(serverEd25519PublicKey_));
+        serverEd25519PublicKeyLength_ = 0;
 
         NTSTATUS status = PrepareScratch(options);
         if (NT_SUCCESS(status)) {
@@ -2318,7 +2325,8 @@ namespace tls
             (selectedCapability->Authentication == TlsAuthenticationKind::Ecdsa &&
                 serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::EcdsaP256 &&
                 serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::EcdsaP384 &&
-                serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::EcdsaP521)) {
+                serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::EcdsaP521 &&
+                serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::Ed25519)) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
         if (selectedCapability->Tls12KeyExchange == Tls12KeyExchangeKind::Rsa &&
@@ -2341,10 +2349,20 @@ namespace tls
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        status = CertificateValidator::ImportSubjectPublicKey(providerCache_, validationResult->Leaf, *serverPublicKey.Get());
-        if (!NT_SUCCESS(status)) {
-            kprintf("TlsConnection import server public key failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            return status;
+        if (validationResult->Leaf.PublicKeyAlgorithm == CertificatePublicKeyAlgorithm::Ed25519) {
+            if (validationResult->Leaf.PublicKey == nullptr ||
+                validationResult->Leaf.PublicKeyLength != crypto::Ed25519PublicKeyLength) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            RtlCopyMemory(serverEd25519PublicKey_, validationResult->Leaf.PublicKey, crypto::Ed25519PublicKeyLength);
+            serverEd25519PublicKeyLength_ = crypto::Ed25519PublicKeyLength;
+        }
+        else {
+            status = CertificateValidator::ImportSubjectPublicKey(providerCache_, validationResult->Leaf, *serverPublicKey.Get());
+            if (!NT_SUCCESS(status)) {
+                kprintf("TlsConnection import server public key failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                return status;
+            }
         }
 
         const Tls12KeyExchangeKind serverKeyExchangeKind =
@@ -4239,10 +4257,21 @@ namespace tls
             return STATUS_TRUST_FAILURE;
         }
 
-        status = CertificateValidator::ImportSubjectPublicKey(providerCache_, result->Leaf, serverPublicKey);
-        if (!NT_SUCCESS(status)) {
-            RtlSecureZeroMemory(legacyCertificateList, TlsScratchLegacyCertificateLength);
-            return LogTls13Failure("ImportTls13CertificatePublicKey", status);
+        if (result->Leaf.PublicKeyAlgorithm == CertificatePublicKeyAlgorithm::Ed25519) {
+            if (result->Leaf.PublicKey == nullptr ||
+                result->Leaf.PublicKeyLength != crypto::Ed25519PublicKeyLength) {
+                RtlSecureZeroMemory(legacyCertificateList, TlsScratchLegacyCertificateLength);
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            RtlCopyMemory(serverEd25519PublicKey_, result->Leaf.PublicKey, crypto::Ed25519PublicKeyLength);
+            serverEd25519PublicKeyLength_ = crypto::Ed25519PublicKeyLength;
+        }
+        else {
+            status = CertificateValidator::ImportSubjectPublicKey(providerCache_, result->Leaf, serverPublicKey);
+            if (!NT_SUCCESS(status)) {
+                RtlSecureZeroMemory(legacyCertificateList, TlsScratchLegacyCertificateLength);
+                return LogTls13Failure("ImportTls13CertificatePublicKey", status);
+            }
         }
         RtlSecureZeroMemory(legacyCertificateList, TlsScratchLegacyCertificateLength);
         return STATUS_SUCCESS;
@@ -4288,6 +4317,26 @@ namespace tls
             &signedInputLength);
         if (!NT_SUCCESS(status)) {
             return LogTls13Failure("BuildTls13CertificateVerifyInput", status);
+        }
+
+        if (certificateVerify.SignatureScheme == TlsSignatureScheme::Ed25519) {
+            if (serverEd25519PublicKeyLength_ != crypto::Ed25519PublicKeyLength) {
+                RtlSecureZeroMemory(signedInput, TlsScratchSignedInputLength);
+                return LogTls13Failure("VerifyTls13CertificateVerifyEd25519Key", STATUS_INVALID_NETWORK_RESPONSE);
+            }
+
+            status = crypto::CngProvider::VerifyEd25519(
+                serverEd25519PublicKey_,
+                serverEd25519PublicKeyLength_,
+                signedInput,
+                signedInputLength,
+                certificateVerify.Signature,
+                certificateVerify.SignatureLength);
+            RtlSecureZeroMemory(signedInput, TlsScratchSignedInputLength);
+            if (!NT_SUCCESS(status)) {
+                status = LogTls13Failure("VerifyTls13CertificateVerifyEd25519Signature", status);
+            }
+            return NT_SUCCESS(status) ? STATUS_SUCCESS : STATUS_INVALID_SIGNATURE;
         }
 
         HeapArray<UCHAR> hash(64);
@@ -4920,6 +4969,24 @@ namespace tls
         RtlCopyMemory(signedData, context_.Secrets().ClientRandom, TlsRandomLength);
         RtlCopyMemory(signedData + TlsRandomLength, context_.Secrets().ServerRandom, TlsRandomLength);
         RtlCopyMemory(signedData + (TlsRandomLength * 2), keyExchange.Parameters, keyExchange.ParametersLength);
+        const SIZE_T signedDataLength = (TlsRandomLength * 2) + keyExchange.ParametersLength;
+
+        if (keyExchange.SignatureScheme == TlsSignatureScheme::Ed25519) {
+            if (serverEd25519PublicKeyLength_ != crypto::Ed25519PublicKeyLength) {
+                RtlSecureZeroMemory(signedData, TlsScratchSignedDataLength);
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            status = crypto::CngProvider::VerifyEd25519(
+                serverEd25519PublicKey_,
+                serverEd25519PublicKeyLength_,
+                signedData,
+                signedDataLength,
+                keyExchange.Signature,
+                keyExchange.SignatureLength);
+            RtlSecureZeroMemory(signedData, TlsScratchSignedDataLength);
+            return NT_SUCCESS(status) ? STATUS_SUCCESS : STATUS_INVALID_SIGNATURE;
+        }
 
         HeapArray<UCHAR> hash(64);
         if (!hash.IsValid()) {
@@ -4931,7 +4998,7 @@ namespace tls
             providerCache_,
             HashForSignature(keyExchange.SignatureScheme),
             signedData,
-            (TlsRandomLength * 2) + keyExchange.ParametersLength,
+            signedDataLength,
             hash.Get(),
             hash.Count(),
             &hashLength);

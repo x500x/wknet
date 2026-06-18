@@ -1192,6 +1192,63 @@ namespace
         return STATUS_SUCCESS;
     }
 
+    bool IsForbiddenRequestTrailerField(const char* name, SIZE_T nameLength) noexcept
+    {
+        return TextEqualsLiteralIgnoreCase(name, nameLength, "Content-Length") ||
+            TextEqualsLiteralIgnoreCase(name, nameLength, "Transfer-Encoding") ||
+            TextEqualsLiteralIgnoreCase(name, nameLength, "Host") ||
+            TextEqualsLiteralIgnoreCase(name, nameLength, "Authorization") ||
+            TextEqualsLiteralIgnoreCase(name, nameLength, "Proxy-Authorization") ||
+            TextEqualsLiteralIgnoreCase(name, nameLength, "Cookie") ||
+            TextEqualsLiteralIgnoreCase(name, nameLength, "Set-Cookie");
+    }
+
+    NTSTATUS AddStoredTrailer(
+        _Inout_ KhRequest& request,
+        _In_reads_bytes_(nameLength) const char* name,
+        SIZE_T nameLength,
+        _In_reads_bytes_(valueLength) const char* value,
+        SIZE_T valueLength) noexcept
+    {
+        if (name == nullptr || nameLength == 0 || (value == nullptr && valueLength != 0)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (nameLength > KhMaxHeaderNameLength || valueLength > KhMaxHeaderValueLength) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        if (!IsValidHeaderText(name, nameLength, true) ||
+            !IsValidHeaderText(value, valueLength, false)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (IsForbiddenRequestTrailerField(name, nameLength)) {
+            return STATUS_NOT_SUPPORTED;
+        }
+        if (request.TrailerCount >= KhMaxHeadersPerRequest) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        char* nameCopy = AllocateTextCopy(name, nameLength);
+        if (nameCopy == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        char* valueCopy = nullptr;
+        if (valueLength != 0) {
+            valueCopy = AllocateTextCopy(value, valueLength);
+            if (valueCopy == nullptr) {
+                FreeApiMemory(nameCopy);
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+        }
+
+        KhStoredHeader& trailer = request.Trailers[request.TrailerCount++];
+        trailer.Name = nameCopy;
+        trailer.NameLength = nameLength;
+        trailer.Value = valueCopy;
+        trailer.ValueLength = valueLength;
+        return STATUS_SUCCESS;
+    }
+
     void RemoveStoredHeadersByName(_Inout_ KhRequest& request, _In_z_ const char* name) noexcept
     {
         SIZE_T index = 0;
@@ -1785,6 +1842,11 @@ namespace
             ReleaseStoredHeader(request.Headers[index]);
         }
         request.HeaderCount = 0;
+
+        for (SIZE_T index = 0; index < request.TrailerCount && index < KhMaxHeadersPerRequest; ++index) {
+            ReleaseStoredHeader(request.Trailers[index]);
+        }
+        request.TrailerCount = 0;
     }
 
     _Must_inspect_result_
@@ -1889,6 +1951,20 @@ namespace
             }
         }
 
+        for (SIZE_T index = 0; index < source.TrailerCount && index < KhMaxHeadersPerRequest; ++index) {
+            NTSTATUS status = AddStoredTrailer(
+                *clone,
+                source.Trailers[index].Name,
+                source.Trailers[index].NameLength,
+                source.Trailers[index].Value,
+                source.Trailers[index].ValueLength);
+            if (!NT_SUCCESS(status)) {
+                ReleaseRequestStorage(*clone);
+                FreeHandle(clone);
+                return status;
+            }
+        }
+
         NTSTATUS status = RegisterActiveRequestHandle(clone);
         if (!NT_SUCCESS(status)) {
             ReleaseRequestStorage(*clone);
@@ -1929,6 +2005,79 @@ namespace
         response.StatusCode = 0;
     }
 
+    NTSTATUS CopyWebSocketHeaders(
+        const KhWebSocketHeader* headers,
+        SIZE_T headerCount,
+        KhWebSocket& websocket) noexcept
+    {
+        websocket.ExtraHeaderCount = 0;
+
+        if (headerCount == 0) {
+            return STATUS_SUCCESS;
+        }
+
+        if (headers == nullptr || headerCount > KhMaxHeadersPerRequest) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        static const char* const controlledHeaders[] = {
+            "Host",
+            "Connection",
+            "Upgrade",
+            "Content-Length",
+            "Transfer-Encoding",
+            "Sec-WebSocket-Key",
+            "Sec-WebSocket-Version",
+            "Sec-WebSocket-Protocol",
+            "Sec-WebSocket-Extensions"
+        };
+
+        for (SIZE_T index = 0; index < headerCount; ++index) {
+            const KhWebSocketHeader& header = headers[index];
+            if (header.Name == nullptr || header.NameLength == 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (header.NameLength > KhMaxHeaderNameLength ||
+                header.ValueLength > KhMaxHeaderValueLength) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            if (!IsValidHeaderText(header.Name, header.NameLength, true) ||
+                !IsValidHeaderText(header.Value, header.ValueLength, false)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            for (SIZE_T controlled = 0;
+                 controlled < sizeof(controlledHeaders) / sizeof(controlledHeaders[0]);
+                 ++controlled) {
+                if (TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, controlledHeaders[controlled])) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+            }
+
+            char* nameCopy = AllocateTextCopy(header.Name, header.NameLength);
+            if (nameCopy == nullptr) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            char* valueCopy = nullptr;
+            if (header.ValueLength != 0) {
+                valueCopy = AllocateTextCopy(header.Value, header.ValueLength);
+                if (valueCopy == nullptr) {
+                    FreeApiMemory(nameCopy);
+                    return STATUS_INSUFFICIENT_RESOURCES;
+                }
+            }
+
+            KhStoredHeader& stored = websocket.ExtraHeaders[websocket.ExtraHeaderCount++];
+            stored.Name = nameCopy;
+            stored.NameLength = header.NameLength;
+            stored.Value = valueCopy;
+            stored.ValueLength = header.ValueLength;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
     void ReleaseWebSocketStorage(_Inout_ KhWebSocket& websocket) noexcept
     {
         KhWorkspaceRelease(websocket.Workspace);
@@ -1942,6 +2091,10 @@ namespace
         FreeApiMemory(websocket.Url);
         FreeApiMemory(websocket.Subprotocol);
         FreeApiMemory(websocket.LastMessage);
+        for (SIZE_T index = 0; index < websocket.ExtraHeaderCount && index < KhMaxHeadersPerRequest; ++index) {
+            ReleaseStoredHeader(websocket.ExtraHeaders[index]);
+        }
+        websocket.ExtraHeaderCount = 0;
         websocket.Url = nullptr;
         websocket.UrlLength = 0;
         websocket.Subprotocol = nullptr;
@@ -2320,6 +2473,32 @@ namespace
 
         request->BodyMode = mode;
         return STATUS_SUCCESS;
+    }
+
+    NTSTATUS KhHttpRequestAddTrailer(
+        KH_REQUEST request,
+        const char* name,
+        SIZE_T nameLength,
+        const char* value,
+        SIZE_T valueLength) noexcept
+    {
+        NTSTATUS status = CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (!IsRequestHandle(request) ||
+            name == nullptr ||
+            nameLength == 0 ||
+            (value == nullptr && valueLength != 0)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (nameLength > KhMaxHeaderNameLength || valueLength > KhMaxHeaderValueLength) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        return AddStoredTrailer(*request, name, nameLength, value, valueLength);
     }
 
     NTSTATUS KhHttpRequestClearBody(KH_REQUEST request) noexcept

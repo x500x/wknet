@@ -23,7 +23,8 @@ namespace tls
         Rsa,
         EcdsaP256,
         EcdsaP384,
-        EcdsaP521
+        EcdsaP521,
+        Ed25519
     };
 
     enum class CertificateSignatureAlgorithm : UCHAR
@@ -32,7 +33,8 @@ namespace tls
         RsaPkcs1Sha256,
         RsaPkcs1Sha384,
         EcdsaSha256,
-        EcdsaSha384
+        EcdsaSha384,
+        Ed25519
     };
 
     struct ParsedCertificate final
@@ -169,8 +171,9 @@ namespace tls
             _Out_ crypto::CngKey& publicKey) noexcept;
 
         _Must_inspect_result_
-        static crypto::SignatureAlgorithm ToSignatureAlgorithm(
-            CertificateSignatureAlgorithm algorithm) noexcept;
+        static NTSTATUS ToSignatureAlgorithm(
+            CertificateSignatureAlgorithm algorithm,
+            _Out_ crypto::SignatureAlgorithm* signatureAlgorithm) noexcept;
     };
 }
 }

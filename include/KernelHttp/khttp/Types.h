@@ -253,12 +253,25 @@ namespace kws
         SIZE_T dataLength,
         bool finalFragment);
 
+    // A caller-supplied opening-handshake header (e.g. Origin, Authorization, Cookie).
+    // Headers that the library controls (Upgrade, Connection, Host, Sec-WebSocket-*)
+    // are rejected with STATUS_INVALID_PARAMETER to prevent handshake tampering.
+    struct Header final
+    {
+        const char* Name = nullptr;
+        SIZE_T NameLength = 0;
+        const char* Value = nullptr;
+        SIZE_T ValueLength = 0;
+    };
+
     struct ConnectConfig final
     {
         const char* Url = nullptr;
         SIZE_T UrlLength = 0;
         const char* Subprotocol = nullptr;
         SIZE_T SubprotocolLength = 0;
+        const Header* Headers = nullptr;
+        SIZE_T HeaderCount = 0;
         khttp::TlsConfig Tls = {};
         khttp::AddressFamily Family = khttp::AddressFamily::Any;
         SIZE_T MaxMessageBytes = khttp::DefaultMaxResponseBytes;

@@ -43,6 +43,11 @@ namespace http
         HttpConnectionDirective Connection = HttpConnectionDirective::Omit;
         const HttpHeader* ExtraHeaders = nullptr;
         SIZE_T ExtraHeaderCount = 0;
+        // Request trailers are only valid with BodyMode::Chunked. Each trailer's
+        // field name must be a valid token and must not be a forbidden trailer
+        // field (framing/auth/cookie headers); otherwise Build returns an error.
+        const HttpHeader* Trailers = nullptr;
+        SIZE_T TrailerCount = 0;
         const char* Body = nullptr;
         SIZE_T BodyLength = 0;
         bool IncludeContentLength = false;

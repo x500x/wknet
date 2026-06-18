@@ -86,6 +86,8 @@ namespace engine
         char MultipartBoundary[KhMultipartBoundaryStorageLength] = {};
         KhStoredHeader Headers[KhMaxHeadersPerRequest] = {};
         SIZE_T HeaderCount = 0;
+        KhStoredHeader Trailers[KhMaxHeadersPerRequest] = {};
+        SIZE_T TrailerCount = 0;
         KhTlsOptions Tls = {};
         char* OwnedTlsServerName = nullptr;
         char* OwnedTlsAlpn = nullptr;
@@ -140,6 +142,8 @@ namespace engine
         USHORT Port = 0;
         char* Subprotocol = nullptr;
         SIZE_T SubprotocolLength = 0;
+        KhStoredHeader ExtraHeaders[KhMaxHeadersPerRequest] = {};
+        SIZE_T ExtraHeaderCount = 0;
         UCHAR* LastMessage = nullptr;
         SIZE_T LastMessageLength = 0;
         KhWebSocketMessageType LastMessageType = KhWebSocketMessageType::Binary;

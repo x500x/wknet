@@ -75,6 +75,16 @@ NTSTATUS RequestSetBodyMode(Request* request, RequestBodyMode mode) noexcept
     return ::KernelHttp::engine::KhHttpRequestSetBodyMode(detail::ToApiRequest(request), detail::ToApiRequestBodyMode(mode));
 }
 
+NTSTATUS RequestAddTrailer(
+    Request* request,
+    const char* name,
+    SIZE_T nameLength,
+    const char* value,
+    SIZE_T valueLength) noexcept
+{
+    return ::KernelHttp::engine::KhHttpRequestAddTrailer(detail::ToApiRequest(request), name, nameLength, value, valueLength);
+}
+
 NTSTATUS RequestClearBody(Request* request) noexcept
 {
     return ::KernelHttp::engine::KhHttpRequestClearBody(detail::ToApiRequest(request));

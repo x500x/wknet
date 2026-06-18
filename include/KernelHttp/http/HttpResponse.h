@@ -14,6 +14,18 @@ namespace http
         CloseDelimited
     };
 
+    // Parsed `Content-Range: bytes <first>-<last>/<complete>` per RFC 7233 §4.2.
+    // `HasRange` is false for an unsatisfied-range form (`bytes */<complete>`),
+    // in which case only the complete length is meaningful (if `HasCompleteLength`).
+    struct HttpContentRange final
+    {
+        ULONGLONG FirstBytePos = 0;
+        ULONGLONG LastBytePos = 0;
+        ULONGLONG CompleteLength = 0;
+        bool HasRange = false;
+        bool HasCompleteLength = false;
+    };
+
     struct HttpResponse final
     {
         USHORT MajorVersion = 0;
@@ -44,6 +56,15 @@ namespace http
 
         _Must_inspect_result_
         bool HasChunkedTransferEncoding() const noexcept;
+
+        // True for 206 Partial Content.
+        _Must_inspect_result_
+        bool IsPartialContent() const noexcept;
+
+        // Parses the `Content-Range` header (read-only; does not affect Body framing).
+        // Returns false if the header is absent or malformed.
+        _Must_inspect_result_
+        bool GetContentRange(_Out_ HttpContentRange* range) const noexcept;
     };
 }
 }

@@ -328,7 +328,8 @@ namespace tls
             { TlsSignatureScheme::EcdsaSecp384r1Sha384, TlsCapabilityDisposition::Default, TlsCapabilityDisposition::Default },
             { TlsSignatureScheme::EcdsaSecp521r1Sha512, TlsCapabilityDisposition::Default, TlsCapabilityDisposition::Default },
             { TlsSignatureScheme::Ed25519, TlsCapabilityDisposition::Default, TlsCapabilityDisposition::Default },
-            { TlsSignatureScheme::Ed448, TlsCapabilityDisposition::Optional, TlsCapabilityDisposition::Optional },
+            // Ed448 verification is not implemented yet; keep it out of the offered lists.
+            { TlsSignatureScheme::Ed448, TlsCapabilityDisposition::Unsupported, TlsCapabilityDisposition::Unsupported },
             { TlsSignatureScheme::RsaPssPssSha256, TlsCapabilityDisposition::Optional, TlsCapabilityDisposition::Optional },
             { TlsSignatureScheme::RsaPssPssSha384, TlsCapabilityDisposition::Optional, TlsCapabilityDisposition::Optional },
             { TlsSignatureScheme::RsaPssPssSha512, TlsCapabilityDisposition::Optional, TlsCapabilityDisposition::Optional },
