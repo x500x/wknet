@@ -1,0 +1,85 @@
+site_name: KernelHttp
+site_description: 面向 Windows 内核驱动的纯内核态 HTTP/HTTPS 客户端库 · A pure kernel-mode HTTP/HTTPS client library for Windows kernel drivers
+site_url: https://x500x.github.io/khttp/
+repo_url: https://github.com/x500x/khttp
+repo_name: x500x/khttp
+docs_dir: docsite
+copyright: KernelHttp · MIT License
+
+theme:
+  name: material
+  language: zh
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - navigation.instant
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: 切换到暗色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到亮色模式
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - 首页 Home: index.md
+  - 入门 Start:
+      - 快速开始 Getting Started: getting-started.md
+      - 构建与测试 Build & Test: build-and-test.md
+  - 协议 Protocols:
+      - 能力边界 Capability Matrix: capability-matrix.md
+      - 架构 Architecture: architecture.md
+      - HTTP/1.1: http1.md
+      - HTTP/2 & HPACK: http2.md
+      - WebSocket: websocket.md
+      - TLS 与证书 TLS & Certificates: tls-and-certificates.md
+      - 密码学 Cryptography: cryptography.md
+  - API:
+      - 高层 API High-Level: high-level-api.md
+      - 底层 API Low-Level: low-level-api.md
+      - 配置 Configuration: configuration.md
+      - 客户端类 Client Classes: client-classes.md
+      - 传输层 Transport Layer: transport-layer.md
+      - NTSTATUS 错误码: ntstatus-reference.md
+  - 机制 Mechanics:
+      - 连接池 Connection Pool: connection-pool.md
+      - 异步模型 Async Model: async-model.md
+      - 内存模型 Memory Model: memory-model.md
+  - 实战与项目:
+      - Cookbook 样例: cookbook.md
+      - 常见问题 FAQ: faq.md
+      - 路线图 Roadmap: roadmap.md
+      - 术语表 Glossary: glossary.md
+      - 贡献指南 Contributing: contributing.md
