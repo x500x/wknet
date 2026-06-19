@@ -14,7 +14,7 @@
 |----------|----------------|
 | `STATUS_SUCCESS` | 成功 |
 | `STATUS_INVALID_PARAMETER` | 参数无效；如非法 URL、禁止的头（Host/Content-Length/Connection）、配置越界 |
-| `STATUS_NOT_SUPPORTED` | 能力不支持/未启用；如非 http(s)/ws(s) scheme、用户设 `Transfer-Encoding`、TE 中 `br`、ALPN 不被支持、0-RTT 未声明 replay-safe、h2 未协商、未实现的签名方案（如 Ed448） |
+| `STATUS_NOT_SUPPORTED` | 能力不支持/未启用；如非 http(s)/ws(s) scheme、用户设 `Transfer-Encoding`、TE 中 `br`、ALPN 不被支持、0-RTT 未声明 replay-safe、h2 未协商、未实现或未启用的签名方案 |
 | `STATUS_INSUFFICIENT_RESOURCES` | 资源不足；如异步队列满（256）、每主机连接配额满、分配失败 |
 | `STATUS_INTEGER_OVERFLOW` | 大小/长度计算溢出；如 HPACK 整数、body 增长 |
 | `STATUS_INVALID_DEVICE_REQUEST` | 非 `PASSIVE_LEVEL` 调用（IRQL 违规） |
@@ -40,7 +40,7 @@
 |----------|----------------|
 | `STATUS_TRUST_FAILURE` | 证书校验失败；链/有效期/主机名/pin/信任锚/撤销(fail-closed) |
 | `STATUS_INVALID_SIGNATURE` | MAC / AEAD tag / CBC MAC 校验失败 |
-| `STATUS_NOT_SUPPORTED` | TLS 版本协商失败、弱算法被策略拒、未实现的签名方案（如 Ed448）、early data 不 replay-safe |
+| `STATUS_NOT_SUPPORTED` | TLS 版本协商失败、弱算法被策略拒、未实现或未启用的签名方案、early data 不 replay-safe |
 
 ### 处理示例
 
@@ -67,4 +67,4 @@ if (!NT_SUCCESS(s)) {
 
 ## English
 
-The project uses Windows NTSTATUS throughout; test with `NT_SUCCESS()`. The tables above list the codes actually used and their typical sources. Highlights: `STATUS_INVALID_DEVICE_REQUEST` = IRQL violation (not `PASSIVE_LEVEL`); `STATUS_NOT_SUPPORTED` = unsupported scheme / user `Transfer-Encoding` / unsupported ALPN / non-replay-safe 0-RTT / un-negotiated h2 / unimplemented signature schemes such as Ed448; `STATUS_INVALID_NETWORK_RESPONSE` = protocol violations (bad status line/headers, obs-fold, duplicate Content-Length, decode-verification failure, illegal frames, HPACK errors); `STATUS_BUFFER_TOO_SMALL` = over `MaxResponseBytes` / decode > 16 MiB / WS over `MaxMessageBytes`; `STATUS_TRUST_FAILURE` = certificate validation failure including fail-closed revocation; `STATUS_INVALID_SIGNATURE` = MAC/AEAD/CBC-MAC/signature verification failure; `STATUS_RETRY` = retryable (e.g. clean GOAWAY); `STATUS_CANCELLED` = cancelled async op. Use `NT_SUCCESS`, honor `_Must_inspect_result_`, and release on all paths (Release/Close accept `nullptr`).
+The project uses Windows NTSTATUS throughout; test with `NT_SUCCESS()`. The tables above list the codes actually used and their typical sources. Highlights: `STATUS_INVALID_DEVICE_REQUEST` = IRQL violation (not `PASSIVE_LEVEL`); `STATUS_NOT_SUPPORTED` = unsupported scheme / user `Transfer-Encoding` / unsupported ALPN / non-replay-safe 0-RTT / un-negotiated h2 / unsupported or disabled signature schemes; `STATUS_INVALID_NETWORK_RESPONSE` = protocol violations (bad status line/headers, obs-fold, duplicate Content-Length, decode-verification failure, illegal frames, HPACK errors); `STATUS_BUFFER_TOO_SMALL` = over `MaxResponseBytes` / decode > 16 MiB / WS over `MaxMessageBytes`; `STATUS_TRUST_FAILURE` = certificate validation failure including fail-closed revocation; `STATUS_INVALID_SIGNATURE` = MAC/AEAD/CBC-MAC/signature verification failure; `STATUS_RETRY` = retryable (e.g. clean GOAWAY); `STATUS_CANCELLED` = cancelled async op. Use `NT_SUCCESS`, honor `_Must_inspect_result_`, and release on all paths (Release/Close accept `nullptr`).

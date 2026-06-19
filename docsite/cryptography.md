@@ -22,7 +22,7 @@
 | RSA-PKCS1 / RSA-PSS 验签 | CNG（PSS salt=摘要长 32/48/64） |
 | ECDSA 验签 | CNG（DER→raw R‖S 转换，长度 64/96/132） |
 | Ed25519 验签 | 纯软件 PureEdDSA（RFC 8032），对完整消息执行内部 SHA-512；证书链与 TLS CertificateVerify 路径均使用原始输入验签 |
-| **Ed448 验签** | **未实现**，不在默认 `signature_algorithms` 中宣称 |
+| Ed448 验签 | 纯软件 PureEdDSA（RFC 8032），对完整消息执行内部 SHAKE256；证书链与 TLS CertificateVerify/ServerKeyExchange 路径均使用原始输入验签，并在默认 `signature_algorithms` 中宣称 |
 
 ### 枚举
 
@@ -59,6 +59,6 @@ enum class KeyExchangeGroup : USHORT { Secp256r1=23, Secp384r1=24, Secp521r1=25,
 
 ## English
 
-Namespace `KernelHttp::crypto`, hybrid: some primitives via kernel CNG/BCrypt, others **in-kernel software**. CNG: SHA-1/256/384/512, HMAC, HKDF (software over HMAC), AES-GCM, NIST P-256/384/521 ECDH/ECDSA, RSA-PKCS1/RSA-PSS (salt = digest length) and ECDSA verification (DER→raw). **Software**: ChaCha20-Poly1305 (constant-time tag verify before decrypt), AES-128 + CCM/CCM8, X25519, X448 (Montgomery ladders, constant-time cswap, reject all-zero), FFDHE 2048–8192 (Montgomery modexp, RFC 7919 primes, public-key range validation 2≤y≤p-2), and Ed25519 verification (PureEdDSA over the full message). Ed448 verification is not implemented and is not advertised.
+Namespace `KernelHttp::crypto`, hybrid: some primitives via kernel CNG/BCrypt, others **in-kernel software**. CNG: SHA-1/256/384/512, HMAC, HKDF (software over HMAC), AES-GCM, NIST P-256/384/521 ECDH/ECDSA, RSA-PKCS1/RSA-PSS (salt = digest length) and ECDSA verification (DER→raw). **Software**: ChaCha20-Poly1305 (constant-time tag verify before decrypt), AES-128 + CCM/CCM8, X25519, X448 (Montgomery ladders, constant-time cswap, reject all-zero), FFDHE 2048–8192 (Montgomery modexp, RFC 7919 primes, public-key range validation 2≤y≤p-2), and Ed25519/Ed448 verification (PureEdDSA over the full message).
 
 Hardening: minimum RSA modulus **2048 bits** (enforced at SPKI parse and RSA import; exponent ≥3 and odd); FFDHE public-key validation on every shared-secret derivation; pervasive `RtlSecureZeroMemory` of key material; CNG little-endian secrets converted to big-endian with left zero-pad. `CngProviderCache` pre-opens AES/SHA/HMAC/RSA/ECDSA/ECDH(P256/384/521) handles (one per session, `PASSIVE_LEVEL` to init); software paths bypass the cache. RAII: `CngAlgorithmProvider`, `CngKey` (private-key RAII), `CngHashContext`. Under `KERNEL_HTTP_USER_MODE_TEST`, `bcrypt.h` is stubbed and software SHA-1/SHA-256 are provided.

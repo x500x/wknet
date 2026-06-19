@@ -45,7 +45,7 @@
 
 **TLS 1.2（RFC 5246）/ 1.3（RFC 8446）**
 - 客户端只走单版本路径（1.3 在范围内优先）；**无握手内自动降级**——失败时分类为 `VersionNegotiation` 由上层显式重连 1.2。
-- 下游 cipher/group/sig 分「默认启用 / 可选 / 兼容(Legacy)」三档（详见 [TLS 与证书](tls-and-certificates.md)）。默认套件为 ECDHE-RSA/ECDSA 的 AES-GCM 与 ChaCha20-Poly1305 + TLS1.3 三件套；默认群 X25519/P-256/P-384/P-521；默认签名 RSA-PSS/ECDSA/Ed25519。
+- 下游 cipher/group/sig 分「默认启用 / 可选 / 兼容(Legacy)」三档（详见 [TLS 与证书](tls-and-certificates.md)）。默认套件为 ECDHE-RSA/ECDSA 的 AES-GCM 与 ChaCha20-Poly1305 + TLS1.3 三件套；默认群 X25519/P-256/P-384/P-521；默认签名 RSA-PSS/ECDSA/Ed25519/Ed448。
 - TLS1.2 强制 Extended Master Secret、安全重协商指示、CBC 必须 Encrypt-then-MAC，否则失败。
 - TLS1.3：HelloRetryRequest（binder 重算）、KeyUpdate（仅在服务端请求时被动 rekey）、NewSessionTicket、record padding、`signature_algorithms_cert`、OCSP stapling 解析。
 - 会话恢复绑定 policy 身份 + SNI + ALPN + cipher + 版本（1.2/1.3 各最多 4 条缓存）。
@@ -68,7 +68,7 @@
 | HTTP/1.1 | 拒绝用户设置 `Transfer-Encoding`/`TE`；request trailer 仅 chunked 路径；无入站 parser/server；支持 CONNECT 方法与 `HttpsClient` 显式代理隧道基础，但高层 Session 尚无全局代理配置；无 TRACE/管线化；`Range`/条件请求透传且响应 `Content-Range` 只读解析；响应先缓冲（无流式上传）；`Expect:100-continue` 带 body 被拒；`br` 仅 Content-Encoding（TE 中 `br` → `STATUS_NOT_SUPPORTED`） |
 | HTTP/2 | 低层连接支持多活动流基础、交错帧分发与 RFC 8441 extended CONNECT DATA tunnel；高层 `khttp`/`HttpsClient` 仍是每次调用请求模型，尚无 h2 连接池级复用；不发 PRIORITY/主动 PING；高层 khttp 不暴露 h2c（仅 `Http2Client`） |
 | WebSocket | 高层 `kws` 主路径仍为 HTTP/1.1 Upgrade；支持自定义 opening headers；无扩展协商（permessage-deflate 等拒绝）；RFC 8441 仅有低层 HTTP/2 tunnel 基础，`kws` 尚不自动选择；不跟随握手 redirect/401 |
-| TLS | 默认不启用 TLS1.2 RSA kx/CBC/renegotiation/SHA-1（需 `CompatibilityExplicit`）；Ed25519 验签为内核内软件实现；Ed448 验签未实现且不主动宣称；不在线抓取 OCSP/CRL；0-RTT 默认关闭 |
+| TLS | 默认不启用 TLS1.2 RSA kx/CBC/renegotiation/SHA-1（需 `CompatibilityExplicit`）；Ed25519/Ed448 验签为内核内软件实现并默认宣称；不在线抓取 OCSP/CRL；0-RTT 默认关闭 |
 
 ### 默认关闭、需显式开启
 
@@ -76,7 +76,7 @@
 
 ### 明确非目标
 
-HTTP/3·QUIC、服务端/入站解析、TRACE、管线化、`Expect:100-continue`、流式请求体上传、高层 Session 全局代理配置、高层 `kws` 自动 WebSocket over HTTP/2、WebSocket permessage-deflate、在线 OCSP/CRL 抓取、Ed448 验签。详见 [路线图与非目标](roadmap.md)。
+HTTP/3·QUIC、服务端/入站解析、TRACE、管线化、`Expect:100-continue`、流式请求体上传、高层 Session 全局代理配置、高层 `kws` 自动 WebSocket over HTTP/2、WebSocket permessage-deflate、在线 OCSP/CRL 抓取。详见 [路线图与非目标](roadmap.md)。
 
 ### 关键默认行为
 
@@ -97,6 +97,6 @@ This page is grounded in the actual `src/KernelHttpLib/` implementation.
 
 **WebSocket**: handshake with **constant-time** accept comparison, caller-supplied opening headers with controlled-header rejection, **rejects any Sec-WebSocket-Extensions**, subprotocol negotiation; client frames always masked (masked server frame → 1002); **fragment send (`kws::SendContinuation` + `FinalFragment`)** with incremental cross-fragment UTF-8 validation; **receive-fragment callback (`ReceiveOptions.OnMessage`)** or aggregated whole-message; auto-Pong (toggleable), ≤100 control frames per receive (1008), UTF-8 validation (1007), max-message (1009); active and passive close handshakes.
 
-**TLS 1.2/1.3**: single-version path (no in-handshake fallback — failures classified as `VersionNegotiation` for an explicit caller retry at 1.2); cipher/group/sig split into default / optional / legacy; TLS1.2 enforces EMS + secure-reneg indication + Encrypt-then-MAC for CBC; TLS1.3 HelloRetryRequest, reactive-only KeyUpdate, NewSessionTicket, record padding, `signature_algorithms_cert`, OCSP stapling parse; resumption bound to policy identity + SNI + ALPN + cipher + version. Certificate validation (on an expanded kernel stack): chain ≤8, exact-DN linking, signature/validity/basic-constraints/pathLen/KU/EKU/name-constraints/cert-policies/trust-anchor; rejects duplicate and unknown-critical extensions; hostname match with single-label wildcard, IP literals match iPAddress SAN only, **never falls back to CN**; revocation offline + table-driven, **fail-closed** when required-but-absent; SPKI pinning (fail-open for un-pinned hosts); mTLS via caller `Sign` callback (private key never enters the library). Crypto: ChaCha20-Poly1305/AES-CCM/X25519/X448/FFDHE/Ed25519 verification are in-kernel **software**; min RSA modulus 2048; Ed448 verification is not implemented and is not advertised.
+**TLS 1.2/1.3**: single-version path (no in-handshake fallback — failures classified as `VersionNegotiation` for an explicit caller retry at 1.2); cipher/group/sig split into default / optional / legacy; TLS1.2 enforces EMS + secure-reneg indication + Encrypt-then-MAC for CBC; TLS1.3 HelloRetryRequest, reactive-only KeyUpdate, NewSessionTicket, record padding, `signature_algorithms_cert`, OCSP stapling parse; resumption bound to policy identity + SNI + ALPN + cipher + version. Certificate validation (on an expanded kernel stack): chain ≤8, exact-DN linking, signature/validity/basic-constraints/pathLen/KU/EKU/name-constraints/cert-policies/trust-anchor; rejects duplicate and unknown-critical extensions; hostname match with single-label wildcard, IP literals match iPAddress SAN only, **never falls back to CN**; revocation offline + table-driven, **fail-closed** when required-but-absent; SPKI pinning (fail-open for un-pinned hosts); mTLS via caller `Sign` callback (private key never enters the library). Crypto: ChaCha20-Poly1305/AES-CCM/X25519/X448/FFDHE/Ed25519/Ed448 verification are in-kernel **software**; min RSA modulus 2048.
 
 **Boundaries / non-goals**: no high-level pooled HTTP/2 connection reuse yet; no TRACE/pipelining/streaming upload; proxy CONNECT is limited to explicit low-level `HttpsClient` options; high-level WebSocket remains HTTP/1.1 Upgrade (custom opening headers supported, no extensions, RFC 8441 only as low-level HTTP/2 tunnel primitives); TLS 1.2 RSA-kx/CBC/renegotiation/SHA-1 off by default (`CompatibilityExplicit`); no online OCSP/CRL fetch; 0-RTT off by default; HTTP/3·QUIC and server role out of scope. Redirect exhaustion returns the 3xx response (no error). See [Roadmap](roadmap.md).

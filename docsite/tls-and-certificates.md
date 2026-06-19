@@ -25,7 +25,7 @@
 **Cipher（TLS 1.3）**：Default `AES_128_GCM_SHA256`、`AES_256_GCM_SHA384`、`CHACHA20_POLY1305_SHA256`；Optional `AES_128_CCM_SHA256`、`AES_128_CCM_8_SHA256`（注：1.3 默认 offer 列表只含前三件）。
 **Cipher（TLS 1.2）**：Default ECDHE-RSA/ECDSA 的 AES128/256-GCM 与 ChaCha20；Optional DHE-RSA 三件；**Legacy（兼容档）** ECDHE-*-AES128-CBC-SHA256、RSA-kx 的 GCM/CBC。
 **群**：Default `X25519`、`secp256r1/384r1/521r1`；Optional `X448`、`ffdhe2048/3072/4096/6144/8192`。
-**签名**：Default `RSA-PSS-RSAE 256/384/512`、`ECDSA secp256r1/384r1/521r1`、`Ed25519`；Optional `RSA-PSS-PSS 256/384/512`；Legacy `RSA-PKCS1 256/384/512`、`*-SHA1`。Ed448 尚未实现且不主动宣称。
+**签名**：Default `RSA-PSS-RSAE 256/384/512`、`ECDSA secp256r1/384r1/521r1`、`Ed25519`、`Ed448`；Optional `RSA-PSS-PSS 256/384/512`；Legacy `RSA-PKCS1 256/384/512`、`*-SHA1`。
 
 ### 安全策略 `tls::TlsPolicy`
 
