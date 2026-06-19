@@ -29,7 +29,7 @@ KernelHttp is a pure kernel-mode HTTP/HTTPS client library designed specifically
 - **⚡ Asynchronous Operations**: Supports async requests with concurrency protection and workspace isolation, avoiding blocking kernel threads
 - **🎯 Two-Layer API**: Provides both high-level simplified API (`khttp`) and low-level fine-grained control API (`engine`)
 - **🛡️ Certificate Verification**: Supports Certificate Pinning, Trust Anchors, SPKI hash verification, and TLS 1.3 signature scheme validation
-- **📦 Response Encoding**: Supports `Content-Encoding: gzip/deflate/br` and HTTP/1.1 response `Transfer-Encoding` chains for `chunked/gzip/deflate/compress`
+- **📦 Response Encoding**: Supports `Content-Encoding: gzip/deflate/br/compress/identity` and HTTP/1.1 response `Transfer-Encoding` chains for `chunked/gzip/deflate/compress`
 - **🧱 Heap Memory Management**: Uses `HeapObject<T>` / `HeapArray<T>` for unified heap memory management, high-frequency buffers resident in Workspace
 
 ### Protocol Capability Boundaries
@@ -38,23 +38,19 @@ KernelHttp implements protocol behavior on the Windows kernel path: transport us
 
 | Protocol | Supported | Current Boundary |
 |----------|-----------|------------------|
-| HTTP/1.1 | `Content-Length`, explicit chunked request bodies, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer syntax/forbidden-field validation and read-only API exposure, RFC 3986 relative redirect resolution | User-supplied request `Transfer-Encoding` is rejected; request trailers are not supported; no inbound request parser/server role is provided; HTTP proxy/CONNECT/TRACE is outside the current main path; `Range`/conditional requests are pass-through headers only; `Accept-Encoding` does not promise full qvalue/content negotiation; `br` is supported only as `Content-Encoding` |
-| HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS, HEADERS/CONTINUATION, DATA, PING, GOAWAY, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits | RFC 8441 WebSocket over HTTP/2, server push, priority, and full multiplex scheduling are not supported; disabled `PUSH_PROMISE` is a protocol error; missing SETTINGS ACK closes with `SETTINGS_TIMEOUT`; received GOAWAY terminates the current single-request connection semantics |
-| WebSocket | ws/wss handshake (constant-time accept check), text/binary send, empty messages, **fragment send (`kws::SendContinuation`) and receive-fragment callback (`ReceiveOptions.OnMessage`)**, control-frame validation, auto-Pong, public Ping/Pong/CloseEx, selected subprotocol query, cross-fragment UTF-8 validation, complete-message aggregation by default | Main path is HTTP/1.1 Upgrade; custom opening handshake headers and extension negotiation unsupported (rejects `Sec-WebSocket-Extensions`); active close sends a close frame then waits for peer close (3 s timeout), received peer close is echoed before closing |
+| HTTP/1.1 | `Content-Length`, explicit chunked request bodies, request trailers on the chunked path, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer syntax/forbidden-field validation and read-only API exposure, read-only `206` / `Content-Range` parsing, RFC 3986 relative redirect resolution, CONNECT request construction | User-supplied request `Transfer-Encoding`/`TE` is rejected; request trailers are chunked-only; no inbound request parser/server role is provided; `HttpsClient` supports explicit HTTP/1.1 CONNECT proxy tunneling, but session-wide high-level proxy configuration is not exposed; TRACE is unsupported; `Range`/conditional requests are pass-through headers only; `Accept-Encoding` does not promise full qvalue/content negotiation; `br` is supported only as `Content-Encoding` |
+| HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS (including `ENABLE_CONNECT_PROTOCOL`), HEADERS/CONTINUATION, DATA, PING, GOAWAY, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits, active-stream table with two-stage `BeginRequest` / `ReceiveResponse(streamId)`, RFC 8441 extended CONNECT low-level DATA tunnel | High-level `khttp`/`HttpsClient` does not yet provide h2 connection-pool reuse; high-level `kws` does not automatically select RFC 8441; server push and priority are not public capabilities; disabled `PUSH_PROMISE` is a protocol error; missing SETTINGS ACK closes with `SETTINGS_TIMEOUT` |
+| WebSocket | ws/wss handshake (constant-time accept check), caller-supplied opening handshake headers (controlled headers and invalid text rejected), text/binary send, empty messages, **fragment send (`kws::SendContinuation`) and receive-fragment callback (`ReceiveOptions.OnMessage`)**, control-frame validation, auto-Pong, public Ping/Pong/CloseEx, selected subprotocol query, cross-fragment UTF-8 validation, complete-message aggregation by default | High-level `kws` main path is HTTP/1.1 Upgrade; extension negotiation is unsupported (rejects `Sec-WebSocket-Extensions`); RFC 8441 exists only as low-level HTTP/2 tunnel primitives; active close sends a close frame then waits for peer close (3 s timeout), received peer close is echoed before closing |
 | TLS | TLS 1.2/1.3, all standard TLS 1.3 cipher suites, TLS 1.2 ECDHE/DHE/RSA key exchange, AES-GCM/AES-CBC/ChaCha20-Poly1305, X25519/X448/NIST P curves/FFDHE, RSA-PSS/RSA-PKCS1/ECDSA/Ed25519 signature schemes, SNI, ALPN, PSK/session ticket, explicit opt-in 0-RTT, reactive KeyUpdate, record padding, client certificates (mTLS), OCSP stapling parse, certificate chain reordering and validation, Name Constraints, certificatePolicies, IDNA, OCSP/CRL revocation cache, SPKI pin. ChaCha20-Poly1305/AES-CCM/X25519/X448/FFDHE/Ed25519 verification are in-kernel software implementations | The default policy does not enable TLS 1.2 RSA key exchange, CBC, renegotiation, or SHA-1 signatures; those require `TlsSecurityProfile::CompatibilityExplicit` plus the matching explicit option. Ed448 verification is not implemented and is not advertised. No hard-coded system CA; revocation is offline/table-driven and fail-closed when required-but-absent |
 
 | Unsupported Optional Capability | Current Handling |
 |---------------------------------|------------------|
 | WebSocket extensions such as permessage-deflate | Out of scope; unexpected server extensions are rejected |
-| WebSocket over HTTP/2 RFC 8441 | Deferred; extended CONNECT is not negotiated, and the current WebSocket path is HTTP/1.1 Upgrade |
-| WebSocket custom opening headers | Deferred; Origin, Authorization, Cookie, and similar headers need a separate validation and sensitive-header policy |
-| WebSocket active close handshake | Client-simplified semantics: send a close frame and then close the transport; received peer close is echoed before close |
-| WebSocket receive-fragment callback | Receive aggregates complete messages; fragment callback exposure is not supported |
-| HTTP proxy / CONNECT / TRACE | Outside the current kernel client main path |
+| High-level automatic WebSocket over HTTP/2 RFC 8441 | Deferred; low-level HTTP/2 exposes extended CONNECT tunnel primitives, while `kws` still uses HTTP/1.1 Upgrade |
+| Session-wide high-level proxy configuration / TRACE | Session proxy configuration is not exposed; low-level `HttpsClient` can explicitly establish HTTP/1.1 CONNECT proxy tunnels; TRACE is unsupported |
 | HTTP inbound request parser / server role | Out of scope; this project is a client protocol stack |
-| HTTP request trailers | Chunked upload does not carry request trailers; user-supplied `Transfer-Encoding` is still rejected |
-| HTTP/2 full multiplexing / server push / priority | Full multiplex scheduling is not exposed; push is disabled, forbidden `PUSH_PROMISE` is a protocol error, and priority is not a public scheduling capability |
-| RFC 9111 cache / Range / conditional requests | No kernel cache API is provided; `Range` and conditional request fields are pass-through only and are not semantically merged or validated |
+| High-level HTTP/2 connection-pool reuse / server push / priority | Low-level active-stream routing exists; high-level pool reuse is not wired yet; push is disabled, forbidden `PUSH_PROMISE` is a protocol error, and priority is not a public scheduling capability |
+| RFC 9111 cache / Range / conditional requests | No kernel cache API is provided; `Range` and conditional request fields are pass-through only and are not semantically merged or validated; response `Content-Range` has read-only parsing |
 | Accept-Encoding qvalue/content negotiation | The default header only describes the implemented response decoder subset; callers may override it, but full negotiation semantics are not provided |
 | TLS 1.2 RSA key exchange / CBC / renegotiation | Implemented but disabled by default; callers must use `CompatibilityExplicit` policy and enable RSA, CBC, or renegotiation explicitly |
 | TLS 1.3 0-RTT | Implemented but disabled by default; callers must enable early data and mark the request replay-safe |
@@ -150,7 +146,7 @@ For certificate host validation, IP literals match only iPAddress SAN entries an
 
 ## 📚 API Overview
 
-KernelHttp exposes three public namespaces:
+Common KernelHttp entry namespaces:
 
 | Namespace | Purpose | Use Case |
 |-----------|---------|----------|
@@ -402,7 +398,8 @@ KernelHttp/
 │   └── KernelHttpTest/              # Test driver project
 │       └── samples/                 # Example code
 ├── tests/                            # Test code
-├── docs/                             # Documentation
+├── docs/                             # Planning and audit documents
+├── docsite/                          # MkDocs online documentation source
 ├── certs/                            # Certificate related
 └── tools/                            # Tool scripts
 ```
@@ -525,7 +522,7 @@ msbuild KernelHttp.sln /m /restore /p:Configuration=Debug /p:Platform=x64
 
 ## ⚠️ Error Handling
 
-The project uses Windows NTSTATUS error codes. For detailed information, see [NTSTATUS Code Reference](docs/ntstatus-codes.md).
+The project uses Windows NTSTATUS error codes. For detailed information, see [NTSTATUS Code Reference](docsite/ntstatus-reference.md).
 
 ### Common Error Codes
 
