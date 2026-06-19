@@ -525,6 +525,63 @@ namespace
         return NT_SUCCESS(tls::TlsValidatePolicy(options.Policy));
     }
 
+    bool IsValidProxyAuthorityText(const char* text, SIZE_T textLength) noexcept
+    {
+        if (text == nullptr || textLength == 0 || textLength > KhPoolMaxProxyAuthorityLength) {
+            return false;
+        }
+
+        for (SIZE_T index = 0; index < textLength; ++index) {
+            const unsigned char value = static_cast<unsigned char>(text[index]);
+            if (value <= 0x20 || value == 0x7f) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool IsValidProxyHeaderValueText(const char* text, SIZE_T textLength) noexcept
+    {
+        if (text == nullptr || textLength == 0 || textLength > KhMaxHeaderValueLength) {
+            return false;
+        }
+
+        for (SIZE_T index = 0; index < textLength; ++index) {
+            const unsigned char value = static_cast<unsigned char>(text[index]);
+            if (text[index] != '\t' && (value < 0x20 || value == 0x7f)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool IsValidProxyOptions(const KhProxyOptions& options) noexcept
+    {
+        if (!options.Enabled) {
+            return options.Address.ss_family == 0 &&
+                options.Authority == nullptr &&
+                options.AuthorityLength == 0 &&
+                options.AuthHeader == nullptr &&
+                options.AuthHeaderLength == 0;
+        }
+
+        if (options.Address.ss_family != AF_INET && options.Address.ss_family != AF_INET6) {
+            return false;
+        }
+
+        if (!IsValidProxyAuthorityText(options.Authority, options.AuthorityLength)) {
+            return false;
+        }
+
+        if (options.AuthHeader == nullptr) {
+            return options.AuthHeaderLength == 0;
+        }
+
+        return IsValidProxyHeaderValueText(options.AuthHeader, options.AuthHeaderLength);
+    }
+
     bool IsValidSessionOptions(const KhSessionOptions& options) noexcept
     {
         if (options.RequestBufferBytes == 0) {
@@ -555,7 +612,7 @@ namespace
             return false;
         }
 
-        return IsValidTlsOptions(options.Tls);
+        return IsValidTlsOptions(options.Tls) && IsValidProxyOptions(options.Proxy);
     }
 
     bool IsValidAddressFamily(KhAddressFamily addressFamily) noexcept

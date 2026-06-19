@@ -38,6 +38,12 @@ NTSTATUS SessionCreate(
 
     if (config != nullptr) {
         detail::FillApiTlsOptions(config->Tls, apiOptions.Tls);
+        apiOptions.Proxy.Enabled = config->Proxy.Enabled;
+        apiOptions.Proxy.Address = config->Proxy.Address;
+        apiOptions.Proxy.Authority = config->Proxy.Authority;
+        apiOptions.Proxy.AuthorityLength = config->Proxy.AuthorityLength;
+        apiOptions.Proxy.AuthHeader = config->Proxy.AuthHeader;
+        apiOptions.Proxy.AuthHeaderLength = config->Proxy.AuthHeaderLength;
     }
     else {
         TlsConfig defaultTls = {};

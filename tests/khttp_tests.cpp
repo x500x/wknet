@@ -166,6 +166,12 @@ namespace
         SIZE_T CallCount = 0;
         const char* RawResponse = nullptr;
         SIZE_T RawResponseLength = 0;
+        bool ProxyEnabled = false;
+        SOCKADDR_STORAGE ProxyAddress = {};
+        char ProxyAuthority[128] = {};
+        SIZE_T ProxyAuthorityLength = 0;
+        char ProxyAuthHeader[128] = {};
+        SIZE_T ProxyAuthHeaderLength = 0;
     };
 
     struct RedirectCapture
@@ -267,6 +273,22 @@ namespace
             : sizeof(captured->BuiltRequest) - 1;
         memcpy(captured->BuiltRequest, requestBytes, captured->BuiltRequestLength);
         captured->BuiltRequest[captured->BuiltRequestLength] = '\0';
+        captured->ProxyEnabled = request->ProxyEnabled;
+        captured->ProxyAddress = request->ProxyAddress;
+        captured->ProxyAuthorityLength = request->ProxyAuthorityLength < sizeof(captured->ProxyAuthority) - 1
+            ? request->ProxyAuthorityLength
+            : sizeof(captured->ProxyAuthority) - 1;
+        if (request->ProxyAuthority != nullptr && captured->ProxyAuthorityLength != 0) {
+            memcpy(captured->ProxyAuthority, request->ProxyAuthority, captured->ProxyAuthorityLength);
+        }
+        captured->ProxyAuthority[captured->ProxyAuthorityLength] = '\0';
+        captured->ProxyAuthHeaderLength = request->ProxyAuthHeaderLength < sizeof(captured->ProxyAuthHeader) - 1
+            ? request->ProxyAuthHeaderLength
+            : sizeof(captured->ProxyAuthHeader) - 1;
+        if (request->ProxyAuthHeader != nullptr && captured->ProxyAuthHeaderLength != 0) {
+            memcpy(captured->ProxyAuthHeader, request->ProxyAuthHeader, captured->ProxyAuthHeaderLength);
+        }
+        captured->ProxyAuthHeader[captured->ProxyAuthHeaderLength] = '\0';
 
         const char* bodyMarker = "\r\n\r\n";
         const SIZE_T markerLength = 4;
@@ -1847,6 +1869,37 @@ namespace
         Expect(
             !KernelHttp::engine::KhConnectionPoolKeysEqual(base, differentStore),
             "connection pool key includes certificate store identity");
+
+        KernelHttp::engine::KhConnectionPoolKey proxyKey = base;
+        proxyKey.ProxyEnabled = true;
+        auto* proxyAddress = reinterpret_cast<SOCKADDR_IN*>(&proxyKey.ProxyAddress);
+        proxyAddress->sin_family = AF_INET;
+        proxyAddress->sin_port = 0x901f;
+        proxyAddress->sin_addr = 0x0a000001UL;
+        memcpy(proxyKey.ProxyAuthority, "proxy.example:8080", Length("proxy.example:8080"));
+        proxyKey.ProxyAuthorityLength = Length("proxy.example:8080");
+
+        Expect(
+            !KernelHttp::engine::KhConnectionPoolKeysEqual(base, proxyKey),
+            "connection pool key includes proxy enablement");
+
+        KernelHttp::engine::KhConnectionPoolKey sameProxy = proxyKey;
+        Expect(
+            KernelHttp::engine::KhConnectionPoolKeysEqual(proxyKey, sameProxy),
+            "connection pool keys match when proxy identity is identical");
+
+        KernelHttp::engine::KhConnectionPoolKey differentProxyAddress = proxyKey;
+        reinterpret_cast<SOCKADDR_IN*>(&differentProxyAddress.ProxyAddress)->sin_addr = 0x0a000002UL;
+        Expect(
+            !KernelHttp::engine::KhConnectionPoolKeysEqual(proxyKey, differentProxyAddress),
+            "connection pool key includes proxy address");
+
+        KernelHttp::engine::KhConnectionPoolKey differentProxyAuthority = proxyKey;
+        memcpy(differentProxyAuthority.ProxyAuthority, "other-proxy:8080", Length("other-proxy:8080"));
+        differentProxyAuthority.ProxyAuthorityLength = Length("other-proxy:8080");
+        Expect(
+            !KernelHttp::engine::KhConnectionPoolKeysEqual(proxyKey, differentProxyAuthority),
+            "connection pool key includes proxy authority");
     }
 
     struct FakeResolveCapture
@@ -1873,6 +1926,143 @@ namespace
         }
 
         return static_cast<USHORT>((port >> 8) | (port << 8));
+    }
+
+    void FillProxyConfig(khttp::ProxyConfig& proxy) noexcept
+    {
+        proxy.Enabled = true;
+        auto* address = reinterpret_cast<SOCKADDR_IN*>(&proxy.Address);
+        address->sin_family = AF_INET;
+        address->sin_port = HostToNetworkPort(L"8080");
+        address->sin_addr = 0x0a000001UL;
+        proxy.Authority = "proxy.example:8080";
+        proxy.AuthorityLength = Length(proxy.Authority);
+    }
+
+    void TestSessionProxyConfigReachesTransport() noexcept
+    {
+        CapturedRequest captured = {};
+        static const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "ok";
+        captured.RawResponse = responseBytes;
+        captured.RawResponseLength = sizeof(responseBytes) - 1;
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        FillProxyConfig(config.Proxy);
+        config.Proxy.AuthHeader = "Basic c2VjcmV0";
+        config.Proxy.AuthHeaderLength = Length(config.Proxy.AuthHeader);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate accepts complete proxy config");
+
+        const char* url = "https://example.com/proxy";
+        khttp::Response* response = nullptr;
+        status = khttp::Get(session, url, Length(url), &response);
+        Expect(NT_SUCCESS(status), "HTTPS request with session proxy reaches transport");
+        Expect(captured.CallCount == 1, "proxy HTTPS request issues one transport call");
+        Expect(captured.ProxyEnabled, "transport observes proxy enabled");
+        Expect(captured.ProxyAddress.ss_family == AF_INET, "transport observes proxy address family");
+        Expect(
+            reinterpret_cast<const SOCKADDR_IN*>(&captured.ProxyAddress)->sin_port == HostToNetworkPort(L"8080"),
+            "transport observes proxy address port");
+        Expect(
+            captured.ProxyAuthorityLength == Length("proxy.example:8080") &&
+                memcmp(captured.ProxyAuthority, "proxy.example:8080", Length("proxy.example:8080")) == 0,
+            "transport observes proxy authority");
+        Expect(
+            captured.ProxyAuthHeaderLength == Length("Basic c2VjcmV0") &&
+                memcmp(captured.ProxyAuthHeader, "Basic c2VjcmV0", Length("Basic c2VjcmV0")) == 0,
+            "transport observes opaque proxy auth header");
+        Expect(
+            !BufferContainsLiteral(
+                captured.BuiltRequest,
+                captured.BuiltRequestLength,
+                "Proxy-Authorization"),
+            "target request does not receive proxy credentials");
+
+        khttp::ResponseRelease(response);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestSessionProxyRejectsInvalidConfig() noexcept
+    {
+        khttp::Session* session = nullptr;
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.Proxy.Enabled = true;
+        NTSTATUS status = khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "SessionCreate rejects proxy without address and authority");
+        Expect(session == nullptr, "invalid proxy session is not returned");
+
+        config = khttp::DefaultSessionConfig();
+        FillProxyConfig(config.Proxy);
+        config.Proxy.Authority = "proxy.example:8080\r\nInjected: x";
+        config.Proxy.AuthorityLength = Length(config.Proxy.Authority);
+        status = khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "SessionCreate rejects proxy authority CRLF injection");
+        Expect(session == nullptr, "CRLF proxy authority session is not returned");
+
+        config = khttp::DefaultSessionConfig();
+        FillProxyConfig(config.Proxy);
+        config.Proxy.AuthHeader = "Basic ok\r\nInjected: x";
+        config.Proxy.AuthHeaderLength = Length(config.Proxy.AuthHeader);
+        status = khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "SessionCreate rejects proxy auth CRLF injection");
+        Expect(session == nullptr, "CRLF proxy auth session is not returned");
+
+        config = khttp::DefaultSessionConfig();
+        config.Proxy.Authority = "proxy.example:8080";
+        config.Proxy.AuthorityLength = Length(config.Proxy.Authority);
+        status = khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "SessionCreate rejects disabled proxy with stray fields");
+        Expect(session == nullptr, "disabled stray proxy session is not returned");
+    }
+
+    void TestPlainHttpProxyIsRejectedUntilImplemented() noexcept
+    {
+        CapturedRequest captured = {};
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        FillProxyConfig(config.Proxy);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            &config,
+            &session);
+        Expect(NT_SUCCESS(status), "SessionCreate accepts proxy config before plaintext proxy rejection");
+
+        const char* url = "http://example.com/proxy";
+        khttp::Response* response = nullptr;
+        status = khttp::Get(session, url, Length(url), &response);
+        Expect(status == STATUS_NOT_SUPPORTED, "plain HTTP over proxy remains explicitly unsupported");
+        Expect(response == nullptr, "plain HTTP proxy rejection returns no response");
+        Expect(captured.CallCount == 0, "plain HTTP proxy rejection does not reach transport");
+
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
     ULONG WideChecksum(const wchar_t* text) noexcept
@@ -4308,6 +4498,9 @@ int main() noexcept
     TestConnectionPoolHonorsMaxConnectionsPerHost();
     TestConnectionPoolHostQuotaSeparatesTlsReuseIdentity();
     TestConnectionPoolKeyIncludesTlsIdentity();
+    TestSessionProxyConfigReachesTransport();
+    TestSessionProxyRejectsInvalidConfig();
+    TestPlainHttpProxyIsRejectedUntilImplemented();
     TestResolveAllCacheBoundaries();
     TestResolveAllAnyNoMatchQueriesExplicitFamilies();
     TestResolveAllSequentialConnectFallback();

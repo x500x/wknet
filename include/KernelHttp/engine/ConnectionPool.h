@@ -30,6 +30,7 @@ namespace engine
     constexpr SIZE_T KhPoolMaxHostLength = 255;
     constexpr SIZE_T KhPoolMaxTlsServerNameLength = 255;
     constexpr SIZE_T KhPoolMaxAlpnLength = 16;
+    constexpr SIZE_T KhPoolMaxProxyAuthorityLength = 255;
 
     struct KhConnectionPoolKey final
     {
@@ -50,6 +51,10 @@ namespace engine
         char Alpn[KhPoolMaxAlpnLength + 1] = {};
         SIZE_T AlpnLength = 0;
         bool AutomaticAlpn = false;
+        bool ProxyEnabled = false;
+        SOCKADDR_STORAGE ProxyAddress = {};
+        char ProxyAuthority[KhPoolMaxProxyAuthorityLength + 1] = {};
+        SIZE_T ProxyAuthorityLength = 0;
     };
 
     struct KhPooledConnection final
@@ -58,6 +63,7 @@ namespace engine
         bool Connected = false;
         ULONG Id = 0;
         ULONGLONG LastUsedTime = 0;
+        bool ProxyTunnelEstablished = false;
         KhConnectionPoolKey Key = {};
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         net::WskSocket* Socket = nullptr;

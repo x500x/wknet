@@ -1,4 +1,5 @@
 #include <KernelHttp/engine/HttpEngine.h>
+#include <KernelHttp/client/ProxyTunnel.h>
 #include <KernelHttp/core/TlsTransport.h>
 #include <KernelHttp/core/WorkspaceScratchAllocator.h>
 #include <KernelHttp/core/WskTransport.h>
@@ -637,7 +638,10 @@ namespace engine
     }
 
     _Must_inspect_result_
-    NTSTATUS BuildPoolKey(const KhRequest& request, _Out_ KhConnectionPoolKey* key) noexcept
+    NTSTATUS BuildPoolKey(
+        const KhRequest& request,
+        const KhProxyOptions& proxy,
+        _Out_ KhConnectionPoolKey* key) noexcept
     {
         if (key == nullptr || request.SchemeLength == 0 || request.HostLength == 0) {
             return STATUS_INVALID_PARAMETER;
@@ -697,6 +701,20 @@ namespace engine
                 key->Alpn,
                 sizeof(key->Alpn),
                 &key->AlpnLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        if (proxy.Enabled) {
+            key->ProxyEnabled = true;
+            key->ProxyAddress = proxy.Address;
+            status = CopyExactText(
+                proxy.Authority,
+                proxy.AuthorityLength,
+                key->ProxyAuthority,
+                sizeof(key->ProxyAuthority),
+                &key->ProxyAuthorityLength);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -1674,6 +1692,96 @@ namespace engine
         return version == KhTlsVersion::Tls13 ? tls::TlsProtocol::Tls13 : tls::TlsProtocol::Tls12;
     }
 
+    SIZE_T DecimalDigitCount(USHORT value) noexcept
+    {
+        SIZE_T divisor = 1;
+        while ((value / divisor) >= 10) {
+            divisor *= 10;
+        }
+
+        SIZE_T digitCount = 0;
+        for (SIZE_T currentDivisor = divisor; currentDivisor != 0; currentDivisor /= 10) {
+            ++digitCount;
+        }
+        return digitCount;
+    }
+
+    NTSTATUS AppendDecimalPort(
+        USHORT value,
+        _Out_writes_bytes_(destinationCapacity) char* destination,
+        SIZE_T destinationCapacity,
+        _Inout_ SIZE_T* destinationLength) noexcept
+    {
+        if (destination == nullptr || destinationLength == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        SIZE_T divisor = 1;
+        while ((value / divisor) >= 10) {
+            divisor *= 10;
+        }
+
+        SIZE_T length = *destinationLength;
+        const SIZE_T digitCount = DecimalDigitCount(value);
+        if (length + digitCount >= destinationCapacity) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        for (SIZE_T currentDivisor = divisor; currentDivisor != 0; currentDivisor /= 10) {
+            destination[length++] = static_cast<char>('0' + ((value / currentDivisor) % 10));
+        }
+
+        *destinationLength = length;
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS BuildProxyConnectAuthority(
+        const KhRequest& request,
+        _Out_writes_bytes_(destinationCapacity) char* destination,
+        SIZE_T destinationCapacity,
+        _Out_ SIZE_T* destinationLength) noexcept
+    {
+        if (destinationLength != nullptr) {
+            *destinationLength = 0;
+        }
+
+        if (destination == nullptr ||
+            destinationCapacity == 0 ||
+            destinationLength == nullptr ||
+            request.HostLength == 0 ||
+            request.Port == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const bool ipv6Literal = TextContainsChar(request.Host, request.HostLength, ':');
+        const SIZE_T bracketBytes = ipv6Literal ? 2 : 0;
+        const SIZE_T digitCount = DecimalDigitCount(request.Port);
+        if (request.HostLength + bracketBytes + 1 + digitCount >= destinationCapacity) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        SIZE_T length = 0;
+        if (ipv6Literal) {
+            destination[length++] = '[';
+        }
+        RtlCopyMemory(destination + length, request.Host, request.HostLength);
+        length += request.HostLength;
+        if (ipv6Literal) {
+            destination[length++] = ']';
+        }
+        destination[length++] = ':';
+
+        NTSTATUS status = AppendDecimalPort(request.Port, destination, destinationCapacity, &length);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        destination[length] = '\0';
+        *destinationLength = length;
+        return STATUS_SUCCESS;
+    }
+
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
     static bool IsHttpAsyncCancellationRequested(_In_opt_ void* context) noexcept;
 
@@ -1721,8 +1829,171 @@ namespace engine
         }
 
         connection.LastUsedTime = 0;
+        connection.ProxyTunnelEstablished = false;
     }
 #endif
+
+    _Must_inspect_result_
+    NTSTATUS ConnectSocketToAddress(
+        _In_ KH_SESSION session,
+        _In_ const SOCKADDR* remoteAddress,
+        _Inout_ KhPooledConnection& connection,
+        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
+    {
+        if (session == nullptr || remoteAddress == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        auto* socket = AllocateNonPagedObject<net::WskSocket>();
+        if (socket == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        net::WskCancellationToken cancellation = {};
+        if (cancellationOperation != nullptr) {
+            cancellation.IsCancellationRequested = IsHttpAsyncCancellationRequested;
+            cancellation.Context = cancellationOperation;
+        }
+
+        NTSTATUS status = socket->Connect(
+            *session->WskClient,
+            remoteAddress,
+            nullptr,
+            cancellation.IsCancellationRequested != nullptr ? &cancellation : nullptr);
+        if (!NT_SUCCESS(status)) {
+            FreeNonPagedObject(socket);
+            return status;
+        }
+
+        connection.Socket = socket;
+        connection.RawTransport = AllocateNonPagedObject<core::WskTransport>(*connection.Socket);
+        if (connection.RawTransport == nullptr) {
+            const NTSTATUS closeStatus = connection.Socket->Close();
+            UNREFERENCED_PARAMETER(closeStatus);
+            FreeNonPagedObject(connection.Socket);
+            connection.Socket = nullptr;
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        connection.Transport = connection.RawTransport;
+        connection.ProxyTunnelEstablished = false;
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS EstablishProxyTunnel(
+        _In_ KH_SESSION session,
+        const KhRequest& request,
+        _Inout_ KhWorkspace& workspace,
+        _Inout_ KhPooledConnection& connection,
+        _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
+        SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http::HttpHeader* responseTrailers,
+        SIZE_T trailerCapacity,
+        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
+    {
+        if (session == nullptr || !session->Options.Proxy.Enabled) {
+            return STATUS_SUCCESS;
+        }
+        if (connection.ProxyTunnelEstablished) {
+            return STATUS_SUCCESS;
+        }
+        if (connection.RawTransport == nullptr ||
+            workspace.Response.Data == nullptr ||
+            workspace.Response.Length == 0 ||
+            workspace.DecodedBody.Data == nullptr ||
+            workspace.DecodedBody.Length == 0 ||
+            responseHeaders == nullptr ||
+            responseTrailers == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        SIZE_T authorityLength = 0;
+        NTSTATUS status = BuildProxyConnectAuthority(
+            request,
+            reinterpret_cast<char*>(workspace.DecodedBody.Data),
+            workspace.DecodedBody.Length,
+            &authorityLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        http::HttpHeader proxyAuthHeader = {};
+        client::ProxyConnectRequestOptions connectOptions = {};
+        connectOptions.Authority = {
+            reinterpret_cast<char*>(workspace.DecodedBody.Data),
+            authorityLength
+        };
+        if (session->Options.Proxy.AuthHeader != nullptr) {
+            proxyAuthHeader.Name = http::MakeText("Proxy-Authorization");
+            proxyAuthHeader.Value = {
+                session->Options.Proxy.AuthHeader,
+                session->Options.Proxy.AuthHeaderLength
+            };
+            connectOptions.Headers = &proxyAuthHeader;
+            connectOptions.HeaderCount = 1;
+        }
+
+        SIZE_T connectRequestLength = 0;
+        status = client::BuildProxyConnectRequest(
+            connectOptions,
+            reinterpret_cast<char*>(workspace.Response.Data),
+            workspace.Response.Length,
+            &connectRequestLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        net::WskCancellationToken cancellation = {};
+        if (cancellationOperation != nullptr) {
+            cancellation.IsCancellationRequested = IsHttpAsyncCancellationRequested;
+            cancellation.Context = cancellationOperation;
+            connection.RawTransport->SetCancellation(&cancellation);
+        }
+
+        SIZE_T sent = 0;
+        status = connection.RawTransport->Send(
+            workspace.Response.Data,
+            connectRequestLength,
+            &sent);
+        if (cancellationOperation != nullptr) {
+            connection.RawTransport->SetCancellation(nullptr);
+        }
+        if (NT_SUCCESS(status) && sent != connectRequestLength) {
+            return STATUS_CONNECTION_DISCONNECTED;
+        }
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        http::HttpResponse proxyResponse = {};
+        SIZE_T proxyRawResponseLength = 0;
+        workspace.ResponseLength = 0;
+        status = ReadHttpResponseFromSocket(
+            *connection.RawTransport,
+            workspace,
+            true,
+            &proxyResponse,
+            responseHeaders,
+            headerCapacity,
+            responseTrailers,
+            trailerCapacity,
+            &proxyRawResponseLength);
+        UNREFERENCED_PARAMETER(proxyRawResponseLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        if (proxyResponse.StatusCode == 407) {
+            return STATUS_ACCESS_DENIED;
+        }
+        if (!client::IsSuccessfulProxyConnectResponse(proxyResponse)) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        workspace.ResponseLength = 0;
+        connection.ProxyTunnelEstablished = true;
+        return STATUS_SUCCESS;
+    }
 
     _Must_inspect_result_
     NTSTATUS EnsureSocketConnected(
@@ -1758,6 +2029,15 @@ namespace engine
             FreeNonPagedObject(connection.Socket);
             connection.Socket = nullptr;
         }
+        connection.ProxyTunnelEstablished = false;
+
+        if (session->Options.Proxy.Enabled) {
+            return ConnectSocketToAddress(
+                session,
+                reinterpret_cast<const SOCKADDR*>(&session->Options.Proxy.Address),
+                connection,
+                cancellationOperation);
+        }
 
         HeapArray<wchar_t> serverName(KhMaxHostLength + 1);
         HeapArray<wchar_t> serviceName(KhMaxServiceNameLength + 1);
@@ -1790,32 +2070,16 @@ namespace engine
         if (NT_SUCCESS(status)) {
             lastStatus = STATUS_NOT_FOUND;
             for (SIZE_T addressIndex = 0; addressIndex < remoteAddressCount; ++addressIndex) {
-                auto* socket = AllocateNonPagedObject<net::WskSocket>();
-                if (socket == nullptr) {
-                    return STATUS_INSUFFICIENT_RESOURCES;
-                }
-
-                net::WskCancellationToken cancellation = {};
-                if (cancellationOperation != nullptr) {
-                    cancellation.IsCancellationRequested = IsHttpAsyncCancellationRequested;
-                    cancellation.Context = cancellationOperation;
-                }
-
-                status = socket->Connect(
-                    *session->WskClient,
+                status = ConnectSocketToAddress(
+                    session,
                     reinterpret_cast<const SOCKADDR*>(&remoteAddresses[addressIndex]),
-                    nullptr,
-                    cancellation.IsCancellationRequested != nullptr ? &cancellation : nullptr);
+                    connection,
+                    cancellationOperation);
                 if (NT_SUCCESS(status)) {
-                    connection.Socket = socket;
-                    connection.RawTransport = AllocateNonPagedObject<core::WskTransport>(*connection.Socket);
-                    if (connection.RawTransport == nullptr) {
-                        FreeNonPagedObject(connection.Socket);
-                        connection.Socket = nullptr;
-                        return STATUS_INSUFFICIENT_RESOURCES;
-                    }
-                    connection.Transport = connection.RawTransport;
                     return STATUS_SUCCESS;
+                }
+                if (status == STATUS_INSUFFICIENT_RESOURCES) {
+                    return status;
                 }
 
                 lastStatus = status;
@@ -1823,7 +2087,6 @@ namespace engine
                     static_cast<ULONG>(status),
                     addressIndex,
                     static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
-                FreeNonPagedObject(socket);
             }
         }
 
@@ -1948,6 +2211,10 @@ namespace engine
         const KhRequest& request,
         _Inout_ KhWorkspace& workspace,
         _Inout_ KhPooledConnection& connection,
+        _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
+        SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http::HttpHeader* responseTrailers,
+        SIZE_T trailerCapacity,
         _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
     {
         if (session == nullptr || connection.Socket == nullptr || connection.RawTransport == nullptr) {
@@ -1964,7 +2231,21 @@ namespace engine
         ReleaseTlsLayer(connection);
 
         tls::TlsHandshakeFailure failure = {};
-        NTSTATUS status = ConnectTlsOnExistingSocket(
+        NTSTATUS status = EstablishProxyTunnel(
+            session,
+            request,
+            workspace,
+            connection,
+            responseHeaders,
+            headerCapacity,
+            responseTrailers,
+            trailerCapacity,
+            cancellationOperation);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = ConnectTlsOnExistingSocket(
             session,
             request,
             workspace,
@@ -1983,6 +2264,24 @@ namespace engine
         if (!NT_SUCCESS(status)) {
             kprintf(
                 "HttpEngine TLS1.2 confirmation reconnect failed: 0x%08X original=0x%08X\r\n",
+                static_cast<ULONG>(status),
+                static_cast<ULONG>(originalStatus));
+            return originalStatus;
+        }
+
+        status = EstablishProxyTunnel(
+            session,
+            request,
+            workspace,
+            connection,
+            responseHeaders,
+            headerCapacity,
+            responseTrailers,
+            trailerCapacity,
+            cancellationOperation);
+        if (!NT_SUCCESS(status)) {
+            kprintf(
+                "HttpEngine TLS1.2 confirmation proxy CONNECT failed: 0x%08X original=0x%08X\r\n",
                 static_cast<ULONG>(status),
                 static_cast<ULONG>(originalStatus));
             return originalStatus;
@@ -2085,6 +2384,9 @@ namespace engine
             !IsSupportedHttpAlpn(request.Tls.Alpn, request.Tls.AlpnLength)) {
             return STATUS_NOT_SUPPORTED;
         }
+        if (session->Options.Proxy.Enabled && !IsHttpsRequest(request)) {
+            return STATUS_NOT_SUPPORTED;
+        }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         UNREFERENCED_PARAMETER(requestHeaders);
@@ -2119,6 +2421,12 @@ namespace engine
             testRequest.OfferedAlpnLength = request.Tls.AlpnLength;
         }
         testRequest.Policy = request.Tls.Policy;
+        testRequest.ProxyEnabled = session->Options.Proxy.Enabled;
+        testRequest.ProxyAddress = session->Options.Proxy.Address;
+        testRequest.ProxyAuthority = session->Options.Proxy.Authority;
+        testRequest.ProxyAuthorityLength = session->Options.Proxy.AuthorityLength;
+        testRequest.ProxyAuthHeader = session->Options.Proxy.AuthHeader;
+        testRequest.ProxyAuthHeaderLength = session->Options.Proxy.AuthHeaderLength;
         testRequest.PoolableConnection = request.ConnectionPolicy != KhConnectionPolicy::NoPool;
         testRequest.ReusedConnection = reusedConnection;
         testRequest.ConnectionId = pooledConnection != nullptr ? pooledConnection->Id : 0;
@@ -2205,6 +2513,10 @@ namespace engine
                 request,
                 workspace,
                 *pooledConnection,
+                responseHeaders,
+                headerCapacity,
+                responseTrailers,
+                trailerCapacity,
                 cancellationOperation);
             if (!NT_SUCCESS(status)) {
                 return status;
@@ -3083,7 +3395,7 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        status = BuildPoolKey(request, poolKey.Get());
+        status = BuildPoolKey(request, session->Options.Proxy, poolKey.Get());
         if (!NT_SUCCESS(status)) {
             return status;
         }

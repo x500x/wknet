@@ -164,6 +164,16 @@ namespace engine
         ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;
     };
 
+    struct KhProxyOptions final
+    {
+        bool Enabled = false;
+        SOCKADDR_STORAGE Address = {};
+        const char* Authority = nullptr;
+        SIZE_T AuthorityLength = 0;
+        const char* AuthHeader = nullptr;
+        SIZE_T AuthHeaderLength = 0;
+    };
+
     struct KhSessionOptions final
     {
         KhPoolType ResponsePoolType = KhPoolType::NonPaged;
@@ -176,6 +186,7 @@ namespace engine
         ULONG MaxConnectionsPerHost = KhDefaultConnectionsPerHost;
         ULONG IdleTimeoutMilliseconds = KhDefaultIdleTimeoutMilliseconds;
         KhTlsOptions Tls = {};
+        KhProxyOptions Proxy = {};
     };
 
     struct KhHttpSendOptions final
@@ -549,6 +560,12 @@ namespace engine
         SIZE_T OfferedAlpnLength = 0;
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
+        bool ProxyEnabled = false;
+        SOCKADDR_STORAGE ProxyAddress = {};
+        const char* ProxyAuthority = nullptr;
+        SIZE_T ProxyAuthorityLength = 0;
+        const char* ProxyAuthHeader = nullptr;
+        SIZE_T ProxyAuthHeaderLength = 0;
         bool PoolableConnection = false;
         bool ReusedConnection = false;
         ULONG ConnectionId = 0;

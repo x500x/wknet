@@ -44,6 +44,7 @@
 #include <KernelHttp/net/WskClient.h>
 #else
 #include <KernelHttp/KernelHttpConfig.h>
+#include <KernelHttp/net/WskClient.h>
 #endif
 
 namespace KernelHttp
@@ -177,6 +178,16 @@ namespace khttp
         ULONG HandshakeTimeoutMs = DefaultTlsHandshakeTimeoutMs;
     };
 
+    struct ProxyConfig final
+    {
+        bool Enabled = false;
+        SOCKADDR_STORAGE Address = {};
+        const char* Authority = nullptr;
+        SIZE_T AuthorityLength = 0;
+        const char* AuthHeader = nullptr;
+        SIZE_T AuthHeaderLength = 0;
+    };
+
     struct SessionConfig final
     {
         PoolType ResponsePool = PoolType::NonPaged;
@@ -187,6 +198,7 @@ namespace khttp
         ULONG MaxConnsPerHost = DefaultMaxConnsPerHost;
         ULONG IdleTimeoutMs = DefaultIdleTimeoutMs;
         TlsConfig Tls = {};
+        ProxyConfig Proxy = {};
     };
 
     struct SendOptions final

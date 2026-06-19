@@ -131,6 +131,48 @@ namespace
         return RtlCompareMemory(left, right, leftLength) == leftLength;
     }
 
+    SIZE_T SockaddrStorageCompareLength(const SOCKADDR_STORAGE& address) noexcept
+    {
+        switch (address.ss_family) {
+        case AF_INET:
+            return sizeof(SOCKADDR_IN);
+        case AF_INET6:
+            return sizeof(SOCKADDR_IN6);
+        default:
+            return sizeof(address.ss_family);
+        }
+    }
+
+    bool SockaddrStorageEquals(const SOCKADDR_STORAGE& left, const SOCKADDR_STORAGE& right) noexcept
+    {
+        if (left.ss_family != right.ss_family) {
+            return false;
+        }
+
+        const SIZE_T compareLength = SockaddrStorageCompareLength(left);
+        return RtlCompareMemory(&left, &right, compareLength) == compareLength;
+    }
+
+    bool ProxyIdentityEquals(
+        const KhConnectionPoolKey& left,
+        const KhConnectionPoolKey& right) noexcept
+    {
+        if (left.ProxyEnabled != right.ProxyEnabled) {
+            return false;
+        }
+
+        if (!left.ProxyEnabled) {
+            return true;
+        }
+
+        return SockaddrStorageEquals(left.ProxyAddress, right.ProxyAddress) &&
+            TextEquals(
+                left.ProxyAuthority,
+                left.ProxyAuthorityLength,
+                right.ProxyAuthority,
+                right.ProxyAuthorityLength);
+    }
+
     _Must_inspect_result_
     bool HasConnectionState(_In_ const KhPooledConnection& connection) noexcept
     {
@@ -368,6 +410,7 @@ namespace
             left.Policy.EnablePostHandshakeClientAuth == right.Policy.EnablePostHandshakeClientAuth &&
             left.Policy.RequireRevocationCheck == right.Policy.RequireRevocationCheck &&
             left.AutomaticAlpn == right.AutomaticAlpn &&
+            ProxyIdentityEquals(left, right) &&
             TextEquals(left.Scheme, left.SchemeLength, right.Scheme, right.SchemeLength) &&
             TextEquals(left.Host, left.HostLength, right.Host, right.HostLength) &&
             TextEquals(left.TlsServerName, left.TlsServerNameLength, right.TlsServerName, right.TlsServerNameLength);

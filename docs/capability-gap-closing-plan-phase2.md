@@ -81,13 +81,15 @@
 
 ## P1 — 高层 Session 代理（CONNECT 隧道）配置
 
-> 进度（截至 2026-06-19）：第一小步已完成：新增 `client::ProxyTunnel` 共享 helper，集中构建 HTTP/1.1 CONNECT 请求与判定 CONNECT 2xx 成功响应；低层 `HttpsClient` 已切换到该 helper，现有代理隧道行为保持不变。已通过 `http2_client_tests` 与 Debug 构建。
+> 进度（截至 2026-06-19）：P1 已按路线 A 完成：高层 `SessionConfig` / `KhSessionOptions` 已接入显式代理配置，引擎在 HTTPS 传输装配中对代理建 TCP、通过共享 `client::ProxyTunnel` 建立 HTTP/1.1 CONNECT 隧道，再对目标主机执行 TLS；连接池按代理身份分桶，明文 HTTP over proxy 仍作为二期能力显式拒绝。已通过 `khttp_tests`、`http2_client_tests` 与 Debug x64 构建（0 警告）。
 
 ### 现状
 
 - 低层 `client::HttpsClient` 已支持显式 HTTP/1.1 CONNECT 隧道：`include/KernelHttp/client/HttpsClient.h:23-53` 的 `HttpsRequestOptions`（`ProxyAddress:26`、`ProxyAuthority/Length:27-28`、`ProxyHeaders/Count:29-30`、`RemoteAddress:25` 为目标）；实现见 `HttpsClient.cpp:52-54`（`UsesProxyTunnel`）、`:58-70`（`IsValidProxyTunnelOptions`）、`:74-90`（`BuildProxyConnectRequest`）、`:305`（连接目标选择）、`:327-370`（建隧道 + 读代理响应 + 2xx 校验）、`:411-443`（对**目标**主机再次 TLS）。
 - **关键事实**：`HttpsClient` **未被高层引擎调用**——`src/KernelHttpLib/engine/HttpEngine.cpp` 走 `Http2Client`/`Http2Connection` 与自有传输 / TLS 装配路径；`HttpsClient::SendRequest` 当前仅测试调用（`tests/http2_client_tests.cpp:413-416`）。
-- 高层无代理字段：`SessionConfig`（`Types.h:180-190`）、`KhSessionOptions`（`Engine.h:166-178`）、`KhHttpSendOptions`（`Engine.h:180-192`）均无 proxy；翻译点 `src/KernelHttpLib/khttp/Session.cpp:31-40`。
+- 高层 `SessionConfig` 已新增 `Proxy`，并由 `src/KernelHttpLib/khttp/Session.cpp` 透传到 `KhSessionOptions`；代理地址、CONNECT authority 与 opaque `Proxy-Authorization` 头均由显式配置提供。
+- 引擎路径已接入代理隧道：HTTPS 请求先连接代理地址、发送 CONNECT 并校验 2xx，再在隧道上针对目标主机执行 TLS；HTTP 明文代理转发当前显式返回 `STATUS_NOT_SUPPORTED`。
+- 连接池键已纳入代理身份，避免不同代理的连接混用；每 host quota 仍按目标 host / scheme / port / address family 计数，防止通过多代理绕过目标主机上限。
 
 ### 决策点（两条路线）
 
@@ -96,11 +98,11 @@
 
 ### 实施步骤（路线 A）
 
-1. **配置面**：`SessionConfig` 增 `Proxy`（`Address`、`Authority`、`AuthHeader`(opaque)、可选 `Bypass` 规则）；透传到 `KhSessionOptions`；翻译点 `Session.cpp:31-40`。
-2. **连接池键**纳入代理身份（`ConnectionPool` 的 `BuildPoolKey`，见 `HttpEngine.cpp:636`）——经不同代理的连接不可混用复用。
-3. **传输装配**：配置代理且目标为 https 时，先对 proxy 建 TCP → 发 CONNECT（共享 helper）→ 校验 2xx → 在 raw 隧道上对**目标主机** TLS（SNI / 证书校验始终针对**目标**，不是代理）。
-4. **明文 over proxy**（可选，二期）：以绝对 URI 形式经代理转发。
-5. **错误分类**：CONNECT 非 2xx、代理认证 407 等映射到清晰 NTSTATUS。
+1. **配置面（已完成）**：`SessionConfig` 增 `Proxy`（`Address`、`Authority`、`AuthHeader` opaque）；透传到 `KhSessionOptions`；翻译点 `Session.cpp` 已接入。
+2. **连接池键（已完成）**：`ConnectionPool` 复用比较纳入代理身份，经不同代理的连接不可混用复用。
+3. **传输装配（已完成）**：配置代理且目标为 https 时，先对 proxy 建 TCP → 发 CONNECT（共享 helper）→ 校验 2xx → 在 raw 隧道上对**目标主机** TLS（SNI / 证书校验始终针对**目标**，不是代理）。
+4. **明文 over proxy（二期）**：以绝对 URI 形式经代理转发；当前实现显式拒绝，不静默降级。
+5. **错误分类（已完成）**：CONNECT 407 映射 `STATUS_ACCESS_DENIED`，其他非 2xx 映射 `STATUS_INVALID_NETWORK_RESPONSE`；无效代理配置在入口拒绝。
 
 ### 安全护栏
 
@@ -111,7 +113,8 @@
 
 ### 测试
 
-`tests/proxy_tunnel_tests.cpp`：CONNECT 2xx → 目标 TLS 成功；407 / 非 2xx 失败分类；CRLF 注入 authority 拒绝；跨源凭据清理；连接池按代理身份分桶。
+- `tests/khttp_tests.cpp`：覆盖 `SessionConfig.Proxy` 透传到传输层、无效代理配置拒绝、明文 HTTP proxy 显式拒绝、连接池按代理身份分桶，并验证 `Proxy-Authorization` 不进入目标请求。
+- `tests/http2_client_tests.cpp`：继续覆盖低层 `HttpsClient` / `client::ProxyTunnel` 既有 CONNECT 行为，防止共享 helper 回归。
 
 ### 风险 / 工作量
 
