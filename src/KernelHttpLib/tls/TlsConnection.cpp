@@ -2,6 +2,7 @@
 
 #include <KernelHttp/crypto/CngProviderCache.h>
 #include <KernelHttp/crypto/Ed25519.h>
+#include <KernelHttp/crypto/Ed448.h>
 #include <KernelHttp/crypto/KeyExchange.h>
 #include <KernelHttp/tls/TlsCapabilities.h>
 #include <KernelHttp/tls/TlsHandshake13.h>
@@ -455,6 +456,8 @@ namespace tls
                     scheme == TlsSignatureScheme::EcdsaSecp521r1Sha512;
             case CertificatePublicKeyAlgorithm::Ed25519:
                 return scheme == TlsSignatureScheme::Ed25519;
+            case CertificatePublicKeyAlgorithm::Ed448:
+                return scheme == TlsSignatureScheme::Ed448;
             default:
                 return false;
             }
@@ -1697,6 +1700,8 @@ namespace tls
         serverCertificatePublicKeyAlgorithm_ = CertificatePublicKeyAlgorithm::Unknown;
         RtlSecureZeroMemory(serverEd25519PublicKey_, sizeof(serverEd25519PublicKey_));
         serverEd25519PublicKeyLength_ = 0;
+        RtlSecureZeroMemory(serverEd448PublicKey_, sizeof(serverEd448PublicKey_));
+        serverEd448PublicKeyLength_ = 0;
         if (tlsKeyBlockScratch_.IsValid()) {
             RtlSecureZeroMemory(tlsKeyBlockScratch_.Get(), sizeof(TlsKeyBlock));
         }
@@ -1907,6 +1912,8 @@ namespace tls
         serverCertificatePublicKeyAlgorithm_ = CertificatePublicKeyAlgorithm::Unknown;
         RtlSecureZeroMemory(serverEd25519PublicKey_, sizeof(serverEd25519PublicKey_));
         serverEd25519PublicKeyLength_ = 0;
+        RtlSecureZeroMemory(serverEd448PublicKey_, sizeof(serverEd448PublicKey_));
+        serverEd448PublicKeyLength_ = 0;
 
         NTSTATUS status = PrepareScratch(options);
         if (NT_SUCCESS(status)) {
@@ -2326,7 +2333,8 @@ namespace tls
                 serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::EcdsaP256 &&
                 serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::EcdsaP384 &&
                 serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::EcdsaP521 &&
-                serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::Ed25519)) {
+                serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::Ed25519 &&
+                serverCertificatePublicKeyAlgorithm_ != CertificatePublicKeyAlgorithm::Ed448)) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
         if (selectedCapability->Tls12KeyExchange == Tls12KeyExchangeKind::Rsa &&
@@ -2356,6 +2364,14 @@ namespace tls
             }
             RtlCopyMemory(serverEd25519PublicKey_, validationResult->Leaf.PublicKey, crypto::Ed25519PublicKeyLength);
             serverEd25519PublicKeyLength_ = crypto::Ed25519PublicKeyLength;
+        }
+        else if (validationResult->Leaf.PublicKeyAlgorithm == CertificatePublicKeyAlgorithm::Ed448) {
+            if (validationResult->Leaf.PublicKey == nullptr ||
+                validationResult->Leaf.PublicKeyLength != crypto::Ed448PublicKeyLength) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            RtlCopyMemory(serverEd448PublicKey_, validationResult->Leaf.PublicKey, crypto::Ed448PublicKeyLength);
+            serverEd448PublicKeyLength_ = crypto::Ed448PublicKeyLength;
         }
         else {
             status = CertificateValidator::ImportSubjectPublicKey(providerCache_, validationResult->Leaf, *serverPublicKey.Get());
@@ -4266,6 +4282,15 @@ namespace tls
             RtlCopyMemory(serverEd25519PublicKey_, result->Leaf.PublicKey, crypto::Ed25519PublicKeyLength);
             serverEd25519PublicKeyLength_ = crypto::Ed25519PublicKeyLength;
         }
+        else if (result->Leaf.PublicKeyAlgorithm == CertificatePublicKeyAlgorithm::Ed448) {
+            if (result->Leaf.PublicKey == nullptr ||
+                result->Leaf.PublicKeyLength != crypto::Ed448PublicKeyLength) {
+                RtlSecureZeroMemory(legacyCertificateList, TlsScratchLegacyCertificateLength);
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            RtlCopyMemory(serverEd448PublicKey_, result->Leaf.PublicKey, crypto::Ed448PublicKeyLength);
+            serverEd448PublicKeyLength_ = crypto::Ed448PublicKeyLength;
+        }
         else {
             status = CertificateValidator::ImportSubjectPublicKey(providerCache_, result->Leaf, serverPublicKey);
             if (!NT_SUCCESS(status)) {
@@ -4335,6 +4360,25 @@ namespace tls
             RtlSecureZeroMemory(signedInput, TlsScratchSignedInputLength);
             if (!NT_SUCCESS(status)) {
                 status = LogTls13Failure("VerifyTls13CertificateVerifyEd25519Signature", status);
+            }
+            return NT_SUCCESS(status) ? STATUS_SUCCESS : STATUS_INVALID_SIGNATURE;
+        }
+        if (certificateVerify.SignatureScheme == TlsSignatureScheme::Ed448) {
+            if (serverEd448PublicKeyLength_ != crypto::Ed448PublicKeyLength) {
+                RtlSecureZeroMemory(signedInput, TlsScratchSignedInputLength);
+                return LogTls13Failure("VerifyTls13CertificateVerifyEd448Key", STATUS_INVALID_NETWORK_RESPONSE);
+            }
+
+            status = crypto::CngProvider::VerifyEd448(
+                serverEd448PublicKey_,
+                serverEd448PublicKeyLength_,
+                signedInput,
+                signedInputLength,
+                certificateVerify.Signature,
+                certificateVerify.SignatureLength);
+            RtlSecureZeroMemory(signedInput, TlsScratchSignedInputLength);
+            if (!NT_SUCCESS(status)) {
+                status = LogTls13Failure("VerifyTls13CertificateVerifyEd448Signature", status);
             }
             return NT_SUCCESS(status) ? STATUS_SUCCESS : STATUS_INVALID_SIGNATURE;
         }
@@ -4980,6 +5024,22 @@ namespace tls
             status = crypto::CngProvider::VerifyEd25519(
                 serverEd25519PublicKey_,
                 serverEd25519PublicKeyLength_,
+                signedData,
+                signedDataLength,
+                keyExchange.Signature,
+                keyExchange.SignatureLength);
+            RtlSecureZeroMemory(signedData, TlsScratchSignedDataLength);
+            return NT_SUCCESS(status) ? STATUS_SUCCESS : STATUS_INVALID_SIGNATURE;
+        }
+        if (keyExchange.SignatureScheme == TlsSignatureScheme::Ed448) {
+            if (serverEd448PublicKeyLength_ != crypto::Ed448PublicKeyLength) {
+                RtlSecureZeroMemory(signedData, TlsScratchSignedDataLength);
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            status = crypto::CngProvider::VerifyEd448(
+                serverEd448PublicKey_,
+                serverEd448PublicKeyLength_,
                 signedData,
                 signedDataLength,
                 keyExchange.Signature,

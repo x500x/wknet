@@ -49,6 +49,9 @@ namespace tls
         // id-Ed25519 = 1.3.101.112 (RFC 8410); used for both the SPKI algorithm
         // and the certificate signature algorithm (no parameters).
         const UCHAR OidEd25519[] = { 0x2b, 0x65, 0x70 };
+        // id-Ed448 = 1.3.101.113 (RFC 8410); used for both the SPKI algorithm
+        // and the certificate signature algorithm (no parameters).
+        const UCHAR OidEd448[] = { 0x2b, 0x65, 0x71 };
         const UCHAR OidBasicConstraints[] = { 0x55, 0x1d, 0x13 };
         const UCHAR OidKeyUsage[] = { 0x55, 0x1d, 0x0f };
         const UCHAR OidSubjectAltName[] = { 0x55, 0x1d, 0x11 };
@@ -538,6 +541,9 @@ namespace tls
                 else if (OidEquals(oid, OidEd25519, sizeof(OidEd25519))) {
                     *signatureAlgorithm = CertificateSignatureAlgorithm::Ed25519;
                 }
+                else if (OidEquals(oid, OidEd448, sizeof(OidEd448))) {
+                    *signatureAlgorithm = CertificateSignatureAlgorithm::Ed448;
+                }
             }
 
             if (publicKeyAlgorithm != nullptr) {
@@ -546,6 +552,9 @@ namespace tls
                 }
                 else if (OidEquals(oid, OidEd25519, sizeof(OidEd25519))) {
                     *publicKeyAlgorithm = CertificatePublicKeyAlgorithm::Ed25519;
+                }
+                else if (OidEquals(oid, OidEd448, sizeof(OidEd448))) {
+                    *publicKeyAlgorithm = CertificatePublicKeyAlgorithm::Ed448;
                 }
                 else if (OidEquals(oid, OidEcPublicKey, sizeof(OidEcPublicKey))) {
                     DerElement curve = {};
@@ -2206,6 +2215,20 @@ namespace tls
                 }
 
                 NTSTATUS status = crypto::CngProvider::VerifyEd25519(
+                    issuer.PublicKey,
+                    issuer.PublicKeyLength,
+                    certificate.TbsCertificate,
+                    certificate.TbsCertificateLength,
+                    certificate.Signature,
+                    certificate.SignatureLength);
+                return NT_SUCCESS(status) ? STATUS_SUCCESS : STATUS_INVALID_SIGNATURE;
+            }
+            if (certificate.SignatureAlgorithm == CertificateSignatureAlgorithm::Ed448) {
+                if (issuer.PublicKeyAlgorithm != CertificatePublicKeyAlgorithm::Ed448) {
+                    return STATUS_INVALID_SIGNATURE;
+                }
+
+                NTSTATUS status = crypto::CngProvider::VerifyEd448(
                     issuer.PublicKey,
                     issuer.PublicKeyLength,
                     certificate.TbsCertificate,
@@ -3967,6 +3990,9 @@ namespace tls
             return STATUS_SUCCESS;
         case CertificateSignatureAlgorithm::Ed25519:
             *signatureAlgorithm = crypto::SignatureAlgorithm::Ed25519;
+            return STATUS_SUCCESS;
+        case CertificateSignatureAlgorithm::Ed448:
+            *signatureAlgorithm = crypto::SignatureAlgorithm::Ed448;
             return STATUS_SUCCESS;
         default:
             return STATUS_NOT_SUPPORTED;

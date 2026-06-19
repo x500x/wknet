@@ -1,6 +1,7 @@
 #include <KernelHttp/crypto/CngProvider.h>
 #include <KernelHttp/crypto/CngProviderCache.h>
 #include <KernelHttp/crypto/Ed25519.h>
+#include <KernelHttp/crypto/Ed448.h>
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
 
@@ -1546,6 +1547,24 @@ namespace crypto
         SIZE_T signatureLength) noexcept
     {
         const bool valid = Ed25519Verify(
+            publicKey,
+            publicKeyLength,
+            message,
+            messageLength,
+            signature,
+            signatureLength);
+        return valid ? STATUS_SUCCESS : STATUS_INVALID_SIGNATURE;
+    }
+
+    NTSTATUS CngProvider::VerifyEd448(
+        const UCHAR* publicKey,
+        SIZE_T publicKeyLength,
+        const UCHAR* message,
+        SIZE_T messageLength,
+        const UCHAR* signature,
+        SIZE_T signatureLength) noexcept
+    {
+        const bool valid = Ed448Verify(
             publicKey,
             publicKeyLength,
             message,
@@ -3300,6 +3319,24 @@ namespace crypto
         SIZE_T signatureLength) noexcept
     {
         const bool valid = Ed25519Verify(
+            publicKey,
+            publicKeyLength,
+            message,
+            messageLength,
+            signature,
+            signatureLength);
+        return valid ? STATUS_SUCCESS : STATUS_INVALID_SIGNATURE;
+    }
+
+    NTSTATUS CngProvider::VerifyEd448(
+        const UCHAR* publicKey,
+        SIZE_T publicKeyLength,
+        const UCHAR* message,
+        SIZE_T messageLength,
+        const UCHAR* signature,
+        SIZE_T signatureLength) noexcept
+    {
+        const bool valid = Ed448Verify(
             publicKey,
             publicKeyLength,
             message,

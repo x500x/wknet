@@ -402,6 +402,17 @@ namespace crypto
             _In_reads_bytes_(signatureLength) const UCHAR* signature,
             SIZE_T signatureLength) noexcept;
 
+        // Ed448 (RFC 8032) verification. Same full-message EdDSA contract as
+        // VerifyEd25519, with 57-byte public keys and 114-byte signatures.
+        _Must_inspect_result_
+        static NTSTATUS VerifyEd448(
+            _In_reads_bytes_(publicKeyLength) const UCHAR* publicKey,
+            SIZE_T publicKeyLength,
+            _In_reads_bytes_(messageLength) const UCHAR* message,
+            SIZE_T messageLength,
+            _In_reads_bytes_(signatureLength) const UCHAR* signature,
+            SIZE_T signatureLength) noexcept;
+
         _Must_inspect_result_
         static NTSTATUS EncryptRsaPkcs1(
             _In_opt_ const CngProviderCache* cache,

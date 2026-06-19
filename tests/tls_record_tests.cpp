@@ -6220,9 +6220,11 @@ namespace
         Expect(KernelHttp::tls::TlsIsKnownNamedGroup(TlsNamedGroup::X448), "X448 is a known named group");
         Expect(KernelHttp::tls::TlsIsKnownCipherSuite(TlsCipherSuite::TlsChaCha20Poly1305Sha256), "TLS 1.3 ChaCha20-Poly1305 is known");
         Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::Ed25519), "Ed25519 is a known signature scheme");
+        Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::Ed448), "Ed448 is a known signature scheme");
         Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::RsaPkcs1Sha1), "TLS 1.2 rsa_pkcs1_sha1 is known");
         Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::EcdsaSha1), "TLS 1.2 ecdsa_sha1 is known");
         Expect(KernelHttp::tls::TlsIsDefaultEnabledNamedGroup(TlsNamedGroup::X25519), "X25519 is default-enabled");
+        Expect(KernelHttp::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::Ed448), "Ed448 is default-enabled");
         Expect(!KernelHttp::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::RsaPkcs1Sha1), "rsa_pkcs1_sha1 is not modern-default");
         Expect(!KernelHttp::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::EcdsaSha1), "ecdsa_sha1 is not modern-default");
         Expect(!KernelHttp::tls::TlsIsDefaultEnabledTls12KeyExchange(Tls12KeyExchangeKind::Rsa), "TLS 1.2 RSA key exchange is not default-enabled");
@@ -6262,6 +6264,7 @@ namespace
         Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "compatibility policy allows ecdsa_sha1 when explicitly enabled");
         Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSecp256r1Sha256), "compatibility policy still allows modern signatures");
         Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::Ed25519), "Ed25519 is offered after software verify implementation");
+        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::Ed448), "Ed448 is offered after software verify implementation");
     }
 }
 

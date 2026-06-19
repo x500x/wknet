@@ -24,7 +24,8 @@ namespace tls
         EcdsaP256,
         EcdsaP384,
         EcdsaP521,
-        Ed25519
+        Ed25519,
+        Ed448
     };
 
     enum class CertificateSignatureAlgorithm : UCHAR
@@ -34,7 +35,8 @@ namespace tls
         RsaPkcs1Sha384,
         EcdsaSha256,
         EcdsaSha384,
-        Ed25519
+        Ed25519,
+        Ed448
     };
 
     struct ParsedCertificate final

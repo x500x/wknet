@@ -36,6 +36,7 @@
     <ClCompile Include="crypto\CngProvider.cpp" />
     <ClCompile Include="crypto\CngProviderCache.cpp" />
     <ClCompile Include="crypto\Ed25519.cpp" />
+    <ClCompile Include="crypto\Ed448.cpp" />
     <ClCompile Include="crypto\KeyExchange.cpp" />
     <ClCompile Include="khttp\AsyncOp.cpp" />
     <ClCompile Include="khttp\Http.cpp" />
@@ -145,6 +146,7 @@
     <ClInclude Include="..\..\include\KernelHttp\crypto\CngProvider.h" />
     <ClInclude Include="..\..\include\KernelHttp\crypto\CngProviderCache.h" />
     <ClInclude Include="..\..\include\KernelHttp\crypto\Ed25519.h" />
+    <ClInclude Include="..\..\include\KernelHttp\crypto\Ed448.h" />
     <ClInclude Include="..\..\include\KernelHttp\crypto\KeyExchange.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpCoding.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpContentEncoding.h" />

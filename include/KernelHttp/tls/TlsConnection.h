@@ -321,6 +321,8 @@ namespace tls
         CertificatePublicKeyAlgorithm serverCertificatePublicKeyAlgorithm_ = CertificatePublicKeyAlgorithm::Unknown;
         UCHAR serverEd25519PublicKey_[32] = {};
         SIZE_T serverEd25519PublicKeyLength_ = 0;
+        UCHAR serverEd448PublicKey_[57] = {};
+        SIZE_T serverEd448PublicKeyLength_ = 0;
         HeapObject<TlsKeyBlock> tlsKeyBlockScratch_;
         HeapObject<Tls12Session> tls12SessionScratch_;
         HeapObject<Tls13SessionTicket> tls13SessionTicketScratch_;
