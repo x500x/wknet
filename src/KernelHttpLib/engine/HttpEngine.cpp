@@ -354,6 +354,8 @@ namespace engine
             return http::HttpMethod::Head;
         case KhHttpMethod::Options:
             return http::HttpMethod::Options;
+        case KhHttpMethod::Connect:
+            return http::HttpMethod::Connect;
         case KhHttpMethod::Get:
         default:
             return http::HttpMethod::Get;

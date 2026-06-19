@@ -23,6 +23,11 @@ namespace client
     struct HttpsRequestOptions final
     {
         const SOCKADDR* RemoteAddress = nullptr;
+        const SOCKADDR* ProxyAddress = nullptr;
+        const char* ProxyAuthority = nullptr;
+        SIZE_T ProxyAuthorityLength = 0;
+        const http::HttpHeader* ProxyHeaders = nullptr;
+        SIZE_T ProxyHeaderCount = 0;
         const char* ServerName = nullptr;
         SIZE_T ServerNameLength = 0;
         http::HttpRequestBuildOptions Request = {};

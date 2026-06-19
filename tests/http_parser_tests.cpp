@@ -298,6 +298,34 @@ namespace
         Expect(memcmp(buffer, expected, strlen(expected)) == 0, "GET request bytes match expected output");
     }
 
+    void TestBuildConnectRequest()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Connect;
+        options.Path = MakeText("example.com:443");
+        options.Host = MakeText("example.com:443");
+        options.UserAgent = MakeText("KernelHttp/0.1");
+
+        const NTSTATUS status = HttpRequestBuilder::Build(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+
+        const char expected[] =
+            "CONNECT example.com:443 HTTP/1.1\r\n"
+            "Host: example.com:443\r\n"
+            "User-Agent: KernelHttp/0.1\r\n"
+            "\r\n";
+
+        Expect(status == STATUS_SUCCESS, "CONNECT request builds successfully");
+        Expect(written == strlen(expected), "CONNECT request reports exact byte count");
+        Expect(memcmp(buffer, expected, strlen(expected)) == 0, "CONNECT request bytes match expected output");
+    }
+
     void TestBuildPostRequest()
     {
         char buffer[512] = {};
@@ -2434,6 +2462,7 @@ namespace
 int main()
 {
     TestBuildGetRequest();
+    TestBuildConnectRequest();
     TestBuildPostRequest();
     TestBuildChunkedPostRequest();
     TestBuildUpgradeRequest();

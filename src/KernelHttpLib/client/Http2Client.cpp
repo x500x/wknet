@@ -20,6 +20,7 @@ namespace client
             case http::HttpMethod::DeleteMethod: return "DELETE";
             case http::HttpMethod::Head: return "HEAD";
             case http::HttpMethod::Options: return "OPTIONS";
+            case http::HttpMethod::Connect: return "CONNECT";
             default: return "GET";
             }
         }
@@ -441,7 +442,14 @@ namespace client
             !IsValidHttp2FieldValue(authority) ||
             !IsValidHttp2FieldValue(options.UserAgent) ||
             !IsValidHttp2FieldValue(options.ContentType) ||
-            !IsValidHttp2FieldValue(options.AcceptEncoding)) {
+            !IsValidHttp2FieldValue(options.AcceptEncoding) ||
+            !IsValidHttp2FieldValue(options.ConnectProtocol)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        const bool usesExtendedConnect =
+            options.ConnectProtocol.Data != nullptr &&
+            options.ConnectProtocol.Length > 0;
+        if (usesExtendedConnect && options.Method != http::HttpMethod::Connect) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -462,6 +470,12 @@ namespace client
         requestHeaders[headerIdx].Name = { ":authority", 10 };
         requestHeaders[headerIdx].Value = authority;
         ++headerIdx;
+
+        if (usesExtendedConnect) {
+            requestHeaders[headerIdx].Name = { ":protocol", 9 };
+            requestHeaders[headerIdx].Value = options.ConnectProtocol;
+            ++headerIdx;
+        }
 
         if (options.UserAgent.Data != nullptr && options.UserAgent.Length > 0) {
             requestHeaders[headerIdx].Name = { "user-agent", 10 };

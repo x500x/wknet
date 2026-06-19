@@ -75,7 +75,8 @@ namespace khttp
         Patch = 3,
         Delete = 4,
         Head = 5,
-        Options = 6
+        Options = 6,
+        Connect = 7
     };
 
     enum class PoolType : ULONG

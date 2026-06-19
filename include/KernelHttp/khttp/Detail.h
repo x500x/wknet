@@ -106,6 +106,7 @@ namespace detail
         case Method::Delete: return ::KernelHttp::engine::KhHttpMethod::Delete;
         case Method::Head: return ::KernelHttp::engine::KhHttpMethod::Head;
         case Method::Options: return ::KernelHttp::engine::KhHttpMethod::Options;
+        case Method::Connect: return ::KernelHttp::engine::KhHttpMethod::Connect;
         case Method::Get:
         default: return ::KernelHttp::engine::KhHttpMethod::Get;
         }

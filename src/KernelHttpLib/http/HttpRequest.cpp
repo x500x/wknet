@@ -254,6 +254,8 @@ namespace http
                 return MakeText("OPTIONS");
             case HttpMethod::Patch:
                 return MakeText("PATCH");
+            case HttpMethod::Connect:
+                return MakeText("CONNECT");
             case HttpMethod::Custom:
                 return options.CustomMethod;
             default:

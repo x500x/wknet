@@ -34,6 +34,7 @@ namespace client
         http::HttpText UserAgent = {};
         http::HttpText ContentType = {};
         http::HttpText AcceptEncoding = {};
+        http::HttpText ConnectProtocol = {};
         const http::HttpHeader* ExtraHeaders = nullptr;
         SIZE_T ExtraHeaderCount = 0;
         const UCHAR* Body = nullptr;

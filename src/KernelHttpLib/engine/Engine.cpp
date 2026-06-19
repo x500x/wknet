@@ -2400,6 +2400,7 @@ namespace
         case KhHttpMethod::Delete:
         case KhHttpMethod::Head:
         case KhHttpMethod::Options:
+        case KhHttpMethod::Connect:
             request->Method = method;
             return STATUS_SUCCESS;
         default:

@@ -178,8 +178,8 @@ namespace http2
     {
         if (dest == nullptr || bytesWritten == nullptr) return STATUS_INVALID_PARAMETER;
 
-        // 6 settings, each 6 bytes (USHORT id + ULONG value) = 36 bytes payload
-        constexpr SIZE_T SettingCount = 6;
+        // 7 settings, each 6 bytes (USHORT id + ULONG value) = 42 bytes payload.
+        constexpr SIZE_T SettingCount = 7;
         constexpr SIZE_T SettingsPayloadLen = SettingCount * 6;
         const SIZE_T totalLen = Http2FrameHeaderLength + SettingsPayloadLen;
 
@@ -210,6 +210,7 @@ namespace http2
         writeSetting(Http2SettingId::InitialWindowSize, settings.InitialWindowSize);
         writeSetting(Http2SettingId::MaxFrameSize, settings.MaxFrameSize);
         writeSetting(Http2SettingId::MaxHeaderListSize, settings.MaxHeaderListSize);
+        writeSetting(Http2SettingId::EnableConnectProtocol, settings.EnableConnectProtocol);
 
         *bytesWritten = offset;
         return STATUS_SUCCESS;
@@ -240,7 +241,7 @@ namespace http2
     {
         if (dest == nullptr || charsWritten == nullptr) return STATUS_INVALID_PARAMETER;
 
-        HeapArray<UCHAR> frame(Http2FrameHeaderLength + (6 * 6));
+        HeapArray<UCHAR> frame(Http2FrameHeaderLength + (7 * 6));
         if (!frame.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
 
         SIZE_T frameLength = 0;
@@ -294,6 +295,10 @@ namespace http2
                 break;
             case Http2SettingId::MaxHeaderListSize:
                 settings->MaxHeaderListSize = value;
+                break;
+            case Http2SettingId::EnableConnectProtocol:
+                if (value > 1) return STATUS_INVALID_NETWORK_RESPONSE;
+                settings->EnableConnectProtocol = value;
                 break;
             default:
                 // Unknown settings MUST be ignored (RFC 9113 Section 6.5.2)

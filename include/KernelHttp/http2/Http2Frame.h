@@ -64,7 +64,8 @@ namespace http2
         MaxConcurrentStreams = 0x3,
         InitialWindowSize = 0x4,
         MaxFrameSize = 0x5,
-        MaxHeaderListSize = 0x6
+        MaxHeaderListSize = 0x6,
+        EnableConnectProtocol = 0x8
     };
 
     struct Http2Settings final
@@ -75,6 +76,7 @@ namespace http2
         ULONG InitialWindowSize = 65535;
         ULONG MaxFrameSize = 16384;
         ULONG MaxHeaderListSize = 65536;
+        ULONG EnableConnectProtocol = 0;
     };
 
     struct Http2FrameHeader final

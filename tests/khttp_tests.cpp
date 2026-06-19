@@ -3077,6 +3077,11 @@ namespace
 
         status = khttp::RequestSetMethod(
             request,
+            khttp::Method::Connect);
+        Expect(NT_SUCCESS(status), "RequestSetMethod accepts CONNECT method enum");
+
+        status = khttp::RequestSetMethod(
+            request,
             static_cast<khttp::Method>(0xFFFFFFFFUL));
         Expect(status == STATUS_INVALID_PARAMETER, "RequestSetMethod rejects unsupported method enum");
 

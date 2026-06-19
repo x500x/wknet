@@ -15,6 +15,7 @@ namespace http
         Head,
         Options,
         Patch,
+        Connect,
         Custom
     };
 

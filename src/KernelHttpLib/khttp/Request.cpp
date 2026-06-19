@@ -16,6 +16,7 @@ namespace
         case Method::Delete:
         case Method::Head:
         case Method::Options:
+        case Method::Connect:
             return true;
         default:
             return false;

@@ -676,6 +676,7 @@ namespace
         case khttp::Method::Delete: return "DELETE";
         case khttp::Method::Head: return "HEAD";
         case khttp::Method::Options: return "OPTIONS";
+        case khttp::Method::Connect: return "CONNECT";
         default: return "UNKNOWN";
         }
     }

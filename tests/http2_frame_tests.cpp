@@ -134,26 +134,27 @@ namespace
         settings.InitialWindowSize = 65535;
         settings.MaxFrameSize = 16384;
         settings.MaxHeaderListSize = 65536;
+        settings.EnableConnectProtocol = 1;
 
         unsigned char buf[256] = {};
         size_t written = 0;
         NTSTATUS s = Http2FrameCodec::EncodeSettings(settings, buf, sizeof(buf), &written);
         Expect(NT_SUCCESS(s), "EncodeSettings should succeed");
-        // 9 header + 6 settings * 6 bytes = 9 + 36 = 45
-        Expect(written == 45, "EncodeSettings writes 45 bytes");
+        // 9 header + 7 settings * 6 bytes = 9 + 42 = 51
+        Expect(written == 51, "EncodeSettings writes 51 bytes");
 
         // Decode the frame header
         Http2FrameHeader hdr = {};
         s = Http2FrameCodec::DecodeFrameHeader(buf, 9, &hdr);
         Expect(NT_SUCCESS(s), "Decode SETTINGS header");
         Expect(hdr.Type == Http2FrameType::Settings, "SETTINGS type");
-        Expect(hdr.Length == 36, "SETTINGS payload length == 36");
+        Expect(hdr.Length == 42, "SETTINGS payload length == 42");
         Expect(hdr.Flags == 0, "SETTINGS flags == 0");
         Expect(hdr.StreamId == 0, "SETTINGS streamId == 0");
 
         // Decode the payload
         Http2Settings decoded = {};
-        s = Http2FrameCodec::DecodeSettingsPayload(buf + 9, 36, &decoded);
+        s = Http2FrameCodec::DecodeSettingsPayload(buf + 9, 42, &decoded);
         Expect(NT_SUCCESS(s), "DecodeSettingsPayload should succeed");
         Expect(decoded.HeaderTableSize == 4096, "Decoded HeaderTableSize");
         Expect(decoded.EnablePush == 0, "Decoded EnablePush");
@@ -161,6 +162,7 @@ namespace
         Expect(decoded.InitialWindowSize == 65535, "Decoded InitialWindowSize");
         Expect(decoded.MaxFrameSize == 16384, "Decoded MaxFrameSize");
         Expect(decoded.MaxHeaderListSize == 65536, "Decoded MaxHeaderListSize");
+        Expect(decoded.EnableConnectProtocol == 1, "Decoded EnableConnectProtocol");
     }
 
     void TestEncodeSettingsAck()
@@ -215,6 +217,17 @@ namespace
         NTSTATUS s = Http2FrameCodec::DecodeSettingsPayload(payload, sizeof(payload), &settings);
         Expect(NT_SUCCESS(s), "DecodeSettings unknown ID ignored");
         Expect(settings.HeaderTableSize == 4096, "Existing settings unchanged");
+    }
+
+    void TestDecodeSettingsInvalidEnableConnectProtocol()
+    {
+        unsigned char payload[6] = {};
+        payload[0] = 0x00; payload[1] = 0x08;
+        payload[2] = 0x00; payload[3] = 0x00; payload[4] = 0x00; payload[5] = 0x02;
+
+        Http2Settings settings = {};
+        NTSTATUS s = Http2FrameCodec::DecodeSettingsPayload(payload, sizeof(payload), &settings);
+        Expect(s == STATUS_INVALID_NETWORK_RESPONSE, "DecodeSettings invalid ENABLE_CONNECT_PROTOCOL");
     }
 
     // ========================================================================
@@ -659,7 +672,7 @@ namespace
             sizeof(encoded),
             &encodedLength);
 
-        const char* expected = "AAEAABAAAAIAAAAAAAMAAABkAAQAAP__AAUAAEAAAAYAAQAA";
+        const char* expected = "AAEAABAAAAIAAAAAAAMAAABkAAQAAP__AAUAAEAAAAYAAQAAAAgAAAAA";
         Expect(NT_SUCCESS(s), "EncodeSettingsPayloadBase64Url succeeds");
         Expect(encodedLength == strlen(expected), "HTTP2-Settings length matches");
         Expect(memcmp(encoded, expected, strlen(expected)) == 0, "HTTP2-Settings value matches");
@@ -744,6 +757,7 @@ int main()
     TestDecodeSettingsInvalidPayloadLength();
     TestDecodeSettingsInvalidWindowSize();
     TestDecodeSettingsUnknownIgnored();
+    TestDecodeSettingsInvalidEnableConnectProtocol();
     TestEncodeDecodeWindowUpdate();
     TestWindowUpdateZeroIncrement();
     TestDecodeWindowUpdateZero();

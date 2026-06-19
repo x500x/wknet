@@ -8,6 +8,7 @@
 #include <KernelHttp/http2/Http2Connection.h>
 #include <KernelHttp/net/WskSocket.h>
 #include <KernelHttp/tls/TlsConnection.h>
+#include <KernelHttp/websocket/WebSocketFrame.h>
 
 #include <stdint.h>
 #include <stdio.h>
@@ -43,6 +44,9 @@ using KernelHttp::http2::Http2ResponseBodySink;
 using KernelHttp::http2::Http2Settings;
 using KernelHttp::http2::Http2Transport;
 using KernelHttp::http2::HpackEncoder;
+using KernelHttp::websocket::WebSocketCodec;
+using KernelHttp::websocket::WebSocketFrameHeader;
+using KernelHttp::websocket::WebSocketOpcode;
 namespace Http2FrameFlags = KernelHttp::http2::Http2FrameFlags;
 
 namespace
@@ -59,12 +63,19 @@ namespace
         const char* Response = nullptr;
         SIZE_T ResponseLength = 0;
         SIZE_T ResponseOffset = 0;
+        const char* ProxyResponse = nullptr;
+        SIZE_T ProxyResponseLength = 0;
+        SIZE_T ProxyResponseOffset = 0;
         ULONG ConnectCalls = 0;
+        ULONG RawSendCalls = 0;
+        ULONG RawReceiveCalls = 0;
         ULONG TlsConnectCalls = 0;
         ULONG TlsSendCalls = 0;
         ULONG TlsReceiveCalls = 0;
         SIZE_T CapturedAlpnCount = 0;
         CapturedAlpnProtocol CapturedAlpn[4] = {};
+        char RawSent[1024] = {};
+        SIZE_T RawSentLength = 0;
     };
 
     HttpsClientStubState g_httpsClientStub = {};
@@ -75,6 +86,13 @@ namespace
         g_httpsClientStub.Enabled = true;
         g_httpsClientStub.Response = response;
         g_httpsClientStub.ResponseLength = response != nullptr ? strlen(response) : 0;
+    }
+
+    void ResetHttpsClientProxyStub(const char* proxyResponse, const char* tlsResponse)
+    {
+        ResetHttpsClientStub(tlsResponse);
+        g_httpsClientStub.ProxyResponse = proxyResponse;
+        g_httpsClientStub.ProxyResponseLength = proxyResponse != nullptr ? strlen(proxyResponse) : 0;
     }
 
     void DisableHttpsClientStub()
@@ -103,8 +121,31 @@ namespace net
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS WskSocket::Send(const void*, SIZE_T, SIZE_T*, ULONG, const WskCancellationToken*) noexcept
+    NTSTATUS WskSocket::Send(const void* data, SIZE_T length, SIZE_T* bytesSent, ULONG, const WskCancellationToken*) noexcept
     {
+        if (bytesSent != nullptr) {
+            *bytesSent = 0;
+        }
+        if (g_httpsClientStub.Enabled) {
+            ++g_httpsClientStub.RawSendCalls;
+            if (data == nullptr && length != 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (length > sizeof(g_httpsClientStub.RawSent) - g_httpsClientStub.RawSentLength) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            if (length != 0) {
+                memcpy(
+                    g_httpsClientStub.RawSent + g_httpsClientStub.RawSentLength,
+                    data,
+                    length);
+                g_httpsClientStub.RawSentLength += length;
+            }
+            if (bytesSent != nullptr) {
+                *bytesSent = length;
+            }
+            return STATUS_SUCCESS;
+        }
         return STATUS_NOT_SUPPORTED;
     }
 
@@ -113,8 +154,34 @@ namespace net
         return STATUS_NOT_SUPPORTED;
     }
 
-    NTSTATUS WskSocket::Receive(void*, SIZE_T, SIZE_T*, ULONG, ULONG, const WskCancellationToken*) noexcept
+    NTSTATUS WskSocket::Receive(void* data, SIZE_T length, SIZE_T* bytesReceived, ULONG, ULONG, const WskCancellationToken*) noexcept
     {
+        if (bytesReceived != nullptr) {
+            *bytesReceived = 0;
+        }
+        if (g_httpsClientStub.Enabled) {
+            ++g_httpsClientStub.RawReceiveCalls;
+            if (data == nullptr || length == 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (g_httpsClientStub.ProxyResponse == nullptr ||
+                g_httpsClientStub.ProxyResponseOffset >= g_httpsClientStub.ProxyResponseLength) {
+                return STATUS_CONNECTION_DISCONNECTED;
+            }
+
+            const SIZE_T remaining =
+                g_httpsClientStub.ProxyResponseLength - g_httpsClientStub.ProxyResponseOffset;
+            const SIZE_T copyLength = remaining < length ? remaining : length;
+            memcpy(
+                data,
+                g_httpsClientStub.ProxyResponse + g_httpsClientStub.ProxyResponseOffset,
+                copyLength);
+            g_httpsClientStub.ProxyResponseOffset += copyLength;
+            if (bytesReceived != nullptr) {
+                *bytesReceived = copyLength;
+            }
+            return STATUS_SUCCESS;
+        }
         return STATUS_NOT_SUPPORTED;
     }
 
@@ -255,6 +322,26 @@ namespace
             memcmp(text.Data, literal, len) == 0;
     }
 
+    bool BufferContainsLiteral(const char* buffer, SIZE_T bufferLength, const char* literal)
+    {
+        if (buffer == nullptr || literal == nullptr) {
+            return false;
+        }
+
+        const SIZE_T literalLength = strlen(literal);
+        if (literalLength == 0 || literalLength > bufferLength) {
+            return false;
+        }
+
+        for (SIZE_T offset = 0; offset + literalLength <= bufferLength; ++offset) {
+            if (memcmp(buffer + offset, literal, literalLength) == 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     int CountHeaders(const HttpHeader* headers, size_t headerCount, const char* name)
     {
         int count = 0;
@@ -358,6 +445,17 @@ namespace
         return KhWorkspaceAppendResponse(static_cast<KhWorkspace*>(context), data, dataLength);
     }
 
+    NTSTATUS IgnoreResponseBodyForTest(
+        void* context,
+        const UCHAR* data,
+        SIZE_T dataLength) noexcept
+    {
+        (void)context;
+        (void)data;
+        (void)dataLength;
+        return STATUS_SUCCESS;
+    }
+
     class ScriptedHttp2Transport final : public Http2Transport
     {
     public:
@@ -451,6 +549,27 @@ namespace
     {
         Http2Settings settings = {};
         settings.InitialWindowSize = initialWindowSize;
+        SIZE_T written = 0;
+        const NTSTATUS status = Http2FrameCodec::EncodeSettings(
+            settings,
+            script + *length,
+            capacity - *length,
+            &written);
+        if (!NT_SUCCESS(status)) {
+            return false;
+        }
+        *length += written;
+        return true;
+    }
+
+    bool AppendServerSettingsWithExtendedConnect(
+        bool enabled,
+        UCHAR* script,
+        SIZE_T capacity,
+        SIZE_T* length)
+    {
+        Http2Settings settings = {};
+        settings.EnableConnectProtocol = enabled ? 1 : 0;
         SIZE_T written = 0;
         const NTSTATUS status = Http2FrameCodec::EncodeSettings(
             settings,
@@ -609,6 +728,31 @@ namespace
         SIZE_T written = 0;
         const NTSTATUS status = Http2FrameCodec::EncodeData(
             1,
+            data,
+            dataLength,
+            endStream,
+            script + *length,
+            capacity - *length,
+            &written);
+        if (!NT_SUCCESS(status)) {
+            return false;
+        }
+        *length += written;
+        return true;
+    }
+
+    bool AppendDataForStream(
+        ULONG streamId,
+        const UCHAR* data,
+        SIZE_T dataLength,
+        bool endStream,
+        UCHAR* script,
+        SIZE_T capacity,
+        SIZE_T* length)
+    {
+        SIZE_T written = 0;
+        const NTSTATUS status = Http2FrameCodec::EncodeData(
+            streamId,
             data,
             dataLength,
             endStream,
@@ -1076,6 +1220,51 @@ namespace
         Expect(status == STATUS_INVALID_PARAMETER, "BuildHttp2RequestHeaders rejects TE other than trailers");
     }
 
+    void TestExtendedConnectRequestHeaders()
+    {
+        Http2RequestOptions options = {};
+        options.TransportMode = Http2TransportMode::TlsAlpn;
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.Method = HttpMethod::Connect;
+        options.Path = MakeText("/chat");
+        options.Authority = MakeText("example.com");
+        options.ConnectProtocol = MakeText("websocket");
+
+        HttpHeader headers[Http2MaxRequestHeaders] = {};
+        char lowerHeaderNames[Http2MaxRequestHeaders][Http2MaxHeaderNameLength] = {};
+        char contentLength[Http2ContentLengthBufferLength] = {};
+        size_t headerCount = 0;
+
+        NTSTATUS status = BuildHttp2RequestHeaders(
+            options,
+            headers,
+            Http2MaxRequestHeaders,
+            lowerHeaderNames,
+            contentLength,
+            &headerCount);
+
+        Expect(status == STATUS_SUCCESS, "BuildHttp2RequestHeaders accepts RFC 8441 CONNECT");
+        const HttpHeader* method = FindHeader(headers, headerCount, ":method");
+        const HttpHeader* protocol = FindHeader(headers, headerCount, ":protocol");
+        Expect(method != nullptr && TextEquals(method->Value, "CONNECT"),
+            "RFC 8441 request emits CONNECT method");
+        Expect(protocol != nullptr && TextEquals(protocol->Value, "websocket"),
+            "RFC 8441 request emits :protocol websocket");
+
+        options.Method = HttpMethod::Get;
+        headerCount = 0;
+        status = BuildHttp2RequestHeaders(
+            options,
+            headers,
+            Http2MaxRequestHeaders,
+            lowerHeaderNames,
+            contentLength,
+            &headerCount);
+        Expect(status == STATUS_INVALID_PARAMETER,
+            "BuildHttp2RequestHeaders rejects :protocol without CONNECT");
+    }
+
     void ExpectBuildHttp2HeadersRejected(
         const HttpHeader* extraHeaders,
         SIZE_T extraHeaderCount,
@@ -1363,6 +1552,260 @@ namespace
         Expect(
             CountSentFrames(transport, KernelHttp::http2::Http2FrameType::WindowUpdate, 1) == 0,
             "closed stream does not receive WINDOW_UPDATE");
+    }
+
+    void TestBeginRequestRoutesInterleavedResponses()
+    {
+        UCHAR script[1024] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 interleaved server settings fixture builds");
+        Expect(AppendResponseHeadersForStream(3, true, true, script, sizeof(script), &scriptLength),
+            "HTTP/2 interleaved stream 3 response fixture builds");
+        Expect(AppendResponseHeadersForStream(1, true, true, script, sizeof(script), &scriptLength),
+            "HTTP/2 interleaved stream 1 response fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 interleaved connection initializes");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+
+        Http2ResponseBodySink sink = {};
+        sink.Append = IgnoreResponseBodyForTest;
+
+        HttpHeader responseHeaders1[4] = {};
+        HttpHeader responseHeaders3[4] = {};
+        SIZE_T responseHeaderCount1 = 0;
+        SIZE_T responseHeaderCount3 = 0;
+        SIZE_T responseBodyLength1 = 0;
+        SIZE_T responseBodyLength3 = 0;
+        USHORT statusCode1 = 0;
+        USHORT statusCode3 = 0;
+        char nameValueBuffer1[128] = {};
+        char nameValueBuffer3[128] = {};
+        ULONG stream1 = 0;
+        ULONG stream3 = 0;
+
+        status = connection.BeginRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders1,
+            sizeof(responseHeaders1) / sizeof(responseHeaders1[0]),
+            &responseHeaderCount1,
+            sink,
+            &responseBodyLength1,
+            &statusCode1,
+            nameValueBuffer1,
+            sizeof(nameValueBuffer1),
+            &stream1);
+        Expect(NT_SUCCESS(status), "HTTP/2 stream 1 BeginRequest succeeds");
+        Expect(stream1 == 1, "HTTP/2 first BeginRequest uses stream 1");
+
+        status = connection.BeginRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders3,
+            sizeof(responseHeaders3) / sizeof(responseHeaders3[0]),
+            &responseHeaderCount3,
+            sink,
+            &responseBodyLength3,
+            &statusCode3,
+            nameValueBuffer3,
+            sizeof(nameValueBuffer3),
+            &stream3);
+        Expect(NT_SUCCESS(status), "HTTP/2 stream 3 BeginRequest succeeds");
+        Expect(stream3 == 3, "HTTP/2 second BeginRequest uses stream 3");
+
+        status = connection.ReceiveResponse(transport, stream1);
+        Expect(NT_SUCCESS(status), "HTTP/2 ReceiveResponse stream 1 succeeds after routing stream 3");
+        Expect(statusCode1 == 200, "HTTP/2 stream 1 status is decoded");
+        Expect(statusCode3 == 200, "HTTP/2 stream 3 status is decoded while waiting for stream 1");
+        Expect(responseBodyLength1 == 0, "HTTP/2 stream 1 body remains empty");
+
+        status = connection.ReceiveResponse(transport, stream3);
+        Expect(NT_SUCCESS(status), "HTTP/2 ReceiveResponse stream 3 completes from routed state");
+        Expect(responseBodyLength3 == 0, "HTTP/2 stream 3 body remains empty");
+    }
+
+    void TestExtendedConnectRequiresPeerSetting()
+    {
+        UCHAR script[512] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 default settings fixture builds for extended CONNECT rejection");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 extended CONNECT rejection connection initializes");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("CONNECT") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/chat") },
+            { MakeText(":authority"), MakeText("example.com") },
+            { MakeText(":protocol"), MakeText("websocket") }
+        };
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+        ULONG streamId = 0;
+        Http2ResponseBodySink sink = {};
+        sink.Append = IgnoreResponseBodyForTest;
+
+        status = connection.BeginRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            sink,
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer),
+            &streamId);
+
+        Expect(status == STATUS_NOT_SUPPORTED,
+            "HTTP/2 extended CONNECT requires peer ENABLE_CONNECT_PROTOCOL");
+        Expect(streamId == 0, "HTTP/2 rejected extended CONNECT does not allocate stream");
+    }
+
+    void TestExtendedConnectBeginsWhenPeerSettingEnabled()
+    {
+        UCHAR script[512] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR serverWebSocketFrame[] = { 0x81, 0x02, 'o', 'k' };
+        Expect(AppendServerSettingsWithExtendedConnect(true, script, sizeof(script), &scriptLength),
+            "HTTP/2 extended CONNECT settings fixture builds");
+        Expect(AppendResponseHeadersForStream(1, false, true, script, sizeof(script), &scriptLength),
+            "HTTP/2 extended CONNECT response fixture builds");
+        Expect(AppendDataForStream(
+            1,
+            serverWebSocketFrame,
+            sizeof(serverWebSocketFrame),
+            false,
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 extended CONNECT websocket DATA fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 extended CONNECT connection initializes");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("CONNECT") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/chat") },
+            { MakeText(":authority"), MakeText("example.com") },
+            { MakeText(":protocol"), MakeText("websocket") }
+        };
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+        ULONG streamId = 0;
+        Http2ResponseBodySink sink = {};
+        sink.Append = IgnoreResponseBodyForTest;
+
+        status = connection.BeginRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            sink,
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer),
+            &streamId);
+        Expect(NT_SUCCESS(status), "HTTP/2 extended CONNECT BeginRequest succeeds");
+        Expect(streamId == 1, "HTTP/2 extended CONNECT uses stream 1");
+
+        status = connection.ReceiveResponseHeaders(transport, streamId);
+        Expect(NT_SUCCESS(status), "HTTP/2 extended CONNECT response headers are received");
+        Expect(statusCode == 200, "HTTP/2 extended CONNECT status is decoded");
+
+        const UCHAR clientTunnelBytes[] = { 0x81, 0x00 };
+        status = connection.SendStreamData(
+            transport,
+            streamId,
+            clientTunnelBytes,
+            sizeof(clientTunnelBytes),
+            false);
+        Expect(NT_SUCCESS(status), "HTTP/2 extended CONNECT sends DATA on tunnel stream");
+        Expect(
+            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Data, 1) == 1,
+            "HTTP/2 extended CONNECT emits one DATA frame");
+
+        UCHAR receivedTunnelBytes[16] = {};
+        SIZE_T receivedTunnelLength = 0;
+        bool tunnelEndStream = false;
+        status = connection.ReceiveStreamData(
+            transport,
+            streamId,
+            receivedTunnelBytes,
+            sizeof(receivedTunnelBytes),
+            &receivedTunnelLength,
+            &tunnelEndStream);
+        Expect(NT_SUCCESS(status), "HTTP/2 extended CONNECT receives DATA from tunnel stream");
+        Expect(receivedTunnelLength == sizeof(serverWebSocketFrame),
+            "HTTP/2 extended CONNECT preserves WebSocket frame byte length");
+        Expect(!tunnelEndStream, "HTTP/2 extended CONNECT DATA keeps stream open");
+
+        WebSocketFrameHeader wsHeader = {};
+        status = WebSocketCodec::DecodeFrameHeader(receivedTunnelBytes, receivedTunnelLength, &wsHeader);
+        Expect(NT_SUCCESS(status), "HTTP/2 extended CONNECT DATA contains decodable WebSocket frame");
+        Expect(wsHeader.Opcode == WebSocketOpcode::Text, "HTTP/2 extended CONNECT WebSocket opcode is text");
+        UCHAR decodedPayload[8] = {};
+        SIZE_T decodedPayloadLength = 0;
+        status = WebSocketCodec::DecodeFramePayload(
+            wsHeader,
+            receivedTunnelBytes,
+            receivedTunnelLength,
+            decodedPayload,
+            sizeof(decodedPayload),
+            &decodedPayloadLength);
+        Expect(NT_SUCCESS(status), "HTTP/2 extended CONNECT WebSocket payload decodes");
+        Expect(decodedPayloadLength == 2 &&
+            decodedPayload[0] == 'o' &&
+            decodedPayload[1] == 'k',
+            "HTTP/2 extended CONNECT WebSocket payload is preserved");
     }
 
     void TestLargeResponseReplenishesStreamWindow()
@@ -2792,6 +3235,80 @@ namespace
         DisableHttpsClientStub();
     }
 
+    void TestHttpsClientProxyConnectTunnel()
+    {
+        ResetHttpsClientProxyStub(
+            "HTTP/1.1 200 Connection Established\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
+
+        char requestBuffer[512] = {};
+        char responseBuffer[512] = {};
+        char decodedBody[64] = {};
+        char scratchBody[64] = {};
+        char headerNameValue[256] = {};
+        HttpHeader responseHeaders[8] = {};
+
+        HttpsResponseBuffers buffers = {};
+        buffers.RequestBuffer = requestBuffer;
+        buffers.RequestBufferLength = sizeof(requestBuffer);
+        buffers.ResponseBuffer = responseBuffer;
+        buffers.ResponseBufferLength = sizeof(responseBuffer);
+        buffers.DecodedBodyBuffer = decodedBody;
+        buffers.DecodedBodyBufferLength = sizeof(decodedBody);
+        buffers.ScratchBodyBuffer = scratchBody;
+        buffers.ScratchBodyBufferLength = sizeof(scratchBody);
+        buffers.HeaderNameValueBuffer = headerNameValue;
+        buffers.HeaderNameValueBufferLength = sizeof(headerNameValue);
+        buffers.Headers = responseHeaders;
+        buffers.HeaderCapacity = sizeof(responseHeaders) / sizeof(responseHeaders[0]);
+
+        SOCKADDR_STORAGE remoteAddress = {};
+        remoteAddress.ss_family = AF_INET;
+        SOCKADDR_STORAGE proxyAddress = {};
+        proxyAddress.ss_family = AF_INET;
+
+        HttpsRequestOptions options = {};
+        options.RemoteAddress = reinterpret_cast<const SOCKADDR*>(&remoteAddress);
+        options.ProxyAddress = reinterpret_cast<const SOCKADDR*>(&proxyAddress);
+        options.ProxyAuthority = "example.test:443";
+        options.ProxyAuthorityLength = strlen(options.ProxyAuthority);
+        options.ServerName = "example.test";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.Request.Method = HttpMethod::Get;
+        options.Request.Path = MakeText("/");
+        options.Request.Host = MakeText("example.test");
+        options.Request.UserAgent = MakeText("KernelHttp/0.1");
+        options.Request.Connection = KernelHttp::http::HttpConnectionDirective::Close;
+        options.VerifyCertificate = false;
+        options.PreferHttp2 = false;
+
+        HttpsClient client;
+        KernelHttp::http::HttpResponse response = {};
+        auto& wskClient = *reinterpret_cast<KernelHttp::net::WskClient*>(0x1);
+        const NTSTATUS status = client.SendRequest(wskClient, options, buffers, response);
+
+        Expect(NT_SUCCESS(status), "HTTPS client proxy CONNECT request succeeds");
+        Expect(g_httpsClientStub.ConnectCalls == 1, "HTTPS proxy CONNECT opens one TCP connection");
+        Expect(g_httpsClientStub.RawSendCalls == 1, "HTTPS proxy CONNECT sends one plaintext CONNECT request");
+        Expect(g_httpsClientStub.RawReceiveCalls >= 1, "HTTPS proxy CONNECT reads proxy response");
+        Expect(g_httpsClientStub.TlsConnectCalls == 1, "HTTPS proxy CONNECT starts TLS after tunnel");
+        Expect(BufferContainsLiteral(
+            g_httpsClientStub.RawSent,
+            g_httpsClientStub.RawSentLength,
+            "CONNECT example.test:443 HTTP/1.1\r\n"),
+            "HTTPS proxy CONNECT request line targets authority");
+        Expect(BufferContainsLiteral(
+            g_httpsClientStub.RawSent,
+            g_httpsClientStub.RawSentLength,
+            "Host: example.test:443\r\n"),
+            "HTTPS proxy CONNECT includes Host authority");
+        Expect(response.StatusCode == 200, "HTTPS proxy CONNECT inner response status is decoded");
+        Expect(response.BodyLength == 2 && memcmp(response.Body, "ok", 2) == 0,
+            "HTTPS proxy CONNECT inner response body is decoded");
+
+        DisableHttpsClientStub();
+    }
+
     void TestConnectionRejectsMalformedResponseHeaders()
     {
         const UCHAR duplicateStatus[] = { 0x88, 0x88 };
@@ -3252,11 +3769,15 @@ int main()
     TestPromotedAcceptEncodingIsNotDuplicated();
     TestExtraAcceptEncodingRemainsWhenNotPromoted();
     TestRequestTeHeaderValidation();
+    TestExtendedConnectRequestHeaders();
     TestRequestNormalizesMixedCaseExtraHeaders();
     TestRequestRejectsInvalidExtraHeaders();
     TestUpgradeReceivesResponseOnStreamOne();
     TestUpgradeReservesStreamOneForInitiatingRequest();
     TestEndStreamDataSkipsStreamWindowUpdate();
+    TestBeginRequestRoutesInterleavedResponses();
+    TestExtendedConnectRequiresPeerSetting();
+    TestExtendedConnectBeginsWhenPeerSettingEnabled();
     TestLargeResponseReplenishesStreamWindow();
     TestWorkspaceResponseSinkGrowsForLargeResponse();
     TestConnectionAcceptsRaisedMaxFrameSizePayload();
@@ -3286,6 +3807,7 @@ int main()
     TestConnectionHidesResponsePseudoHeaders();
     TestHttpsH2HeaderNameValueBufferSurvivesDecodedBodyWrite();
     TestHttpsClientExplicitHttp11Alpn();
+    TestHttpsClientProxyConnectTunnel();
     TestConnectionRejectsMalformedResponseHeaders();
     TestConnectionValidatesResponseContentLength();
     TestConnectionRejectsDataForNoBodyResponses();

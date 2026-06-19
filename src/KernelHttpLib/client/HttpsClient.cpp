@@ -49,6 +49,52 @@ namespace client
             return status == STATUS_CONNECTION_DISCONNECTED;
         }
 
+        bool UsesProxyTunnel(const HttpsRequestOptions& options) noexcept
+        {
+            return options.ProxyAddress != nullptr;
+        }
+
+        _Must_inspect_result_
+        bool IsValidProxyTunnelOptions(const HttpsRequestOptions& options) noexcept
+        {
+            if (!UsesProxyTunnel(options)) {
+                return options.ProxyAuthority == nullptr &&
+                    options.ProxyAuthorityLength == 0 &&
+                    options.ProxyHeaders == nullptr &&
+                    options.ProxyHeaderCount == 0;
+            }
+
+            return options.ProxyAuthority != nullptr &&
+                options.ProxyAuthorityLength != 0 &&
+                (options.ProxyHeaders != nullptr || options.ProxyHeaderCount == 0) &&
+                (options.ProxyHeaders == nullptr || options.ProxyHeaderCount != 0);
+        }
+
+        _Must_inspect_result_
+        NTSTATUS BuildProxyConnectRequest(
+            const HttpsRequestOptions& options,
+            _Out_writes_bytes_(requestCapacity) char* requestBuffer,
+            SIZE_T requestCapacity,
+            _Out_ SIZE_T* requestLength) noexcept
+        {
+            if (requestBuffer == nullptr || requestLength == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            http::HttpRequestBuildOptions connect = {};
+            connect.Method = http::HttpMethod::Connect;
+            connect.Path = { options.ProxyAuthority, options.ProxyAuthorityLength };
+            connect.Host = { options.ProxyAuthority, options.ProxyAuthorityLength };
+            connect.UserAgent = options.Request.UserAgent;
+            connect.ExtraHeaders = options.ProxyHeaders;
+            connect.ExtraHeaderCount = options.ProxyHeaderCount;
+            return http::HttpRequestBuilder::Build(
+                connect,
+                requestBuffer,
+                requestCapacity,
+                requestLength);
+        }
+
         _Must_inspect_result_
         bool IsNonFinalInformationalResponse(const http::HttpResponse& response) noexcept
         {
@@ -234,7 +280,8 @@ namespace client
             buffers.Headers == nullptr ||
             buffers.HeaderCapacity == 0 ||
             (options.AlpnProtocols == nullptr && options.AlpnProtocolCount != 0) ||
-            (options.AlpnProtocols != nullptr && options.AlpnProtocolCount == 0)) {
+            (options.AlpnProtocols != nullptr && options.AlpnProtocolCount == 0) ||
+            !IsValidProxyTunnelOptions(options)) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -254,7 +301,9 @@ namespace client
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        status = socket->Connect(wskClient, options.RemoteAddress);
+        const SOCKADDR* connectAddress =
+            UsesProxyTunnel(options) ? options.ProxyAddress : options.RemoteAddress;
+        status = socket->Connect(wskClient, connectAddress);
         if (!NT_SUCCESS(status)) {
             kprintf("HttpsClient connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
@@ -273,6 +322,65 @@ namespace client
             const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
             return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        if (UsesProxyTunnel(options)) {
+            SIZE_T connectRequestLength = 0;
+            status = BuildProxyConnectRequest(
+                options,
+                buffers.RequestBuffer,
+                buffers.RequestBufferLength,
+                &connectRequestLength);
+            if (!NT_SUCCESS(status)) {
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
+                const NTSTATUS closeStatus = socket->Close();
+                UNREFERENCED_PARAMETER(closeStatus);
+                return status;
+            }
+
+            SIZE_T sent = 0;
+            status = rawTransport->Send(
+                buffers.RequestBuffer,
+                connectRequestLength,
+                &sent);
+            if (!NT_SUCCESS(status) || sent != connectRequestLength) {
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
+                const NTSTATUS closeStatus = socket->Close();
+                UNREFERENCED_PARAMETER(closeStatus);
+                return NT_SUCCESS(status) ? STATUS_CONNECTION_DISCONNECTED : status;
+            }
+
+            http::HttpResponse proxyResponse = {};
+            status = ReadHttpResponse(*rawTransport, true, buffers, proxyResponse);
+            if (!NT_SUCCESS(status)) {
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
+                const NTSTATUS closeStatus = socket->Close();
+                UNREFERENCED_PARAMETER(closeStatus);
+                return status;
+            }
+            if (proxyResponse.StatusCode < 200 || proxyResponse.StatusCode >= 300) {
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
+                const NTSTATUS closeStatus = socket->Close();
+                UNREFERENCED_PARAMETER(closeStatus);
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            status = http::HttpRequestBuilder::Build(
+                options.Request,
+                buffers.RequestBuffer,
+                buffers.RequestBufferLength,
+                &requestLength);
+            if (!NT_SUCCESS(status)) {
+                FreeNonPagedObject(rawTransport);
+                FreeNonPagedObject(tlsConnection);
+                const NTSTATUS closeStatus = socket->Close();
+                UNREFERENCED_PARAMETER(closeStatus);
+                return status;
+            }
         }
 
         core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
