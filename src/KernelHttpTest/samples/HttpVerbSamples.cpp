@@ -129,6 +129,60 @@ namespace samples
             return MinSize(dataLength, MaxLoggedTextBytes);
         }
 
+        char HexDigit(unsigned int value) noexcept
+        {
+            return static_cast<char>(value < 10 ? ('0' + value) : ('A' + (value - 10)));
+        }
+
+        SIZE_T EscapeLogTextChunk(
+            _In_reads_bytes_(dataLength) const char* data,
+            SIZE_T dataLength,
+            _Out_writes_(escapedCapacity) char* escaped,
+            SIZE_T escapedCapacity) noexcept
+        {
+            if (data == nullptr || escaped == nullptr || escapedCapacity == 0) {
+                return 0;
+            }
+
+            SIZE_T written = 0;
+            for (SIZE_T index = 0; index < dataLength && written < escapedCapacity; ++index) {
+                const unsigned char value = static_cast<unsigned char>(data[index]);
+                const char* escape = nullptr;
+                switch (value) {
+                case '\r': escape = "\\r"; break;
+                case '\n': escape = "\\n"; break;
+                case '\t': escape = "\\t"; break;
+                case '\\': escape = "\\\\"; break;
+                case '"': escape = "\\\""; break;
+                default: break;
+                }
+
+                if (escape != nullptr) {
+                    if (written + 2 > escapedCapacity) {
+                        break;
+                    }
+                    escaped[written++] = escape[0];
+                    escaped[written++] = escape[1];
+                    continue;
+                }
+
+                if (value >= 0x20 && value != 0x7F) {
+                    escaped[written++] = static_cast<char>(value);
+                    continue;
+                }
+
+                if (written + 4 > escapedCapacity) {
+                    break;
+                }
+                escaped[written++] = '\\';
+                escaped[written++] = 'x';
+                escaped[written++] = HexDigit((value >> 4) & 0x0F);
+                escaped[written++] = HexDigit(value & 0x0F);
+            }
+
+            return written;
+        }
+
         void LogTextValue(
             _In_opt_ const char* label,
             _In_reads_bytes_opt_(dataLength) const char* data,
@@ -143,7 +197,9 @@ namespace samples
             const SIZE_T loggedBytes = ClampLoggedBytes(dataLength);
             const bool truncated = loggedBytes < dataLength;
             if (!truncated && dataLength <= TextLogChunkBytes) {
-                kprintf("%s%.*s\r\n", safeLabel, PrintLength(dataLength), data);
+                char escaped[TextLogChunkBytes * 4] = {};
+                const SIZE_T escapedLength = EscapeLogTextChunk(data, dataLength, escaped, sizeof(escaped));
+                kprintf("%s%.*s\r\n", safeLabel, PrintLength(escapedLength), escaped);
                 return;
             }
 
@@ -155,13 +211,15 @@ namespace samples
                 truncated ? " <truncated>" : "");
             for (SIZE_T offset = 0; offset < loggedBytes; offset += TextLogChunkBytes) {
                 const SIZE_T chunkLength = MinSize(loggedBytes - offset, TextLogChunkBytes);
+                char escaped[TextLogChunkBytes * 4] = {};
+                const SIZE_T escapedLength = EscapeLogTextChunk(data + offset, chunkLength, escaped, sizeof(escaped));
                 kprintf(
                     "%s偏移=%Iu 长度=%Iu 内容=%.*s\r\n",
                     safeLabel,
                     offset,
                     chunkLength,
-                    PrintLength(chunkLength),
-                    data + offset);
+                    PrintLength(escapedLength),
+                    escaped);
             }
             if (truncated) {
                 kprintf(
@@ -235,36 +293,17 @@ namespace samples
         void LogBody(const char* body, SIZE_T bodyLength) noexcept
         {
             if (body == nullptr || bodyLength == 0) {
-                kprintf("[body]\r\n<empty>\r\n");
+                kprintf("[body] length=0 raw follows\r\n");
                 return;
             }
 
-            const SIZE_T loggedBytes = ClampLoggedBytes(bodyLength);
-            const bool truncated = loggedBytes < bodyLength;
-            if (!truncated && bodyLength <= TextLogChunkBytes) {
-                kprintf("[body]\r\n%.*s\r\n", PrintLength(bodyLength), body);
-                return;
-            }
-
-            kprintf(
-                "[body] 长度=%Iu 日志分块输出=%Iu%s\r\n",
-                bodyLength,
-                loggedBytes,
-                truncated ? " <truncated>" : "");
-            for (SIZE_T offset = 0; offset < loggedBytes; offset += TextLogChunkBytes) {
-                const SIZE_T chunkLength = MinSize(loggedBytes - offset, TextLogChunkBytes);
-                kprintf(
-                    "[body] 偏移=%Iu 长度=%Iu 内容=%.*s\r\n",
-                    offset,
-                    chunkLength,
-                    PrintLength(chunkLength),
-                    body + offset);
-            }
-            if (truncated) {
-                kprintf(
-                    "[body] 日志展示截断 已输出=%Iu 总长度=%Iu\r\n",
-                    loggedBytes,
-                    bodyLength);
+            kprintf("[body] length=%Iu raw follows\r\n", bodyLength);
+            SIZE_T offset = 0;
+            while (offset < bodyLength) {
+                constexpr SIZE_T MaxPrintLength = 0x7fffffff;
+                const SIZE_T chunkLength = MinSize(bodyLength - offset, MaxPrintLength);
+                kprintf("%.*s", static_cast<int>(chunkLength), body + offset);
+                offset += chunkLength;
             }
         }
 
