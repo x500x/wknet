@@ -1113,32 +1113,74 @@ header 合成与覆盖：
 
 ### 同步动词 helper
 
-功能：按 HTTP 方法调用 `SendEx`。`Ex` 版本允许传显式 URL 长度、headers、body、options；非 `Ex` 版本按 NUL 结尾 URL 计算长度。
+功能：按函数名选择 HTTP 方法并调用通用 `Send` / `SendEx` 路径。调用方不需要手动传 `Method`，适合最常见的 GET、POST、PUT、PATCH、DELETE、HEAD、OPTIONS 请求。
+
+动词与语义：
+
+| 函数族 | HTTP 方法 | 请求体 | 典型用途 |
+|--------|-----------|--------|----------|
+| `Get` / `GetEx` | `GET` | 无 | 获取资源 |
+| `Post` / `PostEx` | `POST` | 可选 | 创建资源、提交表单或 JSON 字节 |
+| `Put` / `PutEx` | `PUT` | 可选 | 整体替换资源 |
+| `Patch` / `PatchEx` | `PATCH` | 可选 | 局部修改资源 |
+| `Delete` / `DeleteEx` | `DELETE` | 无 | 删除资源 |
+| `Head` / `HeadEx` | `HEAD` | 无 | 只取响应头 |
+| `Options` / `OptionsEx` | `OPTIONS` | 无 | 查询服务端能力 |
+
+`Session*` 重载签名：
 
 ```cpp
 NTSTATUS Get(Session* session, const char* url, Response** response) noexcept;
 NTSTATUS GetEx(Session* session, const char* url, SIZE_T urlLength,
                const Headers* headers, const SendOptions* options,
                Response** response) noexcept;
+NTSTATUS Get(Session* session, const char* url, SIZE_T urlLength,
+             Response** response) noexcept;
 
 NTSTATUS Post(Session* session, const char* url, const Body* body, Response** response) noexcept;
 NTSTATUS PostEx(Session* session, const char* url, SIZE_T urlLength,
                 const Headers* headers, const Body* body,
                 const SendOptions* options, Response** response) noexcept;
+NTSTATUS Post(Session* session, const char* url, SIZE_T urlLength,
+              const UCHAR* body, SIZE_T bodyLength, Response** response) noexcept;
 
-NTSTATUS Put(...);
-NTSTATUS PutEx(...);
-NTSTATUS Patch(...);
-NTSTATUS PatchEx(...);
-NTSTATUS Delete(...);
-NTSTATUS DeleteEx(...);
-NTSTATUS Head(...);
-NTSTATUS HeadEx(...);
-NTSTATUS Options(...);
-NTSTATUS OptionsEx(...);
+NTSTATUS Put(Session* session, const char* url, const Body* body, Response** response) noexcept;
+NTSTATUS PutEx(Session* session, const char* url, SIZE_T urlLength,
+               const Headers* headers, const Body* body,
+               const SendOptions* options, Response** response) noexcept;
+NTSTATUS Put(Session* session, const char* url, SIZE_T urlLength,
+             const UCHAR* body, SIZE_T bodyLength, Response** response) noexcept;
+
+NTSTATUS Patch(Session* session, const char* url, const Body* body, Response** response) noexcept;
+NTSTATUS PatchEx(Session* session, const char* url, SIZE_T urlLength,
+                 const Headers* headers, const Body* body,
+                 const SendOptions* options, Response** response) noexcept;
+NTSTATUS Patch(Session* session, const char* url, SIZE_T urlLength,
+               const UCHAR* body, SIZE_T bodyLength, Response** response) noexcept;
+
+NTSTATUS Delete(Session* session, const char* url, Response** response) noexcept;
+NTSTATUS DeleteEx(Session* session, const char* url, SIZE_T urlLength,
+                  const Headers* headers, const SendOptions* options,
+                  Response** response) noexcept;
+NTSTATUS Delete(Session* session, const char* url, SIZE_T urlLength,
+                Response** response) noexcept;
+
+NTSTATUS Head(Session* session, const char* url, Response** response) noexcept;
+NTSTATUS HeadEx(Session* session, const char* url, SIZE_T urlLength,
+                const Headers* headers, const SendOptions* options,
+                Response** response) noexcept;
+NTSTATUS Head(Session* session, const char* url, SIZE_T urlLength,
+              Response** response) noexcept;
+
+NTSTATUS Options(Session* session, const char* url, Response** response) noexcept;
+NTSTATUS OptionsEx(Session* session, const char* url, SIZE_T urlLength,
+                   const Headers* headers, const SendOptions* options,
+                   Response** response) noexcept;
+NTSTATUS Options(Session* session, const char* url, SIZE_T urlLength,
+                 Response** response) noexcept;
 ```
 
-`Request*` send handle 也提供同名重载：
+`Request*` send handle 重载签名：
 
 ```cpp
 NTSTATUS Get(Request* request, const char* url, Response** response) noexcept;
@@ -1150,22 +1192,55 @@ NTSTATUS Post(Request* request, const char* url, const Body* body, Response** re
 NTSTATUS PostEx(Request* request, const char* url, SIZE_T urlLength,
                 const Headers* headers, const Body* body,
                 const SendOptions* options, Response** response) noexcept;
+
+NTSTATUS Put(Request* request, const char* url, const Body* body, Response** response) noexcept;
+NTSTATUS PutEx(Request* request, const char* url, SIZE_T urlLength,
+               const Headers* headers, const Body* body,
+               const SendOptions* options, Response** response) noexcept;
+
+NTSTATUS Patch(Request* request, const char* url, const Body* body, Response** response) noexcept;
+NTSTATUS PatchEx(Request* request, const char* url, SIZE_T urlLength,
+                 const Headers* headers, const Body* body,
+                 const SendOptions* options, Response** response) noexcept;
+
+NTSTATUS Delete(Request* request, const char* url, Response** response) noexcept;
+NTSTATUS DeleteEx(Request* request, const char* url, SIZE_T urlLength,
+                  const Headers* headers, const SendOptions* options,
+                  Response** response) noexcept;
+
+NTSTATUS Head(Request* request, const char* url, Response** response) noexcept;
+NTSTATUS HeadEx(Request* request, const char* url, SIZE_T urlLength,
+                const Headers* headers, const SendOptions* options,
+                Response** response) noexcept;
+
+NTSTATUS Options(Request* request, const char* url, Response** response) noexcept;
+NTSTATUS OptionsEx(Request* request, const char* url, SIZE_T urlLength,
+                   const Headers* headers, const SendOptions* options,
+                   Response** response) noexcept;
 ```
 
-参数与返回值：同 `SendEx`，但 method 由函数名决定。
+参数：
 
-便捷原始字节重载：
+| 参数 | 方向 | 是否可空 | 说明 |
+|------|------|----------|------|
+| `session` | in | 否 | 会话句柄；用于 `Session*` 重载 |
+| `request` | in | 否 | 请求发送句柄；用于 `Request*` 重载 |
+| `url` | in | 否 | 请求 URL。非 `Ex` 重载按 NUL 结尾字符串计算长度 |
+| `urlLength` | in | 否 | URL 字节长度，不包含额外 NUL；仅 `Ex` 和显式长度便捷重载使用 |
+| `headers` | in | 是 | 请求头集合；为空时只使用库合成 header |
+| `body` | in | 是 | `Post` / `Put` / `Patch` 的请求体；无 body 时传 `nullptr` |
+| `bodyLength` | in | 否 | 原始字节 body 长度；仅 `Session*` 的 `Post` / `Put` / `Patch` 字节便捷重载使用 |
+| `options` | in | 是 | 同步发送选项；为空时使用默认发送选项 |
+| `response` | out | 否 | 成功时接收 `Response*`，调用方用 `ResponseRelease` 释放 |
 
-```cpp
-NTSTATUS Post(Session* session, const char* url, SIZE_T urlLength,
-              const UCHAR* body, SIZE_T bodyLength, Response** response) noexcept;
-NTSTATUS Put(Session* session, const char* url, SIZE_T urlLength,
-             const UCHAR* body, SIZE_T bodyLength, Response** response) noexcept;
-NTSTATUS Patch(Session* session, const char* url, SIZE_T urlLength,
-               const UCHAR* body, SIZE_T bodyLength, Response** response) noexcept;
-```
+返回值：与 `Send` / `SendEx` 一致。`STATUS_SUCCESS` 表示收到并构造响应；`STATUS_INVALID_PARAMETER` 表示句柄、URL、输出指针等非法；其他失败状态来自 DNS、连接、TLS、HTTP 解析、重定向、回调或内存分配路径。
 
-这些重载会创建调用期引用 body；`body` 必须在调用返回前保持有效。
+注意事项：
+
+- `Get`、`Delete`、`Head`、`Options` 没有 `Body*` 参数；需要带 body 的非典型请求请使用通用 `Send` / `SendEx`。
+- `Post`、`Put`、`Patch` 的 `Body*` 重载不会复制 body 句柄本身；body 的引用/拷贝语义由 `BodyCreate*` 函数决定。
+- `Session*` 的原始字节便捷重载会创建调用期引用 body；`body` 必须在调用返回前保持有效。
+- `Head` 请求通常不返回响应体；仍然通过 `Response*` 读取状态码和响应头。
 
 ## 异步 HTTP 函数
 
@@ -1240,7 +1315,21 @@ NTSTATUS AsyncSendEx(
 
 ### 异步动词 helper
 
-功能：按 HTTP 方法调用 `AsyncSendEx`。
+功能：按函数名选择 HTTP 方法并调用通用 `AsyncSend` / `AsyncSendEx` 路径。函数只创建并排队异步操作，响应需要后续通过 `AsyncWait` + `AsyncGetResponse` 获取。
+
+动词与语义：
+
+| 函数族 | HTTP 方法 | 请求体 | 结果获取 |
+|--------|-----------|--------|----------|
+| `AsyncGet` / `AsyncGetEx` | `GET` | 无 | `AsyncGetResponse` |
+| `AsyncPost` / `AsyncPostEx` | `POST` | 可选 | `AsyncGetResponse` |
+| `AsyncPut` / `AsyncPutEx` | `PUT` | 可选 | `AsyncGetResponse` |
+| `AsyncPatch` / `AsyncPatchEx` | `PATCH` | 可选 | `AsyncGetResponse` |
+| `AsyncDelete` / `AsyncDeleteEx` | `DELETE` | 无 | `AsyncGetResponse` |
+| `AsyncHead` / `AsyncHeadEx` | `HEAD` | 无 | `AsyncGetResponse` |
+| `AsyncOptionsRequest` / `AsyncOptionsRequestEx` | `OPTIONS` | 无 | `AsyncGetResponse` |
+
+`Session*` 重载签名：
 
 ```cpp
 NTSTATUS AsyncGet(Session* session, const char* url, AsyncOp** operation) noexcept;
@@ -1253,21 +1342,99 @@ NTSTATUS AsyncPostEx(Session* session, const char* url, SIZE_T urlLength,
                      const Headers* headers, const Body* body,
                      const AsyncOptions* options, AsyncOp** operation) noexcept;
 
-NTSTATUS AsyncPut(...);
-NTSTATUS AsyncPutEx(...);
-NTSTATUS AsyncPatch(...);
-NTSTATUS AsyncPatchEx(...);
-NTSTATUS AsyncDelete(...);
-NTSTATUS AsyncDeleteEx(...);
-NTSTATUS AsyncHead(...);
-NTSTATUS AsyncHeadEx(...);
-NTSTATUS AsyncOptionsRequest(...);
-NTSTATUS AsyncOptionsRequestEx(...);
+NTSTATUS AsyncPut(Session* session, const char* url, const Body* body, AsyncOp** operation) noexcept;
+NTSTATUS AsyncPutEx(Session* session, const char* url, SIZE_T urlLength,
+                    const Headers* headers, const Body* body,
+                    const AsyncOptions* options, AsyncOp** operation) noexcept;
+
+NTSTATUS AsyncPatch(Session* session, const char* url, const Body* body, AsyncOp** operation) noexcept;
+NTSTATUS AsyncPatchEx(Session* session, const char* url, SIZE_T urlLength,
+                      const Headers* headers, const Body* body,
+                      const AsyncOptions* options, AsyncOp** operation) noexcept;
+
+NTSTATUS AsyncDelete(Session* session, const char* url, AsyncOp** operation) noexcept;
+NTSTATUS AsyncDeleteEx(Session* session, const char* url, SIZE_T urlLength,
+                       const Headers* headers, const AsyncOptions* options,
+                       AsyncOp** operation) noexcept;
+
+NTSTATUS AsyncHead(Session* session, const char* url, AsyncOp** operation) noexcept;
+NTSTATUS AsyncHeadEx(Session* session, const char* url, SIZE_T urlLength,
+                     const Headers* headers, const AsyncOptions* options,
+                     AsyncOp** operation) noexcept;
+
+NTSTATUS AsyncOptionsRequest(Session* session, const char* url, AsyncOp** operation) noexcept;
+NTSTATUS AsyncOptionsRequestEx(Session* session, const char* url, SIZE_T urlLength,
+                               const Headers* headers, const AsyncOptions* options,
+                               AsyncOp** operation) noexcept;
 ```
 
-`Request*` send handle 也提供同名重载。`AsyncOptionsRequest` / `AsyncOptionsRequestEx` 是 HTTP OPTIONS 动词 helper；没有命名为 `AsyncOptions` 是为了避免和 `AsyncOptions` 类型名冲突。
+`Request*` send handle 重载签名：
 
-参数与返回值：同 `AsyncSendEx`，但 method 由函数名决定。
+```cpp
+NTSTATUS AsyncGet(Request* request, const char* url, AsyncOp** operation) noexcept;
+NTSTATUS AsyncGetEx(Request* request, const char* url, SIZE_T urlLength,
+                    const Headers* headers, const AsyncOptions* options,
+                    AsyncOp** operation) noexcept;
+
+NTSTATUS AsyncPost(Request* request, const char* url, const Body* body, AsyncOp** operation) noexcept;
+NTSTATUS AsyncPostEx(Request* request, const char* url, SIZE_T urlLength,
+                     const Headers* headers, const Body* body,
+                     const AsyncOptions* options, AsyncOp** operation) noexcept;
+
+NTSTATUS AsyncPut(Request* request, const char* url, const Body* body, AsyncOp** operation) noexcept;
+NTSTATUS AsyncPutEx(Request* request, const char* url, SIZE_T urlLength,
+                    const Headers* headers, const Body* body,
+                    const AsyncOptions* options, AsyncOp** operation) noexcept;
+
+NTSTATUS AsyncPatch(Request* request, const char* url, const Body* body, AsyncOp** operation) noexcept;
+NTSTATUS AsyncPatchEx(Request* request, const char* url, SIZE_T urlLength,
+                      const Headers* headers, const Body* body,
+                      const AsyncOptions* options, AsyncOp** operation) noexcept;
+
+NTSTATUS AsyncDelete(Request* request, const char* url, AsyncOp** operation) noexcept;
+NTSTATUS AsyncDeleteEx(Request* request, const char* url, SIZE_T urlLength,
+                       const Headers* headers, const AsyncOptions* options,
+                       AsyncOp** operation) noexcept;
+
+NTSTATUS AsyncHead(Request* request, const char* url, AsyncOp** operation) noexcept;
+NTSTATUS AsyncHeadEx(Request* request, const char* url, SIZE_T urlLength,
+                     const Headers* headers, const AsyncOptions* options,
+                     AsyncOp** operation) noexcept;
+
+NTSTATUS AsyncOptionsRequest(Request* request, const char* url, AsyncOp** operation) noexcept;
+NTSTATUS AsyncOptionsRequestEx(Request* request, const char* url, SIZE_T urlLength,
+                               const Headers* headers, const AsyncOptions* options,
+                               AsyncOp** operation) noexcept;
+```
+
+参数：
+
+| 参数 | 方向 | 是否可空 | 说明 |
+|------|------|----------|------|
+| `session` | in | 否 | 会话句柄；用于 `Session*` 重载 |
+| `request` | in | 否 | 请求发送句柄；用于 `Request*` 重载 |
+| `url` | in | 否 | 请求 URL。非 `Ex` 重载按 NUL 结尾字符串计算长度 |
+| `urlLength` | in | 否 | URL 字节长度，不包含额外 NUL；仅 `Ex` 重载使用 |
+| `headers` | in | 是 | 请求头集合 |
+| `body` | in | 是 | `AsyncPost` / `AsyncPut` / `AsyncPatch` 的请求体 |
+| `options` | in | 是 | 异步发送选项；为空时使用默认异步发送行为 |
+| `operation` | out | 否 | 成功时接收 `AsyncOp*`，调用方最终用 `AsyncRelease` 释放 |
+
+返回值：
+
+| 返回值 | 含义 |
+|--------|------|
+| `STATUS_SUCCESS` | 异步操作创建并排队成功 |
+| `STATUS_INVALID_PARAMETER` | 句柄、URL、输出指针等非法 |
+| `STATUS_INSUFFICIENT_RESOURCES` | 分配失败或异步资源不足 |
+| 其他失败状态 | 请求准备或排队阶段失败 |
+
+注意事项：
+
+- `AsyncOptionsRequest` / `AsyncOptionsRequestEx` 是 HTTP OPTIONS 动词 helper；没有命名为 `AsyncOptions` 是为了避免和 `AsyncOptions` 类型名冲突。
+- `AsyncGet`、`AsyncDelete`、`AsyncHead`、`AsyncOptionsRequest` 没有 `Body*` 参数；需要非典型带 body 的请求请使用通用 `AsyncSend` / `AsyncSendEx`。
+- 引用型 `Body` 的源缓冲必须保持到异步操作完成或取消。
+- 成功创建操作后，调用方应 `AsyncWait` 等待终态，调用 `AsyncGetResponse` 取得响应，再分别释放 `Response` 和 `AsyncOp`。
 
 ## 异步操作函数
 
