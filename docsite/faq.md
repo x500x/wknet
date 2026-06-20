@@ -46,7 +46,7 @@ A：`KernelHttp::kws`（`kws::Connect/SendText/Receive/Close`），头文件 `<K
 A：内核环境约束。库内禁止用栈（请用堆，高频缓冲常驻 Workspace），`new/delete` 也不直接用（除非在 lib 内重载）。统一用 `HeapObject<T>` / `HeapArray<T>`。
 
 **Q：用了异步 API，卸载驱动要注意什么？**
-A：卸载前必须 `engine::KhEngineDrainAsync()` 等待异步 worker 结束，再释放 WSK。
+A：高层调用方卸载前调用 `khttp::Destroy()` 等待异步 worker 结束，再释放 WSK。同步-only 路径可不调用，但可无条件调用。
 
 ---
 
@@ -83,4 +83,4 @@ A: It is supported as an explicit opt-in. Set `ConnectConfig.AllowWebSocketOverH
 A: Kernel constraints. The library forbids stack buffers (use heap; hot buffers resident in Workspace) and raw `new/delete` (unless overloaded in the lib). Use `HeapObject<T>` / `HeapArray<T>`.
 
 **Q: Anything special on driver unload after async APIs?**
-A: Call `engine::KhEngineDrainAsync()` before releasing WSK.
+A: Call `khttp::Destroy()` before releasing WSK. Synchronous-only paths do not require it, but may call it unconditionally.

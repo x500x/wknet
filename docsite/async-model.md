@@ -39,7 +39,7 @@ enum class KhAsyncState { Pending, Running, Completed };
 ```cpp
 NTSTATUS KhEngineDrainAsync() noexcept;   // 等待全部在飞异步操作结束
 ```
-**用过异步 API 后，驱动卸载前必须先 `engine::KhEngineDrainAsync()`**，再释放 WSK / 关闭句柄。每个句柄含 `volatile LONG InFlight` 计数与 `KEVENT DrainEvent` 做收尾同步，确保操作仍在使用时句柄不被释放。
+高层调用方使用 `khttp::Destroy()` 作为卸载收尾入口；它内部等待全部在飞异步操作结束。**用过异步 API 后，驱动卸载前必须先 `khttp::Destroy()`**，再释放 WSK / 关闭句柄。同步-only 路径可不调用，但可无条件调用。每个句柄含 `volatile LONG InFlight` 计数与 `KEVENT DrainEvent` 做收尾同步，确保操作仍在使用时句柄不被释放。
 
 ### 高层异步函数速查
 
@@ -63,7 +63,7 @@ if (khttp::AsyncWait(op, 30000) == STATUS_SUCCESS) {
     }
 }
 khttp::AsyncRelease(op);
-// 驱动卸载路径：engine::KhEngineDrainAsync();
+// 驱动卸载路径：khttp::Destroy();
 ```
 
 ---
@@ -74,4 +74,4 @@ khttp::AsyncRelease(op);
 
 Reference counting: the user handle holds one reference; an internal worker holds another, keeping the object alive after the user marks it closed so it can still observe cancellation. `AsyncCancel` completes a pending op immediately and signals a running HTTP/WS worker, which forwards the flag into WSK transport waits to cancel the active IRP where supported — cancellation is cooperative, so still `AsyncWait` then `AsyncRelease`.
 
-**After using async APIs, call `engine::KhEngineDrainAsync()` before driver unload** (then release WSK / close handles). Each handle carries a `volatile LONG InFlight` counter and a `KEVENT DrainEvent` so handles are not freed while operations still use them.
+**After using async APIs, call `khttp::Destroy()` before driver unload** (then release WSK / close handles). Synchronous-only paths do not require it, but may call it unconditionally. Each handle carries a `volatile LONG InFlight` counter and a `KEVENT DrainEvent` so handles are not freed while operations still use them.

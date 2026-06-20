@@ -54,13 +54,13 @@ tests/run-cookbook-tests.ps1  —— 一键编译并运行测试
 1. 把 `samples/` 三个文件拷到 `src/KernelHttpExample/samples/`。
 2. 在 `.vcxproj` 加入 `CookbookSamples.cpp` 与两个头文件。
 3. 在 `DriverEntry.cpp` 包含 `samples/CookbookSamples.h`，在 `RunLoadHttpSamples()` 里追加 `RunCookbookSamples(g_wskClient, &cookbookResults)`。
-4. 卸载路径无需改动——现有 `DriverUnload` 已调用 `engine::KhEngineDrainAsync()`。
+4. 卸载路径无需改动——现有 `DriverUnload` 已调用 `khttp::Destroy()`。
 
 ### 注意事项
 
 1. **IRQL**：所有调用与守卫析构都在 `PASSIVE_LEVEL`。
 2. **所有权**：`Response` 与 `Request`/`AsyncOp` 独立生命周期，分别释放。
-3. **卸载**：用异步 API 后卸载前必须 `KhEngineDrainAsync()`。
+3. **卸载**：用异步 API 后卸载前必须 `khttp::Destroy()`；同步-only 路径可不调用，但可无条件调用。
 4. **WebSocket 全双工时序**：`kws::Close` 不得与同句柄「新 I/O 发起」并发；最安全是单线程内 连接→发→收→关。
 5. **`kws::Receive` 的 `message.Data`** 指向内部缓冲，下次收/关前有效，关闭后勿引用。
 
@@ -93,7 +93,7 @@ A set of production-grade samples showing correct resource/error handling for th
 
 1. **IRQL**: all calls and guard destruction at `PASSIVE_LEVEL`.
 2. **Ownership**: `Response` lifetime is independent of `Request`/`AsyncOp`.
-3. **Unload**: call `KhEngineDrainAsync()` before unload after using async APIs.
+3. **Unload**: call `khttp::Destroy()` before unload after using async APIs. Synchronous-only paths do not require it, but may call it unconditionally.
 4. **WebSocket full-duplex**: never run `kws::Close` concurrently with new I/O on the same handle; safest is single-threaded connect→send→recv→close.
 5. **`kws::Receive`'s `message.Data`** points to an internal buffer valid until the next receive/close.
 

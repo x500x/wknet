@@ -12,7 +12,13 @@ HTTP 在命名空间 `KernelHttp::khttp`，WebSocket 在 `KernelHttp::kws`。句
 
 - `khttp::Session` / `Request` / `Response` / `AsyncOp`，`kws::WebSocket`。
 - `Response` 与发起它的 `Request`/`AsyncOp` 是**独立**生命周期，分别释放。
-- 全部调用在 `PASSIVE_LEVEL`。用过异步 API 后，卸载前必须 `engine::KhEngineDrainAsync()`。
+- 全部调用在 `PASSIVE_LEVEL`。用过异步 API 后，卸载前必须 `khttp::Destroy()`；同步-only 路径可不调用，但可无条件调用。
+
+### 生命周期（`khttp/Lifecycle.h`）
+
+```cpp
+void Destroy() noexcept;   // 高层卸载收尾入口，等待全部在飞异步操作结束
+```
 
 ### Session（`khttp/Session.h`）
 
@@ -167,8 +173,8 @@ khttp::SessionClose(s);
 
 ## English
 
-HTTP lives in `KernelHttp::khttp`, WebSocket in `KernelHttp::kws`. Handles are opaque; release with the matching Release/Close (all accept `nullptr`). A `Response` has a lifetime independent of its `Request`/`AsyncOp`. All calls at `PASSIVE_LEVEL`; after async usage call `engine::KhEngineDrainAsync()` before unload.
+HTTP lives in `KernelHttp::khttp`, WebSocket in `KernelHttp::kws`. Handles are opaque; release with the matching Release/Close (all accept `nullptr`). A `Response` has a lifetime independent of its `Request`/`AsyncOp`. All calls at `PASSIVE_LEVEL`; after async usage call `khttp::Destroy()` before unload. Synchronous-only paths do not require it, but may call it unconditionally.
 
-The full signatures, enums, `SendOptions` fields, and callback prototypes are listed in the Chinese section above (code is language-neutral). Key entry points: `SessionCreate`/`SessionClose`; `RequestCreate` + setters (`SetUrl`/`SetMethod`/`SetHeader`/`Set*Body`/`RequestAddTrailer`/`SetTls`/`SetConnPolicy`/`SetAddressFamily`); synchronous `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options`/`Send`; asynchronous `GetAsync`/`PostAsync`/`SendAsync` + `AsyncWait`/`AsyncCancel`/`AsyncGetResponse`/`AsyncRelease`; response accessors `ResponseStatusCode`/`ResponseBody`/`ResponseGetHeader`/...
+The full signatures, enums, `SendOptions` fields, and callback prototypes are listed in the Chinese section above (code is language-neutral). Key entry points: `Destroy`; `SessionCreate`/`SessionClose`; `RequestCreate` + setters (`SetUrl`/`SetMethod`/`SetHeader`/`Set*Body`/`RequestAddTrailer`/`SetTls`/`SetConnPolicy`/`SetAddressFamily`); synchronous `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options`/`Send`; asynchronous `GetAsync`/`PostAsync`/`SendAsync` + `AsyncWait`/`AsyncCancel`/`AsyncGetResponse`/`AsyncRelease`; response accessors `ResponseStatusCode`/`ResponseBody`/`ResponseGetHeader`/...
 
 **WebSocket (`kws`)**: `Connect`/`ConnectAsync` (`ConnectConfig.Headers` for opening-handshake headers; `AllowWebSocketOverHttp2` explicitly opts `wss` into RFC 8441), `SendText`/`SendBinary`/`SendContinuation`/`SendPing`/`SendPong` (+ `*Ex` with `FinalFragment`), `Receive`/`ReceiveEx`, `Close`/`CloseEx`, `SelectedSubprotocol`. `Message.Data` points to an internal buffer valid until the next receive/close. Never run `Close` concurrently with new I/O on the same handle.
