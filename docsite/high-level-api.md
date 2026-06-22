@@ -2650,1230 +2650,1230 @@ These functions handle WebSocket connections and communication:
 
 ### Detailed Function Reference
 
- #### Default Config Functions
+#### Default Config Functions
 
- ##### `DefaultTlsConfig`
+##### `DefaultTlsConfig`
 
- ```cpp
- TlsConfig DefaultTlsConfig() noexcept;
- ```
+```cpp
+TlsConfig DefaultTlsConfig() noexcept;
+```
 
- Returns default TLS config value. This is a convenience function so you don't need to manually initialize each field.
+Returns default TLS config value. This is a convenience function so you don't need to manually initialize each field.
 
- No parameters.
+No parameters.
 
- Returns: `TlsConfig` value with default TLS config fields.
+Returns: `TlsConfig` value with default TLS config fields.
 
- ##### `DefaultSessionConfig`
+##### `DefaultSessionConfig`
 
- ```cpp
- SessionConfig DefaultSessionConfig() noexcept;
- ```
+```cpp
+SessionConfig DefaultSessionConfig() noexcept;
+```
 
- Returns default session config value. This config works for most scenarios.
+Returns default session config value. This config works for most scenarios.
 
- No parameters.
+No parameters.
 
- Returns: `SessionConfig` value.
+Returns: `SessionConfig` value.
 
- ##### `DefaultSendOptions`
+##### `DefaultSendOptions`
 
- ```cpp
- SendOptions DefaultSendOptions() noexcept;
- ```
+```cpp
+SendOptions DefaultSendOptions() noexcept;
+```
 
- Returns default send options value. For actual high-level calls, prefer `SendOptionsCreate` to create a heap object
- and modify fields; this function is mainly for internal and compatibility scenarios.
+Returns default send options value. For actual high-level calls, prefer `SendOptionsCreate` to create a heap object
+and modify fields; this function is mainly for internal and compatibility scenarios.
 
- No parameters.
+No parameters.
 
- Returns: `SendOptions` value.
+Returns: `SendOptions` value.
 
- #### Lifecycle Functions
+#### Lifecycle Functions
 
- ##### `SessionCreate`
+##### `SessionCreate`
 
- ```cpp
- NTSTATUS SessionCreate(
-     _Out_ Session** session
- ) noexcept;
+```cpp
+NTSTATUS SessionCreate(
+    _Out_ Session** session
+) noexcept;
 
- NTSTATUS SessionCreate(
-     _In_opt_ const SessionConfig* config,
-     _Out_ Session** session
- ) noexcept;
- ```
+NTSTATUS SessionCreate(
+    _In_opt_ const SessionConfig* config,
+    _Out_ Session** session
+) noexcept;
+```
 
- Creates a high-level HTTP/WS session. The session internally initializes the hidden WSK runtime and creates engine
- session, connection pool, workspace, TLS provider cache, etc. This is the first step in using the high-level API.
+Creates a high-level HTTP/WS session. The session internally initializes the hidden WSK runtime and creates engine
+session, connection pool, workspace, TLS provider cache, etc. This is the first step in using the high-level API.
 
- | Parameter | Description |
- |-----------|-------------|
- | `config` | Session config; `nullptr` uses `DefaultSessionConfig()` |
- | `session` | Receives `Session*` on success; set to `nullptr` on failure |
+| Parameter | Description |
+|-----------|-------------|
+| `config` | Session config; `nullptr` uses `DefaultSessionConfig()` |
+| `session` | Receives `Session*` on success; set to `nullptr` on failure |
 
- | Return Value | Meaning |
- |--------------|---------|
- | `STATUS_SUCCESS` | Created successfully |
- | `STATUS_INVALID_PARAMETER` | `session == nullptr` or invalid config |
- | `STATUS_INSUFFICIENT_RESOURCES` | Failed to allocate session, WSK runtime, or internal resources |
- | Other failure | WSK initialization or engine session creation failed |
+| Return Value | Meaning |
+|--------------|---------|
+| `STATUS_SUCCESS` | Created successfully |
+| `STATUS_INVALID_PARAMETER` | `session == nullptr` or invalid config |
+| `STATUS_INSUFFICIENT_RESOURCES` | Failed to allocate session, WSK runtime, or internal resources |
+| Other failure | WSK initialization or engine session creation failed |
 
- NOTE: Must call `SessionClose` after success. High-level `SessionCreate` does not accept `net::WskClient*`; this is an
- internal implementation detail. You can still release `Request` objects created by this session before `SessionClose`,
- but do not continue using old `Request` for sends after session close.
+NOTE: Must call `SessionClose` after success. High-level `SessionCreate` does not accept `net::WskClient*`; this is an
+internal implementation detail. You can still release `Request` objects created by this session before `SessionClose`,
+but do not continue using old `Request` for sends after session close.
 
- ##### `SessionClose`
+##### `SessionClose`
 
- ```cpp
- void SessionClose(
-     _In_opt_ Session* session
- ) noexcept;
- ```
+```cpp
+void SessionClose(
+    _In_opt_ Session* session
+) noexcept;
+```
 
- Closes and releases the session. This is a safe function that accepts `nullptr`.
+Closes and releases the session. This is a safe function that accepts `nullptr`.
 
- | Parameter | Description |
- |-----------|-------------|
- | `session` | Session to close; `nullptr` returns immediately |
+| Parameter | Description |
+|-----------|-------------|
+| `session` | Session to close; `nullptr` returns immediately |
 
- No return value.
+No return value.
 
- NOTE: Closing the session closes the internal engine session and the hidden WSK runtime. If you used async APIs, you
- must also call `Destroy()` before driver unload.
+NOTE: Closing the session closes the internal engine session and the hidden WSK runtime. If you used async APIs, you
+must also call `Destroy()` before driver unload.
 
- ##### `RequestCreate`
+##### `RequestCreate`
 
- ```cpp
- NTSTATUS RequestCreate(
-     _In_ Session* session,
-     _Out_ Request** out
- ) noexcept;
- ```
+```cpp
+NTSTATUS RequestCreate(
+    _In_ Session* session,
+    _Out_ Request** out
+) noexcept;
+```
 
- Creates a send handle bound to `Session`. `Request` can be used as the first parameter of `Send*` / `AsyncSend*`,
- equivalent to `Session*`.
+Creates a send handle bound to `Session`. `Request` can be used as the first parameter of `Send*` / `AsyncSend*`,
+equivalent to `Session*`.
 
- | Parameter | Description |
- |-----------|-------------|
- | `session` | Parent session |
- | `out` | Receives `Request*` on success |
+| Parameter | Description |
+|-----------|-------------|
+| `session` | Parent session |
+| `out` | Receives `Request*` on success |
 
- | Return Value | Meaning |
- |--------------|---------|
- | `STATUS_SUCCESS` | Created successfully |
- | `STATUS_INVALID_PARAMETER` | Parameter is null, session invalid, or session closed |
- | `STATUS_INSUFFICIENT_RESOURCES` | Allocation failed |
+| Return Value | Meaning |
+|--------------|---------|
+| `STATUS_SUCCESS` | Created successfully |
+| `STATUS_INVALID_PARAMETER` | Parameter is null, session invalid, or session closed |
+| `STATUS_INSUFFICIENT_RESOURCES` | Allocation failed |
 
- NOTE: `Request` is no longer a builder. method, URL, headers, body, options are all passed in `Send*` / `AsyncSend*`
- calls. This design allows the same `Request` to be used for multiple sends.
+NOTE: `Request` is no longer a builder. method, URL, headers, body, options are all passed in `Send*` / `AsyncSend*`
+calls. This design allows the same `Request` to be used for multiple sends.
 
- ##### `RequestRelease`
+##### `RequestRelease`
 
- ```cpp
- void RequestRelease(
-     _In_opt_ Request* request
- ) noexcept;
- ```
+```cpp
+void RequestRelease(
+    _In_opt_ Request* request
+) noexcept;
+```
 
- Releases the `Request` send handle. This is a safe function that accepts `nullptr`.
+Releases the `Request` send handle. This is a safe function that accepts `nullptr`.
 
- | Parameter | Description |
- |-----------|-------------|
- | `request` | Request handle to release |
+| Parameter | Description |
+|-----------|-------------|
+| `request` | Request handle to release |
 
- No return value.
+No return value.
 
- ##### `Destroy`
+##### `Destroy`
 
- ```cpp
- void Destroy() noexcept;
- ```
+```cpp
+void Destroy() noexcept;
+```
 
- Library-level async cleanup entry point. This function cleans up async runtime resources.
+Library-level async cleanup entry point. This function cleans up async runtime resources.
 
- No parameters.
+No parameters.
 
- No return value.
+No return value.
 
- NOTE: Must call after using HTTP or WebSocket async APIs before driver unload. Safe to call unconditionally on
- sync-only paths.
+NOTE: Must call after using HTTP or WebSocket async APIs before driver unload. Safe to call unconditionally on
+sync-only paths.
 
- #### Headers Functions
+#### Headers Functions
 
- ##### `HeadersCreate`
+##### `HeadersCreate`
 
- ```cpp
- NTSTATUS HeadersCreate(
-     _Out_ Headers** headers
- ) noexcept;
- ```
+```cpp
+NTSTATUS HeadersCreate(
+    _Out_ Headers** headers
+) noexcept;
+```
 
- Creates an empty request header collection. This is the first step in building request headers.
+Creates an empty request header collection. This is the first step in building request headers.
 
- | Parameter | Description |
- |-----------|-------------|
- | `headers` | Receives `Headers*` on success; set to `nullptr` on failure |
+| Parameter | Description |
+|-----------|-------------|
+| `headers` | Receives `Headers*` on success; set to `nullptr` on failure |
 
- | Return Value | Meaning |
- |--------------|---------|
- | `STATUS_SUCCESS` | Created successfully |
- | `STATUS_INVALID_PARAMETER` | `headers == nullptr` |
- | `STATUS_INSUFFICIENT_RESOURCES` | Allocation failed |
+| Return Value | Meaning |
+|--------------|---------|
+| `STATUS_SUCCESS` | Created successfully |
+| `STATUS_INVALID_PARAMETER` | `headers == nullptr` |
+| `STATUS_INSUFFICIENT_RESOURCES` | Allocation failed |
 
- ##### `HeadersAdd` / `HeadersAddEx`
+##### `HeadersAdd` / `HeadersAddEx`
 
- ```cpp
- NTSTATUS HeadersAdd(
-     _Inout_ Headers* headers,
-     _In_ const char* name,
-     _In_ const char* value
- ) noexcept;
+```cpp
+NTSTATUS HeadersAdd(
+    _Inout_ Headers* headers,
+    _In_ const char* name,
+    _In_ const char* value
+) noexcept;
 
- NTSTATUS HeadersAddEx(
-     _Inout_ Headers* headers,
-     _In_ const char* name,
-     _In_ SIZE_T nameLength,
-     _In_ const char* value,
-     _In_ SIZE_T valueLength
- ) noexcept;
- ```
+NTSTATUS HeadersAddEx(
+    _Inout_ Headers* headers,
+    _In_ const char* name,
+    _In_ SIZE_T nameLength,
+    _In_ const char* value,
+    _In_ SIZE_T valueLength
+) noexcept;
+```
 
- Adds or overwrites a request header in `Headers`. Deduplicates by case-insensitive field name; same-name fields
- overwrite the old value. `HeadersAdd` is the convenience version requiring NUL-terminated strings; `Allows` specifying
- length for non-NUL-terminated strings.
+Adds or overwrites a request header in `Headers`. Deduplicates by case-insensitive field name; same-name fields
+overwrite the old value. `HeadersAdd` is the convenience version requiring NUL-terminated strings; `Allows` specifying
+length for non-NUL-terminated strings.
 
- | Parameter | Description |
- |-----------|-------------|
- | `headers` | Handle returned by `HeadersCreate` |
- | `name` | Header name; `HeadersAdd` requires NUL-terminated |
- | `nameLength` | Header name byte length, excluding NUL |
- | `value` | Header value; `HeadersAdd` requires NUL-terminated |
- | `valueLength` | Header value byte length, excluding NUL |
+| Parameter | Description |
+|-----------|-------------|
+| `headers` | Handle returned by `HeadersCreate` |
+| `name` | Header name; `HeadersAdd` requires NUL-terminated |
+| `nameLength` | Header name byte length, excluding NUL |
+| `value` | Header value; `HeadersAdd` requires NUL-terminated |
+| `valueLength` | Header value byte length, excluding NUL |
 
- | Return Value | Meaning |
- |--------------|---------|
- | `STATUS_SUCCESS` | Added or overwritten successfully |
- | `STATUS_INVALID_PARAMETER` | Invalid handle, illegal name, CR/LF in value, or attempted to add library-controlled
- header |
- | `STATUS_INSUFFICIENT_RESOURCES` | Exceeded header count limit or failed to copy name/value |
+| Return Value | Meaning |
+|--------------|---------|
+| `STATUS_SUCCESS` | Added or overwritten successfully |
+| `STATUS_INVALID_PARAMETER` | Invalid handle, illegal name, CR/LF in value, or attempted to add library-controlled
+header |
+| `STATUS_INSUFFICIENT_RESOURCES` | Exceeded header count limit or failed to copy name/value |
 
- **Ownership and restrictions**: name/value are always copied to heap; source buffer can be modified or freed after
- call returns. CR/LF injection is prohibited. Library-controlled headers like `Host`, `Content-Length`, connection
- framing fields are synthesized or rejected by the library.
-
- ##### `HeadersRelease`
-
- ```cpp
- void HeadersRelease(
-     _In_opt_ Headers* headers
- ) noexcept;
- ```
-
- Releases the request header collection and its copied name/value. This is a safe function that accepts `nullptr`.
-
- | Parameter | Description |
- |-----------|-------------|
- | `headers` | Header collection to release |
-
- No return value.
-
- #### Body Functions
-
- ##### Body Reference vs Copy Rules
-
- Understanding Body memory management rules is important:
-
- | Function Family | Data Ownership | Lifetime Requirement |
- |-----------------|----------------|---------------------|
- | `BodyCreateBytes` / `BodyCreateText` / `BodyCreateJson` | References caller bytes | Valid until sync send returns or
- async send completes/cancels |
- | `BodyCreateBytesCopy` / `BodyCreateTextCopy` / `BodyCreateJsonCopy` | Copies bytes to heap on creation | Source
- buffer can be freed after creation |
- | `BodyCreateForm` | Copies pair descriptor array; pair pointers used by reference | name/value bytes must remain
- valid until send completes |
- | `BodyCreateMultipart` | Copies part descriptor array; part pointers used by reference | bytes pointed to by parts
- must remain valid until send completes |
- | `BodyCreateFile` / `BodyCreateFileEx` | Copies file path and Content-Type | File content read at send time |
-
- **Simple rule**: If unsure, prefer functions with `Copy` suffix so you don't need to worry about data lifetime.
-
- ##### `BodyCreateBytes` / `BodyCreateBytesEx`
-
- ```cpp
- NTSTATUS BodyCreateBytes(
-     _In_opt_ const UCHAR* data,
-     _In_ SIZE_T dataLength,
-     _Out_ Body** body
- ) noexcept;
-
- NTSTATUS BodyCreateBytesEx(
-     _In_opt_ const UCHAR* data,
-     _In_ SIZE_T dataLength,
-     _Out_ Body** body
- ) noexcept;
- ```
-
- Creates a raw bytes body referencing caller memory, without setting Content-Type. This is the most basic body creation
- function.
-
- | Parameter | Description |
- |-----------|-------------|
- | `data` | Request body bytes; can be NULL when `dataLength == 0` |
- | `dataLength` | Byte length |
- | `body` | Receives `Body*` on success |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
-
- ##### `BodyCreateBytesCopy` / `BodyCreateBytesCopyEx`
-
- ```cpp
- NTSTATUS BodyCreateBytesCopy(
-     _In_opt_ const UCHAR* data,
-     _In_ SIZE_T dataLength,
-     _Out_ Body** body
- ) noexcept;
-
- NTSTATUS BodyCreateBytesCopyEx(
-     _In_opt_ const UCHAR* data,
-     _In_ SIZE_T dataLength,
-     _Out_ Body** body
- ) noexcept;
- ```
-
- Creates a raw bytes body and copies caller bytes on creation. After success, `data` can be immediately freed or
- modified. This is the safer version.
-
- Parameters and return values: Same as `BodyCreateBytes`
-
- ##### `BodyCreateText` / `BodyCreateTextEx`
-
- ```cpp
- NTSTATUS BodyCreateText(
-     _In_opt_ const char* text,
-     _In_ SIZE_T textLength,
-     _In_opt_ const char* contentType,
-     _Out_ Body** body
- ) noexcept;
-
- NTSTATUS BodyCreateTextEx(
-     _In_opt_ const char* text,
-     _In_ SIZE_T textLength,
-     _In_opt_ const char* contentType,
-     _In_ SIZE_T contentTypeLength,
-     _Out_ Body** body
- ) noexcept;
- ```
-
- Creates a text body referencing caller text bytes, with optional Content-Type. Suitable for sending plain text, HTML,
- XML, etc.
-
- | Parameter | Description |
- |-----------|-------------|
- | `text` | Text bytes; not required to be NUL-terminated; can be NULL when `textLength == 0` |
- | `textLength` | Text byte length |
- | `contentType` | Content-Type; `BodyCreateText` requires NUL-terminated |
- | `contentTypeLength` | Content-Type byte length, excluding NUL |
- | `body` | Receives `Body*` on success |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
-
- ##### `BodyCreateTextCopy` / `BodyCreateTextCopyEx`
-
- ```cpp
- NTSTATUS BodyCreateTextCopy(
-     _In_opt_ const char* text,
-     _In_ SIZE_T textLength,
-     _In_opt_ const char* contentType,
-     _Out_ Body** body
- ) noexcept;
-
- NTSTATUS BodyCreateTextCopyEx(
-     _In_opt_ const char* text,
-     _In_ SIZE_T textLength,
-     _In_opt_ const char* contentType,
-     _In_ SIZE_T contentTypeLength,
-     _Out_ Body** body
- ) noexcept;
- ```
-
- Creates a text body and copies text and Content-Type. After success, source buffers can be immediately freed or
- modified. Safer version.
-
- Parameters and return values: Same as `BodyCreateText`
-
- ##### `BodyCreateJson` / `BodyCreateJsonEx`
-
- ```cpp
- NTSTATUS BodyCreateJson(
-     _In_opt_ const char* json,
-     _In_ SIZE_T jsonLength,
-     _Out_ Body** body
- ) noexcept;
-
- NTSTATUS BodyCreateJsonEx(
-     _In_opt_ const char* json,
-     _In_ SIZE_T jsonLength,
-     _Out_ Body** body
- ) noexcept;
- ```
-
- Creates a body referencing caller JSON bytes and sets `Content-Type: application/json; charset=utf-8`. Note: library
- does not parse or validate JSON.
-
- | Parameter | Description |
- |-----------|-------------|
- | `json` | JSON bytes; library does not parse or validate; can be NULL when `jsonLength == 0` |
- | `jsonLength` | JSON byte length |
- | `body` | Receives `Body*` on success |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
-
- ##### `BodyCreateJsonCopy` / `BodyCreateJsonCopyEx`
-
- ```cpp
- NTSTATUS BodyCreateJsonCopy(
-     _In_opt_ const char* json,
-     _In_ SIZE_T jsonLength,
-     _Out_ Body** body
- ) noexcept;
-
- NTSTATUS BodyCreateJsonCopyEx(
-     _In_opt_ const char* json,
-     _In_ SIZE_T jsonLength,
-     _Out_ Body** body
- ) noexcept;
- ```
-
- Creates a JSON body and copies JSON bytes. After success, `json` source buffer can be immediately freed or modified.
- Safer version.
-
- Parameters and return values: Same as `BodyCreateJson`
-
- ##### `BodyCreateForm`
-
- ```cpp
- NTSTATUS BodyCreateForm(
-     _In_ const NameValuePair* pairs,
-     _In_ SIZE_T pairCount,
-     _Out_ Body** body
- ) noexcept;
- ```
-
- Creates an `application/x-www-form-urlencoded` body. Suitable for submitting form data.
-
- | Parameter | Description |
- |-----------|-------------|
- | `pairs` | Form field array |
- | `pairCount` | Field count; must be > 0 and not exceed per-request field limit |
- | `body` | Receives `Body*` on success |
-
- | Return Value | Meaning |
- |--------------|---------|
- | `STATUS_SUCCESS` | Created successfully |
- | `STATUS_INVALID_PARAMETER` | `pairs` is null, count invalid, or fields invalid |
- | `STATUS_INSUFFICIENT_RESOURCES` | Allocation failed |
-
- ##### `BodyCreateMultipart`
-
- ```cpp
- NTSTATUS BodyCreateMultipart(
-     _In_ const MultipartPart* parts,
-     _In_ SIZE_T partCount,
-     _Out_ Body** body
- ) noexcept;
- ```
-
- Creates a `multipart/form-data` body. Suitable for file uploads and complex form submissions.
-
- | Parameter | Description |
- |-----------|-------------|
- | `parts` | Multipart part array |
- | `partCount` | Part count; must be > 0 and not exceed per-request field limit |
- | `body` | Receives `Body*` on success |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
-
- ##### `BodyCreateFile` / `BodyCreateFileEx`
-
- ```cpp
- NTSTATUS BodyCreateFile(
-     _In_ const char* filePath,
-     _In_opt_ const char* contentType,
-     _Out_ Body** body
- ) noexcept;
-
- NTSTATUS BodyCreateFileEx(
-     _In_ const char* filePath,
-     _In_ SIZE_T filePathLength,
-     _In_opt_ const char* contentType,
-     _In_ SIZE_T contentTypeLength,
-     _Out_ Body** body
- ) noexcept;
- ```
-
- Creates a file request body. Library copies file path and Content-Type; file content is read at send time. Suitable
- for uploading local files.
-
- | Parameter | Description |
- |-----------|-------------|
- | `filePath` | File path; `BodyCreateFile` requires NUL-terminated |
- | `filePathLength` | File path byte length |
- | `contentType` | Content-Type; NULL means don't explicitly set |
- | `contentTypeLength` | Content-Type byte length |
- | `body` | Receives `Body*` on success |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
-
- ##### `BodySetMode`
-
- ```cpp
- NTSTATUS BodySetMode(
-     _Inout_ Body* body,
-     _In_ RequestBodyMode mode
- ) noexcept;
- ```
-
- Sets request body framing mode. Default is `ContentLength` for known-size bodies; `Chunked` for streaming data.
-
- | Parameter | Description |
- |-----------|-------------|
- | `body` | Body handle |
- | `mode` | `ContentLength` or `Chunked` |
-
- Returns: `STATUS_SUCCESS` or `STATUS_INVALID_PARAMETER`
-
- ##### `BodyAddTrailer` / `BodyAddTrailerEx`
-
- ```cpp
- NTSTATUS BodyAddTrailer(
-     _Inout_ Body* body,
-     _In_ const char* name,
-     _In_ const char* value
- ) noexcept;
-
- NTSTATUS BodyAddTrailerEx(
-     _Inout_ Body* body,
-     _In_ const char* name,
-     _In_ SIZE_T nameLength,
-     _In_ const char* value,
-     _In_ SIZE_T valueLength
- ) noexcept;
- ```
-
- Adds trailer fields for chunked request body. Trailers are extra header fields sent after the request body, commonly
- used for signatures or checksums.
-
- | Parameter | Description |
- |-----------|-------------|
- | `body` | Body handle |
- | `name` | Trailer name |
- | `nameLength` | Trailer name byte length |
- | `value` | Trailer value |
- | `valueLength` | Trailer value byte length |
-
- | Return Value | Meaning |
- |--------------|---------|
- | `STATUS_SUCCESS` | Added successfully |
- | `STATUS_INVALID_PARAMETER` | Invalid parameter, illegal name, CR/LF in value |
- | `STATUS_NOT_SUPPORTED` | Trailer field prohibited, e.g. `Content-Length`, `Transfer-Encoding`, `Host`, auth or
- cookie fields |
- | `STATUS_INSUFFICIENT_RESOURCES` | Exceeded count limit or copy failed |
-
- NOTE: Trailers are only sent after `BodySetMode(body, RequestBodyMode::Chunked)`.
-
- ##### `BodyRelease`
-
- ```cpp
- void BodyRelease(
-     _In_opt_ Body* body
- ) noexcept;
- ```
-
- Releases body handle and its owned heap memory. Safe function, accepts `nullptr`.
-
- | Parameter | Description |
- |-----------|-------------|
- | `body` | Body handle; can be NULL |
-
- No return value.
-
- #### Options Functions
-
- ##### `SendOptionsCreate`
-
- ```cpp
- NTSTATUS SendOptionsCreate(
-     _Out_ SendOptions** options
- ) noexcept;
- ```
-
- Creates `SendOptions` on heap with default values. Recommended way to create send options.
-
- | Parameter | Description |
- |-----------|-------------|
- | `options` | Receives `SendOptions*` on success |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
-
- ##### `SendOptionsRelease`
-
- ```cpp
- void SendOptionsRelease(
-     _In_opt_ SendOptions* options
- ) noexcept;
- ```
-
- Releases `SendOptions`. Safe function, accepts `nullptr`.
-
- | Parameter | Description |
- |-----------|-------------|
- | `options` | Send options handle; can be NULL |
-
- No return value.
-
- ##### `AsyncOptionsCreate`
-
- ```cpp
- NTSTATUS AsyncOptionsCreate(
-     _Out_ AsyncOptions** options
- ) noexcept;
- ```
-
- Creates `AsyncOptions` on heap with default values. Recommended way to create async send options.
-
- | Parameter | Description |
- |-----------|-------------|
- | `options` | Receives `AsyncOptions*` on success |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
-
- ##### `AsyncOptionsRelease`
-
- ```cpp
- void AsyncOptionsRelease(
-     _In_opt_ AsyncOptions* options
- ) noexcept;
- ```
-
- Releases `AsyncOptions`. Safe function, accepts `nullptr`.
-
- | Parameter | Description |
- |-----------|-------------|
- | `options` | Async options handle; can be NULL |
-
- No return value.
-
- #### Synchronous HTTP Functions
-
- ##### `Send` / `SendEx` and Convenience Functions
-
- There are two ways to send HTTP requests:
-
- ```cpp
- // Generic: need to manually pass Method
- NTSTATUS Send(Session* session, Method method, const char* url,
-               const Headers* headers, const Body* body,
-               const SendOptions* options, Response** response);
- NTSTATUS SendEx(Session* session, Method method, const char* url, SIZE_T urlLength, ...);
-
- // Convenience: function name is the HTTP method
- NTSTATUS Get(Session* session, const char* url, Response** response);
- NTSTATUS GetEx(Session* session, const char* url, SIZE_T urlLength,
-                const Headers* headers, const SendOptions* options, Response** response);
-
- NTSTATUS Post(Session* session, const char* url, const Body* body, Response** response);
- NTSTATUS PostEx(Session* session, const char* url, SIZE_T urlLength,
-                 const Headers* headers, const Body* body,
-                 const SendOptions* options, Response** response);
-
- // ... Put, Patch, Delete, Head, Options similar
- ```
-
- `Send` / `SendEx` are generic entry points suitable for all scenarios. Convenience functions (`Get`, `Post`, etc.) are
- syntactic sugar that save you from manually constructing `Method` enum. Both approaches are completely equivalent at
- the implementation level.
-
- **NOTE**: `Request*` can also be used as the first parameter, equivalent to `Session*`.
-
- | Parameter | Description |
- |-----------|-------------|
- | `session` / `request` | Session or request handle |
- | `method` | HTTP method; only needed for `Send` / `SendEx` |
- | `url` | Request URL; non-`Ex` versions require NUL-terminated |
- | `urlLength` | URL byte length; only for `Ex` versions |
- | `headers` | Request header collection; `nullptr` uses library default headers only |
- | `body` | Request body; `nullptr` means no body. `Get`/`Delete`/`Head`/`Options` don't have this parameter |
- | `options` | Send options; `nullptr` uses defaults |
- | `response` | Receives `Response*` on success; remember to release with `ResponseRelease` |
-
- | Return Value | Meaning |
- |--------------|---------|
- | `STATUS_SUCCESS` | Request succeeded |
- | `STATUS_INVALID_PARAMETER` | Invalid parameter |
- | `STATUS_INVALID_DEVICE_REQUEST` | Not called at `PASSIVE_LEVEL` |
- | `STATUS_BUFFER_TOO_SMALL` | Response exceeded `MaxResponseBytes` |
- | `STATUS_IO_TIMEOUT` | Timeout |
- | `STATUS_CONNECTION_DISCONNECTED` | Connection disconnected |
- | `STATUS_TRUST_FAILURE` | TLS certificate verification failed |
- | `STATUS_INVALID_NETWORK_RESPONSE` | Response format incorrect |
- | `STATUS_INSUFFICIENT_RESOURCES` | Out of memory or connection pool full |
- | Other `NTSTATUS` | Transport, TLS, parse, or callback error |
-
- NOTE: Library automatically synthesizes `Host`, `Content-Length` and other protocol-required headers. Your `headers`
- will override library defaults (where allowed). Do not manually set library-controlled headers; they will be rejected
- or ignored.
-
- #### Asynchronous HTTP Functions
-
- ##### `AsyncSend` / `AsyncSendEx` and Convenience Functions
-
- Like sync functions, async also has generic entry and convenience functions:
-
- ```cpp
- // Generic
- NTSTATUS AsyncSend(Session* session, Method method, const char* url,
-                    const Headers* headers, const Body* body,
-                    const AsyncOptions* options, AsyncOp** operation);
- NTSTATUS AsyncSendEx(Session* session, Method method, const char* url, SIZE_T urlLength, ...);
-
- // Convenience functions
- NTSTATUS AsyncGet(Session* session, const char* url, AsyncOp** operation);
- NTSTATUS AsyncGetEx(Session* session, const char* url, SIZE_T urlLength,
-                     const Headers* headers, const AsyncOptions* options, AsyncOp** operation);
-
- NTSTATUS AsyncPost(Session* session, const char* url, const Body* body, AsyncOp** operation);
- NTSTATUS AsyncPostEx(Session* session, const char* url, SIZE_T urlLength,
-                      const Headers* headers, const Body* body,
-                      const AsyncOptions* options, AsyncOp** operation);
-
- // ... AsyncPut, AsyncPatch, AsyncDelete, AsyncHead similar
- // Note: Async HTTP OPTIONS is called AsyncOptionsRequest, not AsyncOptions (to avoid name collision)
- ```
-
- | Parameter | Description |
- |-----------|-------------|
- | `session` / `request` | Session or request handle |
- | `method` | HTTP method; only for `AsyncSend` / `AsyncSendEx` |
- | `url` / `urlLength` | URL and length |
- | `headers` | Request header collection |
- | `body` | Request body. `AsyncGet`/`AsyncDelete`/`AsyncHead` don't have this |
- | `options` | Async send options; `nullptr` uses defaults |
- | `operation` | Receives `AsyncOp*` on success |
-
- | Return Value | Meaning |
- |--------------|---------|
- | `STATUS_SUCCESS` | Async operation created and queued |
- | `STATUS_INVALID_PARAMETER` | Invalid parameter or handle |
- | `STATUS_INSUFFICIENT_RESOURCES` | Allocation failed or async queue full |
- | Other failure | Send preparation failed |
-
- **Lifecycle notes**:
- - Reference-type `Body` source buffers must remain valid until async operation completes or cancels
- - After completion, call `AsyncGetResponse` to get response, then `ResponseRelease`
- - Finally call `AsyncRelease`
-
- | Function | HTTP Method | Request Body |
- |----------|-------------|--------------|
- | `AsyncGet` / `AsyncGetEx` | `GET` | None |
- | `AsyncPost` / `AsyncPostEx` | `POST` | Optional |
- | `AsyncPut` / `AsyncPutEx` | `PUT` | Optional |
- | `AsyncPatch` / `AsyncPatchEx` | `PATCH` | Optional |
- | `AsyncDelete` / `AsyncDeleteEx` | `DELETE` | None |
- | `AsyncHead` / `AsyncHeadEx` | `HEAD` | None |
- | `AsyncOptionsRequest` / `AsyncOptionsRequestEx` | `OPTIONS` | None |
-
- NOTE: `AsyncOptionsRequest` is named this way to avoid collision with `AsyncOptions` type. `AsyncGet`, `AsyncDelete`,
- `AsyncHead`, `AsyncOptionsRequest` have no `Body*` parameter; use generic `AsyncSend` for non-typical requests with
- body.
-
- #### Async Operation Functions
-
- ##### `AsyncWait`
-
- ```cpp
- NTSTATUS AsyncWait(
-     _In_ AsyncOp* operation,
-     _In_ ULONG timeoutMs
- ) noexcept;
- ```
-
- Waits for async operation to complete. This is the synchronous way to wait for async results.
-
- | Parameter | Description |
- |-----------|-------------|
- | `operation` | Async operation handle |
- | `timeoutMs` | Wait timeout in milliseconds; pass `0xffffffffUL` for infinite wait |
-
- Returns: Completion status, `STATUS_TIMEOUT`, `STATUS_INVALID_PARAMETER`, or failure during wait.
-
- ##### `AsyncCancel`
-
- ```cpp
- NTSTATUS AsyncCancel(
-     _In_ AsyncOp* operation
- ) noexcept;
- ```
-
- Requests cancellation of async operation. Cancellation is cooperative, not immediate.
-
- | Parameter | Description |
- |-----------|-------------|
- | `operation` | Async operation handle; cannot be NULL |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, or cancellation failure.
-
- NOTE: After canceling, still call `AsyncWait` to wait for terminal state before releasing.
-
- ##### `AsyncGetStatus`
-
- ```cpp
- NTSTATUS AsyncGetStatus(
-     _In_opt_ const AsyncOp* operation
- ) noexcept;
- ```
-
- Reads current/final status of async operation. Suitable for non-blocking checks.
-
- | Parameter | Description |
- |-----------|-------------|
- | `operation` | Async operation handle; can be NULL; returns failure for NULL or invalid handle |
-
- Returns: Current `NTSTATUS`
-
- ##### `AsyncIsCompleted`
-
- ```cpp
- bool AsyncIsCompleted(
-     _In_opt_ const AsyncOp* operation
- ) noexcept;
- ```
-
- Checks if async operation has completed. Lightweight check, does not block.
-
- | Parameter | Description |
- |-----------|-------------|
- | `operation` | Async operation handle; can be NULL |
-
- Returns: `true` if completed, `false` if not or handle is NULL
-
- ##### `AsyncIsCanceled`
-
- ```cpp
- bool AsyncIsCanceled(
-     _In_opt_ const AsyncOp* operation
- ) noexcept;
- ```
-
- Checks if async operation was requested to cancel.
-
- | Parameter | Description |
- |-----------|-------------|
- | `operation` | Async operation handle; can be NULL |
-
- Returns: `true` if canceled, `false` otherwise
-
- ##### `AsyncGetResponse`
+**Ownership and restrictions**: name/value are always copied to heap; source buffer can be modified or freed after
+call returns. CR/LF injection is prohibited. Library-controlled headers like `Host`, `Content-Length`, connection
+framing fields are synthesized or rejected by the library.
+
+##### `HeadersRelease`
+
+```cpp
+void HeadersRelease(
+    _In_opt_ Headers* headers
+) noexcept;
+```
+
+Releases the request header collection and its copied name/value. This is a safe function that accepts `nullptr`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `headers` | Header collection to release |
+
+No return value.
+
+#### Body Functions
+
+##### Body Reference vs Copy Rules
+
+Understanding Body memory management rules is important:
+
+| Function Family | Data Ownership | Lifetime Requirement |
+|-----------------|----------------|---------------------|
+| `BodyCreateBytes` / `BodyCreateText` / `BodyCreateJson` | References caller bytes | Valid until sync send returns or
+async send completes/cancels |
+| `BodyCreateBytesCopy` / `BodyCreateTextCopy` / `BodyCreateJsonCopy` | Copies bytes to heap on creation | Source
+buffer can be freed after creation |
+| `BodyCreateForm` | Copies pair descriptor array; pair pointers used by reference | name/value bytes must remain
+valid until send completes |
+| `BodyCreateMultipart` | Copies part descriptor array; part pointers used by reference | bytes pointed to by parts
+must remain valid until send completes |
+| `BodyCreateFile` / `BodyCreateFileEx` | Copies file path and Content-Type | File content read at send time |
+
+**Simple rule**: If unsure, prefer functions with `Copy` suffix so you don't need to worry about data lifetime.
+
+##### `BodyCreateBytes` / `BodyCreateBytesEx`
+
+```cpp
+NTSTATUS BodyCreateBytes(
+    _In_opt_ const UCHAR* data,
+    _In_ SIZE_T dataLength,
+    _Out_ Body** body
+) noexcept;
+
+NTSTATUS BodyCreateBytesEx(
+    _In_opt_ const UCHAR* data,
+    _In_ SIZE_T dataLength,
+    _Out_ Body** body
+) noexcept;
+```
+
+Creates a raw bytes body referencing caller memory, without setting Content-Type. This is the most basic body creation
+function.
+
+| Parameter | Description |
+|-----------|-------------|
+| `data` | Request body bytes; can be NULL when `dataLength == 0` |
+| `dataLength` | Byte length |
+| `body` | Receives `Body*` on success |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
+
+##### `BodyCreateBytesCopy` / `BodyCreateBytesCopyEx`
+
+```cpp
+NTSTATUS BodyCreateBytesCopy(
+    _In_opt_ const UCHAR* data,
+    _In_ SIZE_T dataLength,
+    _Out_ Body** body
+) noexcept;
+
+NTSTATUS BodyCreateBytesCopyEx(
+    _In_opt_ const UCHAR* data,
+    _In_ SIZE_T dataLength,
+    _Out_ Body** body
+) noexcept;
+```
+
+Creates a raw bytes body and copies caller bytes on creation. After success, `data` can be immediately freed or
+modified. This is the safer version.
+
+Parameters and return values: Same as `BodyCreateBytes`
+
+##### `BodyCreateText` / `BodyCreateTextEx`
+
+```cpp
+NTSTATUS BodyCreateText(
+    _In_opt_ const char* text,
+    _In_ SIZE_T textLength,
+    _In_opt_ const char* contentType,
+    _Out_ Body** body
+) noexcept;
+
+NTSTATUS BodyCreateTextEx(
+    _In_opt_ const char* text,
+    _In_ SIZE_T textLength,
+    _In_opt_ const char* contentType,
+    _In_ SIZE_T contentTypeLength,
+    _Out_ Body** body
+) noexcept;
+```
+
+Creates a text body referencing caller text bytes, with optional Content-Type. Suitable for sending plain text, HTML,
+XML, etc.
+
+| Parameter | Description |
+|-----------|-------------|
+| `text` | Text bytes; not required to be NUL-terminated; can be NULL when `textLength == 0` |
+| `textLength` | Text byte length |
+| `contentType` | Content-Type; `BodyCreateText` requires NUL-terminated |
+| `contentTypeLength` | Content-Type byte length, excluding NUL |
+| `body` | Receives `Body*` on success |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
+
+##### `BodyCreateTextCopy` / `BodyCreateTextCopyEx`
+
+```cpp
+NTSTATUS BodyCreateTextCopy(
+    _In_opt_ const char* text,
+    _In_ SIZE_T textLength,
+    _In_opt_ const char* contentType,
+    _Out_ Body** body
+) noexcept;
+
+NTSTATUS BodyCreateTextCopyEx(
+    _In_opt_ const char* text,
+    _In_ SIZE_T textLength,
+    _In_opt_ const char* contentType,
+    _In_ SIZE_T contentTypeLength,
+    _Out_ Body** body
+) noexcept;
+```
+
+Creates a text body and copies text and Content-Type. After success, source buffers can be immediately freed or
+modified. Safer version.
+
+Parameters and return values: Same as `BodyCreateText`
+
+##### `BodyCreateJson` / `BodyCreateJsonEx`
+
+```cpp
+NTSTATUS BodyCreateJson(
+    _In_opt_ const char* json,
+    _In_ SIZE_T jsonLength,
+    _Out_ Body** body
+) noexcept;
+
+NTSTATUS BodyCreateJsonEx(
+    _In_opt_ const char* json,
+    _In_ SIZE_T jsonLength,
+    _Out_ Body** body
+) noexcept;
+```
+
+Creates a body referencing caller JSON bytes and sets `Content-Type: application/json; charset=utf-8`. Note: library
+does not parse or validate JSON.
+
+| Parameter | Description |
+|-----------|-------------|
+| `json` | JSON bytes; library does not parse or validate; can be NULL when `jsonLength == 0` |
+| `jsonLength` | JSON byte length |
+| `body` | Receives `Body*` on success |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
+
+##### `BodyCreateJsonCopy` / `BodyCreateJsonCopyEx`
+
+```cpp
+NTSTATUS BodyCreateJsonCopy(
+    _In_opt_ const char* json,
+    _In_ SIZE_T jsonLength,
+    _Out_ Body** body
+) noexcept;
+
+NTSTATUS BodyCreateJsonCopyEx(
+    _In_opt_ const char* json,
+    _In_ SIZE_T jsonLength,
+    _Out_ Body** body
+) noexcept;
+```
+
+Creates a JSON body and copies JSON bytes. After success, `json` source buffer can be immediately freed or modified.
+Safer version.
+
+Parameters and return values: Same as `BodyCreateJson`
+
+##### `BodyCreateForm`
+
+```cpp
+NTSTATUS BodyCreateForm(
+    _In_ const NameValuePair* pairs,
+    _In_ SIZE_T pairCount,
+    _Out_ Body** body
+) noexcept;
+```
+
+Creates an `application/x-www-form-urlencoded` body. Suitable for submitting form data.
+
+| Parameter | Description |
+|-----------|-------------|
+| `pairs` | Form field array |
+| `pairCount` | Field count; must be > 0 and not exceed per-request field limit |
+| `body` | Receives `Body*` on success |
+
+| Return Value | Meaning |
+|--------------|---------|
+| `STATUS_SUCCESS` | Created successfully |
+| `STATUS_INVALID_PARAMETER` | `pairs` is null, count invalid, or fields invalid |
+| `STATUS_INSUFFICIENT_RESOURCES` | Allocation failed |
+
+##### `BodyCreateMultipart`
+
+```cpp
+NTSTATUS BodyCreateMultipart(
+    _In_ const MultipartPart* parts,
+    _In_ SIZE_T partCount,
+    _Out_ Body** body
+) noexcept;
+```
+
+Creates a `multipart/form-data` body. Suitable for file uploads and complex form submissions.
+
+| Parameter | Description |
+|-----------|-------------|
+| `parts` | Multipart part array |
+| `partCount` | Part count; must be > 0 and not exceed per-request field limit |
+| `body` | Receives `Body*` on success |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
+
+##### `BodyCreateFile` / `BodyCreateFileEx`
+
+```cpp
+NTSTATUS BodyCreateFile(
+    _In_ const char* filePath,
+    _In_opt_ const char* contentType,
+    _Out_ Body** body
+) noexcept;
+
+NTSTATUS BodyCreateFileEx(
+    _In_ const char* filePath,
+    _In_ SIZE_T filePathLength,
+    _In_opt_ const char* contentType,
+    _In_ SIZE_T contentTypeLength,
+    _Out_ Body** body
+) noexcept;
+```
+
+Creates a file request body. Library copies file path and Content-Type; file content is read at send time. Suitable
+for uploading local files.
+
+| Parameter | Description |
+|-----------|-------------|
+| `filePath` | File path; `BodyCreateFile` requires NUL-terminated |
+| `filePathLength` | File path byte length |
+| `contentType` | Content-Type; NULL means don't explicitly set |
+| `contentTypeLength` | Content-Type byte length |
+| `body` | Receives `Body*` on success |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
+
+##### `BodySetMode`
+
+```cpp
+NTSTATUS BodySetMode(
+    _Inout_ Body* body,
+    _In_ RequestBodyMode mode
+) noexcept;
+```
+
+Sets request body framing mode. Default is `ContentLength` for known-size bodies; `Chunked` for streaming data.
+
+| Parameter | Description |
+|-----------|-------------|
+| `body` | Body handle |
+| `mode` | `ContentLength` or `Chunked` |
+
+Returns: `STATUS_SUCCESS` or `STATUS_INVALID_PARAMETER`
+
+##### `BodyAddTrailer` / `BodyAddTrailerEx`
+
+```cpp
+NTSTATUS BodyAddTrailer(
+    _Inout_ Body* body,
+    _In_ const char* name,
+    _In_ const char* value
+) noexcept;
+
+NTSTATUS BodyAddTrailerEx(
+    _Inout_ Body* body,
+    _In_ const char* name,
+    _In_ SIZE_T nameLength,
+    _In_ const char* value,
+    _In_ SIZE_T valueLength
+) noexcept;
+```
+
+Adds trailer fields for chunked request body. Trailers are extra header fields sent after the request body, commonly
+used for signatures or checksums.
+
+| Parameter | Description |
+|-----------|-------------|
+| `body` | Body handle |
+| `name` | Trailer name |
+| `nameLength` | Trailer name byte length |
+| `value` | Trailer value |
+| `valueLength` | Trailer value byte length |
+
+| Return Value | Meaning |
+|--------------|---------|
+| `STATUS_SUCCESS` | Added successfully |
+| `STATUS_INVALID_PARAMETER` | Invalid parameter, illegal name, CR/LF in value |
+| `STATUS_NOT_SUPPORTED` | Trailer field prohibited, e.g. `Content-Length`, `Transfer-Encoding`, `Host`, auth or
+cookie fields |
+| `STATUS_INSUFFICIENT_RESOURCES` | Exceeded count limit or copy failed |
+
+NOTE: Trailers are only sent after `BodySetMode(body, RequestBodyMode::Chunked)`.
+
+##### `BodyRelease`
+
+```cpp
+void BodyRelease(
+    _In_opt_ Body* body
+) noexcept;
+```
+
+Releases body handle and its owned heap memory. Safe function, accepts `nullptr`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `body` | Body handle; can be NULL |
+
+No return value.
+
+#### Options Functions
+
+##### `SendOptionsCreate`
+
+```cpp
+NTSTATUS SendOptionsCreate(
+    _Out_ SendOptions** options
+) noexcept;
+```
+
+Creates `SendOptions` on heap with default values. Recommended way to create send options.
+
+| Parameter | Description |
+|-----------|-------------|
+| `options` | Receives `SendOptions*` on success |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
+
+##### `SendOptionsRelease`
+
+```cpp
+void SendOptionsRelease(
+    _In_opt_ SendOptions* options
+) noexcept;
+```
+
+Releases `SendOptions`. Safe function, accepts `nullptr`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `options` | Send options handle; can be NULL |
+
+No return value.
+
+##### `AsyncOptionsCreate`
+
+```cpp
+NTSTATUS AsyncOptionsCreate(
+    _Out_ AsyncOptions** options
+) noexcept;
+```
+
+Creates `AsyncOptions` on heap with default values. Recommended way to create async send options.
+
+| Parameter | Description |
+|-----------|-------------|
+| `options` | Receives `AsyncOptions*` on success |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
+
+##### `AsyncOptionsRelease`
+
+```cpp
+void AsyncOptionsRelease(
+    _In_opt_ AsyncOptions* options
+) noexcept;
+```
+
+Releases `AsyncOptions`. Safe function, accepts `nullptr`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `options` | Async options handle; can be NULL |
+
+No return value.
+
+#### Synchronous HTTP Functions
+
+##### `Send` / `SendEx` and Convenience Functions
+
+There are two ways to send HTTP requests:
+
+```cpp
+// Generic: need to manually pass Method
+NTSTATUS Send(Session* session, Method method, const char* url,
+              const Headers* headers, const Body* body,
+              const SendOptions* options, Response** response);
+NTSTATUS SendEx(Session* session, Method method, const char* url, SIZE_T urlLength, ...);
+
+// Convenience: function name is the HTTP method
+NTSTATUS Get(Session* session, const char* url, Response** response);
+NTSTATUS GetEx(Session* session, const char* url, SIZE_T urlLength,
+               const Headers* headers, const SendOptions* options, Response** response);
+
+NTSTATUS Post(Session* session, const char* url, const Body* body, Response** response);
+NTSTATUS PostEx(Session* session, const char* url, SIZE_T urlLength,
+                const Headers* headers, const Body* body,
+                const SendOptions* options, Response** response);
+
+// ... Put, Patch, Delete, Head, Options similar
+```
+
+`Send` / `SendEx` are generic entry points suitable for all scenarios. Convenience functions (`Get`, `Post`, etc.) are
+syntactic sugar that save you from manually constructing `Method` enum. Both approaches are completely equivalent at
+the implementation level.
+
+**NOTE**: `Request*` can also be used as the first parameter, equivalent to `Session*`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `session` / `request` | Session or request handle |
+| `method` | HTTP method; only needed for `Send` / `SendEx` |
+| `url` | Request URL; non-`Ex` versions require NUL-terminated |
+| `urlLength` | URL byte length; only for `Ex` versions |
+| `headers` | Request header collection; `nullptr` uses library default headers only |
+| `body` | Request body; `nullptr` means no body. `Get`/`Delete`/`Head`/`Options` don't have this parameter |
+| `options` | Send options; `nullptr` uses defaults |
+| `response` | Receives `Response*` on success; remember to release with `ResponseRelease` |
+
+| Return Value | Meaning |
+|--------------|---------|
+| `STATUS_SUCCESS` | Request succeeded |
+| `STATUS_INVALID_PARAMETER` | Invalid parameter |
+| `STATUS_INVALID_DEVICE_REQUEST` | Not called at `PASSIVE_LEVEL` |
+| `STATUS_BUFFER_TOO_SMALL` | Response exceeded `MaxResponseBytes` |
+| `STATUS_IO_TIMEOUT` | Timeout |
+| `STATUS_CONNECTION_DISCONNECTED` | Connection disconnected |
+| `STATUS_TRUST_FAILURE` | TLS certificate verification failed |
+| `STATUS_INVALID_NETWORK_RESPONSE` | Response format incorrect |
+| `STATUS_INSUFFICIENT_RESOURCES` | Out of memory or connection pool full |
+| Other `NTSTATUS` | Transport, TLS, parse, or callback error |
+
+NOTE: Library automatically synthesizes `Host`, `Content-Length` and other protocol-required headers. Your `headers`
+will override library defaults (where allowed). Do not manually set library-controlled headers; they will be rejected
+or ignored.
+
+#### Asynchronous HTTP Functions
+
+##### `AsyncSend` / `AsyncSendEx` and Convenience Functions
+
+Like sync functions, async also has generic entry and convenience functions:
+
+```cpp
+// Generic
+NTSTATUS AsyncSend(Session* session, Method method, const char* url,
+                   const Headers* headers, const Body* body,
+                   const AsyncOptions* options, AsyncOp** operation);
+NTSTATUS AsyncSendEx(Session* session, Method method, const char* url, SIZE_T urlLength, ...);
+
+// Convenience functions
+NTSTATUS AsyncGet(Session* session, const char* url, AsyncOp** operation);
+NTSTATUS AsyncGetEx(Session* session, const char* url, SIZE_T urlLength,
+                    const Headers* headers, const AsyncOptions* options, AsyncOp** operation);
+
+NTSTATUS AsyncPost(Session* session, const char* url, const Body* body, AsyncOp** operation);
+NTSTATUS AsyncPostEx(Session* session, const char* url, SIZE_T urlLength,
+                     const Headers* headers, const Body* body,
+                     const AsyncOptions* options, AsyncOp** operation);
+
+// ... AsyncPut, AsyncPatch, AsyncDelete, AsyncHead similar
+// Note: Async HTTP OPTIONS is called AsyncOptionsRequest, not AsyncOptions (to avoid name collision)
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `session` / `request` | Session or request handle |
+| `method` | HTTP method; only for `AsyncSend` / `AsyncSendEx` |
+| `url` / `urlLength` | URL and length |
+| `headers` | Request header collection |
+| `body` | Request body. `AsyncGet`/`AsyncDelete`/`AsyncHead` don't have this |
+| `options` | Async send options; `nullptr` uses defaults |
+| `operation` | Receives `AsyncOp*` on success |
+
+| Return Value | Meaning |
+|--------------|---------|
+| `STATUS_SUCCESS` | Async operation created and queued |
+| `STATUS_INVALID_PARAMETER` | Invalid parameter or handle |
+| `STATUS_INSUFFICIENT_RESOURCES` | Allocation failed or async queue full |
+| Other failure | Send preparation failed |
+
+**Lifecycle notes**:
+- Reference-type `Body` source buffers must remain valid until async operation completes or cancels
+- After completion, call `AsyncGetResponse` to get response, then `ResponseRelease`
+- Finally call `AsyncRelease`
+
+| Function | HTTP Method | Request Body |
+|----------|-------------|--------------|
+| `AsyncGet` / `AsyncGetEx` | `GET` | None |
+| `AsyncPost` / `AsyncPostEx` | `POST` | Optional |
+| `AsyncPut` / `AsyncPutEx` | `PUT` | Optional |
+| `AsyncPatch` / `AsyncPatchEx` | `PATCH` | Optional |
+| `AsyncDelete` / `AsyncDeleteEx` | `DELETE` | None |
+| `AsyncHead` / `AsyncHeadEx` | `HEAD` | None |
+| `AsyncOptionsRequest` / `AsyncOptionsRequestEx` | `OPTIONS` | None |
+
+NOTE: `AsyncOptionsRequest` is named this way to avoid collision with `AsyncOptions` type. `AsyncGet`, `AsyncDelete`,
+`AsyncHead`, `AsyncOptionsRequest` have no `Body*` parameter; use generic `AsyncSend` for non-typical requests with
+body.
+
+#### Async Operation Functions
+
+##### `AsyncWait`
+
+```cpp
+NTSTATUS AsyncWait(
+    _In_ AsyncOp* operation,
+    _In_ ULONG timeoutMs
+) noexcept;
+```
+
+Waits for async operation to complete. This is the synchronous way to wait for async results.
+
+| Parameter | Description |
+|-----------|-------------|
+| `operation` | Async operation handle |
+| `timeoutMs` | Wait timeout in milliseconds; pass `0xffffffffUL` for infinite wait |
+
+Returns: Completion status, `STATUS_TIMEOUT`, `STATUS_INVALID_PARAMETER`, or failure during wait.
+
+##### `AsyncCancel`
+
+```cpp
+NTSTATUS AsyncCancel(
+    _In_ AsyncOp* operation
+) noexcept;
+```
+
+Requests cancellation of async operation. Cancellation is cooperative, not immediate.
+
+| Parameter | Description |
+|-----------|-------------|
+| `operation` | Async operation handle; cannot be NULL |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, or cancellation failure.
+
+NOTE: After canceling, still call `AsyncWait` to wait for terminal state before releasing.
+
+##### `AsyncGetStatus`
+
+```cpp
+NTSTATUS AsyncGetStatus(
+    _In_opt_ const AsyncOp* operation
+) noexcept;
+```
+
+Reads current/final status of async operation. Suitable for non-blocking checks.
+
+| Parameter | Description |
+|-----------|-------------|
+| `operation` | Async operation handle; can be NULL; returns failure for NULL or invalid handle |
+
+Returns: Current `NTSTATUS`
+
+##### `AsyncIsCompleted`
+
+```cpp
+bool AsyncIsCompleted(
+    _In_opt_ const AsyncOp* operation
+) noexcept;
+```
+
+Checks if async operation has completed. Lightweight check, does not block.
+
+| Parameter | Description |
+|-----------|-------------|
+| `operation` | Async operation handle; can be NULL |
+
+Returns: `true` if completed, `false` if not or handle is NULL
+
+##### `AsyncIsCanceled`
+
+```cpp
+bool AsyncIsCanceled(
+    _In_opt_ const AsyncOp* operation
+) noexcept;
+```
+
+Checks if async operation was requested to cancel.
+
+| Parameter | Description |
+|-----------|-------------|
+| `operation` | Async operation handle; can be NULL |
+
+Returns: `true` if canceled, `false` otherwise
+
+##### `AsyncGetResponse`
 
- ```cpp
- NTSTATUS AsyncGetResponse(
-     _In_ AsyncOp* operation,
-     _Out_ Response** response
- ) noexcept;
- ```
-
- Extracts response from completed HTTP async operation. Must be called after operation completes.
-
- | Parameter | Description |
- |-----------|-------------|
- | `operation` | HTTP send async operation |
- | `response` | Receives `Response*` on success |
-
- | Return Value | Meaning |
- |--------------|---------|
- | `STATUS_SUCCESS` | Successfully extracted response |
- | `STATUS_INVALID_PARAMETER` | Invalid parameter or operation type |
- | `STATUS_PENDING` | Operation not yet complete; call `AsyncWait` first |
- | Other failure | Send failed or was canceled |
-
- ##### `AsyncRelease`
-
- ```cpp
- void AsyncRelease(
-     _In_opt_ AsyncOp* operation
- ) noexcept;
- ```
-
- Releases async operation handle. Safe function, accepts `nullptr`.
-
- | Parameter | Description |
- |-----------|-------------|
- | `operation` | Async operation handle; can be NULL |
-
- No return value.
-
- #### Response Functions
-
- ##### `ResponseStatusCode`
-
- ```cpp
- ULONG ResponseStatusCode(
-     _In_opt_ const Response* response
- ) noexcept;
- ```
-
- Reads HTTP status code. This is the first step in checking if a request succeeded.
-
- | Parameter | Description |
- |-----------|-------------|
- | `response` | Response handle; can be NULL |
-
- Returns: Status code (e.g. 200, 404, 500); returns 0 for NULL or invalid handle.
-
- ##### `ResponseBody` / `ResponseBodyLength`
-
- ```cpp
- const UCHAR* ResponseBody(
-     _In_opt_ const Response* response
- ) noexcept;
-
- SIZE_T ResponseBodyLength(
-     _In_opt_ const Response* response
- ) noexcept;
- ```
-
- Reads aggregated response body pointer and length. Response body is the complete content automatically aggregated by
- the library.
-
- | Parameter | Description |
- |-----------|-------------|
- | `response` | Response handle; can be NULL |
-
- Returns: `ResponseBody` returns library internal buffer pointer; `ResponseBodyLength` returns byte length. Pointer
- valid until `ResponseRelease`.
-
- NOTE: If you set callbacks (`OnBody`), response body may be empty because data was already streamed through callbacks.
-
- ##### `ResponseHeaderCount` / `ResponseTrailerCount`
-
- ```cpp
- SIZE_T ResponseHeaderCount(
-     _In_opt_ const Response* response
- ) noexcept;
-
- SIZE_T ResponseTrailerCount(
-     _In_opt_ const Response* response
- ) noexcept;
- ```
-
- Reads response header or trailer count. Used for iterating all header fields.
-
- | Parameter | Description |
- |-----------|-------------|
- | `response` | Response handle; can be NULL |
+```cpp
+NTSTATUS AsyncGetResponse(
+    _In_ AsyncOp* operation,
+    _Out_ Response** response
+) noexcept;
+```
+
+Extracts response from completed HTTP async operation. Must be called after operation completes.
+
+| Parameter | Description |
+|-----------|-------------|
+| `operation` | HTTP send async operation |
+| `response` | Receives `Response*` on success |
+
+| Return Value | Meaning |
+|--------------|---------|
+| `STATUS_SUCCESS` | Successfully extracted response |
+| `STATUS_INVALID_PARAMETER` | Invalid parameter or operation type |
+| `STATUS_PENDING` | Operation not yet complete; call `AsyncWait` first |
+| Other failure | Send failed or was canceled |
+
+##### `AsyncRelease`
+
+```cpp
+void AsyncRelease(
+    _In_opt_ AsyncOp* operation
+) noexcept;
+```
+
+Releases async operation handle. Safe function, accepts `nullptr`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `operation` | Async operation handle; can be NULL |
+
+No return value.
+
+#### Response Functions
+
+##### `ResponseStatusCode`
+
+```cpp
+ULONG ResponseStatusCode(
+    _In_opt_ const Response* response
+) noexcept;
+```
+
+Reads HTTP status code. This is the first step in checking if a request succeeded.
+
+| Parameter | Description |
+|-----------|-------------|
+| `response` | Response handle; can be NULL |
+
+Returns: Status code (e.g. 200, 404, 500); returns 0 for NULL or invalid handle.
+
+##### `ResponseBody` / `ResponseBodyLength`
+
+```cpp
+const UCHAR* ResponseBody(
+    _In_opt_ const Response* response
+) noexcept;
+
+SIZE_T ResponseBodyLength(
+    _In_opt_ const Response* response
+) noexcept;
+```
+
+Reads aggregated response body pointer and length. Response body is the complete content automatically aggregated by
+the library.
+
+| Parameter | Description |
+|-----------|-------------|
+| `response` | Response handle; can be NULL |
+
+Returns: `ResponseBody` returns library internal buffer pointer; `ResponseBodyLength` returns byte length. Pointer
+valid until `ResponseRelease`.
+
+NOTE: If you set callbacks (`OnBody`), response body may be empty because data was already streamed through callbacks.
+
+##### `ResponseHeaderCount` / `ResponseTrailerCount`
+
+```cpp
+SIZE_T ResponseHeaderCount(
+    _In_opt_ const Response* response
+) noexcept;
+
+SIZE_T ResponseTrailerCount(
+    _In_opt_ const Response* response
+) noexcept;
+```
+
+Reads response header or trailer count. Used for iterating all header fields.
+
+| Parameter | Description |
+|-----------|-------------|
+| `response` | Response handle; can be NULL |
 
- Returns: Count; returns 0 for NULL or invalid handle.
+Returns: Count; returns 0 for NULL or invalid handle.
 
- ##### `ResponseGetHeader`
+##### `ResponseGetHeader`
 
- ```cpp
- NTSTATUS ResponseGetHeader(
-     _In_ const Response* response,
-     _In_ const char* name,
-     _In_ SIZE_T nameLength,
-     _Out_ const char** value,
-     _Out_ SIZE_T* valueLength
- ) noexcept;
- ```
-
- Reads response header by name. Name matching is case-insensitive.
-
- | Parameter | Description |
- |-----------|-------------|
- | `response` | Response handle |
- | `name` | Header name |
- | `nameLength` | Name byte length |
- | `value` | Receives header value pointer on success |
- | `valueLength` | Receives value length on success |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_FOUND`
-
- ##### `ResponseGetHeaderAt`
-
- ```cpp
- NTSTATUS ResponseGetHeaderAt(
-     _In_ const Response* response,
-     _In_ SIZE_T index,
-     _Out_ const char** name,
-     _Out_ SIZE_T* nameLength,
-     _Out_ const char** value,
-     _Out_ SIZE_T* valueLength
- ) noexcept;
- ```
-
- Enumerates response header by index. Suitable for iterating all headers.
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_FOUND`
-
- ##### `ResponseGetTrailer` / `ResponseGetTrailerAt`
-
- ```cpp
- NTSTATUS ResponseGetTrailer(
-     _In_ const Response* response,
-     _In_ const char* name,
-     _In_ SIZE_T nameLength,
-     _Out_ const char** value,
-     _Out_ SIZE_T* valueLength
- ) noexcept;
-
- NTSTATUS ResponseGetTrailerAt(
-     _In_ const Response* response,
-     _In_ SIZE_T index,
-     _Out_ const char** name,
-     _Out_ SIZE_T* nameLength,
-     _Out_ const char** value,
-     _Out_ SIZE_T* valueLength
- ) noexcept;
- ```
-
- Reads response trailer by name or index. Trailers are header fields sent after the response body, commonly used with
- chunked transfer.
-
- Parameters and return values: Same as header read functions.
-
- ##### `ResponseRelease`
-
- ```cpp
- void ResponseRelease(
-     _In_opt_ Response* response
- ) noexcept;
- ```
-
- Releases response handle and its internal buffers. Safe function, accepts `nullptr`.
-
- | Parameter | Description |
- |-----------|-------------|
- | `response` | Response handle; can be NULL |
-
- No return value.
-
- #### WebSocket Functions
-
- ##### `kws::DefaultConnectConfig`
-
- ```cpp
- kws::ConnectConfig DefaultConnectConfig() noexcept;
- ```
-
- Returns default WebSocket connection config.
-
- No parameters.
-
- Returns: `ConnectConfig` value.
-
- ##### `kws::Connect` / `kws::ConnectEx`
-
- ```cpp
- NTSTATUS Connect(
-     _In_ khttp::Session* session,
-     _In_ const char* url,
-     _In_ SIZE_T urlLength,
-     _Out_ WebSocket** websocket
- ) noexcept;
-
- NTSTATUS Connect(
-     _In_ khttp::Session* session,
-     _In_ const ConnectConfig* config,
-     _Out_ WebSocket** websocket
- ) noexcept;
-
- NTSTATUS ConnectEx(
-     _In_ khttp::Session* session,
-     _In_ const ConnectConfig* config,
-     _Out_ WebSocket** websocket
- ) noexcept;
- ```
-
- Synchronous WebSocket connection. Function blocks until handshake completes.
-
- | Parameter | Description |
- |-----------|-------------|
- | `session` | High-level session |
- | `url` / `urlLength` | `ws://` or `wss://` URL |
- | `config` | Connection config |
- | `websocket` | Receives `WebSocket*` on success |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_SUPPORTED`, network/TLS/HTTP handshake failure.
-
- ##### `kws::ConnectAsync` / `kws::ConnectAsyncEx`
-
- ```cpp
- NTSTATUS ConnectAsync(
-     _In_ khttp::Session* session,
-     _In_ const char* url,
-     _In_ SIZE_T urlLength,
-     _Out_ khttp::AsyncOp** operation
- ) noexcept;
-
- NTSTATUS ConnectAsync(
-     _In_ khttp::Session* session,
-     _In_ const ConnectConfig* config,
-     _Out_ khttp::AsyncOp** operation
- ) noexcept;
-
- NTSTATUS ConnectAsyncEx(
-     _In_ khttp::Session* session,
-     _In_ const ConnectConfig* config,
-     _Out_ khttp::AsyncOp** operation
- ) noexcept;
- ```
-
- Asynchronous WebSocket connection. Parameters similar to `Connect`, but output is `AsyncOp**`. Use `AsyncWait` after
- success, then `kws::AsyncGetWebSocket` to get connection.
-
- ##### `kws::AsyncGetWebSocket`
-
- ```cpp
- NTSTATUS AsyncGetWebSocket(
-     _In_ khttp::AsyncOp* operation,
-     _Out_ WebSocket** websocket
- ) noexcept;
- ```
-
- Extracts `WebSocket` handle from completed WebSocket connect async operation.
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_PENDING`, or connection final failure.
-
- ##### WebSocket Send Functions
-
- ```cpp
- NTSTATUS SendText(
-     _In_ WebSocket* websocket,
-     _In_ const char* text,
-     _In_ SIZE_T textLength
- ) noexcept;
-
- NTSTATUS SendTextEx(
-     _In_ WebSocket* websocket,
-     _In_ const char* text,
-     _In_ SIZE_T textLength,
-     _In_opt_ const SendOptions* options
- ) noexcept;
-
- NTSTATUS SendBinary(
-     _In_ WebSocket* websocket,
-     _In_ const UCHAR* data,
-     _In_ SIZE_T dataLength
- ) noexcept;
-
- NTSTATUS SendBinaryEx(
-     _In_ WebSocket* websocket,
-     _In_ const UCHAR* data,
-     _In_ SIZE_T dataLength,
-     _In_opt_ const SendOptions* options
- ) noexcept;
-
- NTSTATUS SendContinuation(
-     _In_ WebSocket* websocket,
-     _In_ const UCHAR* data,
-     _In_ SIZE_T dataLength
- ) noexcept;
-
- NTSTATUS SendContinuationEx(
-     _In_ WebSocket* websocket,
-     _In_ const UCHAR* data,
-     _In_ SIZE_T dataLength,
-     _In_opt_ const SendOptions* options
- ) noexcept;
-
- NTSTATUS SendPing(
-     _In_ WebSocket* websocket,
-     _In_opt_ const UCHAR* payload,
-     _In_ SIZE_T payloadLength
- ) noexcept;
-
- NTSTATUS SendPong(
-     _In_ WebSocket* websocket,
-     _In_opt_ const UCHAR* payload,
-     _In_ SIZE_T payloadLength
- ) noexcept;
- ```
-
- | Parameter | Description |
- |-----------|-------------|
- | `websocket` | WebSocket handle |
- | `text` | Text bytes |
- | `data` | Binary or continuation bytes |
- | `payload` | Ping/pong payload; can be NULL when `payloadLength == 0` |
- | `options` | `FinalFragment` option |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, connection closed/disconnected/timeout failure.
-
- ##### `kws::Receive` / `kws::ReceiveEx`
-
- ```cpp
- NTSTATUS Receive(
-     _In_ WebSocket* websocket,
-     _Out_ Message* message
- ) noexcept;
-
- NTSTATUS ReceiveEx(
-     _In_ WebSocket* websocket,
-     _In_opt_ const ReceiveOptions* options,
-     _Out_opt_ Message* message
- ) noexcept;
- ```
-
- Receives WebSocket message. Blocking call, waits until message received or error.
-
- | Parameter | Description |
- |-----------|-------------|
- | `websocket` | WebSocket handle |
- | `options` | Receive options |
- | `message` | Receives message view on success; can be NULL in `ReceiveEx` |
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_BUFFER_TOO_SMALL`, connection
- closed/disconnected/timeout.
-
- ##### `kws::Close` / `kws::CloseEx`
-
- ```cpp
- NTSTATUS Close(
-     _In_opt_ WebSocket* websocket
- ) noexcept;
-
- NTSTATUS CloseEx(
-     _In_opt_ WebSocket* websocket,
-     _In_ USHORT statusCode,
-     _In_opt_ const UCHAR* reason,
-     _In_ SIZE_T reasonLength
- ) noexcept;
- ```
-
- Closes WebSocket connection. `Close` is simple version; `CloseEx` allows specifying close status code and reason.
-
- | Parameter | Description |
- |-----------|-------------|
- | `websocket` | WebSocket handle; can be NULL |
- | `statusCode` | Close status code |
- | `reason` | Close reason; can be NULL when `reasonLength == 0` |
- | `reasonLength` | Close reason byte length |
-
- Returns: Close success or transport failure.
-
- NOTE: Do not concurrently execute `Close` and new send/receive on the same `WebSocket`. Close should be the last
- operation.
-
- ##### `kws::SelectedSubprotocol`
-
- ```cpp
- NTSTATUS SelectedSubprotocol(
-     _In_ WebSocket* websocket,
-     _Out_ const char** subprotocol,
-     _Out_ SIZE_T* subprotocolLength
- ) noexcept;
- ```
-
- Reads the WebSocket subprotocol selected by the server. Call after connection established.
-
- Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_FOUND`
+```cpp
+NTSTATUS ResponseGetHeader(
+    _In_ const Response* response,
+    _In_ const char* name,
+    _In_ SIZE_T nameLength,
+    _Out_ const char** value,
+    _Out_ SIZE_T* valueLength
+) noexcept;
+```
+
+Reads response header by name. Name matching is case-insensitive.
+
+| Parameter | Description |
+|-----------|-------------|
+| `response` | Response handle |
+| `name` | Header name |
+| `nameLength` | Name byte length |
+| `value` | Receives header value pointer on success |
+| `valueLength` | Receives value length on success |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_FOUND`
+
+##### `ResponseGetHeaderAt`
+
+```cpp
+NTSTATUS ResponseGetHeaderAt(
+    _In_ const Response* response,
+    _In_ SIZE_T index,
+    _Out_ const char** name,
+    _Out_ SIZE_T* nameLength,
+    _Out_ const char** value,
+    _Out_ SIZE_T* valueLength
+) noexcept;
+```
+
+Enumerates response header by index. Suitable for iterating all headers.
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_FOUND`
+
+##### `ResponseGetTrailer` / `ResponseGetTrailerAt`
+
+```cpp
+NTSTATUS ResponseGetTrailer(
+    _In_ const Response* response,
+    _In_ const char* name,
+    _In_ SIZE_T nameLength,
+    _Out_ const char** value,
+    _Out_ SIZE_T* valueLength
+) noexcept;
+
+NTSTATUS ResponseGetTrailerAt(
+    _In_ const Response* response,
+    _In_ SIZE_T index,
+    _Out_ const char** name,
+    _Out_ SIZE_T* nameLength,
+    _Out_ const char** value,
+    _Out_ SIZE_T* valueLength
+) noexcept;
+```
+
+Reads response trailer by name or index. Trailers are header fields sent after the response body, commonly used with
+chunked transfer.
+
+Parameters and return values: Same as header read functions.
+
+##### `ResponseRelease`
+
+```cpp
+void ResponseRelease(
+    _In_opt_ Response* response
+) noexcept;
+```
+
+Releases response handle and its internal buffers. Safe function, accepts `nullptr`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `response` | Response handle; can be NULL |
+
+No return value.
+
+#### WebSocket Functions
+
+##### `kws::DefaultConnectConfig`
+
+```cpp
+kws::ConnectConfig DefaultConnectConfig() noexcept;
+```
+
+Returns default WebSocket connection config.
+
+No parameters.
+
+Returns: `ConnectConfig` value.
+
+##### `kws::Connect` / `kws::ConnectEx`
+
+```cpp
+NTSTATUS Connect(
+    _In_ khttp::Session* session,
+    _In_ const char* url,
+    _In_ SIZE_T urlLength,
+    _Out_ WebSocket** websocket
+) noexcept;
+
+NTSTATUS Connect(
+    _In_ khttp::Session* session,
+    _In_ const ConnectConfig* config,
+    _Out_ WebSocket** websocket
+) noexcept;
+
+NTSTATUS ConnectEx(
+    _In_ khttp::Session* session,
+    _In_ const ConnectConfig* config,
+    _Out_ WebSocket** websocket
+) noexcept;
+```
+
+Synchronous WebSocket connection. Function blocks until handshake completes.
+
+| Parameter | Description |
+|-----------|-------------|
+| `session` | High-level session |
+| `url` / `urlLength` | `ws://` or `wss://` URL |
+| `config` | Connection config |
+| `websocket` | Receives `WebSocket*` on success |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_SUPPORTED`, network/TLS/HTTP handshake failure.
+
+##### `kws::ConnectAsync` / `kws::ConnectAsyncEx`
+
+```cpp
+NTSTATUS ConnectAsync(
+    _In_ khttp::Session* session,
+    _In_ const char* url,
+    _In_ SIZE_T urlLength,
+    _Out_ khttp::AsyncOp** operation
+) noexcept;
+
+NTSTATUS ConnectAsync(
+    _In_ khttp::Session* session,
+    _In_ const ConnectConfig* config,
+    _Out_ khttp::AsyncOp** operation
+) noexcept;
+
+NTSTATUS ConnectAsyncEx(
+    _In_ khttp::Session* session,
+    _In_ const ConnectConfig* config,
+    _Out_ khttp::AsyncOp** operation
+) noexcept;
+```
+
+Asynchronous WebSocket connection. Parameters similar to `Connect`, but output is `AsyncOp**`. Use `AsyncWait` after
+success, then `kws::AsyncGetWebSocket` to get connection.
+
+##### `kws::AsyncGetWebSocket`
+
+```cpp
+NTSTATUS AsyncGetWebSocket(
+    _In_ khttp::AsyncOp* operation,
+    _Out_ WebSocket** websocket
+) noexcept;
+```
+
+Extracts `WebSocket` handle from completed WebSocket connect async operation.
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_PENDING`, or connection final failure.
+
+##### WebSocket Send Functions
+
+```cpp
+NTSTATUS SendText(
+    _In_ WebSocket* websocket,
+    _In_ const char* text,
+    _In_ SIZE_T textLength
+) noexcept;
+
+NTSTATUS SendTextEx(
+    _In_ WebSocket* websocket,
+    _In_ const char* text,
+    _In_ SIZE_T textLength,
+    _In_opt_ const SendOptions* options
+) noexcept;
+
+NTSTATUS SendBinary(
+    _In_ WebSocket* websocket,
+    _In_ const UCHAR* data,
+    _In_ SIZE_T dataLength
+) noexcept;
+
+NTSTATUS SendBinaryEx(
+    _In_ WebSocket* websocket,
+    _In_ const UCHAR* data,
+    _In_ SIZE_T dataLength,
+    _In_opt_ const SendOptions* options
+) noexcept;
+
+NTSTATUS SendContinuation(
+    _In_ WebSocket* websocket,
+    _In_ const UCHAR* data,
+    _In_ SIZE_T dataLength
+) noexcept;
+
+NTSTATUS SendContinuationEx(
+    _In_ WebSocket* websocket,
+    _In_ const UCHAR* data,
+    _In_ SIZE_T dataLength,
+    _In_opt_ const SendOptions* options
+) noexcept;
+
+NTSTATUS SendPing(
+    _In_ WebSocket* websocket,
+    _In_opt_ const UCHAR* payload,
+    _In_ SIZE_T payloadLength
+) noexcept;
+
+NTSTATUS SendPong(
+    _In_ WebSocket* websocket,
+    _In_opt_ const UCHAR* payload,
+    _In_ SIZE_T payloadLength
+) noexcept;
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `websocket` | WebSocket handle |
+| `text` | Text bytes |
+| `data` | Binary or continuation bytes |
+| `payload` | Ping/pong payload; can be NULL when `payloadLength == 0` |
+| `options` | `FinalFragment` option |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, connection closed/disconnected/timeout failure.
+
+##### `kws::Receive` / `kws::ReceiveEx`
+
+```cpp
+NTSTATUS Receive(
+    _In_ WebSocket* websocket,
+    _Out_ Message* message
+) noexcept;
+
+NTSTATUS ReceiveEx(
+    _In_ WebSocket* websocket,
+    _In_opt_ const ReceiveOptions* options,
+    _Out_opt_ Message* message
+) noexcept;
+```
+
+Receives WebSocket message. Blocking call, waits until message received or error.
+
+| Parameter | Description |
+|-----------|-------------|
+| `websocket` | WebSocket handle |
+| `options` | Receive options |
+| `message` | Receives message view on success; can be NULL in `ReceiveEx` |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_BUFFER_TOO_SMALL`, connection
+closed/disconnected/timeout.
+
+##### `kws::Close` / `kws::CloseEx`
+
+```cpp
+NTSTATUS Close(
+    _In_opt_ WebSocket* websocket
+) noexcept;
+
+NTSTATUS CloseEx(
+    _In_opt_ WebSocket* websocket,
+    _In_ USHORT statusCode,
+    _In_opt_ const UCHAR* reason,
+    _In_ SIZE_T reasonLength
+) noexcept;
+```
+
+Closes WebSocket connection. `Close` is simple version; `CloseEx` allows specifying close status code and reason.
+
+| Parameter | Description |
+|-----------|-------------|
+| `websocket` | WebSocket handle; can be NULL |
+| `statusCode` | Close status code |
+| `reason` | Close reason; can be NULL when `reasonLength == 0` |
+| `reasonLength` | Close reason byte length |
+
+Returns: Close success or transport failure.
+
+NOTE: Do not concurrently execute `Close` and new send/receive on the same `WebSocket`. Close should be the last
+operation.
+
+##### `kws::SelectedSubprotocol`
+
+```cpp
+NTSTATUS SelectedSubprotocol(
+    _In_ WebSocket* websocket,
+    _Out_ const char** subprotocol,
+    _Out_ SIZE_T* subprotocolLength
+) noexcept;
+```
+
+Reads the WebSocket subprotocol selected by the server. Call after connection established.
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_FOUND`
