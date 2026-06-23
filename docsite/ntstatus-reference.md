@@ -1,12 +1,4 @@
-# NTSTATUS 错误码 / NTSTATUS Reference
-
-项目统一使用 Windows NTSTATUS 错误码，用 `NT_SUCCESS()` 判断成功。下表为代码中实际使用的主要返回码及其典型来源。
-
-[English](#english) | 简体中文
-
----
-
-## 简体中文
+# NTSTATUS 错误码
 
 ### 通用
 
@@ -62,9 +54,3 @@ if (!NT_SUCCESS(s)) {
 - 用 `NT_SUCCESS(status)` 判断，不要 `== STATUS_SUCCESS`（有信息性成功码）。
 - 标了 `_Must_inspect_result_` 的返回值必须检查。
 - Release/Close 接受 `nullptr`，失败路径也统一释放，避免泄漏。
-
----
-
-## English
-
-The project uses Windows NTSTATUS throughout; test with `NT_SUCCESS()`. The tables above list the codes actually used and their typical sources. Highlights: `STATUS_INVALID_DEVICE_REQUEST` = IRQL violation (not `PASSIVE_LEVEL`); `STATUS_NOT_SUPPORTED` = unsupported scheme / user `Transfer-Encoding` / unsupported ALPN / non-replay-safe 0-RTT / un-negotiated h2 / unsupported or disabled signature schemes; `STATUS_INVALID_NETWORK_RESPONSE` = protocol violations (bad status line/headers, obs-fold, duplicate Content-Length, decode-verification failure, illegal frames, HPACK errors, decompression expansion ratio exceeded); `STATUS_BUFFER_TOO_SMALL` = over nonzero `MaxResponseBytes` / decode buffer too small / WS over `MaxMessageBytes`; `STATUS_TRUST_FAILURE` = certificate validation failure including fail-closed revocation; `STATUS_INVALID_SIGNATURE` = MAC/AEAD/CBC-MAC/signature verification failure; `STATUS_RETRY` = retryable (e.g. clean GOAWAY); `STATUS_CANCELLED` = cancelled async op. Use `NT_SUCCESS`, honor `_Must_inspect_result_`, and release on all paths (Release/Close accept `nullptr`).

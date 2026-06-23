@@ -1,12 +1,4 @@
-# HTTP/1.1 协议 / HTTP/1.1 Protocol
-
-命名空间 `KernelHttp::http`。内容依据 `src/KernelHttpLib/http/` 实现。
-
-[English](#english) | 简体中文
-
----
-
-## 简体中文
+# HTTP/1.1 协议
 
 ### 基础类型（`HttpTypes`）
 
@@ -62,15 +54,3 @@ struct HttpHeader { HttpText Name; HttpText Value; };
 
 - 识别 `chunked`/`gzip`/`deflate`/`compress`，最多 4 级；`identity` → `STATUS_INVALID_NETWORK_RESPONSE`；**`br` → `STATUS_NOT_SUPPORTED`**；带参数 token → 非法；重复 `chunked` → 非法。
 - 反序解码，仅最外层 chunked 收 trailer；非最外 chunked 未吃完输入 → 非法。
-
----
-
-## English
-
-Namespace `KernelHttp::http`, grounded in `src/KernelHttpLib/http/`.
-
-**Request building** (`HttpRequestBuilder::Build`): serializes request line + headers + body via a length-measuring `BufferWriter` (`STATUS_BUFFER_TOO_SMALL` with required size if it won't fit); **Host emitted first** from `options.Host`; CONNECT requests can be built (`CONNECT authority HTTP/1.1`), TRACE is unsupported; body via Content-Length or builder-generated chunked; request trailers are supported only with chunked framing; forbidden extra headers Host/Content-Length/Connection (`STATUS_INVALID_PARAMETER`) and Transfer-Encoding/TE + Expect:100-continue-with-body (`STATUS_NOT_SUPPORTED`); `Trailer` is allowed only for chunked request trailers; engine injects default `Accept-Encoding: gzip, deflate, br, identity` (or `br, identity` when deflate runtime is unavailable).
-
-**Response parsing** (`HttpParser::ParseResponse`): full header block required (else `STATUS_MORE_PROCESSING_REQUIRED`); >64 KiB header block rejected; status line accepts only HTTP major==1, minor<=1, 3-digit 100..599; per-line ≤8 KiB, **obs-fold rejected**, token names, value rejects <0x20 (except TAB) and 0x7f; ≥200 headers → `STATUS_BUFFER_TOO_SMALL`. No-body for HEAD/1xx/204/**205**/304; duplicate Content-Length or TE+CL conflict → `STATUS_INVALID_NETWORK_RESPONSE`; chunked ≤8192 chunks, strict extension grammar, forbidden trailers rejected; `IsPartialContent` / `GetContentRange` expose read-only 206 / Content-Range semantics.
-
-**Content-Encoding** gzip (CRC16/CRC32/ISIZE verified), deflate (zlib autodetect + Adler-32, kernel `RtlDecompressBufferEx` with runtime probe), br (bundled Brotli), compress (full LZW), identity — up to **2** codings, reverse-decoded, with **64× per-step decompression-bomb guard**. **Transfer-Encoding** chunked/gzip/deflate/compress up to 4 (identity rejected, `br` → `STATUS_NOT_SUPPORTED`), reverse-decoded with trailers only on the outermost chunked layer.

@@ -1,12 +1,4 @@
-# 密码学层 / Cryptography
-
-命名空间 `KernelHttp::crypto`。混合实现：部分走内核 CNG/BCrypt，部分为**内核内自实现软件**。内容依据 `src/KernelHttpLib/crypto/` 实现。
-
-[English](#english) | 简体中文
-
----
-
-## 简体中文
+# 密码学层
 
 ### CNG vs 软件实现
 
@@ -54,11 +46,3 @@ enum class KeyExchangeGroup : USHORT { Secp256r1=23, Secp384r1=24, Secp521r1=25,
 ### 用户态测试
 
 `KERNEL_HTTP_USER_MODE_TEST` 下 `bcrypt.h` 类型被 stub，并提供软件 SHA-1/SHA-256 实现以便无内核环境跑通。
-
----
-
-## English
-
-Namespace `KernelHttp::crypto`, hybrid: some primitives via kernel CNG/BCrypt, others **in-kernel software**. CNG: SHA-1/256/384/512, HMAC, HKDF (software over HMAC), AES-GCM, NIST P-256/384/521 ECDH/ECDSA, RSA-PKCS1/RSA-PSS (salt = digest length) and ECDSA verification (DER→raw). **Software**: ChaCha20-Poly1305 (constant-time tag verify before decrypt), AES-128 + CCM/CCM8, X25519, X448 (Montgomery ladders, constant-time cswap, reject all-zero), FFDHE 2048–8192 (Montgomery modexp, RFC 7919 primes, public-key range validation 2≤y≤p-2), and Ed25519/Ed448 verification (PureEdDSA over the full message).
-
-Hardening: minimum RSA modulus **2048 bits** (enforced at SPKI parse and RSA import; exponent ≥3 and odd); FFDHE public-key validation on every shared-secret derivation; pervasive `RtlSecureZeroMemory` of key material; CNG little-endian secrets converted to big-endian with left zero-pad. `CngProviderCache` pre-opens AES/SHA/HMAC/RSA/ECDSA/ECDH(P256/384/521) handles (one per session, `PASSIVE_LEVEL` to init); software paths bypass the cache. RAII: `CngAlgorithmProvider`, `CngKey` (private-key RAII), `CngHashContext`. Under `KERNEL_HTTP_USER_MODE_TEST`, `bcrypt.h` is stubbed and software SHA-1/SHA-256 are provided.

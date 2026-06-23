@@ -1,12 +1,4 @@
-# 客户端类 / Client Classes
-
-`KernelHttp::client`。比 `engine` 更底层的协议客户端封装，使用调用方提供的缓冲（无内部句柄/连接池），适合精细控制与测试。高层 `khttp`/`kws` 一般已够用。
-
-[English](#english) | 简体中文
-
----
-
-## 简体中文
+# 客户端类
 
 ### HttpClient（`client/HttpClient.h`）
 
@@ -64,9 +56,3 @@ NTSTATUS SendTextAndReceiveEcho(..., WebSocketEchoResult&);   // 便捷：发文
 ### 与高层 API 的关系
 
 `khttp`/`kws` + `engine` 在这些客户端类之上增加了会话、连接池、Workspace 自动管理和句柄生命周期。**多数应用应优先用 [高层 API](high-level-api.md)**；直接用 client 类适合需要完全掌控缓冲与连接的测试/特殊场景。
-
----
-
-## English
-
-`KernelHttp::client` — protocol client wrappers below `engine` that use caller-provided buffers (no internal handles/pool). `HttpClient::SendRequest` (plaintext HTTP/1.1), `HttpsClient::SendRequest` (TLS, HTTP/2 via ALPN; optional explicit HTTP/1.1 CONNECT proxy tunnel; carries cert store, `TlsPolicy`, session caches, ALPN list, client credential, resumption/0-RTT controls), `Http2Client::SendRequest` (modes `TlsAlpn`/`H2cPriorKnowledge`/`H2cUpgrade`; returns `STATUS_NOT_SUPPORTED` if peer won't negotiate `h2`; helper `BuildHttp2RequestHeaders` with RFC 8441 `ConnectProtocol`; low-level `Http2Connection` exposes active-stream and DATA tunnel primitives), `WebSocketClient` (`Connect` with extra opening headers and optional RFC 8441 over HTTP/2 for `wss`, `SendText`/`SendBinary`/`SendContinuation`/`SendPing`/`SendPong`/`ReceiveMessage`/`Close`/`SelectedSubprotocol`/`SendTextAndReceiveEcho`). Most applications should prefer the [High-Level API](high-level-api.md); use client classes directly for tests or full buffer/connection control.

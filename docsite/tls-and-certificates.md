@@ -1,12 +1,4 @@
-# TLS 与证书 / TLS & Certificates
-
-命名空间 `KernelHttp::tls`。内核自实现 TLS 1.2/1.3，密码学走 CNG/BCrypt 与内核内软件实现（见 [密码学层](cryptography.md)）。内容依据 `src/KernelHttpLib/tls/` 实现。
-
-[English](#english) | 简体中文
-
----
-
-## 简体中文
+# TLS 与证书
 
 ### 版本路径与降级保护
 
@@ -99,11 +91,3 @@ config.Tls.Store = &store;
 `tls::TlsClientCredential` 携带证书链、`KeyAlgorithm`、支持的签名方案、`AllowsDigitalSignature` 与 `Sign` 回调。**私钥永不进入库**——签名经回调完成（TLS1.2 对 transcript hash 签；TLS1.3 对 `BuildCertificateVerifyInput` 构造的上下文签）。
 
 > ⚠️ 生产环境严禁 `CertPolicy::NoVerify`（会跳过整条链校验，仅算叶 SPKI）。
-
----
-
-## English
-
-In-kernel TLS 1.2/1.3. The client uses a **single-version path** (1.3 first if in range), **no in-handshake fallback**: on 1.3 failure it re-classifies the bytes as a possible 1.2 ServerHello and reports `VersionNegotiation` for an explicit caller retry; a downgrade sentinel in server random is treated as an attack (`DecodeError`). Cipher/group/signature are split into Default / Optional / Legacy (full lists in the Chinese section). `TlsPolicy` defaults to `ModernDefault` (rejects setting TLS 1.2 RSA-kx/CBC/renegotiation/SHA-1 unless `CompatibilityExplicit`); the policy is hashed into a resumption-binding identity. TLS 1.2 enforces Extended Master Secret + secure-renegotiation indication + Encrypt-then-MAC for CBC. TLS 1.3 offers a single X25519 key_share, recomputes the PSK binder on HelloRetryRequest, offers `signature_algorithms_cert`, and does **reactive-only KeyUpdate**. 0-RTT requires `EnableEarlyData` + `EarlyDataReplaySafe` + a ticket advertising `max_early_data_size` (else `STATUS_NOT_SUPPORTED`); 1.2 rejects early data. Resumption (≤4 tickets each) binds policy identity + SNI + ALPN + cipher + version. Record layer: AES-GCM, AES-CBC EtM (constant-time MAC-then-decrypt), ChaCha20-Poly1305; `TlsMaxPlaintextLength=16384` with anti-flood record limits.
-
-Certificate validation runs on an **expanded kernel stack**; ordered steps: bounds (chain ≤8) → parse → host normalize → exact-DN chain reorder → leaf SPKI → name constraints → cert policies → validity → optional EKU serverAuth → leaf basic-constraints/KU → hostname → per-link (DN/CA/keyCertSign/pathLen/signature) → pin → trust anchor → revocation; duplicate and unknown-critical extensions rejected. Hostname: single-label dNSName wildcard, IP literals match iPAddress SAN only, **never falls back to CN**, IDNA/punycode. `CertificateStore`: ≤16 anchors (SPKI required), ≤8 CA bundles (PEM/DER), ≤32 revocation entries; SPKI pinning enforced for pinned hosts (**fail-open for un-pinned hosts**). Revocation is **offline, table-driven, fail-closed** when required-but-absent; no online fetch. mTLS via `TlsClientCredential.Sign` callback — the private key never enters the library. Never use `CertPolicy::NoVerify` in production.

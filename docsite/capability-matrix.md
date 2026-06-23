@@ -1,12 +1,4 @@
-# 能力边界 / Capability Matrix
-
-[English](#english) | 简体中文
-
-> 本页严格依据 `src/KernelHttpLib/` 实际实现编写。KernelHttp 以 Windows kernel 主路径实现协议：传输优先 WSK，密码学优先 CNG/BCrypt（部分算法为内核内自实现软件），不依赖 WinHTTP/WinINet/SChannel。
-
----
-
-## 简体中文
+# 能力边界
 
 ### 已实现 / 已验证能力
 
@@ -86,19 +78,3 @@ HTTP/3·QUIC、服务端/入站解析、TRACE、管线化、`Expect:100-continue
 - **Stale 重试**：仅 `GET`/`HEAD`/`OPTIONS`，且复用连接、`ReuseOrCreate`、失败状态属连接关闭族/`STATUS_RETRY`/`STATUS_IO_TIMEOUT` 时，以 `ForceNew` **重试恰好一次**。
 - **连接池**：close-delimited 与 101 响应不回池；`NoPool` 从不挤掉活跃连接，`ForceNew`/`ReuseOrCreate` 会驱逐空闲槽。
 - **IRQL**：同步 HTTP/WS/TLS/证书路径要求 `PASSIVE_LEVEL`，否则 `STATUS_INVALID_DEVICE_REQUEST`/`STATUS_INVALID_DEVICE_STATE`。
-
----
-
-## English
-
-This page is grounded in the actual `src/KernelHttpLib/` implementation.
-
-**HTTP/1.1**: Content-Length or builder-generated chunked request bodies (caller `Transfer-Encoding`/`TE` are rejected; `Trailer` is allowed only with chunked request trailers); request trailers via `KhHttpRequestAddTrailer` / `khttp::RequestAddTrailer`; response parsing accepts only HTTP/1.0–1.1, header line ≤8 KiB, section ≤64 KiB, ≤200 headers, rejects obs-fold, rejects duplicate Content-Length and TE+CL conflict; no-body for 1xx/204/**205**/304 and HEAD; chunked ≤8192 chunks with strict extension grammar and forbidden-trailer rejection; read-only `206` / `Content-Range` parsing; Content-Encoding gzip (CRC32/ISIZE verified), deflate (zlib autodetect + Adler-32, via kernel `RtlDecompressBufferEx` with runtime probe), br (bundled Brotli), compress (full LZW), identity, up to 2 codings reverse-decoded; **decompression-bomb guard 64× per-step**; 1xx skipping; redirects; keep-alive pooling.
-
-**HTTP/2**: preface + SETTINGS (7 settings including `ENABLE_CONNECT_PROTOCOL`, ACK sent immediately, not awaited), SETTINGS validation (ENABLE_PUSH!=0 rejected, ENABLE_CONNECT_PROTOCOL must be 0/1, window/frame bounds), **CONTINUATION flood guards (64 / 4 empty)**, active-stream table with two-stage `BeginRequest` / `ReceiveResponse(streamId)`, interleaved frame dispatch by stream id, high-level `khttp` pooled multi-stream reuse, connection + per-stream flow control with half-window WINDOW_UPDATE threshold, 1xx interim handling, PUSH_PROMISE always a protocol error, RFC 8441 extended CONNECT tunnel primitives, three modes (TLS-ALPN h2 / h2c prior-knowledge / h2c upgrade — upgrade forbids a body, replays post-101 bytes, uses stream 1). HPACK: continuation-byte ≤5, Huffman (rejects >30-bit codes/EOS/bad padding), table-size-update only at block start, **never-indexed forced for authorization/cookie/proxy-authorization**.
-
-**WebSocket**: handshake with **constant-time** accept comparison, caller-supplied opening headers with controlled-header rejection, **rejects any Sec-WebSocket-Extensions**, subprotocol negotiation; HTTP/1.1 client frames are masked, RFC 8441 over HTTP/2 frames are unmasked as required (masked server frame → 1002); explicit opt-in high-level `wss` over HTTP/2 via `AllowWebSocketOverHttp2`; **fragment send (`kws::SendContinuation` + `FinalFragment`)** with incremental cross-fragment UTF-8 validation; **receive-fragment callback (`ReceiveOptions.OnMessage`)** or aggregated whole-message; auto-Pong (toggleable), ≤100 control frames per receive (1008), UTF-8 validation (1007), max-message (1009); active and passive close handshakes.
-
-**TLS 1.2/1.3**: single-version path (no in-handshake fallback — failures classified as `VersionNegotiation` for an explicit caller retry at 1.2); cipher/group/sig split into default / optional / legacy; TLS1.2 enforces EMS + secure-reneg indication + Encrypt-then-MAC for CBC; TLS1.3 HelloRetryRequest, reactive-only KeyUpdate, NewSessionTicket, record padding, `signature_algorithms_cert`, OCSP stapling parse; resumption bound to policy identity + SNI + ALPN + cipher + version. Certificate validation (on an expanded kernel stack): chain ≤8, exact-DN linking, signature/validity/basic-constraints/pathLen/KU/EKU/name-constraints/cert-policies/trust-anchor; rejects duplicate and unknown-critical extensions; hostname match with single-label wildcard, IP literals match iPAddress SAN only, **never falls back to CN**; revocation offline + table-driven, **fail-closed** when required-but-absent; SPKI pinning (fail-open for un-pinned hosts); mTLS via caller `Sign` callback (private key never enters the library). Crypto: ChaCha20-Poly1305/AES-CCM/X25519/X448/FFDHE/Ed25519/Ed448 verification are in-kernel **software**; min RSA modulus 2048.
-
-**Boundaries / non-goals**: no TRACE/pipelining/streaming upload; plaintext HTTP over proxy is explicitly rejected for now; high-level WebSocket over HTTP/2 is opt-in, not automatic by default; TLS 1.2 RSA-kx/CBC/renegotiation/SHA-1 off by default (`CompatibilityExplicit`); no online OCSP/CRL fetch; 0-RTT off by default; HTTP/3·QUIC and server role out of scope. Redirect exhaustion returns the 3xx response (no error). See [Roadmap](roadmap.md).

@@ -1,13 +1,6 @@
 # KernelHttp Wiki
 
 **面向 Windows 内核驱动的纯内核态 HTTP/HTTPS 客户端库**
-**A pure kernel-mode HTTP/HTTPS client library for Windows kernel drivers**
-
-[English](#english) | 简体中文
-
----
-
-## 简体中文
 
 KernelHttp 是一个纯内核态的 HTTP/HTTPS 客户端库，专为 Windows 内核驱动开发设计。它从底层开始构建，实现了内核可用的客户端协议栈：HTTP/1.1、HTTP/2、WebSocket，以及 TLS 1.2/1.3 握手、记录保护和证书验证。
 
@@ -37,26 +30,3 @@ KernelHttp 是一个纯内核态的 HTTP/HTTPS 客户端库，专为 Windows 内
 **实战 / 项目**
 - [Cookbook 样例](cookbook.md) · [常见问题 FAQ](faq.md)
 - [路线图与非目标](roadmap.md) · [术语表](glossary.md) · [贡献指南](contributing.md)
-
----
-
-## English
-
-KernelHttp is a pure kernel-mode HTTP/HTTPS client library for Windows kernel driver development. Built from the ground up, it implements a kernel-friendly client protocol stack: HTTP/1.1, HTTP/2, WebSocket, and TLS 1.2/1.3 handshake, record protection, and certificate validation.
-
-- 🔒 **Pure kernel-mode**: no WinHTTP / WinINet / SChannel dependency
-- 🌐 **WSK transport** + 🔐 **CNG/BCrypt cryptography**
-- 🎯 **Two-layer API**: high-level `khttp` / `kws` and low-level `engine` (`Kh*`)
-- 🔄 Connection pool, async, certificate pinning, response decoding
-
-### 📚 Navigation
-
-**Getting started**: [Getting Started](getting-started.md) · [Build & Test](build-and-test.md)
-
-**Protocol reference**: [Capability Matrix](capability-matrix.md) (read first) · [Architecture](architecture.md) · [HTTP/1.1](http1.md) · [HTTP/2 & HPACK](http2.md) · [WebSocket](websocket.md) · [TLS & Certificates](tls-and-certificates.md) · [Cryptography](cryptography.md)
-
-**API reference**: [High-Level API](high-level-api.md) · [Low-Level API](low-level-api.md) · [Configuration](configuration.md) · [Client Classes](client-classes.md) · [Transport Layer](transport-layer.md) · [NTSTATUS](ntstatus-reference.md)
-
-**Mechanics**: [Connection Pool](connection-pool.md) · [Async Model](async-model.md) · [Memory Model](memory-model.md)
-
-**Guides / project**: [Cookbook](cookbook.md) · [FAQ](faq.md) · [Roadmap](roadmap.md) · [Glossary](glossary.md) · [Contributing](contributing.md)

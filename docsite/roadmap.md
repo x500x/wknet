@@ -1,10 +1,4 @@
-# 路线图与非目标 / Roadmap & Non-Goals
-
-[English](#english) | 简体中文
-
----
-
-## 简体中文
+# 路线图与非目标
 
 明确划清边界有助于正确使用。以下为**有意不做**或**延期**的能力，以及未来改进方向。
 
@@ -54,17 +48,3 @@
 - 评估 WebSocket over HTTP/2 从显式 opt-in 走向自动选择的 API 与兼容性策略。
 
 > 这些是对**当前公开行为**的描述，便于评估适用性；不代表内部审计细节。能力现状见 [能力边界](capability-matrix.md)。
-
----
-
-## English
-
-Explicit boundaries help correct usage. The following are intentionally **out of scope** or **deferred**, plus ongoing improvement directions.
-
-**Non-goals.** HTTP/1.1: `Expect: 100-continue` (rejected), pipelining, TRACE, streaming upload, zero-aggregation streaming response delivery (incremental `OnBody` callbacks exist, responses may still aggregate), obs-fold (rejected). HTTP/2: PRIORITY frames, automatic background PING keepalive (explicit low-level `SendPing` exists), h2c at high-level khttp. WebSocket (fragment send + receive-fragment callback are supported): permessage-deflate (RFC 7692), automatic-by-default high-level WebSocket over HTTP/2 (RFC 8441 is available via explicit opt-in), handshake redirect/401 following. Proxy: plaintext HTTP over proxy (HTTPS CONNECT is supported via high-level Session config and low-level `HttpsClient` options). TLS: TLS 1.2 renegotiation (signaling only), online OCSP/CRL fetch (omitted in kernel; static entries supported), 0-RTT (implemented, off by default). Other: HTTP/3·QUIC, server/inbound request parsing.
-
-**Off by default, explicitly enable.** TLS 1.2 RSA kx / CBC / renegotiation / SHA-1 (via `TlsPolicy` + `CompatibilityExplicit`), post-handshake client auth, required revocation check, TLS 1.3 0-RTT.
-
-**Future directions.** Continue tightening protocol-safety ledgers such as timeouts, cancellation, frame/control-signal and malicious-input bounds while leaving normal buffered responses unlimited by default; reduce repeated allocations on hot paths via Workspace/lookaside/connection-resident buffers; evaluate moving WebSocket over HTTP/2 from explicit opt-in toward automatic selection with a compatibility plan.
-
-This describes current public behavior for fit assessment; see [Capability Matrix](capability-matrix.md) for the current state.

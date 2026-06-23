@@ -34,7 +34,6 @@ theme:
     - navigation.indexes
     - navigation.top
     - navigation.tracking
-    - navigation.instant
     - navigation.footer
     - toc.follow
     - search.suggest
@@ -59,6 +58,49 @@ theme:
         icon: material/weather-sunny
         name: 切换到亮色模式
 
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: zh
+          default: true
+          name: 简体中文
+          build: true
+        - locale: en
+          name: English
+          build: true
+          nav_translations:
+            首页: Home
+            入门: Start
+            快速开始: Getting Started
+            构建与测试: Build & Test
+            协议: Protocols
+            能力边界: Capability Matrix
+            架构: Architecture
+            HTTP/2 与 HPACK: HTTP/2 & HPACK
+            TLS 与证书: TLS & Certificates
+            密码学: Cryptography
+            高层 API: High-Level API
+            底层 API: Low-Level API
+            配置: Configuration
+            客户端类: Client Classes
+            传输层: Transport Layer
+            NTSTATUS 错误码: NTSTATUS Errors
+            机制: Mechanics
+            连接池: Connection Pool
+            异步模型: Async Model
+            内存模型: Memory Model
+            实战与项目: Guides
+            Cookbook 样例: Cookbook
+            常见问题: FAQ
+            路线图: Roadmap
+            术语表: Glossary
+            贡献指南: Contributing
+
 markdown_extensions:
   - admonition
   - attr_list
@@ -76,32 +118,32 @@ markdown_extensions:
       alternate_style: true
 
 nav:
-  - 首页 Home: index.md
-  - 入门 Start:
-      - 快速开始 Getting Started: getting-started.md
-      - 构建与测试 Build & Test: build-and-test.md
-  - 协议 Protocols:
-      - 能力边界 Capability Matrix: capability-matrix.md
-      - 架构 Architecture: architecture.md
+  - 首页: index.md
+  - 入门:
+      - 快速开始: getting-started.md
+      - 构建与测试: build-and-test.md
+  - 协议:
+      - 能力边界: capability-matrix.md
+      - 架构: architecture.md
       - HTTP/1.1: http1.md
-      - HTTP/2 & HPACK: http2.md
+      - HTTP/2 与 HPACK: http2.md
       - WebSocket: websocket.md
-      - TLS 与证书 TLS & Certificates: tls-and-certificates.md
-      - 密码学 Cryptography: cryptography.md
+      - TLS 与证书: tls-and-certificates.md
+      - 密码学: cryptography.md
   - API:
-      - 高层 API High-Level: high-level-api.md
-      - 底层 API Low-Level: low-level-api.md
-      - 配置 Configuration: configuration.md
-      - 客户端类 Client Classes: client-classes.md
-      - 传输层 Transport Layer: transport-layer.md
+      - 高层 API: high-level-api.md
+      - 底层 API: low-level-api.md
+      - 配置: configuration.md
+      - 客户端类: client-classes.md
+      - 传输层: transport-layer.md
       - NTSTATUS 错误码: ntstatus-reference.md
-  - 机制 Mechanics:
-      - 连接池 Connection Pool: connection-pool.md
-      - 异步模型 Async Model: async-model.md
-      - 内存模型 Memory Model: memory-model.md
+  - 机制:
+      - 连接池: connection-pool.md
+      - 异步模型: async-model.md
+      - 内存模型: memory-model.md
   - 实战与项目:
       - Cookbook 样例: cookbook.md
-      - 常见问题 FAQ: faq.md
-      - 路线图 Roadmap: roadmap.md
-      - 术语表 Glossary: glossary.md
-      - 贡献指南 Contributing: contributing.md
+      - 常见问题: faq.md
+      - 路线图: roadmap.md
+      - 术语表: glossary.md
+      - 贡献指南: contributing.md

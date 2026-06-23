@@ -1,12 +1,4 @@
-# 传输层 / Transport Layer
-
-`KernelHttp::core`（抽象与适配器）与 `KernelHttp::net`（WSK）。
-
-[English](#english) | 简体中文
-
----
-
-## 简体中文
+# 传输层
 
 ### ITransport（`core/ITransport.h`）
 
@@ -65,11 +57,3 @@ NTSTATUS Disconnect(); NTSTATUS Close(); bool IsConnected();
 ### 自定义传输（测试 / 扩展）
 
 实现 `ITransport` 即可注入自定义传输；底层 API 与测试钩子（`KhTestSetHttpTransport`）借此做确定性、无真实网络的单元测试（参见 Cookbook 的 mock transport）。
-
----
-
-## English
-
-`core::ITransport` is the byte-stream abstraction (`Send`/`Receive`/`ReceiveWithTimeout`) unifying plaintext and TLS. Adapters: `WskTransport` (over `net::WskSocket`, `WSK_FLAG_NODELAY`, cancellation token) for plaintext, `TlsTransport` (wraps an inner `ITransport` + `tls::TlsConnection`) for auto encrypt/decrypt. Stack: WskSocket → WskTransport → (TlsTransport for HTTPS) → protocol layer. `IScratchAllocator` (`Acquire`/`Release`/`EnsureBuffer`) is implemented by `WorkspaceScratchAllocator`.
-
-WSK layer: `WskClient` (register + `Resolve`/`ResolveAll` up to 8 addresses, `WskAddressFamily` Any/Ipv4/Ipv6), `WskSocket` (`Connect`/`Send`/`Receive` with 30 s default timeout/`Disconnect`/`Close`, cancellation token forwarded to IRPs), `WskBuffer` (MDL-backed pooled buffer). Implement `ITransport` to inject a custom/mock transport — used by the low-level API and test hooks (`KhTestSetHttpTransport`) for deterministic, network-free unit tests.
