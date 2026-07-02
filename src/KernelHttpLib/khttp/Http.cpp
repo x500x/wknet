@@ -251,6 +251,22 @@ namespace
                 contentType,
                 contentTypeLength);
             break;
+        case detail::BodyStorageKind::Stream:
+            status = ::KernelHttp::engine::KhHttpRequestSetBodySource(
+                request,
+                reinterpret_cast<::KernelHttp::engine::KhRequestBodyReadCallback>(body->StreamCallback),
+                body->StreamContext,
+                body->StreamContentLength,
+                body->StreamContentLengthKnown);
+            if (NT_SUCCESS(status) && contentType != nullptr) {
+                status = ::KernelHttp::engine::KhHttpRequestSetHeader(
+                    request,
+                    "Content-Type",
+                    sizeof("Content-Type") - 1,
+                    contentType,
+                    contentTypeLength);
+            }
+            break;
         case detail::BodyStorageKind::Empty:
         default:
             status = ::KernelHttp::engine::KhHttpRequestSetBody(request, nullptr, 0);

@@ -368,6 +368,46 @@ NTSTATUS BodyCreateFileEx(
     return STATUS_SUCCESS;
 }
 
+NTSTATUS BodyCreateStream(
+    RequestBodyReadCallback callback,
+    void* context,
+    SIZE_T contentLength,
+    bool contentLengthKnown,
+    const char* contentType,
+    SIZE_T contentTypeLength,
+    Body** body) noexcept
+{
+    if (callback == nullptr ||
+        (contentType == nullptr && contentTypeLength != 0) ||
+        !IsValidHeaderValue(contentType, contentTypeLength)) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    Body* created = nullptr;
+    NTSTATUS status = AllocateBody(&created);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    if (contentType != nullptr) {
+        created->ContentType = CopyText(contentType, contentTypeLength);
+        if (created->ContentType == nullptr) {
+            BodyRelease(created);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        created->ContentTypeLength = contentTypeLength;
+    }
+
+    created->Kind = detail::BodyStorageKind::Stream;
+    created->Mode = contentLengthKnown ? RequestBodyMode::ContentLength : RequestBodyMode::Chunked;
+    created->StreamCallback = callback;
+    created->StreamContext = context;
+    created->StreamContentLength = contentLength;
+    created->StreamContentLengthKnown = contentLengthKnown;
+    *body = created;
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS BodySetMode(Body* body, RequestBodyMode mode) noexcept
 {
     if (body == nullptr || body->Magic != detail::KhHighBodyMagic) {

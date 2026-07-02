@@ -164,6 +164,13 @@ namespace khttp
         SIZE_T dataLength,
         bool finalChunk);
 
+    typedef NTSTATUS (*RequestBodyReadCallback)(
+        void* context,
+        _Out_writes_bytes_(bufferCapacity) UCHAR* buffer,
+        SIZE_T bufferCapacity,
+        _Out_ SIZE_T* bytesRead,
+        _Out_ bool* endOfBody);
+
     typedef void (*CompletionCallback)(
         void* context,
         NTSTATUS status);

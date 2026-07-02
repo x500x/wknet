@@ -49,6 +49,16 @@ namespace khttp
         _Out_ Body** body) noexcept;
 
     _Must_inspect_result_
+    NTSTATUS BodyCreateStream(
+        _In_ RequestBodyReadCallback callback,
+        _In_opt_ void* context,
+        SIZE_T contentLength,
+        bool contentLengthKnown,
+        _In_reads_bytes_opt_(contentTypeLength) const char* contentType,
+        SIZE_T contentTypeLength,
+        _Out_ Body** body) noexcept;
+
+    _Must_inspect_result_
     NTSTATUS BodySetMode(_In_ Body* body, RequestBodyMode mode) noexcept;
 
     _Must_inspect_result_

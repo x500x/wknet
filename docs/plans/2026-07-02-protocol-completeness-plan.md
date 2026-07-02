@@ -203,19 +203,19 @@
 - Test: `tests/khttp_tests.cpp`
 - Test: `tests/high_level_api_tests.cpp`
 
-- [ ] **Step 1: 设计 body source ABI**
+- [x] **Step 1: 设计 body source ABI**
 
   新增读取回调或复用文件 body，使请求体按块读取。所有状态对象放堆或 workspace，不在 lib 热路径放大栈对象。
 
-- [ ] **Step 2: 实现 Content-Length 与 chunked 两种流式上传**
+- [x] **Step 2: 实现 Content-Length 与 chunked 两种流式上传**
 
   已知长度走 `Content-Length`；未知长度走 chunked。禁止调用方手写 `Transfer-Encoding` 的安全边界保持不变。
 
-- [ ] **Step 3: 复核响应回调模式**
+- [x] **Step 3: 复核响应回调模式**
 
   `OnBody` 且未设置 `AggregateWithCallbacks` 时，不应因普通大响应触发低位聚合硬上限；只保留 header section、单帧、解压膨胀比等协议安全上限。
 
-- [ ] **Step 4: 验证**
+- [x] **Step 4: 验证**
 
   Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test high_level_api_tests -Run`
 

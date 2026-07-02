@@ -81,6 +81,10 @@ namespace engine
         SIZE_T BodyLength = 0;
         bool HasBody = false;
         KhRequestBodyMode BodyMode = KhRequestBodyMode::ContentLength;
+        KhRequestBodyReadCallback BodySourceCallback = nullptr;
+        void* BodySourceContext = nullptr;
+        SIZE_T BodySourceContentLength = 0;
+        bool BodySourceContentLengthKnown = false;
         UCHAR* OwnedBody = nullptr;
         SIZE_T OwnedBodyLength = 0;
         SIZE_T OwnedBodyCapacity = 0;

@@ -1090,6 +1090,10 @@ namespace
         request.Body = nullptr;
         request.BodyLength = 0;
         request.HasBody = false;
+        request.BodySourceCallback = nullptr;
+        request.BodySourceContext = nullptr;
+        request.BodySourceContentLength = 0;
+        request.BodySourceContentLengthKnown = false;
     }
 
     void ResetOwnedBodyContent(_Inout_ KhRequest& request) noexcept
@@ -1099,6 +1103,10 @@ namespace
         }
         request.OwnedBodyLength = 0;
         request.HasBody = false;
+        request.BodySourceCallback = nullptr;
+        request.BodySourceContext = nullptr;
+        request.BodySourceContentLength = 0;
+        request.BodySourceContentLengthKnown = false;
     }
 
     void AbortOwnedBodyBuild(_Inout_ KhRequest& request) noexcept
@@ -1953,6 +1961,10 @@ namespace
         clone->PathLength = source.PathLength;
         clone->Port = source.Port;
         clone->BodyMode = source.BodyMode;
+        clone->BodySourceCallback = source.BodySourceCallback;
+        clone->BodySourceContext = source.BodySourceContext;
+        clone->BodySourceContentLength = source.BodySourceContentLength;
+        clone->BodySourceContentLengthKnown = source.BodySourceContentLengthKnown;
         clone->Tls = source.Tls;
         clone->HasTlsOverride = source.HasTlsOverride;
         clone->ConnectionPolicy = source.ConnectionPolicy;
@@ -1999,7 +2011,12 @@ namespace
             clone->Tls.Alpn = clone->OwnedTlsAlpn;
         }
 
-        if (source.HasBody && source.BodyLength != 0) {
+        if (source.BodySourceCallback != nullptr) {
+            clone->HasBody = source.HasBody;
+            clone->Body = nullptr;
+            clone->BodyLength = source.BodyLength;
+        }
+        else if (source.HasBody && source.BodyLength != 0) {
             NTSTATUS status = BeginOwnedBodyBuild(*clone);
             if (NT_SUCCESS(status)) {
                 status = AppendOwnedBody(*clone, source.Body, source.BodyLength);
@@ -2548,6 +2565,36 @@ namespace
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS KhHttpRequestSetBodySource(
+        KH_REQUEST request,
+        KhRequestBodyReadCallback callback,
+        void* context,
+        SIZE_T contentLength,
+        bool contentLengthKnown) noexcept
+    {
+        NTSTATUS status = CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (!IsRequestHandle(request) || callback == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ReleaseOwnedBody(*request);
+        request->Body = nullptr;
+        request->BodyLength = contentLengthKnown ? contentLength : 0;
+        request->HasBody = true;
+        request->BodyMode = contentLengthKnown ?
+            KhRequestBodyMode::ContentLength :
+            KhRequestBodyMode::Chunked;
+        request->BodySourceCallback = callback;
+        request->BodySourceContext = context;
+        request->BodySourceContentLength = contentLength;
+        request->BodySourceContentLengthKnown = contentLengthKnown;
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS KhHttpRequestSetBodyMode(KH_REQUEST request, KhRequestBodyMode mode) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
@@ -2561,6 +2608,12 @@ namespace
 
         if (mode != KhRequestBodyMode::ContentLength &&
             mode != KhRequestBodyMode::Chunked) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (request->BodySourceCallback != nullptr &&
+            mode == KhRequestBodyMode::ContentLength &&
+            !request->BodySourceContentLengthKnown) {
             return STATUS_INVALID_PARAMETER;
         }
 

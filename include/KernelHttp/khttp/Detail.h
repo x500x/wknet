@@ -22,7 +22,8 @@ namespace detail
         Json = 3,
         Form = 4,
         Multipart = 5,
-        File = 6
+        File = 6,
+        Stream = 7
     };
 
     struct StoredText final
@@ -93,6 +94,10 @@ struct Body final
     SIZE_T MultipartPartCount = 0;
     char* FilePath = nullptr;
     SIZE_T FilePathLength = 0;
+    RequestBodyReadCallback StreamCallback = nullptr;
+    void* StreamContext = nullptr;
+    SIZE_T StreamContentLength = 0;
+    bool StreamContentLengthKnown = false;
     detail::StoredHeader Trailers[::KernelHttp::engine::KhMaxHeadersPerRequest] = {};
     SIZE_T TrailerCount = 0;
 };

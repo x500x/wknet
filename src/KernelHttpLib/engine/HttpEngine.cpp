@@ -1605,6 +1605,14 @@ namespace engine
             return status;
         }
 
+        if (request.BodySourceCallback != nullptr) {
+            return http::HttpRequestBuilder::BuildHeaders(
+                buildOptions,
+                reinterpret_cast<char*>(workspace.Request.Data),
+                workspace.Request.Length,
+                requestLength);
+        }
+
         return http::HttpRequestBuilder::Build(
             buildOptions,
             reinterpret_cast<char*>(workspace.Request.Data),
@@ -1688,6 +1696,319 @@ namespace engine
             requestBytes + bodyOffset,
             requestLength - bodyOffset);
     }
+
+    _Must_inspect_result_
+    bool FormatChunkPrefix(
+        _Out_writes_bytes_(capacity) UCHAR* destination,
+        SIZE_T capacity,
+        SIZE_T value,
+        _Out_ SIZE_T* length) noexcept
+    {
+        if (length != nullptr) {
+            *length = 0;
+        }
+        if (destination == nullptr || length == nullptr || capacity < 3) {
+            return false;
+        }
+
+        SIZE_T shift = (sizeof(SIZE_T) * 8) - 4;
+        bool wroteDigit = false;
+        SIZE_T cursor = 0;
+        for (;;) {
+            const SIZE_T digit = (value >> shift) & 0x0f;
+            if (digit != 0 || wroteDigit || shift == 0) {
+                if (cursor >= capacity) {
+                    return false;
+                }
+                static constexpr char hex[] = "0123456789abcdef";
+                destination[cursor++] = static_cast<UCHAR>(hex[digit]);
+                wroteDigit = true;
+            }
+
+            if (shift == 0) {
+                break;
+            }
+            shift -= 4;
+        }
+
+        if (cursor + 2 > capacity) {
+            return false;
+        }
+        destination[cursor++] = '\r';
+        destination[cursor++] = '\n';
+        *length = cursor;
+        return true;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS SendHttp1RequestTrailers(
+        _Inout_ core::ITransport& transport,
+        _In_ const KhRequest& request) noexcept
+    {
+        NTSTATUS status = SendTransportSegment(
+            transport,
+            reinterpret_cast<const UCHAR*>("0\r\n"),
+            sizeof("0\r\n") - 1);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        for (SIZE_T index = 0; index < request.TrailerCount; ++index) {
+            const KhStoredHeader& trailer = request.Trailers[index];
+            status = SendTransportSegment(
+                transport,
+                reinterpret_cast<const UCHAR*>(trailer.Name),
+                trailer.NameLength);
+            if (NT_SUCCESS(status)) {
+                status = SendTransportSegment(
+                    transport,
+                    reinterpret_cast<const UCHAR*>(": "),
+                    sizeof(": ") - 1);
+            }
+            if (NT_SUCCESS(status)) {
+                status = SendTransportSegment(
+                    transport,
+                    reinterpret_cast<const UCHAR*>(trailer.Value),
+                    trailer.ValueLength);
+            }
+            if (NT_SUCCESS(status)) {
+                status = SendTransportSegment(
+                    transport,
+                    reinterpret_cast<const UCHAR*>("\r\n"),
+                    sizeof("\r\n") - 1);
+            }
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        return SendTransportSegment(
+            transport,
+            reinterpret_cast<const UCHAR*>("\r\n"),
+            sizeof("\r\n") - 1);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS ReadRequestBodySource(
+        _In_ const KhRequest& request,
+        _Out_writes_bytes_(bufferCapacity) UCHAR* buffer,
+        SIZE_T bufferCapacity,
+        _Out_ SIZE_T* bytesRead,
+        _Out_ bool* endOfBody) noexcept
+    {
+        if (request.BodySourceCallback == nullptr ||
+            buffer == nullptr ||
+            bufferCapacity == 0 ||
+            bytesRead == nullptr ||
+            endOfBody == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *bytesRead = 0;
+        *endOfBody = false;
+        NTSTATUS status = request.BodySourceCallback(
+            request.BodySourceContext,
+            buffer,
+            bufferCapacity,
+            bytesRead,
+            endOfBody);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        if (*bytesRead > bufferCapacity) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (*bytesRead == 0 && !*endOfBody) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS SendHttp1RequestBodySource(
+        _Inout_ core::ITransport& transport,
+        _In_ const KhRequest& request,
+        _Inout_ KhWorkspace& workspace) noexcept
+    {
+        if (request.BodySourceCallback == nullptr ||
+            workspace.Request.Data == nullptr ||
+            workspace.Request.Length <= 32) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        constexpr SIZE_T prefixCapacity = 32;
+        UCHAR* chunkPrefix = workspace.Request.Data;
+        UCHAR* bodyBuffer = workspace.Request.Data + prefixCapacity;
+        const SIZE_T bodyBufferCapacity = workspace.Request.Length - prefixCapacity;
+        SIZE_T totalSent = 0;
+
+        for (;;) {
+            SIZE_T bytesRead = 0;
+            bool endOfBody = false;
+            NTSTATUS status = ReadRequestBodySource(
+                request,
+                bodyBuffer,
+                bodyBufferCapacity,
+                &bytesRead,
+                &endOfBody);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            if (request.BodyMode == KhRequestBodyMode::ContentLength) {
+                if (!request.BodySourceContentLengthKnown) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                if (bytesRead > request.BodySourceContentLength - totalSent) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                status = SendTransportSegment(transport, bodyBuffer, bytesRead);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                totalSent += bytesRead;
+                if (totalSent == request.BodySourceContentLength) {
+                    return STATUS_SUCCESS;
+                }
+                if (endOfBody) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                continue;
+            }
+
+            if (bytesRead != 0) {
+                SIZE_T prefixLength = 0;
+                if (!FormatChunkPrefix(chunkPrefix, prefixCapacity, bytesRead, &prefixLength)) {
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+                status = SendTransportSegment(transport, chunkPrefix, prefixLength);
+                if (NT_SUCCESS(status)) {
+                    status = SendTransportSegment(transport, bodyBuffer, bytesRead);
+                }
+                if (NT_SUCCESS(status)) {
+                    status = SendTransportSegment(
+                        transport,
+                        reinterpret_cast<const UCHAR*>("\r\n"),
+                        sizeof("\r\n") - 1);
+                }
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
+            if (endOfBody) {
+                return SendHttp1RequestTrailers(transport, request);
+            }
+        }
+    }
+
+    _Must_inspect_result_
+    bool AddSizeChecked(SIZE_T left, SIZE_T right, _Out_ SIZE_T* result) noexcept
+    {
+        if (result == nullptr) {
+            return false;
+        }
+        if (left > static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) - right) {
+            return false;
+        }
+        *result = left + right;
+        return true;
+    }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+    _Must_inspect_result_
+    NTSTATUS SimulateHttp1RequestBodySourceForTest(
+        _In_ const KhRequest& request,
+        _Inout_ KhWorkspace& workspace,
+        _Out_ SIZE_T* bodyBytesLength) noexcept
+    {
+        if (bodyBytesLength != nullptr) {
+            *bodyBytesLength = 0;
+        }
+        if (request.BodySourceCallback == nullptr || bodyBytesLength == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (workspace.DecodedBody.Data == nullptr || workspace.DecodedBody.Length <= 32) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        constexpr SIZE_T prefixCapacity = 32;
+        UCHAR* chunkPrefix = workspace.DecodedBody.Data;
+        UCHAR* bodyBuffer = workspace.DecodedBody.Data + prefixCapacity;
+        const SIZE_T bodyBufferCapacity = workspace.DecodedBody.Length - prefixCapacity;
+        SIZE_T totalBodyBytes = 0;
+        SIZE_T totalPayloadBytes = 0;
+
+        for (;;) {
+            SIZE_T bytesRead = 0;
+            bool endOfBody = false;
+            NTSTATUS status = ReadRequestBodySource(
+                request,
+                bodyBuffer,
+                bodyBufferCapacity,
+                &bytesRead,
+                &endOfBody);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            if (request.BodyMode == KhRequestBodyMode::ContentLength) {
+                if (!request.BodySourceContentLengthKnown) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                if (bytesRead > request.BodySourceContentLength - totalPayloadBytes) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                if (!AddSizeChecked(totalPayloadBytes, bytesRead, &totalPayloadBytes)) {
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+                if (totalPayloadBytes == request.BodySourceContentLength) {
+                    *bodyBytesLength = totalPayloadBytes;
+                    return STATUS_SUCCESS;
+                }
+                if (endOfBody) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                continue;
+            }
+
+            if (bytesRead != 0) {
+                SIZE_T prefixLength = 0;
+                if (!FormatChunkPrefix(chunkPrefix, prefixCapacity, bytesRead, &prefixLength)) {
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+                SIZE_T next = 0;
+                if (!AddSizeChecked(totalBodyBytes, prefixLength, &next) ||
+                    !AddSizeChecked(next, bytesRead, &next) ||
+                    !AddSizeChecked(next, sizeof("\r\n") - 1, &next)) {
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+                totalBodyBytes = next;
+            }
+
+            if (endOfBody) {
+                SIZE_T next = 0;
+                if (!AddSizeChecked(totalBodyBytes, sizeof("0\r\n") - 1, &next)) {
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+                for (SIZE_T index = 0; index < request.TrailerCount; ++index) {
+                    const KhStoredHeader& trailer = request.Trailers[index];
+                    if (!AddSizeChecked(next, trailer.NameLength, &next) ||
+                        !AddSizeChecked(next, sizeof(": ") - 1, &next) ||
+                        !AddSizeChecked(next, trailer.ValueLength, &next) ||
+                        !AddSizeChecked(next, sizeof("\r\n") - 1, &next)) {
+                        return STATUS_INTEGER_OVERFLOW;
+                    }
+                }
+                if (!AddSizeChecked(next, sizeof("\r\n") - 1, &next)) {
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+                *bodyBytesLength = next;
+                return STATUS_SUCCESS;
+            }
+        }
+    }
+#endif
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
     _Must_inspect_result_
@@ -2081,6 +2402,132 @@ namespace engine
             transport,
             requestBytes + bodyOffset,
             requestLength - bodyOffset);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        *parsed = {};
+        *rawResponseLength = 0;
+        return ReadHttpResponseFromSocket(
+            transport,
+            workspace,
+            responseBodyForbidden,
+            parsed,
+            responseHeaders,
+            headerCapacity,
+            responseTrailers,
+            trailerCapacity,
+            rawResponseLength);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS SendHttp1RequestSourceWithExpect(
+        _Inout_ core::ITransport& transport,
+        _Inout_ KhWorkspace& workspace,
+        _In_ const KhRequest& request,
+        _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
+        SIZE_T requestLength,
+        ULONG expectContinueTimeoutMilliseconds,
+        bool responseBodyForbidden,
+        _Out_ http::HttpResponse* parsed,
+        _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
+        SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http::HttpHeader* responseTrailers,
+        SIZE_T trailerCapacity,
+        _Out_ SIZE_T* rawResponseLength) noexcept
+    {
+        NTSTATUS status = SendTransportSegment(transport, requestBytes, requestLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        workspace.ResponseLength = 0;
+        ULONG informationalCount = 0;
+        for (;;) {
+            status = ReadHttpResponseFromSocketEx(
+                transport,
+                workspace,
+                responseBodyForbidden,
+                true,
+                expectContinueTimeoutMilliseconds,
+                parsed,
+                responseHeaders,
+                headerCapacity,
+                responseTrailers,
+                trailerCapacity,
+                rawResponseLength);
+
+            if (!NT_SUCCESS(status) || !IsNonFinalInformationalResponse(*parsed) || parsed->StatusCode == 100) {
+                break;
+            }
+
+            if (informationalCount >= 16) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            ++informationalCount;
+
+            bool skippedInformational = false;
+            SIZE_T bufferedLength = workspace.ResponseLength;
+            status = DiscardNonFinalInformationalResponse(
+                workspace.Response.Data,
+                &bufferedLength,
+                *parsed,
+                &skippedInformational);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (!skippedInformational) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            workspace.ResponseLength = bufferedLength;
+            *parsed = {};
+            *rawResponseLength = 0;
+        }
+
+        if (NT_SUCCESS(status)) {
+            if (parsed->StatusCode == 100) {
+                bool skippedInformational = false;
+                SIZE_T bufferedLength = workspace.ResponseLength;
+                status = DiscardNonFinalInformationalResponse(
+                    workspace.Response.Data,
+                    &bufferedLength,
+                    *parsed,
+                    &skippedInformational);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                if (!skippedInformational) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                workspace.ResponseLength = bufferedLength;
+                *parsed = {};
+                *rawResponseLength = 0;
+
+                status = SendHttp1RequestBodySource(transport, request, workspace);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                return ReadHttpResponseFromSocket(
+                    transport,
+                    workspace,
+                    responseBodyForbidden,
+                    parsed,
+                    responseHeaders,
+                    headerCapacity,
+                    responseTrailers,
+                    trailerCapacity,
+                    rawResponseLength);
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        if (status != STATUS_IO_TIMEOUT) {
+            return status;
+        }
+
+        status = SendHttp1RequestBodySource(transport, request, workspace);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -2923,7 +3370,7 @@ namespace engine
         if (!FindHttpRequestBodyOffset(workspace.Request.Data, builtRequestLength, &headerBytesLength)) {
             return STATUS_INVALID_PARAMETER;
         }
-        const SIZE_T bodyBytesLength = builtRequestLength - headerBytesLength;
+        SIZE_T bodyBytesLength = builtRequestLength - headerBytesLength;
         const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
 
         KhTestHttpTransportResponse testResponse = {};
@@ -2954,6 +3401,12 @@ namespace engine
                 firstStatusCode == 100;
 
             if (status == STATUS_IO_TIMEOUT || receivedContinue) {
+                if (request.BodySourceCallback != nullptr) {
+                    status = SimulateHttp1RequestBodySourceForTest(request, workspace, &bodyBytesLength);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                }
                 testResponse = {};
                 PopulateTestHttpTransportRequest(
                     request,
@@ -2971,6 +3424,12 @@ namespace engine
             }
         }
         else {
+            if (request.BodySourceCallback != nullptr) {
+                status = SimulateHttp1RequestBodySourceForTest(request, workspace, &bodyBytesLength);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
             PopulateTestHttpTransportRequest(
                 request,
                 *session,
@@ -3118,6 +3577,9 @@ namespace engine
             if (useExpectContinue) {
                 return STATUS_NOT_SUPPORTED;
             }
+            if (request.BodySourceCallback != nullptr) {
+                return STATUS_NOT_SUPPORTED;
+            }
 
             if (pooledConnection->Transport == nullptr) {
                 return STATUS_INVALID_DEVICE_STATE;
@@ -3159,19 +3621,37 @@ namespace engine
         }
 
         if (useExpectContinue) {
-            status = SendHttp1RequestBufferWithExpect(
-                *pooledConnection->Transport,
-                workspace,
-                workspace.Request.Data,
-                builtRequestLength,
-                EffectiveExpectContinueTimeoutMilliseconds(sendOptions),
-                request.Method == KhHttpMethod::Head,
-                parsed,
-                responseHeaders,
-                headerCapacity,
-                responseTrailers,
-                trailerCapacity,
-                rawResponseLength);
+            if (request.BodySourceCallback != nullptr) {
+                status = SendHttp1RequestSourceWithExpect(
+                    *pooledConnection->Transport,
+                    workspace,
+                    request,
+                    workspace.Request.Data,
+                    builtRequestLength,
+                    EffectiveExpectContinueTimeoutMilliseconds(sendOptions),
+                    request.Method == KhHttpMethod::Head,
+                    parsed,
+                    responseHeaders,
+                    headerCapacity,
+                    responseTrailers,
+                    trailerCapacity,
+                    rawResponseLength);
+            }
+            else {
+                status = SendHttp1RequestBufferWithExpect(
+                    *pooledConnection->Transport,
+                    workspace,
+                    workspace.Request.Data,
+                    builtRequestLength,
+                    EffectiveExpectContinueTimeoutMilliseconds(sendOptions),
+                    request.Method == KhHttpMethod::Head,
+                    parsed,
+                    responseHeaders,
+                    headerCapacity,
+                    responseTrailers,
+                    trailerCapacity,
+                    rawResponseLength);
+            }
         }
         else {
             status = SendHttp1RequestBuffer(
@@ -3180,6 +3660,15 @@ namespace engine
                 builtRequestLength);
             if (!NT_SUCCESS(status)) {
                 return status;
+            }
+            if (request.BodySourceCallback != nullptr) {
+                status = SendHttp1RequestBodySource(
+                    *pooledConnection->Transport,
+                    request,
+                    workspace);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
             }
 
             status = ReadHttpResponseFromSocket(
@@ -4301,7 +4790,8 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
-        const SIZE_T maxResponseBytes =
+        const SIZE_T maxResponseBytes = bodyCallbackOnly ?
+            0 :
             EffectiveMaxResponseBytes(options, session->Options.MaxResponseBytes);
         WorkspaceGuard requestWorkspace;
         status = requestWorkspace.CreateForSession(session, maxResponseBytes);

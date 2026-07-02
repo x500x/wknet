@@ -174,6 +174,23 @@ namespace
         SIZE_T ProxyAuthHeaderLength = 0;
     };
 
+    struct StreamingBodyContext
+    {
+        const char* const* Chunks = nullptr;
+        const SIZE_T* ChunkLengths = nullptr;
+        SIZE_T ChunkCount = 0;
+        SIZE_T Index = 0;
+        SIZE_T Offset = 0;
+        SIZE_T CallCount = 0;
+    };
+
+    struct BodyCallbackCapture
+    {
+        SIZE_T CallCount = 0;
+        SIZE_T TotalBytes = 0;
+        bool FinalChunk = false;
+    };
+
     struct RedirectCapture
     {
         SIZE_T CallCount = 0;
@@ -351,10 +368,69 @@ namespace
                 break;
             }
         }
+        if (captured->ObservedBodyLength == 0 && request->BodyBytesLength != 0) {
+            captured->ObservedBodyLength = request->BodyBytesLength;
+        }
 
         response->RawResponse = captured->RawResponse;
         response->RawResponseLength = captured->RawResponseLength;
         response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS StreamingBodyRead(
+        void* context,
+        UCHAR* buffer,
+        SIZE_T bufferCapacity,
+        SIZE_T* bytesRead,
+        bool* endOfBody) noexcept
+    {
+        auto* stream = static_cast<StreamingBodyContext*>(context);
+        if (stream == nullptr || buffer == nullptr || bytesRead == nullptr || endOfBody == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++stream->CallCount;
+        *bytesRead = 0;
+        *endOfBody = false;
+        if (stream->Index >= stream->ChunkCount) {
+            *endOfBody = true;
+            return STATUS_SUCCESS;
+        }
+
+        const char* source = stream->Chunks[stream->Index];
+        const SIZE_T sourceLength = stream->ChunkLengths[stream->Index];
+        const SIZE_T remaining = sourceLength - stream->Offset;
+        const SIZE_T copy = remaining < bufferCapacity ? remaining : bufferCapacity;
+        if (copy != 0) {
+            memcpy(buffer, source + stream->Offset, copy);
+        }
+        stream->Offset += copy;
+        *bytesRead = copy;
+
+        if (stream->Offset == sourceLength) {
+            ++stream->Index;
+            stream->Offset = 0;
+        }
+        if (stream->Index >= stream->ChunkCount) {
+            *endOfBody = true;
+        }
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS CountingBodyCallback(
+        void* context,
+        const UCHAR* data,
+        SIZE_T dataLength,
+        bool finalChunk) noexcept
+    {
+        auto* capture = static_cast<BodyCallbackCapture*>(context);
+        if (capture == nullptr || (data == nullptr && dataLength != 0)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        ++capture->CallCount;
+        capture->TotalBytes += dataLength;
+        capture->FinalChunk = finalChunk;
         return STATUS_SUCCESS;
     }
 
@@ -1401,6 +1477,42 @@ namespace
         Expect(khttp::ResponseBodyLength(resp) == 5000, "default unlimited aggregation returns large body");
         khttp::ResponseRelease(resp);
         khttp::SessionClose(unlimitedSession);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestResponseBodyCallbackIgnoresAggregationLimit() noexcept
+    {
+        char response[5100] = {};
+        const SIZE_T responseLength = BuildLargeHttpResponse(response, sizeof(response));
+        Expect(responseLength != 0, "large callback response fixture is built");
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = responseLength;
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.MaxResponseBytes = 64;
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for callback response limit test");
+
+        BodyCallbackCapture callback = {};
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.OnBody = CountingBodyCallback;
+        options.CallbackContext = &callback;
+
+        const char* url = "http://example.com/large-callback";
+        khttp::Response* resp = nullptr;
+        status = khttp::GetEx(session, url, Length(url), nullptr, &options, &resp);
+        Expect(NT_SUCCESS(status), "OnBody-only response ignores session aggregation limit");
+        Expect(resp == nullptr, "OnBody-only response does not allocate aggregate response");
+        Expect(callback.CallCount == 1, "OnBody-only response callback runs once");
+        Expect(callback.TotalBytes == 5000, "OnBody-only response callback receives full body");
+        Expect(callback.FinalChunk, "OnBody-only response callback marks final chunk");
+
+        khttp::ResponseRelease(resp);
+        khttp::SessionClose(session);
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
@@ -3086,6 +3198,128 @@ namespace
 
         khttp::ResponseRelease(resp);
         khttp::RequestRelease(request);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestStreamingRequestBodyContentLength() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 201 Created\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for streaming content-length body");
+
+        static const char first[] = "hello";
+        static const char second[] = "-world";
+        const char* chunks[] = { first, second };
+        const SIZE_T chunkLengths[] = { sizeof(first) - 1, sizeof(second) - 1 };
+        StreamingBodyContext stream = {};
+        stream.Chunks = chunks;
+        stream.ChunkLengths = chunkLengths;
+        stream.ChunkCount = sizeof(chunks) / sizeof(chunks[0]);
+
+        khttp::Body* body = nullptr;
+        status = khttp::BodyCreateStream(
+            StreamingBodyRead,
+            &stream,
+            (sizeof(first) - 1) + (sizeof(second) - 1),
+            true,
+            "text/plain",
+            sizeof("text/plain") - 1,
+            &body);
+        Expect(NT_SUCCESS(status), "BodyCreateStream succeeds for known-length body");
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/upload";
+        status = khttp::PostEx(session, url, Length(url), nullptr, body, nullptr, &resp);
+        Expect(NT_SUCCESS(status), "known-length streaming body send succeeds");
+        Expect(captured.CallCount == 1, "known-length streaming body reaches transport once");
+        Expect(stream.CallCount == 2, "known-length streaming body is read in source chunks");
+        Expect(captured.ObservedBodyLength == (sizeof(first) - 1) + (sizeof(second) - 1),
+            "known-length streaming body wire length matches payload");
+        Expect(BufferContainsLiteral(
+            captured.BuiltRequest,
+            captured.BuiltRequestLength,
+            "Content-Length: 11\r\n"), "known-length streaming body emits Content-Length");
+        Expect(!BufferContainsLiteral(
+            captured.BuiltRequest,
+            captured.BuiltRequestLength,
+            "Transfer-Encoding: chunked"), "known-length streaming body does not emit chunked");
+
+        khttp::ResponseRelease(resp);
+        khttp::BodyRelease(body);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestStreamingRequestBodyChunkedTrailers() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 201 Created\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for streaming chunked body");
+
+        static const char first[] = "hello";
+        static const char second[] = "-world";
+        const char* chunks[] = { first, second };
+        const SIZE_T chunkLengths[] = { sizeof(first) - 1, sizeof(second) - 1 };
+        StreamingBodyContext stream = {};
+        stream.Chunks = chunks;
+        stream.ChunkLengths = chunkLengths;
+        stream.ChunkCount = sizeof(chunks) / sizeof(chunks[0]);
+
+        khttp::Body* body = nullptr;
+        status = khttp::BodyCreateStream(
+            StreamingBodyRead,
+            &stream,
+            0,
+            false,
+            nullptr,
+            0,
+            &body);
+        Expect(NT_SUCCESS(status), "BodyCreateStream succeeds for unknown-length body");
+        status = khttp::BodyAddTrailerEx(
+            body,
+            "X-Checksum",
+            sizeof("X-Checksum") - 1,
+            "abc",
+            sizeof("abc") - 1);
+        Expect(NT_SUCCESS(status), "BodyAddTrailerEx succeeds for streaming chunked body");
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/upload";
+        status = khttp::PostEx(session, url, Length(url), nullptr, body, nullptr, &resp);
+        Expect(NT_SUCCESS(status), "chunked streaming body send succeeds");
+        Expect(captured.CallCount == 1, "chunked streaming body reaches transport once");
+        Expect(stream.CallCount == 2, "chunked streaming body is read in source chunks");
+        Expect(captured.ObservedBodyLength == 43, "chunked streaming body wire length includes framing and trailer");
+        Expect(BufferContainsLiteral(
+            captured.BuiltRequest,
+            captured.BuiltRequestLength,
+            "Transfer-Encoding: chunked\r\n"), "unknown-length streaming body emits chunked");
+        Expect(!BufferContainsLiteral(
+            captured.BuiltRequest,
+            captured.BuiltRequestLength,
+            "Content-Length:"), "unknown-length streaming body omits Content-Length");
+
+        khttp::ResponseRelease(resp);
+        khttp::BodyRelease(body);
         khttp::SessionClose(session);
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
@@ -4868,6 +5102,7 @@ int main() noexcept
     TestResponseTrailersAreExposed();
     TestInformationalResponsesAreSkipped();
     TestSessionMaxResponseBytesLimitsSimpleApi();
+    TestResponseBodyCallbackIgnoresAggregationLimit();
     TestRequestRejectsHeaderAndUrlInjection();
     TestUrlRequestTargetAndHostSemantics();
     TestReusedConnectionFailureRetriesWithFreshConnection();
@@ -4895,6 +5130,8 @@ int main() noexcept
     TestPostWithBody();
     TestChunkedRequestBody();
     TestChunkedRequestTrailers();
+    TestStreamingRequestBodyContentLength();
+    TestStreamingRequestBodyChunkedTrailers();
     TestTrailersRejectedWithoutChunked();
     TestSessionRequestBufferBytesLimitsRequestBody();
     TestRequestBuilder();

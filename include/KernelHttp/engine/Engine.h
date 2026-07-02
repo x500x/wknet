@@ -141,6 +141,13 @@ namespace engine
         SIZE_T dataLength,
         bool finalChunk);
 
+    typedef NTSTATUS (*KhRequestBodyReadCallback)(
+        void* context,
+        _Out_writes_bytes_(bufferCapacity) UCHAR* buffer,
+        SIZE_T bufferCapacity,
+        _Out_ SIZE_T* bytesRead,
+        _Out_ bool* endOfBody);
+
     typedef void (*KhAsyncCompletionCallback)(
         void* context,
         NTSTATUS status);
@@ -324,6 +331,14 @@ namespace engine
         _In_ KH_REQUEST request,
         _In_reads_bytes_opt_(bodyLength) const UCHAR* body,
         SIZE_T bodyLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetBodySource(
+        _In_ KH_REQUEST request,
+        _In_ KhRequestBodyReadCallback callback,
+        _In_opt_ void* context,
+        SIZE_T contentLength,
+        bool contentLengthKnown) noexcept;
 
     _Must_inspect_result_
     NTSTATUS KhHttpRequestSetBodyMode(
