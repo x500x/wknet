@@ -49,19 +49,27 @@ namespace engine
         sizeof(http::HttpHeader) * client::Http2MaxRequestHeaders;
     constexpr SIZE_T KhHttp2ExtraHeaderScratchBytes =
         sizeof(http::HttpHeader) * client::Http2MaxRequestHeaders;
+    constexpr SIZE_T KhHttp2TrailerScratchBytes =
+        sizeof(http::HttpHeader) * client::Http2MaxRequestTrailers;
     constexpr SIZE_T KhHttp2LowerHeaderScratchBytes =
         client::Http2MaxRequestHeaders * client::Http2MaxHeaderNameLength;
+    constexpr SIZE_T KhHttp2LowerTrailerScratchBytes =
+        client::Http2MaxRequestTrailers * client::Http2MaxHeaderNameLength;
     constexpr SIZE_T KhHttp2RequestScratchBytes =
         KhHttp2HeaderScratchBytes +
         KhHttp2ExtraHeaderScratchBytes +
+        KhHttp2TrailerScratchBytes +
         KhHttp2LowerHeaderScratchBytes +
+        KhHttp2LowerTrailerScratchBytes +
         client::Http2ContentLengthBufferLength;
 
     struct ApiHttp2Scratch final
     {
         http::HttpHeader* Headers = nullptr;
         http::HttpHeader* ExtraHeaders = nullptr;
+        http::HttpHeader* Trailers = nullptr;
         char (*LowerHeaderNames)[client::Http2MaxHeaderNameLength] = nullptr;
+        char (*LowerTrailerNames)[client::Http2MaxHeaderNameLength] = nullptr;
         char* ContentLengthBuffer = nullptr;
         char* AuthorityBuffer = nullptr;
         SIZE_T AuthorityCapacity = 0;
@@ -343,16 +351,106 @@ namespace engine
         scratch->Headers = reinterpret_cast<http::HttpHeader*>(workspace.Http2HeaderScratch.Data);
         scratch->ExtraHeaders = reinterpret_cast<http::HttpHeader*>(
             workspace.Http2HeaderScratch.Data + KhHttp2HeaderScratchBytes);
+        scratch->Trailers = reinterpret_cast<http::HttpHeader*>(
+            workspace.Http2HeaderScratch.Data +
+            KhHttp2HeaderScratchBytes +
+            KhHttp2ExtraHeaderScratchBytes);
         scratch->LowerHeaderNames = reinterpret_cast<char (*)[client::Http2MaxHeaderNameLength]>(
-            workspace.Http2HeaderScratch.Data + KhHttp2HeaderScratchBytes + KhHttp2ExtraHeaderScratchBytes);
+            workspace.Http2HeaderScratch.Data +
+            KhHttp2HeaderScratchBytes +
+            KhHttp2ExtraHeaderScratchBytes +
+            KhHttp2TrailerScratchBytes);
+        scratch->LowerTrailerNames = reinterpret_cast<char (*)[client::Http2MaxHeaderNameLength]>(
+            workspace.Http2HeaderScratch.Data +
+            KhHttp2HeaderScratchBytes +
+            KhHttp2ExtraHeaderScratchBytes +
+            KhHttp2TrailerScratchBytes +
+            KhHttp2LowerHeaderScratchBytes);
         scratch->ContentLengthBuffer = reinterpret_cast<char*>(
             workspace.Http2HeaderScratch.Data +
             KhHttp2HeaderScratchBytes +
             KhHttp2ExtraHeaderScratchBytes +
-            KhHttp2LowerHeaderScratchBytes);
+            KhHttp2TrailerScratchBytes +
+            KhHttp2LowerHeaderScratchBytes +
+            KhHttp2LowerTrailerScratchBytes);
         scratch->AuthorityBuffer = reinterpret_cast<char*>(
             workspace.Http2HeaderScratch.Data + KhHttp2RequestScratchBytes);
         scratch->AuthorityCapacity = workspace.Http2HeaderScratch.Length - KhHttp2RequestScratchBytes;
+        return STATUS_SUCCESS;
+    }
+
+    bool LowercaseHttp2HeaderName(
+        http::HttpText name,
+        _Out_writes_(capacity) char* output,
+        SIZE_T capacity,
+        _Out_ http::HttpText* lowered) noexcept
+    {
+        if (lowered != nullptr) {
+            *lowered = {};
+        }
+        if (name.Data == nullptr ||
+            name.Length == 0 ||
+            name.Length > client::Http2MaxHeaderNameLength ||
+            output == nullptr ||
+            lowered == nullptr ||
+            name.Length > capacity ||
+            name.Data[0] == ':') {
+            return false;
+        }
+
+        for (SIZE_T index = 0; index < name.Length; ++index) {
+            const UCHAR value = static_cast<UCHAR>(name.Data[index]);
+            if (value <= 0x20 || value >= 0x7f || value == ':') {
+                return false;
+            }
+
+            char loweredValue = name.Data[index];
+            if (loweredValue >= 'A' && loweredValue <= 'Z') {
+                loweredValue = static_cast<char>(loweredValue + 32);
+            }
+            output[index] = loweredValue;
+        }
+
+        lowered->Data = output;
+        lowered->Length = name.Length;
+        return true;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS BuildHttp2TrailersFromRequest(
+        const KhRequest& request,
+        _Out_writes_(trailerCapacity) http::HttpHeader* trailers,
+        SIZE_T trailerCapacity,
+        char lowerTrailerNames[client::Http2MaxRequestTrailers][client::Http2MaxHeaderNameLength],
+        _Out_ SIZE_T* trailerCount) noexcept
+    {
+        if (trailerCount != nullptr) {
+            *trailerCount = 0;
+        }
+        if (trailerCount == nullptr ||
+            (request.TrailerCount != 0 && (trailers == nullptr || lowerTrailerNames == nullptr)) ||
+            request.TrailerCount > trailerCapacity ||
+            request.TrailerCount > client::Http2MaxRequestTrailers) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        for (SIZE_T index = 0; index < request.TrailerCount; ++index) {
+            const KhStoredHeader& trailer = request.Trailers[index];
+            http::HttpText loweredName = {};
+            if (!LowercaseHttp2HeaderName(
+                { trailer.Name, trailer.NameLength },
+                lowerTrailerNames[index],
+                client::Http2MaxHeaderNameLength,
+                &loweredName) ||
+                (trailer.Value == nullptr && trailer.ValueLength != 0)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            trailers[index].Name = loweredName;
+            trailers[index].Value = { trailer.Value, trailer.ValueLength };
+        }
+
+        *trailerCount = request.TrailerCount;
         return STATUS_SUCCESS;
     }
 #endif
@@ -508,12 +606,39 @@ namespace engine
         return TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https");
     }
 
+    bool IsPlainHttpRequest(const KhRequest& request) noexcept
+    {
+        return TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "http");
+    }
+
     bool IsAutomaticHttpAlpnMode(const KhRequest& request) noexcept
     {
         return IsHttpsRequest(request) &&
             request.Tls.PreferHttp2 &&
             request.Tls.Alpn == nullptr &&
             request.Tls.AlpnLength == 0;
+    }
+
+    NTSTATUS EffectiveHttp2CleartextMode(
+        _In_ const KhHttpSendOptions& options,
+        _In_ const KhRequest& request,
+        _Out_ KhHttp2CleartextMode* mode) noexcept
+    {
+        if (mode == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *mode = KhHttp2CleartextMode::Disabled;
+        if (options.Http2CleartextMode == KhHttp2CleartextMode::Disabled) {
+            return STATUS_SUCCESS;
+        }
+
+        if (!IsPlainHttpRequest(request)) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        *mode = options.Http2CleartextMode;
+        return STATUS_SUCCESS;
     }
 
     void RefreshResponseParseDecodedBuffers(
@@ -567,10 +692,10 @@ namespace engine
         bool reusedConnection) noexcept
     {
         return !NT_SUCCESS(status) &&
-            reusedConnection &&
             request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate &&
             IsSafeFreshConnectionRetryMethod(request.Method) &&
-            IsFreshConnectionRetryStatus(status);
+            (status == STATUS_RETRY ||
+                (reusedConnection && IsFreshConnectionRetryStatus(status)));
     }
 
     bool RequestUsesExpectContinue(
@@ -804,6 +929,7 @@ namespace engine
     NTSTATUS BuildPoolKey(
         const KhRequest& request,
         const KhProxyOptions& proxy,
+        KhHttp2CleartextMode http2CleartextMode,
         _Out_ KhConnectionPoolKey* key) noexcept
     {
         if (key == nullptr || request.SchemeLength == 0 || request.HostLength == 0) {
@@ -840,6 +966,7 @@ namespace engine
         key->ClientCredential = request.Tls.ClientCredential;
         key->Policy = request.Tls.Policy;
         key->AutomaticAlpn = IsAutomaticHttpAlpnMode(request);
+        key->Http2CleartextMode = http2CleartextMode;
         const bool useTlsIdentity = IsHttpsRequest(request);
         const char* tlsServerName = request.Tls.ServerName != nullptr ? request.Tls.ServerName : request.Host;
         const SIZE_T tlsServerNameLength = request.Tls.ServerName != nullptr ?
@@ -1232,6 +1359,10 @@ namespace engine
         http::HttpText authority,
         _Out_writes_(extraHeaderCapacity) http::HttpHeader* extraHeaders,
         SIZE_T extraHeaderCapacity,
+        _In_opt_ const http2::Http2RequestBodySource* bodySource,
+        _Out_writes_(trailerCapacity) http::HttpHeader* trailers,
+        SIZE_T trailerCapacity,
+        char lowerTrailerNames[client::Http2MaxRequestTrailers][client::Http2MaxHeaderNameLength],
         _Out_ client::Http2RequestOptions* options) noexcept
     {
         if (requestHeaders == nullptr || extraHeaders == nullptr || options == nullptr) {
@@ -1242,8 +1373,8 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (request.BodyMode == KhRequestBodyMode::Chunked) {
-            return STATUS_NOT_SUPPORTED;
+        if (request.BodySourceCallback != nullptr && bodySource == nullptr) {
+            return STATUS_INVALID_PARAMETER;
         }
 
         *options = {};
@@ -1255,9 +1386,12 @@ namespace engine
         options->Method = ToHttpMethod(request.Method);
         options->Path = { request.Path, request.PathLength };
         options->Authority = authority;
-        options->Body = request.Body;
-        options->BodyLength = request.BodyLength;
-        options->IncludeContentLength = request.HasBody;
+        options->Body = request.BodySourceCallback == nullptr ? request.Body : nullptr;
+        options->BodyLength = request.BodySourceCallback == nullptr ? request.BodyLength : 0;
+        options->BodySource = bodySource;
+        options->IncludeContentLength =
+            request.HasBody &&
+            request.BodyMode == KhRequestBodyMode::ContentLength;
         options->CertificateStore = request.Tls.CertificateStore;
         options->VerifyCertificate = request.Tls.CertificatePolicy == KhCertificatePolicy::Verify;
         options->Policy = request.Tls.Policy;
@@ -1289,6 +1423,18 @@ namespace engine
 
         options->ExtraHeaders = extraHeaders;
         options->ExtraHeaderCount = extraHeaderCount;
+        SIZE_T trailerCount = 0;
+        NTSTATUS status = BuildHttp2TrailersFromRequest(
+            request,
+            trailers,
+            trailerCapacity,
+            lowerTrailerNames,
+            &trailerCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        options->Trailers = trailerCount != 0 ? trailers : nullptr;
+        options->TrailerCount = trailerCount;
         return STATUS_SUCCESS;
     }
 
@@ -1394,6 +1540,16 @@ namespace engine
             return status;
         }
 
+        http2::Http2RequestBodySource h2BodySource = {};
+        const http2::Http2RequestBodySource* h2BodySourcePtr = nullptr;
+        if (request.BodySourceCallback != nullptr) {
+            h2BodySource.Read = request.BodySourceCallback;
+            h2BodySource.Context = request.BodySourceContext;
+            h2BodySource.ContentLength = request.BodySourceContentLength;
+            h2BodySource.ContentLengthKnown = request.BodySourceContentLengthKnown;
+            h2BodySourcePtr = &h2BodySource;
+        }
+
         client::Http2RequestOptions h2Options = {};
         status = BuildHttp2OptionsFromRequest(
             request,
@@ -1402,6 +1558,10 @@ namespace engine
             { h2Scratch.AuthorityBuffer, authorityLength },
             h2Scratch.ExtraHeaders,
             client::Http2MaxRequestHeaders,
+            h2BodySourcePtr,
+            h2Scratch.Trailers,
+            client::Http2MaxRequestTrailers,
+            h2Scratch.LowerTrailerNames,
             &h2Options);
         if (!NT_SUCCESS(status)) {
             return status;
@@ -1448,12 +1608,22 @@ namespace engine
         const bool h2LeaseAlreadyHeld =
             KhConnectionPoolHasHttp2StreamLease(&pooledConnection);
         ULONG streamId = 0;
+        http2::Http2RequestBody requestBody = {};
+        requestBody.Data = h2Options.Body;
+        requestBody.DataLength = h2Options.BodyLength;
+        requestBody.Source = h2Options.BodySource;
+        requestBody.Trailers = h2Options.Trailers;
+        requestBody.TrailerCount = h2Options.TrailerCount;
+        requestBody.HasBody =
+            request.HasBody ||
+            h2Options.BodySource != nullptr ||
+            h2Options.TrailerCount != 0 ||
+            (h2Options.Body != nullptr && h2Options.BodyLength != 0);
         status = pooledConnection.Http2->BeginRequest(
             *pooledConnection.Transport,
             h2Scratch.Headers,
             h2HeaderCount,
-            request.Body,
-            request.BodyLength,
+            requestBody,
             responseHeaders,
             headerCapacity,
             &responseHeaderCount,
@@ -1507,6 +1677,577 @@ namespace engine
             &decoded);
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            return status;
+        }
+
+        parsed->MajorVersion = 2;
+        parsed->MinorVersion = 0;
+        parsed->StatusCode = statusCode;
+        parsed->Headers = responseHeaders;
+        parsed->HeaderCount = responseHeaderCount;
+        parsed->Body = decoded.Body;
+        parsed->BodyLength = decoded.BodyLength;
+        parsed->BytesConsumed = responseBodyLength;
+        parsed->BodyKind = http::HttpBodyKind::ContentLength;
+        workspace.ResponseLength = responseBodyLength;
+        *rawResponseLength = responseBodyLength;
+        return STATUS_SUCCESS;
+    }
+
+    class H2cReplayTransport final : public core::ITransport
+    {
+    public:
+        H2cReplayTransport() noexcept = default;
+
+        NTSTATUS Initialize(
+            _Inout_ core::ITransport* inner,
+            _In_reads_bytes_opt_(replayLength) const UCHAR* replayBytes,
+            SIZE_T replayLength) noexcept
+        {
+            if (inner == nullptr || (replayBytes == nullptr && replayLength != 0)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            inner_ = inner;
+            replayBytes_ = replayBytes;
+            replayLength_ = replayLength;
+            replayOffset_ = 0;
+            return STATUS_SUCCESS;
+        }
+
+        NTSTATUS Send(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept override
+        {
+            if (inner_ == nullptr) {
+                return STATUS_INVALID_DEVICE_STATE;
+            }
+            return inner_->Send(data, length, bytesSent);
+        }
+
+        NTSTATUS Receive(void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept override
+        {
+            NTSTATUS status = ReceiveReplay(buffer, length, bytesReceived);
+            if (status != STATUS_MORE_PROCESSING_REQUIRED) {
+                return status;
+            }
+            if (inner_ == nullptr) {
+                return STATUS_INVALID_DEVICE_STATE;
+            }
+            return inner_->Receive(buffer, length, bytesReceived);
+        }
+
+        NTSTATUS ReceiveWithTimeout(
+            void* buffer,
+            SIZE_T length,
+            SIZE_T* bytesReceived,
+            ULONG timeoutMilliseconds) noexcept override
+        {
+            NTSTATUS status = ReceiveReplay(buffer, length, bytesReceived);
+            if (status != STATUS_MORE_PROCESSING_REQUIRED) {
+                return status;
+            }
+            if (inner_ == nullptr) {
+                return STATUS_INVALID_DEVICE_STATE;
+            }
+            return inner_->ReceiveWithTimeout(buffer, length, bytesReceived, timeoutMilliseconds);
+        }
+
+    private:
+        NTSTATUS ReceiveReplay(void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept
+        {
+            if (bytesReceived != nullptr) {
+                *bytesReceived = 0;
+            }
+            if (replayOffset_ >= replayLength_) {
+                return STATUS_MORE_PROCESSING_REQUIRED;
+            }
+            if (buffer == nullptr || length == 0 || replayBytes_ == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            SIZE_T available = replayLength_ - replayOffset_;
+            SIZE_T toCopy = length < available ? length : available;
+            RtlCopyMemory(buffer, replayBytes_ + replayOffset_, toCopy);
+            replayOffset_ += toCopy;
+            if (bytesReceived != nullptr) {
+                *bytesReceived = toCopy;
+            }
+            return STATUS_SUCCESS;
+        }
+
+        core::ITransport* inner_ = nullptr;
+        const UCHAR* replayBytes_ = nullptr;
+        SIZE_T replayLength_ = 0;
+        SIZE_T replayOffset_ = 0;
+    };
+
+    SIZE_T H2cLiteralLength(_In_z_ const char* text) noexcept
+    {
+        SIZE_T length = 0;
+        if (text == nullptr) {
+            return 0;
+        }
+        while (text[length] != '\0') {
+            ++length;
+        }
+        return length;
+    }
+
+    http::HttpText KhHttpMethodText(KhHttpMethod method) noexcept
+    {
+        switch (method) {
+        case KhHttpMethod::Post:
+            return http::MakeText("POST");
+        case KhHttpMethod::Put:
+            return http::MakeText("PUT");
+        case KhHttpMethod::Patch:
+            return http::MakeText("PATCH");
+        case KhHttpMethod::Delete:
+            return http::MakeText("DELETE");
+        case KhHttpMethod::Head:
+            return http::MakeText("HEAD");
+        case KhHttpMethod::Options:
+            return http::MakeText("OPTIONS");
+        case KhHttpMethod::Connect:
+            return http::MakeText("CONNECT");
+        case KhHttpMethod::Get:
+        default:
+            return http::MakeText("GET");
+        }
+    }
+
+    NTSTATUS AppendH2cText(
+        _Out_writes_bytes_(capacity) char* output,
+        SIZE_T capacity,
+        _Inout_ SIZE_T* offset,
+        http::HttpText text) noexcept
+    {
+        if (output == nullptr ||
+            offset == nullptr ||
+            *offset > capacity ||
+            (text.Data == nullptr && text.Length != 0) ||
+            text.Length > capacity - *offset) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        if (text.Length != 0) {
+            RtlCopyMemory(output + *offset, text.Data, text.Length);
+            *offset += text.Length;
+        }
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS AppendH2cLiteral(
+        _Out_writes_bytes_(capacity) char* output,
+        SIZE_T capacity,
+        _Inout_ SIZE_T* offset,
+        _In_z_ const char* literal) noexcept
+    {
+        return AppendH2cText(output, capacity, offset, { literal, H2cLiteralLength(literal) });
+    }
+
+    bool IsH2cUpgradeControlledHeader(http::HttpText name) noexcept
+    {
+        return http::TextEqualsIgnoreCase(name, http::MakeText("Connection")) ||
+            http::TextEqualsIgnoreCase(name, http::MakeText("Upgrade")) ||
+            http::TextEqualsIgnoreCase(name, http::MakeText("HTTP2-Settings")) ||
+            http::TextEqualsIgnoreCase(name, http::MakeText("Host")) ||
+            http::TextEqualsIgnoreCase(name, http::MakeText("Content-Length")) ||
+            http::TextEqualsIgnoreCase(name, http::MakeText("Transfer-Encoding"));
+    }
+
+    _Must_inspect_result_
+    NTSTATUS BuildH2cUpgradeRequest(
+        const KhRequest& request,
+        http::HttpText authority,
+        _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        _Out_writes_bytes_(outputCapacity) char* output,
+        SIZE_T outputCapacity,
+        _Out_ SIZE_T* outputLength) noexcept
+    {
+        if (outputLength != nullptr) {
+            *outputLength = 0;
+        }
+        if (authority.Data == nullptr ||
+            authority.Length == 0 ||
+            request.Path == nullptr ||
+            request.PathLength == 0 ||
+            (requestHeaders == nullptr && requestHeaderCount != 0) ||
+            output == nullptr ||
+            outputLength == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        HeapArray<char> settingsValue(128);
+        if (!settingsValue.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        http2::Http2Settings settings = {};
+        http::HttpText settingsText = {};
+        NTSTATUS status = http2::Http2FrameCodec::EncodeSettingsPayloadBase64Url(
+            settings,
+            settingsValue.Get(),
+            settingsValue.Count(),
+            &settingsText.Length);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        settingsText.Data = settingsValue.Get();
+
+        SIZE_T offset = 0;
+        status = AppendH2cText(output, outputCapacity, &offset, KhHttpMethodText(request.Method));
+        if (!NT_SUCCESS(status)) return status;
+        status = AppendH2cLiteral(output, outputCapacity, &offset, " ");
+        if (!NT_SUCCESS(status)) return status;
+        status = AppendH2cText(output, outputCapacity, &offset, { request.Path, request.PathLength });
+        if (!NT_SUCCESS(status)) return status;
+        status = AppendH2cLiteral(output, outputCapacity, &offset, " HTTP/1.1\r\nHost: ");
+        if (!NT_SUCCESS(status)) return status;
+        status = AppendH2cText(output, outputCapacity, &offset, authority);
+        if (!NT_SUCCESS(status)) return status;
+        status = AppendH2cLiteral(output, outputCapacity, &offset, "\r\n");
+        if (!NT_SUCCESS(status)) return status;
+
+        for (SIZE_T index = 0; index < requestHeaderCount; ++index) {
+            const http::HttpHeader& header = requestHeaders[index];
+            if (header.Name.Data == nullptr ||
+                header.Name.Length == 0 ||
+                (header.Value.Data == nullptr && header.Value.Length != 0) ||
+                IsH2cUpgradeControlledHeader(header.Name)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            status = AppendH2cText(output, outputCapacity, &offset, header.Name);
+            if (!NT_SUCCESS(status)) return status;
+            status = AppendH2cLiteral(output, outputCapacity, &offset, ": ");
+            if (!NT_SUCCESS(status)) return status;
+            status = AppendH2cText(output, outputCapacity, &offset, header.Value);
+            if (!NT_SUCCESS(status)) return status;
+            status = AppendH2cLiteral(output, outputCapacity, &offset, "\r\n");
+            if (!NT_SUCCESS(status)) return status;
+        }
+
+        status = AppendH2cLiteral(
+            output,
+            outputCapacity,
+            &offset,
+            "Connection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: ");
+        if (!NT_SUCCESS(status)) return status;
+        status = AppendH2cText(output, outputCapacity, &offset, settingsText);
+        if (!NT_SUCCESS(status)) return status;
+        status = AppendH2cLiteral(output, outputCapacity, &offset, "\r\n\r\n");
+        if (!NT_SUCCESS(status)) return status;
+
+        *outputLength = offset;
+        return STATUS_SUCCESS;
+    }
+
+    SIZE_T FindH2cHeaderEnd(_In_reads_bytes_(length) const UCHAR* data, SIZE_T length) noexcept
+    {
+        if (data == nullptr || length < 4) {
+            return static_cast<SIZE_T>(~static_cast<SIZE_T>(0));
+        }
+        for (SIZE_T index = 0; index <= length - 4; ++index) {
+            if (data[index] == '\r' &&
+                data[index + 1] == '\n' &&
+                data[index + 2] == '\r' &&
+                data[index + 3] == '\n') {
+                return index + 4;
+            }
+        }
+        return static_cast<SIZE_T>(~static_cast<SIZE_T>(0));
+    }
+
+    bool H2cHeaderBlockHasToken(
+        _In_reads_bytes_(length) const char* data,
+        SIZE_T length,
+        http::HttpText headerName,
+        http::HttpText token) noexcept
+    {
+        if (data == nullptr) {
+            return false;
+        }
+
+        SIZE_T lineStart = 0;
+        while (lineStart + 1 < length) {
+            SIZE_T lineEnd = lineStart;
+            while (lineEnd + 1 < length &&
+                !(data[lineEnd] == '\r' && data[lineEnd + 1] == '\n')) {
+                ++lineEnd;
+            }
+
+            SIZE_T colon = lineStart;
+            while (colon < lineEnd && data[colon] != ':') {
+                ++colon;
+            }
+            if (colon < lineEnd) {
+                http::HttpText name = { data + lineStart, colon - lineStart };
+                http::HttpText value = { data + colon + 1, lineEnd - colon - 1 };
+                if (http::TextEqualsIgnoreCase(name, headerName) &&
+                    http::HeaderValueHasToken(value, token)) {
+                    return true;
+                }
+            }
+
+            if (lineEnd + 1 >= length) {
+                break;
+            }
+            lineStart = lineEnd + 2;
+        }
+
+        return false;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS ValidateH2cUpgradeResponse(
+        _In_reads_bytes_(headerLength) const char* data,
+        SIZE_T headerLength) noexcept
+    {
+        if (data == nullptr || headerLength < 12) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (data[0] != 'H' || data[1] != 'T' || data[2] != 'T' || data[3] != 'P' || data[4] != '/') {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        SIZE_T cursor = 5;
+        while (cursor < headerLength && data[cursor] != ' ') {
+            ++cursor;
+        }
+        if (cursor + 4 >= headerLength || data[cursor] != ' ') {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (data[cursor + 1] != '1' || data[cursor + 2] != '0' || data[cursor + 3] != '1') {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        if (!H2cHeaderBlockHasToken(
+                data,
+                headerLength,
+                http::MakeText("Upgrade"),
+                http::MakeText("h2c")) ||
+            !H2cHeaderBlockHasToken(
+                data,
+                headerLength,
+                http::MakeText("Connection"),
+                http::MakeText("Upgrade"))) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS ReadH2cUpgradeResponse(
+        _Inout_ core::ITransport& transport,
+        _Inout_ KhWorkspace& workspace,
+        _Inout_ HeapArray<UCHAR>& replayBytes,
+        _Out_ SIZE_T* replayLength) noexcept
+    {
+        if (replayLength != nullptr) {
+            *replayLength = 0;
+        }
+        if (workspace.Response.Data == nullptr ||
+            workspace.Response.Length == 0 ||
+            replayLength == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        workspace.ResponseLength = 0;
+        for (;;) {
+            const SIZE_T headerEnd = FindH2cHeaderEnd(workspace.Response.Data, workspace.ResponseLength);
+            if (headerEnd != static_cast<SIZE_T>(~static_cast<SIZE_T>(0))) {
+                NTSTATUS status = ValidateH2cUpgradeResponse(
+                    reinterpret_cast<const char*>(workspace.Response.Data),
+                    headerEnd);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                const SIZE_T extraLength = workspace.ResponseLength - headerEnd;
+                if (extraLength != 0) {
+                    status = replayBytes.Allocate(extraLength);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                    RtlCopyMemory(replayBytes.Get(), workspace.Response.Data + headerEnd, extraLength);
+                }
+
+                *replayLength = extraLength;
+                workspace.ResponseLength = 0;
+                return STATUS_SUCCESS;
+            }
+
+            if (workspace.ResponseLength == workspace.Response.Length) {
+                NTSTATUS status = KhWorkspaceEnsureResponseCapacity(&workspace, workspace.ResponseLength + 1);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
+            SIZE_T received = 0;
+            NTSTATUS status = transport.Receive(
+                workspace.Response.Data + workspace.ResponseLength,
+                workspace.Response.Length - workspace.ResponseLength,
+                &received);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (received == 0) {
+                return STATUS_CONNECTION_DISCONNECTED;
+            }
+            workspace.ResponseLength += received;
+        }
+    }
+
+    _Must_inspect_result_
+    NTSTATUS SendH2cUpgradeViaTransport(
+        const KhRequest& request,
+        KhWorkspace& workspace,
+        _Inout_ KhPooledConnection& pooledConnection,
+        SIZE_T maxHeaderBlockBytes,
+        _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        _Out_ http::HttpResponse* parsed,
+        _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
+        SIZE_T headerCapacity,
+        _Out_ SIZE_T* rawResponseLength) noexcept
+    {
+        if (parsed == nullptr || responseHeaders == nullptr || rawResponseLength == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (request.HasBody ||
+            request.BodyLength != 0 ||
+            request.BodySourceCallback != nullptr ||
+            request.TrailerCount != 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (pooledConnection.Transport == nullptr || pooledConnection.Http2 != nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        *parsed = {};
+        *rawResponseLength = 0;
+        workspace.ResponseLength = 0;
+
+        ApiHttp2Scratch h2Scratch = {};
+        NTSTATUS status = PrepareApiHttp2Scratch(workspace, &h2Scratch);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        SIZE_T authorityLength = 0;
+        status = BuildHostHeaderValue(
+            request,
+            h2Scratch.AuthorityBuffer,
+            h2Scratch.AuthorityCapacity,
+            &authorityLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        SIZE_T upgradeRequestLength = 0;
+        status = BuildH2cUpgradeRequest(
+            request,
+            { h2Scratch.AuthorityBuffer, authorityLength },
+            requestHeaders,
+            requestHeaderCount,
+            reinterpret_cast<char*>(workspace.Request.Data),
+            workspace.Request.Length,
+            &upgradeRequestLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        SIZE_T sent = 0;
+        status = pooledConnection.Transport->Send(
+            workspace.Request.Data,
+            upgradeRequestLength,
+            &sent);
+        if (NT_SUCCESS(status) && sent != upgradeRequestLength) {
+            return STATUS_CONNECTION_DISCONNECTED;
+        }
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        HeapArray<UCHAR> replayBytes;
+        SIZE_T replayLength = 0;
+        status = ReadH2cUpgradeResponse(
+            *pooledConnection.Transport,
+            workspace,
+            replayBytes,
+            &replayLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        auto* h2Connection = AllocateNonPagedObject<http2::Http2Connection>();
+        if (h2Connection == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        HeapObject<H2cReplayTransport> replayTransport;
+        if (!replayTransport.IsValid()) {
+            FreeNonPagedObject(h2Connection);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        core::ITransport* activeTransport = pooledConnection.Transport;
+        if (replayLength != 0) {
+            status = replayTransport->Initialize(
+                pooledConnection.Transport,
+                replayBytes.Get(),
+                replayLength);
+            if (!NT_SUCCESS(status)) {
+                FreeNonPagedObject(h2Connection);
+                return status;
+            }
+            activeTransport = replayTransport.Get();
+        }
+
+        status = h2Connection->InitializeAfterUpgrade(*activeTransport, maxHeaderBlockBytes);
+        if (!NT_SUCCESS(status)) {
+            kprintf("High-level h2c Upgrade init failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            FreeNonPagedObject(h2Connection);
+            return status;
+        }
+        pooledConnection.Http2 = h2Connection;
+
+        SIZE_T responseHeaderCount = 0;
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        http2::Http2ResponseBodySink responseBodySink = {};
+        responseBodySink.Append = AppendHttp2ResponseBodyToWorkspace;
+        responseBodySink.Context = &workspace;
+
+        status = pooledConnection.Http2->ReceiveResponse(
+            *activeTransport,
+            1,
+            responseHeaders,
+            headerCapacity,
+            &responseHeaderCount,
+            responseBodySink,
+            &responseBodyLength,
+            &statusCode,
+            reinterpret_cast<char*>(workspace.Http2HeaderScratch.Data),
+            workspace.Http2HeaderScratch.Length);
+        if (!NT_SUCCESS(status)) {
+            kprintf("High-level h2c Upgrade stream 1 failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            return status;
+        }
+
+        http::HttpContentDecodeResult decoded = {};
+        status = DecodeContentWithWorkspace(
+            responseHeaders,
+            responseHeaderCount,
+            reinterpret_cast<const char*>(workspace.Response.Data),
+            responseBodyLength,
+            workspace,
+            &decoded);
+        if (!NT_SUCCESS(status)) {
+            kprintf("High-level h2c Upgrade content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -3269,7 +4010,9 @@ namespace engine
         SIZE_T bodyBytesLength,
         bool expectContinueEnabled,
         bool expectContinueBodySent,
-        _Out_ KhTestHttpTransportRequest* testRequest) noexcept
+        _Out_ KhTestHttpTransportRequest* testRequest,
+        KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled,
+        bool usedHttp2 = false) noexcept
     {
         if (testRequest == nullptr) {
             return;
@@ -3312,6 +4055,8 @@ namespace engine
         testRequest->PoolableConnection = request.ConnectionPolicy != KhConnectionPolicy::NoPool;
         testRequest->ReusedConnection = reusedConnection;
         testRequest->ConnectionId = pooledConnection != nullptr ? pooledConnection->Id : 0;
+        testRequest->Http2CleartextMode = http2CleartextMode;
+        testRequest->UsedHttp2 = usedHttp2;
     }
 #endif
 
@@ -3372,9 +4117,26 @@ namespace engine
         }
         SIZE_T bodyBytesLength = builtRequestLength - headerBytesLength;
         const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
+        KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled;
+        NTSTATUS status = EffectiveHttp2CleartextMode(
+            sendOptions,
+            request,
+            &http2CleartextMode);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        const bool useHttp2Cleartext =
+            http2CleartextMode != KhHttp2CleartextMode::Disabled;
+        if (useHttp2Cleartext && useExpectContinue) {
+            return STATUS_NOT_SUPPORTED;
+        }
+        if (http2CleartextMode == KhHttp2CleartextMode::Upgrade &&
+            (request.HasBody || request.BodySourceCallback != nullptr || request.TrailerCount != 0)) {
+            return STATUS_INVALID_PARAMETER;
+        }
 
         KhTestHttpTransportResponse testResponse = {};
-        NTSTATUS status = STATUS_SUCCESS;
+        status = STATUS_SUCCESS;
         KhTestHttpTransportRequest testRequest = {};
         if (useExpectContinue) {
             PopulateTestHttpTransportRequest(
@@ -3388,7 +4150,9 @@ namespace engine
                 bodyBytesLength,
                 true,
                 false,
-                &testRequest);
+                &testRequest,
+                http2CleartextMode,
+                useHttp2Cleartext);
             status = g_testHttpTransport(g_testHttpTransportContext, &testRequest, &testResponse);
 
             USHORT firstStatusCode = 0;
@@ -3419,7 +4183,9 @@ namespace engine
                     bodyBytesLength,
                     true,
                     true,
-                    &testRequest);
+                    &testRequest,
+                    http2CleartextMode,
+                    useHttp2Cleartext);
                 status = g_testHttpTransport(g_testHttpTransportContext, &testRequest, &testResponse);
             }
         }
@@ -3441,11 +4207,23 @@ namespace engine
                 bodyBytesLength,
                 false,
                 false,
-                &testRequest);
+                &testRequest,
+                http2CleartextMode,
+                useHttp2Cleartext);
             status = g_testHttpTransport(g_testHttpTransportContext, &testRequest, &testResponse);
         }
         if (!NT_SUCCESS(status)) {
             return status;
+        }
+
+        if (useHttp2Cleartext) {
+            parsed->MajorVersion = 2;
+            parsed->MinorVersion = 0;
+            parsed->StatusCode = 200;
+            workspace.ResponseLength = 0;
+            *rawResponseLength = 0;
+            *connectionReusable = false;
+            return STATUS_SUCCESS;
         }
 
         if (TextEqualsLiteral(testResponse.NegotiatedAlpn, testResponse.NegotiatedAlpnLength, "h2")) {
@@ -3515,7 +4293,30 @@ namespace engine
             return STATUS_NOT_SUPPORTED;
         }
 
-        NTSTATUS status = EnsureSocketConnected(session, request, *pooledConnection, cancellationOperation);
+        const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
+        KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled;
+        NTSTATUS status = EffectiveHttp2CleartextMode(
+            sendOptions,
+            request,
+            &http2CleartextMode);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        const bool useHttp2Cleartext =
+            http2CleartextMode != KhHttp2CleartextMode::Disabled;
+        if (useHttp2Cleartext && session->Options.Proxy.Enabled) {
+            return STATUS_NOT_SUPPORTED;
+        }
+        if (useHttp2Cleartext && useExpectContinue) {
+            return STATUS_NOT_SUPPORTED;
+        }
+        if (http2CleartextMode == KhHttp2CleartextMode::Upgrade &&
+            (request.HasBody || request.BodySourceCallback != nullptr || request.TrailerCount != 0)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        status = EnsureSocketConnected(session, request, *pooledConnection, cancellationOperation);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -3561,6 +4362,49 @@ namespace engine
         UNREFERENCED_PARAMETER(cancellationOperation);
 #endif
 
+        if (useHttp2Cleartext) {
+            if (pooledConnection->Transport == nullptr) {
+                return STATUS_INVALID_DEVICE_STATE;
+            }
+
+            if (http2CleartextMode == KhHttp2CleartextMode::Upgrade &&
+                pooledConnection->Http2 == nullptr) {
+                status = SendH2cUpgradeViaTransport(
+                    request,
+                    workspace,
+                    *pooledConnection,
+                    session->Options.Http2MaxHeaderBlockBytes,
+                    requestHeaders,
+                    requestHeaderCount,
+                    parsed,
+                    responseHeaders,
+                    headerCapacity,
+                    rawResponseLength);
+            }
+            else {
+                status = SendHttp2ViaTransport(
+                    request,
+                    workspace,
+                    &session->ConnectionPool,
+                    *pooledConnection,
+                    session->Options.Http2MaxHeaderBlockBytes,
+                    requestHeaders,
+                    requestHeaderCount,
+                    parsed,
+                    responseHeaders,
+                    headerCapacity,
+                    rawResponseLength);
+            }
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            *connectionReusable =
+                pooledConnection->Http2 != nullptr &&
+                pooledConnection->Http2->IsReusable();
+            return STATUS_SUCCESS;
+        }
+
         const bool h2ExplicitlyRequested =
             request.Tls.Alpn != nullptr &&
             request.Tls.AlpnLength != 0 &&
@@ -3571,13 +4415,9 @@ namespace engine
                 tlsConnection->NegotiatedAlpn(),
                 tlsConnection->NegotiatedAlpnLength(),
                 "h2");
-        const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
 
         if (h2Negotiated || h2ExplicitlyRequested) {
             if (useExpectContinue) {
-                return STATUS_NOT_SUPPORTED;
-            }
-            if (request.BodySourceCallback != nullptr) {
                 return STATUS_NOT_SUPPORTED;
             }
 
@@ -4466,7 +5306,13 @@ namespace engine
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        status = BuildPoolKey(request, session->Options.Proxy, poolKey.Get());
+        KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled;
+        status = EffectiveHttp2CleartextMode(sendOptions, request, &http2CleartextMode);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = BuildPoolKey(request, session->Options.Proxy, http2CleartextMode, poolKey.Get());
         if (!NT_SUCCESS(status)) {
             return status;
         }

@@ -373,7 +373,12 @@ namespace client
         {
             if (replayLength == nullptr) return STATUS_INVALID_PARAMETER;
             *replayLength = 0;
-            if (options.Body != nullptr || options.BodyLength != 0) return STATUS_INVALID_PARAMETER;
+            if (options.Body != nullptr ||
+                options.BodyLength != 0 ||
+                options.BodySource != nullptr ||
+                options.TrailerCount != 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
 
             HeapArray<char> request(1024);
             if (!request.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
@@ -432,7 +437,8 @@ namespace client
             contentLengthBuffer == nullptr ||
             headerCount == nullptr ||
             headerCapacity < Http2MaxRequestHeaders ||
-            (options.ExtraHeaders == nullptr && options.ExtraHeaderCount != 0)) {
+            (options.ExtraHeaders == nullptr && options.ExtraHeaderCount != 0) ||
+            (options.Body != nullptr && options.BodySource != nullptr)) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -489,10 +495,17 @@ namespace client
             ++headerIdx;
         }
 
-        if ((options.Body != nullptr && options.BodyLength > 0) || options.IncludeContentLength) {
+        const bool sourceContentLength =
+            options.BodySource != nullptr && options.BodySource->ContentLengthKnown;
+        const SIZE_T contentLengthValue = sourceContentLength ?
+            options.BodySource->ContentLength :
+            options.BodyLength;
+        if ((options.Body != nullptr && options.BodyLength > 0) ||
+            sourceContentLength ||
+            options.IncludeContentLength) {
             requestHeaders[headerIdx].Name = { "content-length", 14 };
             if (!WriteDecimal(
-                options.BodyLength,
+                contentLengthValue,
                 contentLengthBuffer,
                 Http2ContentLengthBufferLength,
                 requestHeaders[headerIdx].Value)) {
@@ -783,10 +796,20 @@ namespace client
                 &respStatusCode,
                 buffers.NameValueBuffer, buffers.NameValueBufferLength);
         } else {
+            http2::Http2RequestBody requestBody = {};
+            requestBody.Data = options.Body;
+            requestBody.DataLength = options.BodyLength;
+            requestBody.Source = options.BodySource;
+            requestBody.Trailers = options.Trailers;
+            requestBody.TrailerCount = options.TrailerCount;
+            requestBody.HasBody =
+                options.IncludeContentLength ||
+                options.BodySource != nullptr ||
+                (options.Body != nullptr && options.BodyLength != 0);
             status = h2conn->SendRequest(
                 *activeTransport,
                 requestHeaders.Get(), headerCount,
-                options.Body, options.BodyLength,
+                requestBody,
                 buffers.Headers, buffers.HeaderCapacity,
                 &respHeaderCount,
                 buffers.BodyBuffer, buffers.BodyBufferLength,

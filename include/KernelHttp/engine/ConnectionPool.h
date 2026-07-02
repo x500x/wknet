@@ -51,6 +51,7 @@ namespace engine
         char Alpn[KhPoolMaxAlpnLength + 1] = {};
         SIZE_T AlpnLength = 0;
         bool AutomaticAlpn = false;
+        KhHttp2CleartextMode Http2CleartextMode = KhHttp2CleartextMode::Disabled;
         bool ProxyEnabled = false;
         SOCKADDR_STORAGE ProxyAddress = {};
         char ProxyAuthority[KhPoolMaxProxyAuthorityLength + 1] = {};

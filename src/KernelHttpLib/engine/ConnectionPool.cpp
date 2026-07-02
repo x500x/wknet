@@ -437,6 +437,7 @@ namespace
             left.Policy.EnablePostHandshakeClientAuth == right.Policy.EnablePostHandshakeClientAuth &&
             left.Policy.RequireRevocationCheck == right.Policy.RequireRevocationCheck &&
             left.AutomaticAlpn == right.AutomaticAlpn &&
+            left.Http2CleartextMode == right.Http2CleartextMode &&
             ProxyIdentityEquals(left, right) &&
             TextEquals(left.Scheme, left.SchemeLength, right.Scheme, right.SchemeLength) &&
             TextEquals(left.Host, left.HostLength, right.Host, right.HostLength) &&

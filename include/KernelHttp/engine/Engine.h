@@ -90,6 +90,13 @@ namespace engine
         NoPool = 2
     };
 
+    enum class KhHttp2CleartextMode : ULONG
+    {
+        Disabled = 0,
+        PriorKnowledge = 1,
+        Upgrade = 2
+    };
+
     enum class KhAddressFamily : ULONG
     {
         Any = 0,
@@ -214,6 +221,7 @@ namespace engine
         void* CallbackContext = nullptr;
         KhAsyncCompletionCallback CompletionCallback = nullptr;
         void* CompletionContext = nullptr;
+        KhHttp2CleartextMode Http2CleartextMode = KhHttp2CleartextMode::Disabled;
     };
 
     struct KhNameValuePair final
@@ -595,6 +603,8 @@ namespace engine
         bool PoolableConnection = false;
         bool ReusedConnection = false;
         ULONG ConnectionId = 0;
+        KhHttp2CleartextMode Http2CleartextMode = KhHttp2CleartextMode::Disabled;
+        bool UsedHttp2 = false;
     };
 
     struct KhTestHttpTransportResponse final

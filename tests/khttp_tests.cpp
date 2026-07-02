@@ -172,6 +172,9 @@ namespace
         SIZE_T ProxyAuthorityLength = 0;
         char ProxyAuthHeader[128] = {};
         SIZE_T ProxyAuthHeaderLength = 0;
+        KernelHttp::engine::KhHttp2CleartextMode Http2CleartextMode =
+            KernelHttp::engine::KhHttp2CleartextMode::Disabled;
+        bool UsedHttp2 = false;
     };
 
     struct StreamingBodyContext
@@ -223,6 +226,15 @@ namespace
         SIZE_T NewConnectionCallCount = 0;
         ULONG FirstConnectionId = 0;
         ULONG RetryConnectionId = 0;
+    };
+
+    struct FreshRetrySignalCapture
+    {
+        SIZE_T CallCount = 0;
+        SIZE_T NewConnectionCallCount = 0;
+        ULONG FirstConnectionId = 0;
+        ULONG RetryConnectionId = 0;
+        NTSTATUS FailureStatus = STATUS_RETRY;
     };
 
     struct ReuseDecisionCapture
@@ -351,6 +363,8 @@ namespace
             memcpy(captured->ProxyAuthHeader, request->ProxyAuthHeader, captured->ProxyAuthHeaderLength);
         }
         captured->ProxyAuthHeader[captured->ProxyAuthHeaderLength] = '\0';
+        captured->Http2CleartextMode = request->Http2CleartextMode;
+        captured->UsedHttp2 = request->UsedHttp2;
 
         const char* bodyMarker = "\r\n\r\n";
         const SIZE_T markerLength = 4;
@@ -866,6 +880,41 @@ namespace
         if (capture->FirstConnectionId == 0) {
             capture->FirstConnectionId = request->ConnectionId;
             return STATUS_IO_TIMEOUT;
+        }
+
+        capture->RetryConnectionId = request->ConnectionId;
+
+        static const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "ok";
+        response->RawResponse = responseBytes;
+        response->RawResponseLength = sizeof(responseBytes) - 1;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS FreshRetrySignalTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<FreshRetrySignalCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->CallCount;
+        if (request->ReusedConnection) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        ++capture->NewConnectionCallCount;
+        if (capture->FirstConnectionId == 0) {
+            capture->FirstConnectionId = request->ConnectionId;
+            return capture->FailureStatus;
         }
 
         capture->RetryConnectionId = request->ConnectionId;
@@ -2237,6 +2286,160 @@ namespace
         khttp::ResponseRelease(response);
         khttp::SessionClose(session);
         khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestFreshRetrySignalRetriesSafeMethodsOnly() noexcept
+    {
+        {
+            FreshRetrySignalCapture capture = {};
+            khttp::test::SetHttpTransport(FreshRetrySignalTransport, &capture);
+
+            khttp::Session* session = nullptr;
+            NTSTATUS status = khttp::SessionCreate(&session);
+            Expect(NT_SUCCESS(status), "SessionCreate succeeds for fresh retry signal GET");
+
+            const char* url = "http://example.com/fresh-retry";
+            khttp::Response* resp = nullptr;
+            status = khttp::Get(session, url, Length(url), &resp);
+            Expect(NT_SUCCESS(status), "fresh STATUS_RETRY GET retries once on a new connection");
+            Expect(capture.CallCount == 2, "fresh STATUS_RETRY GET sees initial and retry calls");
+            Expect(capture.NewConnectionCallCount == 2, "fresh STATUS_RETRY GET opens two fresh connections");
+            Expect(capture.FirstConnectionId != 0, "fresh STATUS_RETRY first connection id captured");
+            Expect(capture.RetryConnectionId != 0, "fresh STATUS_RETRY retry connection id captured");
+            Expect(capture.RetryConnectionId != capture.FirstConnectionId,
+                "fresh STATUS_RETRY retry uses a different pool entry");
+            Expect(khttp::ResponseStatusCode(resp) == 200, "fresh STATUS_RETRY retry status is 200");
+
+            khttp::ResponseRelease(resp);
+            khttp::SessionClose(session);
+            khttp::test::SetHttpTransport(nullptr, nullptr);
+        }
+
+        {
+            FreshRetrySignalCapture capture = {};
+            khttp::test::SetHttpTransport(FreshRetrySignalTransport, &capture);
+
+            khttp::Session* session = nullptr;
+            NTSTATUS status = khttp::SessionCreate(&session);
+            Expect(NT_SUCCESS(status), "SessionCreate succeeds for fresh retry signal POST");
+
+            const char* url = "http://example.com/fresh-retry-post";
+            const char* body = "payload";
+            khttp::Response* resp = nullptr;
+            status = khttp::Post(
+                session,
+                url,
+                Length(url),
+                reinterpret_cast<const UCHAR*>(body),
+                Length(body),
+                &resp);
+            Expect(status == STATUS_RETRY, "fresh STATUS_RETRY POST is not replayed");
+            Expect(capture.CallCount == 1, "fresh STATUS_RETRY POST sees only the first call");
+            Expect(capture.NewConnectionCallCount == 1, "fresh STATUS_RETRY POST opens no retry connection");
+            Expect(capture.RetryConnectionId == 0, "fresh STATUS_RETRY POST records no retry connection id");
+            Expect(resp == nullptr, "fresh STATUS_RETRY POST returns no response");
+
+            khttp::ResponseRelease(resp);
+            khttp::SessionClose(session);
+            khttp::test::SetHttpTransport(nullptr, nullptr);
+        }
+    }
+
+    void TestHttp2CleartextExplicitEntry() noexcept
+    {
+        static const char http1Response[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "ok";
+
+        {
+            CapturedRequest captured = {};
+            captured.RawResponse = http1Response;
+            captured.RawResponseLength = sizeof(http1Response) - 1;
+            khttp::test::SetHttpTransport(TestTransport, &captured);
+
+            khttp::Session* session = nullptr;
+            NTSTATUS status = khttp::SessionCreate(&session);
+            Expect(NT_SUCCESS(status), "SessionCreate succeeds for default h2c disabled test");
+
+            const char* url = "http://example.com/default-h1";
+            khttp::Response* resp = nullptr;
+            status = khttp::Get(session, url, Length(url), &resp);
+            Expect(NT_SUCCESS(status), "default http request succeeds over HTTP/1.1");
+            Expect(!captured.UsedHttp2, "default http request does not use h2c");
+            Expect(captured.Http2CleartextMode == KernelHttp::engine::KhHttp2CleartextMode::Disabled,
+                "default http request records h2c disabled");
+
+            khttp::ResponseRelease(resp);
+            khttp::SessionClose(session);
+            khttp::test::SetHttpTransport(nullptr, nullptr);
+        }
+
+        {
+            CapturedRequest captured = {};
+            khttp::test::SetHttpTransport(TestTransport, &captured);
+
+            khttp::Session* session = nullptr;
+            NTSTATUS status = khttp::SessionCreate(&session);
+            Expect(NT_SUCCESS(status), "SessionCreate succeeds for h2c prior knowledge");
+
+            khttp::SendOptions options = khttp::DefaultSendOptions();
+            options.Http2CleartextMode = khttp::Http2CleartextMode::PriorKnowledge;
+            const char* url = "http://example.com/h2c-prior";
+            khttp::Response* resp = nullptr;
+            status = khttp::GetEx(session, url, Length(url), nullptr, &options, &resp);
+            Expect(NT_SUCCESS(status), "explicit h2c prior knowledge succeeds through test transport");
+            Expect(captured.UsedHttp2, "explicit h2c prior knowledge uses HTTP/2");
+            Expect(captured.Http2CleartextMode == KernelHttp::engine::KhHttp2CleartextMode::PriorKnowledge,
+                "explicit h2c prior knowledge mode propagates to transport");
+            Expect(khttp::ResponseStatusCode(resp) == 200, "explicit h2c prior response status is 200");
+
+            khttp::ResponseRelease(resp);
+            khttp::SessionClose(session);
+            khttp::test::SetHttpTransport(nullptr, nullptr);
+        }
+
+        {
+            CapturedRequest captured = {};
+            khttp::test::SetHttpTransport(TestTransport, &captured);
+
+            khttp::Session* session = nullptr;
+            NTSTATUS status = khttp::SessionCreate(&session);
+            Expect(NT_SUCCESS(status), "SessionCreate succeeds for h2c upgrade body rejection");
+
+            khttp::SendOptions options = khttp::DefaultSendOptions();
+            options.Http2CleartextMode = khttp::Http2CleartextMode::Upgrade;
+            const char* url = "http://example.com/h2c-upgrade-body";
+            const char* body = "payload";
+            khttp::Request* request = nullptr;
+            status = khttp::RequestCreate(session, &request);
+            Expect(NT_SUCCESS(status), "RequestCreate succeeds for h2c Upgrade body rejection");
+            status = khttp::RequestSetUrl(request, url, Length(url));
+            Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for h2c Upgrade body rejection");
+            status = khttp::RequestSetMethod(request, khttp::Method::Post);
+            Expect(NT_SUCCESS(status), "RequestSetMethod succeeds for h2c Upgrade body rejection");
+            status = khttp::RequestSetBody(
+                request,
+                reinterpret_cast<const UCHAR*>(body),
+                Length(body));
+            Expect(NT_SUCCESS(status), "RequestSetBody succeeds for h2c Upgrade body rejection");
+
+            khttp::Response* resp = nullptr;
+            status = khttp::Send(
+                session,
+                request,
+                &options,
+                &resp);
+            Expect(status == STATUS_INVALID_PARAMETER, "h2c Upgrade rejects requests with a body");
+            Expect(resp == nullptr, "h2c Upgrade body rejection returns no response");
+            Expect(captured.CallCount == 0, "h2c Upgrade body rejection does not reach transport");
+
+            khttp::ResponseRelease(resp);
+            khttp::RequestRelease(request);
+            khttp::SessionClose(session);
+            khttp::test::SetHttpTransport(nullptr, nullptr);
+        }
     }
 
     void TestSessionProxyRejectsInvalidConfig() noexcept
@@ -5110,6 +5313,8 @@ int main() noexcept
     TestReusedHeadTimeoutRetriesWithFreshConnection();
     TestReusedConnectionPostFailureDoesNotRetry();
     TestReusedConnectionPostRetrySignalDoesNotReplay();
+    TestFreshRetrySignalRetriesSafeMethodsOnly();
+    TestHttp2CleartextExplicitEntry();
     TestConnectionPoolHonorsMaxConnectionsPerHost();
     TestConnectionPoolSharesActiveHttp2StreamLeases();
     TestConnectionPoolHostQuotaSeparatesTlsReuseIdentity();

@@ -12,6 +12,7 @@ namespace KernelHttp
 namespace client
 {
     constexpr SIZE_T Http2MaxRequestHeaders = 16;
+    constexpr SIZE_T Http2MaxRequestTrailers = 16;
     constexpr SIZE_T Http2MaxHeaderNameLength = 64;
     constexpr SIZE_T Http2ContentLengthBufferLength = 32;
 
@@ -39,6 +40,9 @@ namespace client
         SIZE_T ExtraHeaderCount = 0;
         const UCHAR* Body = nullptr;
         SIZE_T BodyLength = 0;
+        const http2::Http2RequestBodySource* BodySource = nullptr;
+        const http::HttpHeader* Trailers = nullptr;
+        SIZE_T TrailerCount = 0;
         bool IncludeContentLength = false;
         const tls::CertificateStore* CertificateStore = nullptr;
         bool VerifyCertificate = true;

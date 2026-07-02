@@ -119,6 +119,13 @@ namespace khttp
         NoPool = 2
     };
 
+    enum class Http2CleartextMode : ULONG
+    {
+        Disabled = 0,
+        PriorKnowledge = 1,
+        Upgrade = 2
+    };
+
     enum class BodyPartKind : ULONG
     {
         Field = 0,
@@ -230,6 +237,7 @@ namespace khttp
         bool HasTlsOverride;
         ConnPolicy ConnectionPolicy;
         AddressFamily Family;
+        Http2CleartextMode Http2CleartextMode;
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         CompletionCallback OnComplete;
         void* CompletionContext;

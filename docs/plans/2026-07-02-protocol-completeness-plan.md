@@ -235,19 +235,19 @@
 - Test: `tests/http2_client_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
   覆盖流控窗口耗尽、连接级/stream 级 WINDOW_UPDATE 任意顺序、请求 trailers 以 final HEADERS 发送、trailer 伪头被拒。
 
-- [ ] **Step 2: 将 DATA 发送改为 body source 驱动**
+- [x] **Step 2: 将 DATA 发送改为 body source 驱动**
 
   `Http2Connection` 按 `min(connectionSendWindow, stream.RemoteWindow, peer.MaxFrameSize)` 切块发送，不一次性要求完整 body 在内存中。
 
-- [ ] **Step 3: 实现请求 trailers**
+- [x] **Step 3: 实现请求 trailers**
 
   HTTP/2 不使用 chunked；当 request trailer 存在时，body 结束后发送 trailing HEADERS + END_STREAM。禁止字段规则沿用 HTTP/1.1 trailer 安全边界。
 
-- [ ] **Step 4: 验证**
+- [x] **Step 4: 验证**
 
   Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http2_client_tests -Run`
 
@@ -263,19 +263,19 @@
 - Test: `tests/http2_client_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
-- [ ] **Step 1: 增加显式配置**
+- [x] **Step 1: 增加显式配置**
 
   增加类似 `AllowHttp2Cleartext` / `Http2CleartextMode` 的配置，默认关闭。支持 prior knowledge 与 Upgrade，且 `ws://` 不因该选项隐式走 RFC 8441。
 
-- [ ] **Step 2: 写失败测试**
+- [x] **Step 2: 写失败测试**
 
   覆盖默认 http:// 不走 h2c、显式 prior knowledge、显式 Upgrade 禁请求体、101 后残留字节重放。
 
-- [ ] **Step 3: 接入连接池**
+- [x] **Step 3: 接入连接池**
 
   pool key 区分 HTTP/1.1、h2c prior knowledge、h2c Upgrade，避免协议层复用混淆。
 
-- [ ] **Step 4: 验证**
+- [x] **Step 4: 验证**
 
   Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http2_client_tests -Run`
 
@@ -290,19 +290,19 @@
 - Test: `tests/http2_client_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
   覆盖 GOAWAY `NO_ERROR` 且 stream id 大于 `lastStreamId` 时，安全方法可新连接重试一次；非幂等方法不自动重试。
 
-- [ ] **Step 2: 区分可重试与连接失败**
+- [x] **Step 2: 区分可重试与连接失败**
 
   保留当前 `STATUS_RETRY`，但让高层知道是“stream 未处理”而不是普通断连。
 
-- [ ] **Step 3: 释放 stream lease**
+- [x] **Step 3: 释放 stream lease**
 
   任何失败路径都必须释放 H2 stream lease，避免连接池并发槽泄漏。
 
-- [ ] **Step 4: 验证**
+- [x] **Step 4: 验证**
 
   Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test khttp_tests -Run`
 

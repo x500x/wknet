@@ -53,7 +53,8 @@ SendOptions::SendOptions() noexcept :
     Tls(DefaultTlsConfig()),
     HasTlsOverride(false),
     ConnectionPolicy(ConnPolicy::ReuseOrCreate),
-    Family(AddressFamily::Any)
+    Family(AddressFamily::Any),
+    Http2CleartextMode(::khttp::Http2CleartextMode::Disabled)
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
     ,
     OnComplete(nullptr),

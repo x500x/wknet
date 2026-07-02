@@ -29,6 +29,15 @@ namespace http2
             SIZE_T Length = 0;
         };
 
+        Http2RequestBody MakeFixedRequestBody(const UCHAR* body, SIZE_T bodyLength) noexcept
+        {
+            Http2RequestBody requestBody = {};
+            requestBody.Data = body;
+            requestBody.DataLength = bodyLength;
+            requestBody.HasBody = body != nullptr && bodyLength != 0;
+            return requestBody;
+        }
+
         bool AddWouldOverflow(SIZE_T left, SIZE_T right) noexcept
         {
             return left > static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) - right;
@@ -390,6 +399,59 @@ namespace http2
             }
             return limit;
         }
+
+        bool RequestBodyHasData(const Http2RequestBody& requestBody) noexcept
+        {
+            return (requestBody.Data != nullptr && requestBody.DataLength != 0) ||
+                requestBody.Source != nullptr ||
+                requestBody.HasBody;
+        }
+
+        NTSTATUS ValidateRequestBodyDescriptor(const Http2RequestBody& requestBody) noexcept
+        {
+            if (requestBody.Data == nullptr && requestBody.DataLength != 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (requestBody.Data != nullptr && requestBody.Source != nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (requestBody.Source != nullptr && requestBody.Source->Read == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (requestBody.Trailers == nullptr && requestBody.TrailerCount != 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            return STATUS_SUCCESS;
+        }
+
+        NTSTATUS ValidateRequestTrailers(
+            const http::HttpHeader* trailers,
+            SIZE_T trailerCount) noexcept
+        {
+            if (trailers == nullptr && trailerCount != 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            for (SIZE_T index = 0; index < trailerCount; ++index) {
+                const http::HttpHeader& trailer = trailers[index];
+                if (trailer.Name.Data == nullptr ||
+                    trailer.Name.Length == 0 ||
+                    trailer.Name.Data[0] == ':' ||
+                    (trailer.Value.Data == nullptr && trailer.Value.Length != 0)) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                if (!IsValidHttp2FieldName(trailer.Name.Data, trailer.Name.Length) ||
+                    !IsValidHttp2FieldValue(trailer.Value.Data, trailer.Value.Length) ||
+                    TextContainsUppercase(trailer.Name.Data, trailer.Name.Length) ||
+                    IsConnectionSpecificHeaderName(trailer.Name.Data, trailer.Name.Length) ||
+                    TextEquals(trailer.Name.Data, trailer.Name.Length, "content-length", 14) ||
+                    TextEquals(trailer.Name.Data, trailer.Name.Length, "host", 4)) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+            }
+
+            return STATUS_SUCCESS;
+        }
     }
 
     Http2Connection::Http2Connection() noexcept
@@ -731,22 +793,28 @@ namespace http2
         return Initialize(adapter, maxHeaderBlockBytes);
     }
 
-    NTSTATUS Http2Connection::InitializeAfterUpgrade(Http2Transport& transport) noexcept
+    NTSTATUS Http2Connection::InitializeAfterUpgrade(
+        Http2Transport& transport,
+        SIZE_T maxHeaderBlockBytes) noexcept
     {
-        NTSTATUS status = Initialize(transport);
+        NTSTATUS status = Initialize(transport, maxHeaderBlockBytes);
         if (!NT_SUCCESS(status)) return status;
 
         nextStreamId_ = 3;
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS Http2Connection::InitializeAfterUpgrade(core::ITransport& transport) noexcept
+    NTSTATUS Http2Connection::InitializeAfterUpgrade(
+        core::ITransport& transport,
+        SIZE_T maxHeaderBlockBytes) noexcept
     {
         Http2ITransportAdapter adapter(transport);
-        return InitializeAfterUpgrade(adapter);
+        return InitializeAfterUpgrade(adapter, maxHeaderBlockBytes);
     }
 
-    NTSTATUS Http2Connection::DispatchNextFrame(Http2Transport& transport) noexcept
+    NTSTATUS Http2Connection::DispatchNextFrame(
+        Http2Transport& transport,
+        Http2Stream* activeStream) noexcept
     {
         Http2FrameHeader fh = {};
         UCHAR* fp = framePayload_;
@@ -757,14 +825,15 @@ namespace http2
             return HandleReadFrameFailure(transport, status);
         }
 
-        return DispatchFrame(transport, fh, fp, fpLen);
+        return DispatchFrame(transport, fh, fp, fpLen, activeStream);
     }
 
     NTSTATUS Http2Connection::DispatchFrame(
         Http2Transport& transport,
         const Http2FrameHeader& fh,
         const UCHAR* fp,
-        SIZE_T fpLen) noexcept
+        SIZE_T fpLen,
+        Http2Stream* activeStream) noexcept
     {
         NTSTATUS status = STATUS_SUCCESS;
 
@@ -802,7 +871,7 @@ namespace http2
         }
 
         if (fh.StreamId == 0) {
-            return HandleConnectionFrame(transport, fh, fp, fpLen, nullptr);
+            return HandleConnectionFrame(transport, fh, fp, fpLen, activeStream);
         }
 
         if (fh.Type == Http2FrameType::Settings ||
@@ -857,12 +926,16 @@ namespace http2
         Http2ResponseFrameState& responseFrameState,
         const http::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
-        const UCHAR* body,
-        SIZE_T bodyLength) noexcept
+        const Http2RequestBody& requestBody) noexcept
     {
+        NTSTATUS status = ValidateRequestBodyDescriptor(requestBody);
+        if (!NT_SUCCESS(status)) return status;
+        status = ValidateRequestTrailers(requestBody.Trailers, requestBody.TrailerCount);
+        if (!NT_SUCCESS(status)) return status;
+
         UCHAR* headerBlock = headerBlock_;
         SIZE_T headerBlockLen = 0;
-        NTSTATUS status = encoder_.Encode(
+        status = encoder_.Encode(
             requestHeaders,
             requestHeaderCount,
             headerBlock,
@@ -873,7 +946,8 @@ namespace http2
         const ULONG streamId = stream.StreamId();
         const bool endStream =
             !responseFrameState.TunnelMode &&
-            (body == nullptr || bodyLength == 0);
+            !RequestBodyHasData(requestBody) &&
+            requestBody.TrailerCount == 0;
         UCHAR* sendBuf = sendBuffer_;
         SIZE_T sendOffset = 0;
         SIZE_T blockOffset = 0;
@@ -937,136 +1011,322 @@ namespace http2
             sendOffset = 0;
         }
 
-        SIZE_T bodyOffset = 0;
-        if (!endStream && body != nullptr && bodyLength > 0) {
-            while (bodyOffset < bodyLength) {
-                SIZE_T chunkLen = bodyLength - bodyOffset;
-                if (chunkLen > maxPayload) chunkLen = maxPayload;
-
-                LONG available = connectionSendWindow_ < stream.RemoteWindow()
-                    ? connectionSendWindow_
-                    : stream.RemoteWindow();
-                if (available <= 0) {
-                    if (sendOffset != 0) {
-                        status = SendRaw(transport, sendBuf, sendOffset);
-                        if (!NT_SUCCESS(status)) {
-                            LogRequestBodyFlowControlFailure(
-                                status,
-                                bodyOffset,
-                                bodyLength,
-                                connectionSendWindow_,
-                                stream.RemoteWindow());
-                            return status;
-                        }
-                        sendOffset = 0;
-                    }
-
-                    status = DispatchNextFrame(transport);
-                    if (!NT_SUCCESS(status)) {
-                        LogRequestBodyFlowControlFailure(
-                            status,
-                            bodyOffset,
-                            bodyLength,
-                            connectionSendWindow_,
-                            stream.RemoteWindow());
-                        return status;
-                    }
-                    if (responseFrameState.TerminalResponseReceived ||
-                        responseFrameState.StreamClosed) {
-                        break;
-                    }
-                    continue;
-                }
-
-                if (responseFrameState.TerminalResponseReceived ||
-                    responseFrameState.StreamClosed) {
-                    break;
-                }
-
-                if (chunkLen > static_cast<SIZE_T>(available)) {
-                    chunkLen = static_cast<SIZE_T>(available);
-                }
-
-                const bool lastData = (bodyOffset + chunkLen >= bodyLength);
-
-                if (Http2FrameHeaderLength + chunkLen > SendBufferCapacity) return STATUS_BUFFER_TOO_SMALL;
-                if (sendOffset + Http2FrameHeaderLength + chunkLen > SendBufferCapacity) {
-                    status = SendRaw(transport, sendBuf, sendOffset);
-                    if (!NT_SUCCESS(status)) {
-                        LogRequestBodyFlowControlFailure(
-                            status,
-                            bodyOffset,
-                            bodyLength,
-                            connectionSendWindow_,
-                            stream.RemoteWindow());
-                        return status;
-                    }
-                    sendOffset = 0;
-                }
-
-                SIZE_T written = 0;
-                status = Http2FrameCodec::EncodeData(
-                    streamId,
-                    body + bodyOffset,
-                    chunkLen,
-                    lastData,
-                    sendBuf + sendOffset,
-                    SendBufferCapacity - sendOffset,
-                    &written);
-                if (!NT_SUCCESS(status)) {
-                    LogRequestBodyFlowControlFailure(
-                        status,
-                        bodyOffset,
-                        bodyLength,
-                        connectionSendWindow_,
-                        stream.RemoteWindow());
-                    return status;
-                }
-                status = stream.SendData(chunkLen, lastData);
-                if (!NT_SUCCESS(status)) {
-                    LogRequestBodyFlowControlFailure(
-                        status,
-                        bodyOffset,
-                        bodyLength,
-                        connectionSendWindow_,
-                        stream.RemoteWindow());
-                    return status;
-                }
-                sendOffset += written;
-                bodyOffset += chunkLen;
-                connectionSendWindow_ -= static_cast<LONG>(chunkLen);
+        if (!endStream && RequestBodyHasData(requestBody)) {
+            status = SendRequestBodyFrames(
+                transport,
+                stream,
+                responseFrameState,
+                requestBody);
+            if (!NT_SUCCESS(status)) {
+                return status;
             }
         }
 
         if (!responseFrameState.TerminalResponseReceived &&
             !responseFrameState.StreamClosed) {
-            status = SendRaw(transport, sendBuf, sendOffset);
-            if (!NT_SUCCESS(status)) {
-                kprintf("Http2Connection send request body failed: 0x%08X stream=%u bytes=%Iu\r\n",
-                    static_cast<ULONG>(status),
-                    streamId,
-                    sendOffset);
-                if (bodyLength > 0) {
-                    LogRequestBodyFlowControlFailure(
-                        status,
-                        bodyOffset,
-                        bodyLength,
-                        connectionSendWindow_,
-                        stream.RemoteWindow());
-                }
-                return status;
+            if (requestBody.TrailerCount != 0) {
+                return SendRequestTrailingHeaders(
+                    transport,
+                    stream,
+                    requestBody.Trailers,
+                    requestBody.TrailerCount);
             }
         }
 
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS Http2Connection::SendRequestBodyFrames(
+        Http2Transport& transport,
+        Http2Stream& stream,
+        Http2ResponseFrameState& responseFrameState,
+        const Http2RequestBody& requestBody) noexcept
+    {
+        const ULONG streamId = stream.StreamId();
+        const ULONG maxPayload = OutboundPayloadLimit(peerSettings_.MaxFrameSize);
+        const bool hasTrailers = requestBody.TrailerCount != 0;
+        SIZE_T bodyOffset = 0;
+        SIZE_T sourceTotalRead = 0;
+        bool sourceEnded = requestBody.Source == nullptr;
+        bool sentAnyData = false;
+
+        for (;;) {
+            if (responseFrameState.TerminalResponseReceived ||
+                responseFrameState.StreamClosed) {
+                return STATUS_SUCCESS;
+            }
+
+            SIZE_T chunkLen = 0;
+            const UCHAR* chunkData = nullptr;
+            bool endOfBody = false;
+
+            if (requestBody.Source != nullptr) {
+                LONG available = connectionSendWindow_ < stream.RemoteWindow()
+                    ? connectionSendWindow_
+                    : stream.RemoteWindow();
+                if (available <= 0) {
+                    NTSTATUS status = DispatchNextFrame(transport, &stream);
+                    if (!NT_SUCCESS(status)) {
+                        LogRequestBodyFlowControlFailure(
+                            status,
+                            sourceTotalRead,
+                            requestBody.Source->ContentLength,
+                            connectionSendWindow_,
+                            stream.RemoteWindow());
+                        return status;
+                    }
+                    continue;
+                }
+
+                SIZE_T readCapacity = static_cast<SIZE_T>(available);
+                if (readCapacity > maxPayload) {
+                    readCapacity = maxPayload;
+                }
+                if (readCapacity > SendBufferCapacity - Http2FrameHeaderLength) {
+                    readCapacity = SendBufferCapacity - Http2FrameHeaderLength;
+                }
+
+                SIZE_T bytesRead = 0;
+                bool sourceEnd = false;
+                NTSTATUS status = requestBody.Source->Read(
+                    requestBody.Source->Context,
+                    sendBuffer_ + Http2FrameHeaderLength,
+                    readCapacity,
+                    &bytesRead,
+                    &sourceEnd);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                if (bytesRead > readCapacity ||
+                    (bytesRead == 0 && !sourceEnd)) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                if (requestBody.Source->ContentLengthKnown &&
+                    bytesRead > requestBody.Source->ContentLength - sourceTotalRead) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+
+                chunkLen = bytesRead;
+                chunkData = chunkLen != 0 ? sendBuffer_ + Http2FrameHeaderLength : nullptr;
+                sourceTotalRead += bytesRead;
+                sourceEnded = sourceEnd;
+                endOfBody = sourceEnd;
+                if (requestBody.Source->ContentLengthKnown &&
+                    sourceTotalRead == requestBody.Source->ContentLength) {
+                    endOfBody = true;
+                    sourceEnded = true;
+                }
+                if (requestBody.Source->ContentLengthKnown &&
+                    sourceEnded &&
+                    sourceTotalRead != requestBody.Source->ContentLength) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+            }
+            else {
+                if (bodyOffset >= requestBody.DataLength) {
+                    endOfBody = true;
+                    if (sentAnyData || !requestBody.HasBody) {
+                        break;
+                    }
+                }
+                else {
+                    chunkLen = requestBody.DataLength - bodyOffset;
+                    if (chunkLen > maxPayload) {
+                        chunkLen = maxPayload;
+                    }
+
+                    LONG available = connectionSendWindow_ < stream.RemoteWindow()
+                        ? connectionSendWindow_
+                        : stream.RemoteWindow();
+                    if (available <= 0) {
+                        NTSTATUS status = DispatchNextFrame(transport, &stream);
+                        if (!NT_SUCCESS(status)) {
+                            LogRequestBodyFlowControlFailure(
+                                status,
+                                bodyOffset,
+                                requestBody.DataLength,
+                                connectionSendWindow_,
+                                stream.RemoteWindow());
+                            return status;
+                        }
+                        continue;
+                    }
+                    if (chunkLen > static_cast<SIZE_T>(available)) {
+                        chunkLen = static_cast<SIZE_T>(available);
+                    }
+                    chunkData = requestBody.Data + bodyOffset;
+                    endOfBody = bodyOffset + chunkLen >= requestBody.DataLength;
+                }
+            }
+
+            const bool frameEndStream = endOfBody && !hasTrailers;
+            if (chunkLen == 0 && !frameEndStream) {
+                if (endOfBody) {
+                    break;
+                }
+                continue;
+            }
+
+            SIZE_T written = 0;
+            NTSTATUS status = Http2FrameCodec::EncodeData(
+                streamId,
+                chunkData,
+                chunkLen,
+                frameEndStream,
+                sendBuffer_,
+                SendBufferCapacity,
+                &written);
+            if (!NT_SUCCESS(status)) {
+                LogRequestBodyFlowControlFailure(
+                    status,
+                    requestBody.Source != nullptr ? sourceTotalRead : bodyOffset,
+                    requestBody.Source != nullptr ? requestBody.Source->ContentLength : requestBody.DataLength,
+                    connectionSendWindow_,
+                    stream.RemoteWindow());
+                return status;
+            }
+
+            status = stream.SendData(chunkLen, frameEndStream);
+            if (!NT_SUCCESS(status)) {
+                LogRequestBodyFlowControlFailure(
+                    status,
+                    requestBody.Source != nullptr ? sourceTotalRead : bodyOffset,
+                    requestBody.Source != nullptr ? requestBody.Source->ContentLength : requestBody.DataLength,
+                    connectionSendWindow_,
+                    stream.RemoteWindow());
+                return status;
+            }
+
+            status = SendRaw(transport, sendBuffer_, written);
+            if (!NT_SUCCESS(status)) {
+                LogRequestBodyFlowControlFailure(
+                    status,
+                    requestBody.Source != nullptr ? sourceTotalRead : bodyOffset,
+                    requestBody.Source != nullptr ? requestBody.Source->ContentLength : requestBody.DataLength,
+                    connectionSendWindow_,
+                    stream.RemoteWindow());
+                return status;
+            }
+
+            connectionSendWindow_ -= static_cast<LONG>(chunkLen);
+            sentAnyData = true;
+            if (requestBody.Source == nullptr) {
+                bodyOffset += chunkLen;
+            }
+
+            if (endOfBody) {
+                break;
+            }
+        }
+
+        if (requestBody.Source != nullptr &&
+            requestBody.Source->ContentLengthKnown &&
+            sourceTotalRead != requestBody.Source->ContentLength) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (requestBody.Source != nullptr && !sourceEnded) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS Http2Connection::SendRequestTrailingHeaders(
+        Http2Transport& transport,
+        Http2Stream& stream,
+        const http::HttpHeader* trailers,
+        SIZE_T trailerCount) noexcept
+    {
+        NTSTATUS status = ValidateRequestTrailers(trailers, trailerCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        UCHAR* headerBlock = headerBlock_;
+        SIZE_T headerBlockLen = 0;
+        status = encoder_.Encode(
+            trailers,
+            trailerCount,
+            headerBlock,
+            headerBlockCapacity_,
+            &headerBlockLen);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        const ULONG streamId = stream.StreamId();
+        UCHAR* sendBuf = sendBuffer_;
+        SIZE_T sendOffset = 0;
+        SIZE_T blockOffset = 0;
+        const ULONG maxPayload = OutboundPayloadLimit(peerSettings_.MaxFrameSize);
+        bool firstFrame = true;
+
+        while (blockOffset < headerBlockLen || (headerBlockLen == 0 && firstFrame)) {
+            SIZE_T chunkLen = headerBlockLen - blockOffset;
+            if (chunkLen > maxPayload) {
+                chunkLen = maxPayload;
+            }
+            const bool lastChunk = blockOffset + chunkLen >= headerBlockLen;
+
+            SIZE_T written = 0;
+            if (firstFrame) {
+                status = Http2FrameCodec::EncodeHeaders(
+                    streamId,
+                    chunkLen != 0 ? headerBlock + blockOffset : nullptr,
+                    chunkLen,
+                    true,
+                    lastChunk,
+                    sendBuf + sendOffset,
+                    SendBufferCapacity - sendOffset,
+                    &written);
+                firstFrame = false;
+            }
+            else {
+                status = Http2FrameCodec::EncodeContinuation(
+                    streamId,
+                    headerBlock + blockOffset,
+                    chunkLen,
+                    lastChunk,
+                    sendBuf + sendOffset,
+                    SendBufferCapacity - sendOffset,
+                    &written);
+            }
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            if (sendOffset + written > SendBufferCapacity) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            sendOffset += written;
+            blockOffset += chunkLen;
+
+            if (sendOffset + Http2FrameHeaderLength + maxPayload > SendBufferCapacity) {
+                status = SendRaw(transport, sendBuf, sendOffset);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                sendOffset = 0;
+            }
+
+            if (headerBlockLen == 0) {
+                break;
+            }
+        }
+
+        status = stream.SendHeaders(true);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        return SendRaw(transport, sendBuf, sendOffset);
+    }
+
     NTSTATUS Http2Connection::BeginRequest(
         Http2Transport& transport,
         const http::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
-        const UCHAR* body,
-        SIZE_T bodyLength,
+        const Http2RequestBody& requestBody,
         http::HttpHeader* responseHeaders,
         SIZE_T responseHeaderCapacity,
         SIZE_T* responseHeaderCount,
@@ -1077,7 +1337,7 @@ namespace http2
         SIZE_T nameValueCapacity,
         ULONG* streamId) noexcept
     {
-        ScopedReceiveLock receiveLock(*this, bodyLength != 0);
+        ScopedReceiveLock receiveLock(*this, RequestBodyHasData(requestBody));
         ScopedStateLock stateLock(*this);
 
         if (streamId != nullptr) {
@@ -1149,8 +1409,7 @@ namespace http2
             responseFrameState,
             requestHeaders,
             requestHeaderCount,
-            body,
-            bodyLength);
+            requestBody);
         if (!NT_SUCCESS(status)) {
             ReleaseActiveStream(allocatedStreamId);
             return status;
@@ -1158,6 +1417,71 @@ namespace http2
 
         *streamId = allocatedStreamId;
         return STATUS_SUCCESS;
+    }
+
+    NTSTATUS Http2Connection::BeginRequest(
+        Http2Transport& transport,
+        const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        const UCHAR* body,
+        SIZE_T bodyLength,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        const Http2ResponseBodySink& responseBodySink,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity,
+        ULONG* streamId) noexcept
+    {
+        const Http2RequestBody requestBody = MakeFixedRequestBody(body, bodyLength);
+        return BeginRequest(
+            transport,
+            requestHeaders,
+            requestHeaderCount,
+            requestBody,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBodySink,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity,
+            streamId);
+    }
+
+    NTSTATUS Http2Connection::BeginRequest(
+        core::ITransport& transport,
+        const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        const Http2RequestBody& requestBody,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        const Http2ResponseBodySink& responseBodySink,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity,
+        ULONG* streamId) noexcept
+    {
+        Http2ITransportAdapter adapter(transport);
+        return BeginRequest(
+            adapter,
+            requestHeaders,
+            requestHeaderCount,
+            requestBody,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBodySink,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity,
+            streamId);
     }
 
     NTSTATUS Http2Connection::BeginRequest(
@@ -1275,7 +1599,11 @@ namespace http2
                 if (!NT_SUCCESS(status)) {
                     return HandleReadFrameFailure(transport, status);
                 }
-                status = DispatchFrame(transport, fh, fp, fpLen);
+                Http2ActiveStream* active = FindActiveStream(streamId);
+                if (active == nullptr) {
+                    return streamObserved ? STATUS_CONNECTION_DISCONNECTED : STATUS_INVALID_PARAMETER;
+                }
+                status = DispatchFrame(transport, fh, fp, fpLen, &active->Stream);
                 if (!NT_SUCCESS(status)) {
                     return status;
                 }
@@ -1595,8 +1923,7 @@ namespace http2
         Http2Transport& transport,
         const http::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
-        const UCHAR* body,
-        SIZE_T bodyLength,
+        const Http2RequestBody& requestBody,
         http::HttpHeader* responseHeaders,
         SIZE_T responseHeaderCapacity,
         SIZE_T* responseHeaderCount,
@@ -1623,8 +1950,7 @@ namespace http2
             transport,
             requestHeaders,
             requestHeaderCount,
-            body,
-            bodyLength,
+            requestBody,
             responseHeaders,
             responseHeaderCapacity,
             responseHeaderCount,
@@ -1644,6 +1970,38 @@ namespace http2
         http::HttpHeader* responseHeaders,
         SIZE_T responseHeaderCapacity,
         SIZE_T* responseHeaderCount,
+        char* responseBody,
+        SIZE_T responseBodyCapacity,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
+        const Http2RequestBody requestBody = MakeFixedRequestBody(body, bodyLength);
+        return SendRequest(
+            transport,
+            requestHeaders,
+            requestHeaderCount,
+            requestBody,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBody,
+            responseBodyCapacity,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
+    NTSTATUS Http2Connection::SendRequest(
+        Http2Transport& transport,
+        const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        const Http2RequestBody& requestBody,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
         const Http2ResponseBodySink& responseBodySink,
         SIZE_T* responseBodyLength,
         USHORT* statusCode,
@@ -1655,8 +2013,7 @@ namespace http2
             transport,
             requestHeaders,
             requestHeaderCount,
-            body,
-            bodyLength,
+            requestBody,
             responseHeaders,
             responseHeaderCapacity,
             responseHeaderCount,
@@ -1677,14 +2034,44 @@ namespace http2
         return status;
     }
 
+    NTSTATUS Http2Connection::SendRequest(
+        Http2Transport& transport,
+        const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        const UCHAR* body,
+        SIZE_T bodyLength,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        const Http2ResponseBodySink& responseBodySink,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
+        const Http2RequestBody requestBody = MakeFixedRequestBody(body, bodyLength);
+        return SendRequest(
+            transport,
+            requestHeaders,
+            requestHeaderCount,
+            requestBody,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBodySink,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
     NTSTATUS Http2Connection::ReceiveResponse(
         Http2Transport& transport,
         ULONG streamId,
         http::HttpHeader* responseHeaders,
         SIZE_T responseHeaderCapacity,
         SIZE_T* responseHeaderCount,
-        char* responseBody,
-        SIZE_T responseBodyCapacity,
+        const Http2ResponseBodySink& responseBodySink,
         SIZE_T* responseBodyLength,
         USHORT* statusCode,
         char* nameValueBuffer,
@@ -1705,6 +2092,37 @@ namespace http2
         status = stream.SendHeaders(true);
         if (!NT_SUCCESS(status)) return status;
 
+        if (responseBodySink.Append == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        return ReceiveResponseFrames(
+            transport,
+            stream,
+            false,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBodySink,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
+    NTSTATUS Http2Connection::ReceiveResponse(
+        Http2Transport& transport,
+        ULONG streamId,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        char* responseBody,
+        SIZE_T responseBodyCapacity,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
         if (responseBody == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -1717,10 +2135,9 @@ namespace http2
         sink.Append = AppendFixedResponseBody;
         sink.Context = &fixedBody;
 
-        return ReceiveResponseFrames(
+        return ReceiveResponse(
             transport,
-            stream,
-            false,
+            streamId,
             responseHeaders,
             responseHeaderCapacity,
             responseHeaderCount,
@@ -1753,6 +2170,32 @@ namespace http2
             responseHeaderCount,
             responseBody,
             responseBodyCapacity,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
+    NTSTATUS Http2Connection::ReceiveResponse(
+        core::ITransport& transport,
+        ULONG streamId,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        const Http2ResponseBodySink& responseBodySink,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
+        Http2ITransportAdapter adapter(transport);
+        return ReceiveResponse(
+            adapter,
+            streamId,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBodySink,
             responseBodyLength,
             statusCode,
             nameValueBuffer,
@@ -2100,6 +2543,9 @@ namespace http2
                 state.TerminalResponseReceived) {
                 return STATUS_SUCCESS;
             }
+            if (errorCode == static_cast<ULONG>(Http2ErrorCode::RefusedStream)) {
+                return STATUS_RETRY;
+            }
             return STATUS_CONNECTION_DISCONNECTED;
         }
 
@@ -2278,6 +2724,38 @@ namespace http2
         core::ITransport& transport,
         const http::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
+        const Http2RequestBody& requestBody,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        char* responseBody,
+        SIZE_T responseBodyCapacity,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
+        Http2ITransportAdapter adapter(transport);
+        return SendRequest(
+            adapter,
+            requestHeaders,
+            requestHeaderCount,
+            requestBody,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBody,
+            responseBodyCapacity,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
+    NTSTATUS Http2Connection::SendRequest(
+        core::ITransport& transport,
+        const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
         const UCHAR* body,
         SIZE_T bodyLength,
         http::HttpHeader* responseHeaders,
@@ -2302,6 +2780,36 @@ namespace http2
             responseHeaderCount,
             responseBody,
             responseBodyCapacity,
+            responseBodyLength,
+            statusCode,
+            nameValueBuffer,
+            nameValueCapacity);
+    }
+
+    NTSTATUS Http2Connection::SendRequest(
+        core::ITransport& transport,
+        const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        const Http2RequestBody& requestBody,
+        http::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        const Http2ResponseBodySink& responseBodySink,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
+        Http2ITransportAdapter adapter(transport);
+        return SendRequest(
+            adapter,
+            requestHeaders,
+            requestHeaderCount,
+            requestBody,
+            responseHeaders,
+            responseHeaderCapacity,
+            responseHeaderCount,
+            responseBodySink,
             responseBodyLength,
             statusCode,
             nameValueBuffer,

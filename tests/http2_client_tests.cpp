@@ -40,9 +40,12 @@ using KernelHttp::http2::Http2FrameCodec;
 using KernelHttp::http2::Http2FrameHeader;
 using KernelHttp::http2::Http2InitialWindowSize;
 using KernelHttp::http2::Http2MaxWindowSize;
+using KernelHttp::http2::Http2RequestBody;
+using KernelHttp::http2::Http2RequestBodySource;
 using KernelHttp::http2::Http2ResponseBodySink;
 using KernelHttp::http2::Http2Settings;
 using KernelHttp::http2::Http2Transport;
+using KernelHttp::http2::HpackDecoder;
 using KernelHttp::http2::HpackEncoder;
 using KernelHttp::websocket::WebSocketCodec;
 using KernelHttp::websocket::WebSocketFrameHeader;
@@ -456,6 +459,52 @@ namespace
         return STATUS_SUCCESS;
     }
 
+    struct RequestBodySourceContext final
+    {
+        const UCHAR* Data = nullptr;
+        SIZE_T Length = 0;
+        SIZE_T Offset = 0;
+        SIZE_T MaxChunk = 0;
+        SIZE_T ReadCount = 0;
+    };
+
+    NTSTATUS ReadRequestBodySourceForTest(
+        void* context,
+        UCHAR* buffer,
+        SIZE_T bufferCapacity,
+        SIZE_T* bytesRead,
+        bool* endOfBody) noexcept
+    {
+        auto* source = static_cast<RequestBodySourceContext*>(context);
+        if (source == nullptr ||
+            buffer == nullptr ||
+            bufferCapacity == 0 ||
+            bytesRead == nullptr ||
+            endOfBody == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *bytesRead = 0;
+        *endOfBody = false;
+        ++source->ReadCount;
+        if (source->Offset >= source->Length) {
+            *endOfBody = true;
+            return STATUS_SUCCESS;
+        }
+
+        SIZE_T remaining = source->Length - source->Offset;
+        SIZE_T chunk = remaining < bufferCapacity ? remaining : bufferCapacity;
+        if (source->MaxChunk != 0 && chunk > source->MaxChunk) {
+            chunk = source->MaxChunk;
+        }
+
+        memcpy(buffer, source->Data + source->Offset, chunk);
+        source->Offset += chunk;
+        *bytesRead = chunk;
+        *endOfBody = source->Offset >= source->Length;
+        return STATUS_SUCCESS;
+    }
+
     class ScriptedHttp2Transport final : public Http2Transport
     {
     public:
@@ -828,6 +877,48 @@ namespace
         return true;
     }
 
+    bool AppendRstStream(
+        ULONG streamId,
+        ULONG errorCode,
+        UCHAR* script,
+        SIZE_T capacity,
+        SIZE_T* length)
+    {
+        SIZE_T written = 0;
+        const NTSTATUS status = Http2FrameCodec::EncodeRstStream(
+            streamId,
+            errorCode,
+            script + *length,
+            capacity - *length,
+            &written);
+        if (!NT_SUCCESS(status)) {
+            return false;
+        }
+        *length += written;
+        return true;
+    }
+
+    bool AppendGoAway(
+        ULONG lastStreamId,
+        ULONG errorCode,
+        UCHAR* script,
+        SIZE_T capacity,
+        SIZE_T* length)
+    {
+        SIZE_T written = 0;
+        const NTSTATUS status = Http2FrameCodec::EncodeGoAway(
+            lastStreamId,
+            errorCode,
+            script + *length,
+            capacity - *length,
+            &written);
+        if (!NT_SUCCESS(status)) {
+            return false;
+        }
+        *length += written;
+        return true;
+    }
+
     bool AppendEmptyContinuation(
         bool endHeaders,
         UCHAR* script,
@@ -1017,6 +1108,68 @@ namespace
             *lastStreamId = decodedLastStreamId;
         }
         return true;
+    }
+
+    bool DecodeSentHeadersFrame(
+        const ScriptedHttp2Transport& transport,
+        SIZE_T ordinal,
+        HpackDecoder& decoder,
+        HttpHeader* headers,
+        SIZE_T headerCapacity,
+        SIZE_T* headerCount,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity)
+    {
+        if (headers == nullptr || headerCount == nullptr || nameValueBuffer == nullptr) {
+            return false;
+        }
+
+        Http2FrameHeader frameHeader = {};
+        const UCHAR* payload = nullptr;
+        if (!FindSentFrame(
+                transport,
+                KernelHttp::http2::Http2FrameType::Headers,
+                1,
+                ordinal,
+                &frameHeader,
+                &payload)) {
+            return false;
+        }
+        if ((frameHeader.Flags & Http2FrameFlags::EndHeaders) == 0) {
+            return false;
+        }
+
+        SIZE_T nameValueUsed = 0;
+        const NTSTATUS status = decoder.Decode(
+            payload,
+            frameHeader.Length,
+            headers,
+            headerCapacity,
+            headerCount,
+            nameValueBuffer,
+            nameValueCapacity,
+            &nameValueUsed,
+            4096);
+        return NT_SUCCESS(status);
+    }
+
+    bool HeaderListContains(
+        const HttpHeader* headers,
+        SIZE_T headerCount,
+        const char* name,
+        const char* value)
+    {
+        const HttpText expectedName = MakeText(name);
+        const HttpText expectedValue = MakeText(value);
+        for (SIZE_T index = 0; index < headerCount; ++index) {
+            if (headers[index].Name.Length == expectedName.Length &&
+                headers[index].Value.Length == expectedValue.Length &&
+                memcmp(headers[index].Name.Data, expectedName.Data, expectedName.Length) == 0 &&
+                memcmp(headers[index].Value.Data, expectedValue.Data, expectedValue.Length) == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     NTSTATUS SendScriptedHttp2Request(const UCHAR* script, SIZE_T scriptLength)
@@ -2567,6 +2720,309 @@ namespace
             "HTTP/2 POST records final DATA after stream-first WINDOW_UPDATE pair");
     }
 
+    void TestRequestBodySourceHandlesFlowControlAndWindowUpdateOrder()
+    {
+        static_assert(Http2InitialWindowSize + 1 == 65536, "body source flow-control test expects 65536 bytes");
+
+        UCHAR script[512] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 body source server settings fixture builds");
+        Expect(AppendStreamWindowUpdate(1, 1, script, sizeof(script), &scriptLength),
+            "HTTP/2 body source stream WINDOW_UPDATE fixture builds");
+        Expect(AppendConnectionWindowUpdate(1, script, sizeof(script), &scriptLength),
+            "HTTP/2 body source connection WINDOW_UPDATE fixture builds");
+        Expect(AppendResponseHeaders(true, true, script, sizeof(script), &scriptLength),
+            "HTTP/2 body source response fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 connection initializes for body source test");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("POST") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") },
+            { MakeText("content-length"), MakeText("65536") }
+        };
+        static UCHAR requestBytes[Http2InitialWindowSize + 1] = {};
+        RequestBodySourceContext sourceContext = {};
+        sourceContext.Data = requestBytes;
+        sourceContext.Length = sizeof(requestBytes);
+        sourceContext.MaxChunk = 8192;
+
+        Http2RequestBodySource source = {};
+        source.Read = ReadRequestBodySourceForTest;
+        source.Context = &sourceContext;
+        source.ContentLength = sizeof(requestBytes);
+        source.ContentLengthKnown = true;
+
+        Http2RequestBody requestBody = {};
+        requestBody.Source = &source;
+        requestBody.HasBody = true;
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            requestBody,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_SUCCESS, "HTTP/2 body source sends through exhausted flow-control windows");
+        Expect(sourceContext.ReadCount > 1, "HTTP/2 body source is read incrementally");
+        const SIZE_T dataFrameCount =
+            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Data, 1);
+        Expect(dataFrameCount > 1, "HTTP/2 body source emits multiple DATA frames");
+
+        Http2FrameHeader finalDataFrame = {};
+        const UCHAR* finalPayload = nullptr;
+        Expect(
+            FindSentFrame(
+                transport,
+                KernelHttp::http2::Http2FrameType::Data,
+                1,
+                dataFrameCount - 1,
+                &finalDataFrame,
+                &finalPayload),
+            "HTTP/2 body source final DATA frame is present");
+        Expect(finalDataFrame.Length == 1, "HTTP/2 body source final DATA carries the post-WINDOW_UPDATE byte");
+        Expect((finalDataFrame.Flags & Http2FrameFlags::EndStream) != 0,
+            "HTTP/2 body source final DATA ends the stream");
+    }
+
+    void TestRequestTrailersUseFinalHeaders()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 request trailer server settings fixture builds");
+        Expect(AppendResponseHeaders(true, true, script, sizeof(script), &scriptLength),
+            "HTTP/2 request trailer response fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 connection initializes for request trailer test");
+
+        const UCHAR body[] = { 'o', 'k' };
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("POST") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") },
+            { MakeText("content-length"), MakeText("2") },
+            { MakeText("te"), MakeText("trailers") }
+        };
+        const HttpHeader trailers[] = {
+            { MakeText("x-checksum"), MakeText("ok") }
+        };
+
+        Http2RequestBody requestBody = {};
+        requestBody.Data = body;
+        requestBody.DataLength = sizeof(body);
+        requestBody.HasBody = true;
+        requestBody.Trailers = trailers;
+        requestBody.TrailerCount = sizeof(trailers) / sizeof(trailers[0]);
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            requestBody,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_SUCCESS, "HTTP/2 request with trailers succeeds");
+        Expect(CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Headers, 1) == 2,
+            "HTTP/2 request trailers are emitted as a second HEADERS frame");
+
+        Http2FrameHeader dataFrame = {};
+        const UCHAR* dataPayload = nullptr;
+        Expect(
+            FindSentFrame(
+                transport,
+                KernelHttp::http2::Http2FrameType::Data,
+                1,
+                0,
+                &dataFrame,
+                &dataPayload),
+            "HTTP/2 request DATA frame is present before trailers");
+        Expect((dataFrame.Flags & Http2FrameFlags::EndStream) == 0,
+            "HTTP/2 request DATA does not end stream when trailers follow");
+
+        Http2FrameHeader trailerFrame = {};
+        const UCHAR* trailerPayload = nullptr;
+        Expect(
+            FindSentFrame(
+                transport,
+                KernelHttp::http2::Http2FrameType::Headers,
+                1,
+                1,
+                &trailerFrame,
+                &trailerPayload),
+            "HTTP/2 request trailing HEADERS frame is present");
+        Expect((trailerFrame.Flags & Http2FrameFlags::EndStream) != 0,
+            "HTTP/2 request trailing HEADERS ends stream");
+
+        HpackDecoder decoder;
+        status = decoder.Initialize();
+        Expect(NT_SUCCESS(status), "HPACK decoder initializes for sent request headers");
+        HttpHeader decoded[8] = {};
+        SIZE_T decodedCount = 0;
+        char decodeBuffer[256] = {};
+        Expect(
+            DecodeSentHeadersFrame(
+                transport,
+                0,
+                decoder,
+                decoded,
+                sizeof(decoded) / sizeof(decoded[0]),
+                &decodedCount,
+                decodeBuffer,
+                sizeof(decodeBuffer)),
+            "HTTP/2 initial request HEADERS decode");
+        decodedCount = 0;
+        memset(decoded, 0, sizeof(decoded));
+        memset(decodeBuffer, 0, sizeof(decodeBuffer));
+        Expect(
+            DecodeSentHeadersFrame(
+                transport,
+                1,
+                decoder,
+                decoded,
+                sizeof(decoded) / sizeof(decoded[0]),
+                &decodedCount,
+                decodeBuffer,
+                sizeof(decodeBuffer)),
+            "HTTP/2 request trailer HEADERS decode");
+        Expect(HeaderListContains(decoded, decodedCount, "x-checksum", "ok"),
+            "HTTP/2 request trailer header is HPACK encoded in trailing HEADERS");
+    }
+
+    void TestRequestTrailersRejectPseudoHeaders()
+    {
+        UCHAR script[128] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 pseudo request trailer server settings fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 connection initializes for pseudo request trailer test");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("POST") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+        const HttpHeader trailers[] = {
+            { MakeText(":status"), MakeText("200") }
+        };
+        Http2RequestBody requestBody = {};
+        requestBody.Trailers = trailers;
+        requestBody.TrailerCount = sizeof(trailers) / sizeof(trailers[0]);
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            requestBody,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_INVALID_PARAMETER, "HTTP/2 request trailers reject pseudo-headers");
+        Expect(CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Headers, 1) == 0,
+            "HTTP/2 pseudo request trailer rejection happens before request HEADERS are sent");
+    }
+
+    void TestGoAwayAndRefusedStreamReturnRetry()
+    {
+        {
+            UCHAR script[256] = {};
+            SIZE_T scriptLength = 0;
+            Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+                "HTTP/2 GOAWAY retry server settings fixture builds");
+            Expect(AppendGoAway(
+                0,
+                static_cast<ULONG>(Http2ErrorCode::NoError),
+                script,
+                sizeof(script),
+                &scriptLength), "HTTP/2 GOAWAY retry fixture builds");
+
+            ScriptedHttp2Transport transport(script, scriptLength);
+            Http2Connection connection;
+            const NTSTATUS status = SendDefaultRequest(transport, connection);
+            Expect(status == STATUS_RETRY,
+                "HTTP/2 GOAWAY NO_ERROR before stream is processed returns STATUS_RETRY");
+        }
+
+        {
+            UCHAR script[256] = {};
+            SIZE_T scriptLength = 0;
+            Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+                "HTTP/2 REFUSED_STREAM server settings fixture builds");
+            Expect(AppendRstStream(
+                1,
+                static_cast<ULONG>(Http2ErrorCode::RefusedStream),
+                script,
+                sizeof(script),
+                &scriptLength), "HTTP/2 REFUSED_STREAM fixture builds");
+
+            ScriptedHttp2Transport transport(script, scriptLength);
+            Http2Connection connection;
+            const NTSTATUS status = SendDefaultRequest(transport, connection);
+            Expect(status == STATUS_RETRY,
+                "HTTP/2 RST_STREAM REFUSED_STREAM returns STATUS_RETRY");
+        }
+    }
+
     void TestNonActiveStreamWindowUpdateDoesNotIncreaseConnectionWindow()
     {
         UCHAR script[512] = {};
@@ -3970,6 +4426,10 @@ int main()
     TestInitialWindowSizeDoesNotOverwriteConnectionWindow();
     TestDynamicInitialWindowSizeAdjustsActiveStreamWindow();
     TestPostBodyExceedingInitialWindowAcceptsBothWindowUpdateOrders();
+    TestRequestBodySourceHandlesFlowControlAndWindowUpdateOrder();
+    TestRequestTrailersUseFinalHeaders();
+    TestRequestTrailersRejectPseudoHeaders();
+    TestGoAwayAndRefusedStreamReturnRetry();
     TestNonActiveStreamWindowUpdateDoesNotIncreaseConnectionWindow();
     TestConnectionRejectsOrphanContinuation();
     TestConnectionRejectsInterleavedFrameDuringContinuation();

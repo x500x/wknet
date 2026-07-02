@@ -98,6 +98,7 @@ namespace
         dst.HeaderCallback = reinterpret_cast<::KernelHttp::engine::KhHeaderCallback>(src.OnHeader);
         dst.BodyCallback = reinterpret_cast<::KernelHttp::engine::KhBodyCallback>(src.OnBody);
         dst.CallbackContext = src.CallbackContext;
+        dst.Http2CleartextMode = detail::ToApiHttp2CleartextMode(src.Http2CleartextMode);
     }
 
     NTSTATUS ApplyOptionsToRequest(

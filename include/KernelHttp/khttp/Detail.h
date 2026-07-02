@@ -333,6 +333,20 @@ namespace detail
             ::KernelHttp::engine::KhRequestBodyMode::ContentLength;
     }
 
+    inline ::KernelHttp::engine::KhHttp2CleartextMode ToApiHttp2CleartextMode(
+        Http2CleartextMode mode) noexcept
+    {
+        switch (mode) {
+        case Http2CleartextMode::PriorKnowledge:
+            return ::KernelHttp::engine::KhHttp2CleartextMode::PriorKnowledge;
+        case Http2CleartextMode::Upgrade:
+            return ::KernelHttp::engine::KhHttp2CleartextMode::Upgrade;
+        case Http2CleartextMode::Disabled:
+        default:
+            return ::KernelHttp::engine::KhHttp2CleartextMode::Disabled;
+        }
+    }
+
     inline void FillApiTlsOptions(const TlsConfig& src, ::KernelHttp::engine::KhTlsOptions& dst) noexcept
     {
         dst.MinVersion = ToApiTlsVersion(src.MinVersion);

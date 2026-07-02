@@ -623,6 +623,13 @@ namespace
             addressFamily == KhAddressFamily::Ipv6;
     }
 
+    bool IsValidHttp2CleartextMode(KhHttp2CleartextMode mode) noexcept
+    {
+        return mode == KhHttp2CleartextMode::Disabled ||
+            mode == KhHttp2CleartextMode::PriorKnowledge ||
+            mode == KhHttp2CleartextMode::Upgrade;
+    }
+
     net::WskAddressFamily ToWskAddressFamily(KhAddressFamily addressFamily) noexcept
     {
         switch (addressFamily) {
@@ -881,6 +888,10 @@ namespace
         }
 
         if (options.ExpectContinueTimeoutMilliseconds > KhMaxExpectContinueTimeoutMilliseconds) {
+            return false;
+        }
+
+        if (!IsValidHttp2CleartextMode(options.Http2CleartextMode)) {
             return false;
         }
 
