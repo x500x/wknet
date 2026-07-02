@@ -361,6 +361,64 @@ namespace
         Expect(memcmp(buffer, expected, strlen(expected)) == 0, "POST request bytes match expected output");
     }
 
+    void TestBuildPostRequestHeadersOnly()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+        const char body[] = "alpha=beta";
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Post;
+        options.Path = MakeText("/submit");
+        options.Host = MakeText("example.com");
+        options.ContentType = MakeText("application/x-www-form-urlencoded");
+        options.Connection = HttpConnectionDirective::Close;
+        options.Body = body;
+        options.BodyLength = strlen(body);
+
+        const NTSTATUS status = HttpRequestBuilder::BuildHeaders(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+
+        const char expected[] =
+            "POST /submit HTTP/1.1\r\n"
+            "Host: example.com\r\n"
+            "Content-Type: application/x-www-form-urlencoded\r\n"
+            "Content-Length: 10\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+
+        Expect(status == STATUS_SUCCESS, "POST request headers build successfully");
+        Expect(written == strlen(expected), "POST request headers report exact byte count");
+        Expect(memcmp(buffer, expected, strlen(expected)) == 0, "POST request headers match expected output");
+    }
+
+    void TestBuildContentLengthRequestBodyOnly()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+        const char body[] = "alpha=beta";
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Post;
+        options.Path = MakeText("/submit");
+        options.Host = MakeText("example.com");
+        options.Body = body;
+        options.BodyLength = strlen(body);
+
+        const NTSTATUS status = HttpRequestBuilder::BuildBody(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+
+        Expect(status == STATUS_SUCCESS, "Content-Length request body builds successfully");
+        Expect(written == strlen(body), "Content-Length request body reports exact byte count");
+        Expect(memcmp(buffer, body, strlen(body)) == 0, "Content-Length request body bytes match");
+    }
+
     void TestBuildChunkedPostRequest()
     {
         char buffer[512] = {};
@@ -397,6 +455,44 @@ namespace
         Expect(status == STATUS_SUCCESS, "chunked POST request builds successfully");
         Expect(written == strlen(expected), "chunked POST request reports exact byte count");
         Expect(memcmp(buffer, expected, strlen(expected)) == 0, "chunked POST request bytes match expected output");
+    }
+
+    void TestBuildChunkedRequestBodyOnlyWithTrailers()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+        const char body[] = "alpha=beta";
+        const HttpHeader trailers[] = {
+            { MakeText("X-Checksum"), MakeText("abc123") }
+        };
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Post;
+        options.Path = MakeText("/submit");
+        options.Host = MakeText("example.com");
+        options.Body = body;
+        options.BodyLength = strlen(body);
+        options.IncludeContentLength = true;
+        options.BodyMode = HttpRequestBodyMode::Chunked;
+        options.Trailers = trailers;
+        options.TrailerCount = sizeof(trailers) / sizeof(trailers[0]);
+
+        const NTSTATUS status = HttpRequestBuilder::BuildBody(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+
+        const char expected[] =
+            "a\r\n"
+            "alpha=beta\r\n"
+            "0\r\n"
+            "X-Checksum: abc123\r\n"
+            "\r\n";
+
+        Expect(status == STATUS_SUCCESS, "chunked request body builds successfully");
+        Expect(written == strlen(expected), "chunked request body reports exact byte count");
+        Expect(memcmp(buffer, expected, strlen(expected)) == 0, "chunked request body bytes match expected output");
     }
 
     void TestBuildUpgradeRequest()
@@ -556,6 +652,40 @@ namespace
         options.ExtraHeaders = expectHeader;
         status = HttpRequestBuilder::Build(options, buffer, sizeof(buffer), &written);
         Expect(status == STATUS_NOT_SUPPORTED, "request builder rejects body with Expect: 100-continue");
+    }
+
+    void TestBuildRequestAllowsLibraryExpectContinue()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+        const char body[] = "upload body";
+        const HttpHeader expectHeader[] = {
+            { MakeText("Expect"), MakeText("100-continue") }
+        };
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Post;
+        options.Path = MakeText("/upload");
+        options.Host = MakeText("example.com");
+        options.Body = body;
+        options.BodyLength = strlen(body);
+        options.IncludeContentLength = true;
+        options.ExtraHeaders = expectHeader;
+        options.ExtraHeaderCount = 1;
+        options.AllowExpectContinue = true;
+
+        const NTSTATUS status = HttpRequestBuilder::Build(options, buffer, sizeof(buffer), &written);
+        const char expected[] =
+            "POST /upload HTTP/1.1\r\n"
+            "Host: example.com\r\n"
+            "Content-Length: 11\r\n"
+            "Expect: 100-continue\r\n"
+            "\r\n"
+            "upload body";
+
+        Expect(status == STATUS_SUCCESS, "request builder allows library-controlled Expect: 100-continue");
+        Expect(written == strlen(expected), "Expect request reports exact byte count");
+        Expect(memcmp(buffer, expected, strlen(expected)) == 0, "Expect request bytes match expected output");
     }
 
     void TestBuildChunkedRequestWithTrailers()
@@ -2464,11 +2594,15 @@ int main()
     TestBuildGetRequest();
     TestBuildConnectRequest();
     TestBuildPostRequest();
+    TestBuildPostRequestHeadersOnly();
+    TestBuildContentLengthRequestBodyOnly();
     TestBuildChunkedPostRequest();
+    TestBuildChunkedRequestBodyOnlyWithTrailers();
     TestBuildUpgradeRequest();
     TestRequestBuilderRejectsInjectionText();
     TestRequestBuilderRejectsTransferEncoding();
     TestRequestBuilderRejectsUnsupportedRequestFraming();
+    TestBuildRequestAllowsLibraryExpectContinue();
     TestBuildChunkedRequestWithTrailers();
     TestBuildChunkedRequestWithEmptyBodyTrailers();
     TestRequestBuilderTrailerValidation();

@@ -46,6 +46,7 @@ SendOptions::SendOptions() noexcept :
     MaxResponseBytes(0),
     Flags(SendFlagNone),
     MaxRedirects(0),
+    ExpectContinueTimeoutMs(0),
     OnHeader(nullptr),
     OnBody(nullptr),
     CallbackContext(nullptr),

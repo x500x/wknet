@@ -94,6 +94,7 @@ namespace
         dst.MaxResponseBytes = src.MaxResponseBytes;
         dst.Flags = src.Flags;
         dst.MaxRedirects = src.MaxRedirects;
+        dst.ExpectContinueTimeoutMilliseconds = src.ExpectContinueTimeoutMs;
         dst.HeaderCallback = reinterpret_cast<::KernelHttp::engine::KhHeaderCallback>(src.OnHeader);
         dst.BodyCallback = reinterpret_cast<::KernelHttp::engine::KhBodyCallback>(src.OnBody);
         dst.CallbackContext = src.CallbackContext;

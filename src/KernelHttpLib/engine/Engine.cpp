@@ -867,7 +867,20 @@ namespace
     {
         UNREFERENCED_PARAMETER(session);
 
+        constexpr ULONG knownFlags =
+            KhHttpSendFlagAggregateWithCallbacks |
+            KhHttpSendFlagDisableAutoRedirect |
+            KhHttpSendFlagExpectContinue;
+
         if (!IsValidMaxResponseBytes(options.MaxResponseBytes)) {
+            return false;
+        }
+
+        if ((options.Flags & ~knownFlags) != 0) {
+            return false;
+        }
+
+        if (options.ExpectContinueTimeoutMilliseconds > KhMaxExpectContinueTimeoutMilliseconds) {
             return false;
         }
 

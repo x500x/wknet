@@ -38,7 +38,7 @@ $exePath = Join-Path $binDir "$Test.exe"
 $excludedLibSources = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 @(
     'Http2Client.cpp', 'HttpClient.cpp', 'HttpsClient.cpp',
-    'KernelHttpConfig.cpp', 'WebSocketClient.cpp', 'WskClient.cpp', 'WskSocket.cpp'
+    'KernelHttpConfig.cpp', 'WebSocketClient.cpp', 'WskSocket.cpp'
 ) | ForEach-Object { [void]$excludedLibSources.Add($_) }
 
 switch ($Test) {
@@ -56,6 +56,7 @@ switch ($Test) {
         [void]$excludedLibSources.Remove('WskClient.cpp')
     }
     'websocket_client_tests' {
+        [void]$excludedLibSources.Add('WskClient.cpp')
         [void]$excludedLibSources.Remove('WebSocketClient.cpp')
     }
 }

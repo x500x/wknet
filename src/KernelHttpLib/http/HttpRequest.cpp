@@ -288,7 +288,7 @@ namespace http
         _Must_inspect_result_
         NTSTATUS ValidateExtraHeaders(const HttpRequestBuildOptions& options) noexcept
         {
-            const bool hasBodyBytes = options.BodyLength != 0;
+            const bool hasBody = options.BodyLength != 0 || options.IncludeContentLength;
             const bool chunkedFraming = RequestEmitsChunkedFraming(options);
 
             for (SIZE_T index = 0; index < options.ExtraHeaderCount; ++index) {
@@ -307,9 +307,10 @@ namespace http
                     return STATUS_NOT_SUPPORTED;
                 }
 
-                if (hasBodyBytes &&
+                if (hasBody &&
                     HeaderNameEquals(header, MakeText("Expect")) &&
-                    HeaderValueHasToken(header.Value, MakeText("100-continue"))) {
+                    HeaderValueHasToken(header.Value, MakeText("100-continue")) &&
+                    !options.AllowExpectContinue) {
                     return STATUS_NOT_SUPPORTED;
                 }
 
@@ -418,6 +419,207 @@ namespace http
 
             return writer.AppendLiteral("\r\n");
         }
+
+        _Must_inspect_result_
+        NTSTATUS ValidateBuildOptions(
+            const HttpRequestBuildOptions& options,
+            bool requireBodyBytes) noexcept
+        {
+            if (!IsValidRequestTarget(options.Path) || !IsValidHeaderValue(options.Host)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (requireBodyBytes && options.BodyLength > 0 && options.Body == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (options.BodyMode != HttpRequestBodyMode::ContentLength &&
+                options.BodyMode != HttpRequestBodyMode::Chunked) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (options.ExtraHeaderCount > 0 && options.ExtraHeaders == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            NTSTATUS status = ValidateExtraHeaders(options);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            status = ValidateTrailers(options);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            const HttpText method = MethodText(options);
+            if (!IsValidHeaderName(method)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS AppendRequestHeaders(
+            BufferWriter& writer,
+            const HttpRequestBuildOptions& options) noexcept
+        {
+            const HttpText method = MethodText(options);
+            NTSTATUS status = writer.Append(method);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            status = writer.AppendLiteral(" ");
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            status = writer.Append(options.Path);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            status = writer.AppendLiteral(" HTTP/1.1\r\n");
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            status = writer.AppendHeader(MakeText("Host"), options.Host);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            if (options.UserAgent.Length > 0) {
+                status = writer.AppendHeader(MakeText("User-Agent"), options.UserAgent);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
+            if (options.ContentType.Length > 0) {
+                status = writer.AppendHeader(MakeText("Content-Type"), options.ContentType);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
+            const bool hasBody = options.BodyLength > 0 || options.IncludeContentLength;
+            if (hasBody) {
+                if (options.BodyMode == HttpRequestBodyMode::Chunked) {
+                    status = writer.AppendHeader(MakeText("Transfer-Encoding"), MakeText("chunked"));
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                }
+                else {
+                    status = AppendContentLength(writer, options.BodyLength);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                }
+            }
+
+            if (options.Connection == HttpConnectionDirective::KeepAlive) {
+                status = writer.AppendHeader(MakeText("Connection"), MakeText("keep-alive"));
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+            else if (options.Connection == HttpConnectionDirective::Close) {
+                status = writer.AppendHeader(MakeText("Connection"), MakeText("close"));
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+            else if (options.Connection == HttpConnectionDirective::Upgrade) {
+                status = writer.AppendHeader(MakeText("Connection"), MakeText("Upgrade"));
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
+            for (SIZE_T index = 0; index < options.ExtraHeaderCount; ++index) {
+                status = writer.AppendHeader(options.ExtraHeaders[index].Name, options.ExtraHeaders[index].Value);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
+            return writer.AppendLiteral("\r\n");
+        }
+
+        _Must_inspect_result_
+        NTSTATUS AppendRequestBody(
+            BufferWriter& writer,
+            const HttpRequestBuildOptions& options) noexcept
+        {
+            const bool hasBody = options.BodyLength > 0 || options.IncludeContentLength;
+            if (!hasBody) {
+                return STATUS_SUCCESS;
+            }
+
+            if (options.BodyMode == HttpRequestBodyMode::Chunked) {
+                return AppendChunkedBody(
+                    writer,
+                    options.Body,
+                    options.BodyLength,
+                    options.Trailers,
+                    options.TrailerCount);
+            }
+
+            if (options.BodyLength == 0) {
+                return STATUS_SUCCESS;
+            }
+
+            return writer.Append({ options.Body, options.BodyLength });
+        }
+
+        _Must_inspect_result_
+        NTSTATUS BuildInto(
+            const HttpRequestBuildOptions& options,
+            char* destination,
+            SIZE_T destinationCapacity,
+            SIZE_T* bytesWritten,
+            bool includeHeaders,
+            bool includeBody) noexcept
+        {
+            if (bytesWritten != nullptr) {
+                *bytesWritten = 0;
+            }
+
+            if (destination == nullptr && destinationCapacity != 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            NTSTATUS status = ValidateBuildOptions(options, includeBody);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            BufferWriter writer(destination, destinationCapacity);
+
+            if (includeHeaders) {
+                status = AppendRequestHeaders(writer, options);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
+            if (includeBody) {
+                status = AppendRequestBody(writer, options);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
+            if (bytesWritten != nullptr) {
+                *bytesWritten = writer.Required();
+            }
+
+            return writer.Fits() ? STATUS_SUCCESS : STATUS_BUFFER_TOO_SMALL;
+        }
     }
 
     NTSTATUS HttpRequestBuilder::Build(
@@ -426,159 +628,43 @@ namespace http
         SIZE_T destinationCapacity,
         SIZE_T* bytesWritten) noexcept
     {
-        if (bytesWritten != nullptr) {
-            *bytesWritten = 0;
-        }
+        return BuildInto(
+            options,
+            destination,
+            destinationCapacity,
+            bytesWritten,
+            true,
+            true);
+    }
 
-        if (destination == nullptr && destinationCapacity != 0) {
-            return STATUS_INVALID_PARAMETER;
-        }
+    NTSTATUS HttpRequestBuilder::BuildHeaders(
+        const HttpRequestBuildOptions& options,
+        char* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* bytesWritten) noexcept
+    {
+        return BuildInto(
+            options,
+            destination,
+            destinationCapacity,
+            bytesWritten,
+            true,
+            false);
+    }
 
-        if (!IsValidRequestTarget(options.Path) || !IsValidHeaderValue(options.Host)) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        if (options.BodyLength > 0 && options.Body == nullptr) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        if (options.BodyMode != HttpRequestBodyMode::ContentLength &&
-            options.BodyMode != HttpRequestBodyMode::Chunked) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        if (options.ExtraHeaderCount > 0 && options.ExtraHeaders == nullptr) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        NTSTATUS status = ValidateExtraHeaders(options);
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        status = ValidateTrailers(options);
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        const HttpText method = MethodText(options);
-        if (!IsValidHeaderName(method)) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        BufferWriter writer(destination, destinationCapacity);
-
-        status = writer.Append(method);
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        status = writer.AppendLiteral(" ");
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        status = writer.Append(options.Path);
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        status = writer.AppendLiteral(" HTTP/1.1\r\n");
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        status = writer.AppendHeader(MakeText("Host"), options.Host);
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        if (options.UserAgent.Length > 0) {
-            status = writer.AppendHeader(MakeText("User-Agent"), options.UserAgent);
-            if (!NT_SUCCESS(status)) {
-                return status;
-            }
-        }
-
-        if (options.ContentType.Length > 0) {
-            status = writer.AppendHeader(MakeText("Content-Type"), options.ContentType);
-            if (!NT_SUCCESS(status)) {
-                return status;
-            }
-        }
-
-        const bool hasBody = options.BodyLength > 0 || options.IncludeContentLength;
-        if (hasBody) {
-            if (options.BodyMode == HttpRequestBodyMode::Chunked) {
-                status = writer.AppendHeader(MakeText("Transfer-Encoding"), MakeText("chunked"));
-                if (!NT_SUCCESS(status)) {
-                    return status;
-                }
-            }
-            else {
-                status = AppendContentLength(writer, options.BodyLength);
-                if (!NT_SUCCESS(status)) {
-                    return status;
-                }
-            }
-        }
-
-        if (options.Connection == HttpConnectionDirective::KeepAlive) {
-            status = writer.AppendHeader(MakeText("Connection"), MakeText("keep-alive"));
-            if (!NT_SUCCESS(status)) {
-                return status;
-            }
-        }
-        else if (options.Connection == HttpConnectionDirective::Close) {
-            status = writer.AppendHeader(MakeText("Connection"), MakeText("close"));
-            if (!NT_SUCCESS(status)) {
-                return status;
-            }
-        }
-        else if (options.Connection == HttpConnectionDirective::Upgrade) {
-            status = writer.AppendHeader(MakeText("Connection"), MakeText("Upgrade"));
-            if (!NT_SUCCESS(status)) {
-                return status;
-            }
-        }
-
-        for (SIZE_T index = 0; index < options.ExtraHeaderCount; ++index) {
-            status = writer.AppendHeader(options.ExtraHeaders[index].Name, options.ExtraHeaders[index].Value);
-            if (!NT_SUCCESS(status)) {
-                return status;
-            }
-        }
-
-        status = writer.AppendLiteral("\r\n");
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-
-        if (hasBody) {
-            if (options.BodyMode == HttpRequestBodyMode::Chunked) {
-                status = AppendChunkedBody(
-                    writer,
-                    options.Body,
-                    options.BodyLength,
-                    options.Trailers,
-                    options.TrailerCount);
-                if (!NT_SUCCESS(status)) {
-                    return status;
-                }
-            }
-            else if (options.BodyLength > 0) {
-                status = writer.Append({ options.Body, options.BodyLength });
-                if (!NT_SUCCESS(status)) {
-                    return status;
-                }
-            }
-        }
-
-        if (bytesWritten != nullptr) {
-            *bytesWritten = writer.Required();
-        }
-
-        return writer.Fits() ? STATUS_SUCCESS : STATUS_BUFFER_TOO_SMALL;
+    NTSTATUS HttpRequestBuilder::BuildBody(
+        const HttpRequestBuildOptions& options,
+        char* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* bytesWritten) noexcept
+    {
+        return BuildInto(
+            options,
+            destination,
+            destinationCapacity,
+            bytesWritten,
+            false,
+            true);
     }
 }
 }

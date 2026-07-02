@@ -48,6 +48,8 @@ namespace engine
     constexpr ULONG KhDefaultIdleTimeoutMilliseconds = 30000;
     constexpr ULONG KhDefaultTlsHandshakeReceiveTimeoutMilliseconds = TlsHandshakeReceiveTimeoutMilliseconds;
     constexpr ULONG KhDefaultMaxRedirects = 10;
+    constexpr ULONG KhDefaultExpectContinueTimeoutMilliseconds = 1000;
+    constexpr ULONG KhMaxExpectContinueTimeoutMilliseconds = WskOperationTimeoutMilliseconds;
 
     enum class KhPoolType : ULONG
     {
@@ -112,7 +114,8 @@ namespace engine
     {
         KhHttpSendFlagNone = 0,
         KhHttpSendFlagAggregateWithCallbacks = 0x00000001,
-        KhHttpSendFlagDisableAutoRedirect = 0x00000002
+        KhHttpSendFlagDisableAutoRedirect = 0x00000002,
+        KhHttpSendFlagExpectContinue = 0x00000004
     };
 
     enum class KhWebSocketMessageType : ULONG
@@ -197,6 +200,8 @@ namespace engine
         ULONG Flags = KhHttpSendFlagNone;
         // 0 means use the default redirect limit.
         ULONG MaxRedirects = 0;
+        // 0 means use KhDefaultExpectContinueTimeoutMilliseconds.
+        ULONG ExpectContinueTimeoutMilliseconds = 0;
         KhHeaderCallback HeaderCallback = nullptr;
         KhBodyCallback BodyCallback = nullptr;
         void* CallbackContext = nullptr;
@@ -553,6 +558,10 @@ namespace engine
         KhAddressFamily AddressFamily = KhAddressFamily::Any;
         const char* BuiltRequest = nullptr;
         SIZE_T BuiltRequestLength = 0;
+        SIZE_T HeaderBytesLength = 0;
+        SIZE_T BodyBytesLength = 0;
+        bool ExpectContinueEnabled = false;
+        bool ExpectContinueBodySent = false;
         KhConnectionPolicy ConnectionPolicy = KhConnectionPolicy::ReuseOrCreate;
         KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
         const tls::CertificateStore* CertificateStore = nullptr;

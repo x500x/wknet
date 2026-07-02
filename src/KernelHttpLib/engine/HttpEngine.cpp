@@ -32,12 +32,15 @@ namespace engine
         sizeof(http::HttpHeader) * KhMaxTrailersPerResponse;
     constexpr SIZE_T KhHttpHostHeaderScratchBytes =
         KhMaxHostHeaderLength;
+    constexpr SIZE_T KhHttpRequestTargetScratchBytes =
+        KhMaxSchemeLength + 3 + KhMaxHostHeaderLength + KhMaxPathLength;
     constexpr SIZE_T KhHttpHeaderScratchRequiredBytes =
         KhHttpRequestHeaderScratchBytes +
         KhHttpRequestTrailerScratchBytes +
         KhHttpResponseHeaderScratchBytes +
         KhHttpResponseTrailerScratchBytes +
-        KhHttpHostHeaderScratchBytes;
+        KhHttpHostHeaderScratchBytes +
+        KhHttpRequestTargetScratchBytes;
     constexpr char KhDefaultAcceptEncoding[] = "gzip, deflate, br, identity";
     constexpr char KhDeflateUnavailableAcceptEncoding[] = "br, identity";
     constexpr SIZE_T KhWorkspaceCacheMaxRetainedBytes = 256 * 1024;
@@ -72,6 +75,8 @@ namespace engine
         http::HttpHeader* ResponseTrailers = nullptr;
         char* HostHeader = nullptr;
         SIZE_T HostHeaderCapacity = 0;
+        char* RequestTarget = nullptr;
+        SIZE_T RequestTargetCapacity = 0;
     };
 
     struct RedirectOriginSnapshot final
@@ -307,6 +312,14 @@ namespace engine
             KhHttpResponseHeaderScratchBytes +
             KhHttpResponseTrailerScratchBytes);
         scratch->HostHeaderCapacity = KhHttpHostHeaderScratchBytes;
+        scratch->RequestTarget = reinterpret_cast<char*>(
+            workspace.HttpHeaderScratch.Data +
+            KhHttpRequestHeaderScratchBytes +
+            KhHttpRequestTrailerScratchBytes +
+            KhHttpResponseHeaderScratchBytes +
+            KhHttpResponseTrailerScratchBytes +
+            KhHttpHostHeaderScratchBytes);
+        scratch->RequestTargetCapacity = KhHttpRequestTargetScratchBytes;
         return STATUS_SUCCESS;
     }
 
@@ -432,6 +445,53 @@ namespace engine
         return STATUS_SUCCESS;
     }
 
+    _Must_inspect_result_
+    NTSTATUS BuildProxyAbsoluteFormTarget(
+        const KhRequest& request,
+        http::HttpText hostHeader,
+        _Out_writes_bytes_(destinationCapacity) char* destination,
+        SIZE_T destinationCapacity,
+        _Out_ SIZE_T* destinationLength) noexcept
+    {
+        if (destinationLength != nullptr) {
+            *destinationLength = 0;
+        }
+
+        if (destination == nullptr ||
+            destinationCapacity == 0 ||
+            destinationLength == nullptr ||
+            request.SchemeLength == 0 ||
+            hostHeader.Data == nullptr ||
+            hostHeader.Length == 0 ||
+            request.Path == nullptr ||
+            request.PathLength == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        constexpr SIZE_T schemeSeparatorLength = 3;
+        const SIZE_T required =
+            request.SchemeLength +
+            schemeSeparatorLength +
+            hostHeader.Length +
+            request.PathLength;
+        if (required >= destinationCapacity) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        SIZE_T length = 0;
+        RtlCopyMemory(destination + length, request.Scheme, request.SchemeLength);
+        length += request.SchemeLength;
+        RtlCopyMemory(destination + length, "://", schemeSeparatorLength);
+        length += schemeSeparatorLength;
+        RtlCopyMemory(destination + length, hostHeader.Data, hostHeader.Length);
+        length += hostHeader.Length;
+        RtlCopyMemory(destination + length, request.Path, request.PathLength);
+        length += request.PathLength;
+        destination[length] = '\0';
+        *destinationLength = length;
+        return STATUS_SUCCESS;
+    }
+
     bool HeaderNameEquals(const KhStoredHeader& header, const char* name) noexcept
     {
         return TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, name);
@@ -513,11 +573,73 @@ namespace engine
             IsFreshConnectionRetryStatus(status);
     }
 
+    bool RequestUsesExpectContinue(
+        _In_ const KhHttpSendOptions& options,
+        _In_ const KhRequest& request) noexcept
+    {
+        return ((options.Flags & KhHttpSendFlagExpectContinue) != 0) && request.HasBody;
+    }
+
+    ULONG EffectiveExpectContinueTimeoutMilliseconds(
+        _In_ const KhHttpSendOptions& options) noexcept
+    {
+        return options.ExpectContinueTimeoutMilliseconds != 0 ?
+            options.ExpectContinueTimeoutMilliseconds :
+            KhDefaultExpectContinueTimeoutMilliseconds;
+    }
+
+    bool TryReadRawResponseStatusCode(
+        _In_reads_bytes_(rawResponseLength) const char* rawResponse,
+        SIZE_T rawResponseLength,
+        _Out_ USHORT* statusCode) noexcept
+    {
+        if (statusCode != nullptr) {
+            *statusCode = 0;
+        }
+        if (rawResponse == nullptr || statusCode == nullptr || rawResponseLength < 12) {
+            return false;
+        }
+
+        SIZE_T cursor = 0;
+        while (cursor < rawResponseLength &&
+            rawResponse[cursor] != ' ' &&
+            rawResponse[cursor] != '\r' &&
+            rawResponse[cursor] != '\n') {
+            ++cursor;
+        }
+
+        if (cursor >= rawResponseLength || rawResponse[cursor] != ' ') {
+            return false;
+        }
+        ++cursor;
+
+        if (cursor + 3 > rawResponseLength) {
+            return false;
+        }
+
+        USHORT parsed = 0;
+        for (SIZE_T index = 0; index < 3; ++index) {
+            const char value = rawResponse[cursor + index];
+            if (value < '0' || value > '9') {
+                return false;
+            }
+            parsed = static_cast<USHORT>((parsed * 10) + static_cast<USHORT>(value - '0'));
+        }
+
+        *statusCode = parsed;
+        return true;
+    }
+
     _Must_inspect_result_
     NTSTATUS BuildHttpRequestOptions(
         const KhRequest& request,
+        bool addExpectContinue,
+        bool useProxyAbsoluteForm,
+        const KhProxyOptions& proxy,
         _Out_writes_bytes_(hostCapacity) char* host,
         SIZE_T hostCapacity,
+        _Out_writes_bytes_(requestTargetCapacity) char* requestTarget,
+        SIZE_T requestTargetCapacity,
         _Out_ http::HttpHeader* headers,
         SIZE_T headerCapacity,
         _Out_writes_(trailerCapacity) http::HttpHeader* trailers,
@@ -530,6 +652,10 @@ namespace engine
         }
 
         if (host == nullptr || headers == nullptr || options == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (useProxyAbsoluteForm &&
+            (requestTarget == nullptr || requestTargetCapacity == 0)) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -569,7 +695,7 @@ namespace engine
                 return STATUS_NOT_SUPPORTED;
             }
 
-            if (request.BodyLength != 0 &&
+            if (request.HasBody &&
                 HeaderNameEquals(header, "Expect") &&
                 http::HeaderValueHasToken(
                     { header.Value, header.ValueLength },
@@ -596,6 +722,7 @@ namespace engine
             ++extraHeaderCount;
         }
 
+        const bool emitExpectContinue = addExpectContinue && request.HasBody;
         if (!hasAcceptEncoding) {
             if (extraHeaderCount >= headerCapacity) {
                 return STATUS_BUFFER_TOO_SMALL;
@@ -606,8 +733,43 @@ namespace engine
             ++extraHeaderCount;
         }
 
+        if (emitExpectContinue) {
+            if (extraHeaderCount >= headerCapacity) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            headers[extraHeaderCount].Name = http::MakeText("Expect");
+            headers[extraHeaderCount].Value = http::MakeText("100-continue");
+            ++extraHeaderCount;
+        }
+
+        if (useProxyAbsoluteForm && proxy.AuthHeader != nullptr && proxy.AuthHeaderLength != 0) {
+            if (extraHeaderCount >= headerCapacity) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            headers[extraHeaderCount].Name = http::MakeText("Proxy-Authorization");
+            headers[extraHeaderCount].Value = { proxy.AuthHeader, proxy.AuthHeaderLength };
+            ++extraHeaderCount;
+        }
+
+        http::HttpText requestPath = { request.Path, request.PathLength };
+        if (useProxyAbsoluteForm) {
+            SIZE_T requestTargetLength = 0;
+            status = BuildProxyAbsoluteFormTarget(
+                request,
+                { host, hostLength },
+                requestTarget,
+                requestTargetCapacity,
+                &requestTargetLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            requestPath = { requestTarget, requestTargetLength };
+        }
+
         options->Method = ToHttpMethod(request.Method);
-        options->Path = { request.Path, request.PathLength };
+        options->Path = requestPath;
         options->Host = { host, hostLength };
         options->Connection = request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate ?
             http::HttpConnectionDirective::KeepAlive :
@@ -620,6 +782,7 @@ namespace engine
         options->BodyMode = request.BodyMode == KhRequestBodyMode::Chunked ?
             http::HttpRequestBodyMode::Chunked :
             http::HttpRequestBodyMode::ContentLength;
+        options->AllowExpectContinue = emitExpectContinue;
 
         if (request.TrailerCount != 0) {
             for (SIZE_T index = 0; index < request.TrailerCount; ++index) {
@@ -1393,9 +1556,14 @@ namespace engine
     _Must_inspect_result_
     NTSTATUS BuildRequestBytes(
         const KhRequest& request,
+        bool addExpectContinue,
+        bool useProxyAbsoluteForm,
+        const KhProxyOptions& proxy,
         _Inout_ KhWorkspace& workspace,
         _Out_writes_bytes_(hostHeaderCapacity) char* hostHeader,
         SIZE_T hostHeaderCapacity,
+        _Out_writes_bytes_(requestTargetCapacity) char* requestTarget,
+        SIZE_T requestTargetCapacity,
         _Out_writes_(headerCapacity) http::HttpHeader* requestHeaders,
         SIZE_T headerCapacity,
         _Out_writes_(trailerCapacity) http::HttpHeader* requestTrailers,
@@ -1420,8 +1588,13 @@ namespace engine
         http::HttpRequestBuildOptions buildOptions = {};
         NTSTATUS status = BuildHttpRequestOptions(
             request,
+            addExpectContinue,
+            useProxyAbsoluteForm,
+            proxy,
             hostHeader,
             hostHeaderCapacity,
+            requestTarget,
+            requestTargetCapacity,
             requestHeaders,
             headerCapacity,
             requestTrailers,
@@ -1439,12 +1612,89 @@ namespace engine
             requestLength);
     }
 
+    _Must_inspect_result_
+    bool FindHttpRequestBodyOffset(
+        _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
+        SIZE_T requestLength,
+        _Out_ SIZE_T* bodyOffset) noexcept
+    {
+        if (bodyOffset != nullptr) {
+            *bodyOffset = 0;
+        }
+        if (requestBytes == nullptr || bodyOffset == nullptr || requestLength < 4) {
+            return false;
+        }
+
+        for (SIZE_T index = 0; index <= requestLength - 4; ++index) {
+            if (requestBytes[index] == '\r' &&
+                requestBytes[index + 1] == '\n' &&
+                requestBytes[index + 2] == '\r' &&
+                requestBytes[index + 3] == '\n') {
+                *bodyOffset = index + 4;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS SendTransportSegment(
+        _Inout_ core::ITransport& transport,
+        _In_reads_bytes_opt_(length) const UCHAR* data,
+        SIZE_T length) noexcept
+    {
+        if (length == 0) {
+            return STATUS_SUCCESS;
+        }
+        if (data == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        SIZE_T totalSent = 0;
+        while (totalSent < length) {
+            SIZE_T sent = 0;
+            NTSTATUS status = transport.Send(data + totalSent, length - totalSent, &sent);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (sent == 0) {
+                return STATUS_CONNECTION_DISCONNECTED;
+            }
+            totalSent += sent;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS SendHttp1RequestBuffer(
+        _Inout_ core::ITransport& transport,
+        _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
+        SIZE_T requestLength) noexcept
+    {
+        SIZE_T bodyOffset = 0;
+        if (!FindHttpRequestBodyOffset(requestBytes, requestLength, &bodyOffset)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        NTSTATUS status = SendTransportSegment(transport, requestBytes, bodyOffset);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        return SendTransportSegment(
+            transport,
+            requestBytes + bodyOffset,
+            requestLength - bodyOffset);
+    }
+
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
     _Must_inspect_result_
-    ULONGLONG MakeResponseReadDeadline() noexcept
+    ULONGLONG MakeResponseReadDeadline(ULONG timeoutMilliseconds) noexcept
     {
         return KeQueryInterruptTime() +
-            (static_cast<ULONGLONG>(WskOperationTimeoutMilliseconds) * 10000ULL);
+            (static_cast<ULONGLONG>(timeoutMilliseconds) * 10000ULL);
     }
 
     _Must_inspect_result_
@@ -1476,10 +1726,12 @@ namespace engine
     }
 
     _Must_inspect_result_
-    NTSTATUS ReadHttpResponseFromSocket(
+    NTSTATUS ReadHttpResponseFromSocketEx(
         _Inout_ core::ITransport& transport,
         _Inout_ KhWorkspace& workspace,
         bool responseBodyForbidden,
+        bool preserveInformationalResponses,
+        ULONG readTimeoutMilliseconds,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -1495,8 +1747,8 @@ namespace engine
         }
 
         *rawResponseLength = 0;
-        SIZE_T responseLength = 0;
-        const ULONGLONG responseReadDeadline = MakeResponseReadDeadline();
+        SIZE_T responseLength = workspace.ResponseLength;
+        const ULONGLONG responseReadDeadline = MakeResponseReadDeadline(readTimeoutMilliseconds);
 
         for (;;) {
             http::HttpParseOptions parseOptions = {};
@@ -1516,6 +1768,12 @@ namespace engine
                 parseOptions,
                 *parsed);
             if (status == STATUS_SUCCESS) {
+                if (preserveInformationalResponses) {
+                    workspace.ResponseLength = responseLength;
+                    *rawResponseLength = responseLength;
+                    return STATUS_SUCCESS;
+                }
+
                 bool skippedInformational = false;
                 status = DiscardNonFinalInformationalResponse(
                     workspace.Response.Data,
@@ -1604,6 +1862,12 @@ namespace engine
                         return status;
                     }
 
+                    if (preserveInformationalResponses) {
+                        workspace.ResponseLength = responseLength;
+                        *rawResponseLength = responseLength;
+                        return STATUS_SUCCESS;
+                    }
+
                     bool skippedInformational = false;
                     status = DiscardNonFinalInformationalResponse(
                         workspace.Response.Data,
@@ -1645,6 +1909,12 @@ namespace engine
                         return status;
                     }
 
+                    if (preserveInformationalResponses) {
+                        workspace.ResponseLength = responseLength;
+                        *rawResponseLength = responseLength;
+                        return STATUS_SUCCESS;
+                    }
+
                     bool skippedInformational = false;
                     status = DiscardNonFinalInformationalResponse(
                         workspace.Response.Data,
@@ -1665,6 +1935,168 @@ namespace engine
             responseLength += received;
             workspace.ResponseLength = responseLength;
         }
+    }
+
+    _Must_inspect_result_
+    NTSTATUS ReadHttpResponseFromSocket(
+        _Inout_ core::ITransport& transport,
+        _Inout_ KhWorkspace& workspace,
+        bool responseBodyForbidden,
+        _Out_ http::HttpResponse* parsed,
+        _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
+        SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http::HttpHeader* responseTrailers,
+        SIZE_T trailerCapacity,
+        _Out_ SIZE_T* rawResponseLength) noexcept
+    {
+        return ReadHttpResponseFromSocketEx(
+            transport,
+            workspace,
+            responseBodyForbidden,
+            false,
+            WskOperationTimeoutMilliseconds,
+            parsed,
+            responseHeaders,
+            headerCapacity,
+            responseTrailers,
+            trailerCapacity,
+            rawResponseLength);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS SendHttp1RequestBufferWithExpect(
+        _Inout_ core::ITransport& transport,
+        _Inout_ KhWorkspace& workspace,
+        _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
+        SIZE_T requestLength,
+        ULONG expectContinueTimeoutMilliseconds,
+        bool responseBodyForbidden,
+        _Out_ http::HttpResponse* parsed,
+        _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
+        SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http::HttpHeader* responseTrailers,
+        SIZE_T trailerCapacity,
+        _Out_ SIZE_T* rawResponseLength) noexcept
+    {
+        SIZE_T bodyOffset = 0;
+        if (!FindHttpRequestBodyOffset(requestBytes, requestLength, &bodyOffset)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        NTSTATUS status = SendTransportSegment(transport, requestBytes, bodyOffset);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        workspace.ResponseLength = 0;
+        ULONG informationalCount = 0;
+        for (;;) {
+            status = ReadHttpResponseFromSocketEx(
+                transport,
+                workspace,
+                responseBodyForbidden,
+                true,
+                expectContinueTimeoutMilliseconds,
+                parsed,
+                responseHeaders,
+                headerCapacity,
+                responseTrailers,
+                trailerCapacity,
+                rawResponseLength);
+
+            if (!NT_SUCCESS(status) || !IsNonFinalInformationalResponse(*parsed) || parsed->StatusCode == 100) {
+                break;
+            }
+
+            if (informationalCount >= 16) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            ++informationalCount;
+
+            bool skippedInformational = false;
+            SIZE_T bufferedLength = workspace.ResponseLength;
+            status = DiscardNonFinalInformationalResponse(
+                workspace.Response.Data,
+                &bufferedLength,
+                *parsed,
+                &skippedInformational);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (!skippedInformational) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            workspace.ResponseLength = bufferedLength;
+            *parsed = {};
+            *rawResponseLength = 0;
+        }
+
+        if (NT_SUCCESS(status)) {
+            if (parsed->StatusCode == 100) {
+                bool skippedInformational = false;
+                SIZE_T bufferedLength = workspace.ResponseLength;
+                status = DiscardNonFinalInformationalResponse(
+                    workspace.Response.Data,
+                    &bufferedLength,
+                    *parsed,
+                    &skippedInformational);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                if (!skippedInformational) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                workspace.ResponseLength = bufferedLength;
+                *parsed = {};
+                *rawResponseLength = 0;
+
+                status = SendTransportSegment(
+                    transport,
+                    requestBytes + bodyOffset,
+                    requestLength - bodyOffset);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                return ReadHttpResponseFromSocket(
+                    transport,
+                    workspace,
+                    responseBodyForbidden,
+                    parsed,
+                    responseHeaders,
+                    headerCapacity,
+                    responseTrailers,
+                    trailerCapacity,
+                    rawResponseLength);
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        if (status != STATUS_IO_TIMEOUT) {
+            return status;
+        }
+
+        status = SendTransportSegment(
+            transport,
+            requestBytes + bodyOffset,
+            requestLength - bodyOffset);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        *parsed = {};
+        *rawResponseLength = 0;
+        return ReadHttpResponseFromSocket(
+            transport,
+            workspace,
+            responseBodyForbidden,
+            parsed,
+            responseHeaders,
+            headerCapacity,
+            responseTrailers,
+            trailerCapacity,
+            rawResponseLength);
     }
 #endif
 
@@ -2378,10 +2810,69 @@ namespace engine
     };
 #endif
 
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+    void PopulateTestHttpTransportRequest(
+        const KhRequest& request,
+        const KhSession& session,
+        KhPooledConnection* pooledConnection,
+        bool reusedConnection,
+        _In_reads_bytes_opt_(builtRequestLength) const char* builtRequest,
+        SIZE_T builtRequestLength,
+        SIZE_T headerBytesLength,
+        SIZE_T bodyBytesLength,
+        bool expectContinueEnabled,
+        bool expectContinueBodySent,
+        _Out_ KhTestHttpTransportRequest* testRequest) noexcept
+    {
+        if (testRequest == nullptr) {
+            return;
+        }
+
+        RtlZeroMemory(testRequest, sizeof(*testRequest));
+        testRequest->Scheme = request.Scheme;
+        testRequest->SchemeLength = request.SchemeLength;
+        testRequest->Host = request.Host;
+        testRequest->HostLength = request.HostLength;
+        testRequest->Port = request.Port;
+        testRequest->AddressFamily = request.AddressFamily;
+        testRequest->BuiltRequest = builtRequest;
+        testRequest->BuiltRequestLength = builtRequestLength;
+        testRequest->HeaderBytesLength = headerBytesLength;
+        testRequest->BodyBytesLength = bodyBytesLength;
+        testRequest->ExpectContinueEnabled = expectContinueEnabled;
+        testRequest->ExpectContinueBodySent = expectContinueBodySent;
+        testRequest->ConnectionPolicy = request.ConnectionPolicy;
+        testRequest->CertificatePolicy = request.Tls.CertificatePolicy;
+        testRequest->CertificateStore = request.Tls.CertificateStore;
+        testRequest->ClientCredential = request.Tls.ClientCredential;
+        testRequest->Alpn = request.Tls.Alpn;
+        testRequest->AlpnLength = request.Tls.AlpnLength;
+        if (IsAutomaticHttpAlpnMode(request)) {
+            testRequest->OfferedAlpn = "h2,http/1.1";
+            testRequest->OfferedAlpnLength = 11;
+        }
+        else if (request.Tls.Alpn != nullptr && request.Tls.AlpnLength != 0) {
+            testRequest->OfferedAlpn = request.Tls.Alpn;
+            testRequest->OfferedAlpnLength = request.Tls.AlpnLength;
+        }
+        testRequest->Policy = request.Tls.Policy;
+        testRequest->ProxyEnabled = session.Options.Proxy.Enabled;
+        testRequest->ProxyAddress = session.Options.Proxy.Address;
+        testRequest->ProxyAuthority = session.Options.Proxy.Authority;
+        testRequest->ProxyAuthorityLength = session.Options.Proxy.AuthorityLength;
+        testRequest->ProxyAuthHeader = session.Options.Proxy.AuthHeader;
+        testRequest->ProxyAuthHeaderLength = session.Options.Proxy.AuthHeaderLength;
+        testRequest->PoolableConnection = request.ConnectionPolicy != KhConnectionPolicy::NoPool;
+        testRequest->ReusedConnection = reusedConnection;
+        testRequest->ConnectionId = pooledConnection != nullptr ? pooledConnection->Id : 0;
+    }
+#endif
+
     _Must_inspect_result_
     NTSTATUS SendViaTransport(
         KH_SESSION session,
         const KhRequest& request,
+        const KhHttpSendOptions& sendOptions,
         KhWorkspace& workspace,
         KhPooledConnection* pooledConnection,
         bool reusedConnection,
@@ -2419,10 +2910,6 @@ namespace engine
             !IsSupportedHttpAlpn(request.Tls.Alpn, request.Tls.AlpnLength)) {
             return STATUS_NOT_SUPPORTED;
         }
-        if (session->Options.Proxy.Enabled && !IsHttpsRequest(request)) {
-            return STATUS_NOT_SUPPORTED;
-        }
-
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         UNREFERENCED_PARAMETER(requestHeaders);
         UNREFERENCED_PARAMETER(requestHeaderCount);
@@ -2432,47 +2919,80 @@ namespace engine
             return STATUS_NOT_SUPPORTED;
         }
 
-        KhTestHttpTransportRequest testRequest = {};
-        testRequest.Scheme = request.Scheme;
-        testRequest.SchemeLength = request.SchemeLength;
-        testRequest.Host = request.Host;
-        testRequest.HostLength = request.HostLength;
-        testRequest.Port = request.Port;
-        testRequest.AddressFamily = request.AddressFamily;
-        testRequest.BuiltRequest = reinterpret_cast<const char*>(workspace.Request.Data);
-        testRequest.BuiltRequestLength = builtRequestLength;
-        testRequest.ConnectionPolicy = request.ConnectionPolicy;
-        testRequest.CertificatePolicy = request.Tls.CertificatePolicy;
-        testRequest.CertificateStore = request.Tls.CertificateStore;
-        testRequest.ClientCredential = request.Tls.ClientCredential;
-        testRequest.Alpn = request.Tls.Alpn;
-        testRequest.AlpnLength = request.Tls.AlpnLength;
-        if (IsAutomaticHttpAlpnMode(request)) {
-            testRequest.OfferedAlpn = "h2,http/1.1";
-            testRequest.OfferedAlpnLength = 11;
+        SIZE_T headerBytesLength = 0;
+        if (!FindHttpRequestBodyOffset(workspace.Request.Data, builtRequestLength, &headerBytesLength)) {
+            return STATUS_INVALID_PARAMETER;
         }
-        else if (request.Tls.Alpn != nullptr && request.Tls.AlpnLength != 0) {
-            testRequest.OfferedAlpn = request.Tls.Alpn;
-            testRequest.OfferedAlpnLength = request.Tls.AlpnLength;
-        }
-        testRequest.Policy = request.Tls.Policy;
-        testRequest.ProxyEnabled = session->Options.Proxy.Enabled;
-        testRequest.ProxyAddress = session->Options.Proxy.Address;
-        testRequest.ProxyAuthority = session->Options.Proxy.Authority;
-        testRequest.ProxyAuthorityLength = session->Options.Proxy.AuthorityLength;
-        testRequest.ProxyAuthHeader = session->Options.Proxy.AuthHeader;
-        testRequest.ProxyAuthHeaderLength = session->Options.Proxy.AuthHeaderLength;
-        testRequest.PoolableConnection = request.ConnectionPolicy != KhConnectionPolicy::NoPool;
-        testRequest.ReusedConnection = reusedConnection;
-        testRequest.ConnectionId = pooledConnection != nullptr ? pooledConnection->Id : 0;
+        const SIZE_T bodyBytesLength = builtRequestLength - headerBytesLength;
+        const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
 
         KhTestHttpTransportResponse testResponse = {};
-        NTSTATUS status = g_testHttpTransport(g_testHttpTransportContext, &testRequest, &testResponse);
+        NTSTATUS status = STATUS_SUCCESS;
+        KhTestHttpTransportRequest testRequest = {};
+        if (useExpectContinue) {
+            PopulateTestHttpTransportRequest(
+                request,
+                *session,
+                pooledConnection,
+                reusedConnection,
+                reinterpret_cast<const char*>(workspace.Request.Data),
+                headerBytesLength,
+                headerBytesLength,
+                bodyBytesLength,
+                true,
+                false,
+                &testRequest);
+            status = g_testHttpTransport(g_testHttpTransportContext, &testRequest, &testResponse);
+
+            USHORT firstStatusCode = 0;
+            const bool receivedContinue =
+                NT_SUCCESS(status) &&
+                TryReadRawResponseStatusCode(
+                    testResponse.RawResponse,
+                    testResponse.RawResponseLength,
+                    &firstStatusCode) &&
+                firstStatusCode == 100;
+
+            if (status == STATUS_IO_TIMEOUT || receivedContinue) {
+                testResponse = {};
+                PopulateTestHttpTransportRequest(
+                    request,
+                    *session,
+                    pooledConnection,
+                    reusedConnection,
+                    reinterpret_cast<const char*>(workspace.Request.Data + headerBytesLength),
+                    bodyBytesLength,
+                    headerBytesLength,
+                    bodyBytesLength,
+                    true,
+                    true,
+                    &testRequest);
+                status = g_testHttpTransport(g_testHttpTransportContext, &testRequest, &testResponse);
+            }
+        }
+        else {
+            PopulateTestHttpTransportRequest(
+                request,
+                *session,
+                pooledConnection,
+                reusedConnection,
+                reinterpret_cast<const char*>(workspace.Request.Data),
+                builtRequestLength,
+                headerBytesLength,
+                bodyBytesLength,
+                false,
+                false,
+                &testRequest);
+            status = g_testHttpTransport(g_testHttpTransportContext, &testRequest, &testResponse);
+        }
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
         if (TextEqualsLiteral(testResponse.NegotiatedAlpn, testResponse.NegotiatedAlpnLength, "h2")) {
+            if (useExpectContinue) {
+                return STATUS_NOT_SUPPORTED;
+            }
             parsed->MajorVersion = 2;
             parsed->MinorVersion = 0;
             parsed->StatusCode = 200;
@@ -2592,8 +3112,13 @@ namespace engine
                 tlsConnection->NegotiatedAlpn(),
                 tlsConnection->NegotiatedAlpnLength(),
                 "h2");
+        const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
 
         if (h2Negotiated || h2ExplicitlyRequested) {
+            if (useExpectContinue) {
+                return STATUS_NOT_SUPPORTED;
+            }
+
             if (pooledConnection->Transport == nullptr) {
                 return STATUS_INVALID_DEVICE_STATE;
             }
@@ -2629,32 +3154,45 @@ namespace engine
             return STATUS_SUCCESS;
         }
 
-        SIZE_T sent = 0;
         if (pooledConnection->Transport == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
-        status = pooledConnection->Transport->Send(
-            workspace.Request.Data,
-            builtRequestLength,
-            &sent);
 
-        if (NT_SUCCESS(status) && sent != builtRequestLength) {
-            status = STATUS_CONNECTION_DISCONNECTED;
+        if (useExpectContinue) {
+            status = SendHttp1RequestBufferWithExpect(
+                *pooledConnection->Transport,
+                workspace,
+                workspace.Request.Data,
+                builtRequestLength,
+                EffectiveExpectContinueTimeoutMilliseconds(sendOptions),
+                request.Method == KhHttpMethod::Head,
+                parsed,
+                responseHeaders,
+                headerCapacity,
+                responseTrailers,
+                trailerCapacity,
+                rawResponseLength);
         }
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
+        else {
+            status = SendHttp1RequestBuffer(
+                *pooledConnection->Transport,
+                workspace.Request.Data,
+                builtRequestLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
 
-        status = ReadHttpResponseFromSocket(
-            *pooledConnection->Transport,
-            workspace,
-            request.Method == KhHttpMethod::Head,
-            parsed,
-            responseHeaders,
-            headerCapacity,
-            responseTrailers,
-            trailerCapacity,
-            rawResponseLength);
+            status = ReadHttpResponseFromSocket(
+                *pooledConnection->Transport,
+                workspace,
+                request.Method == KhHttpMethod::Head,
+                parsed,
+                responseHeaders,
+                headerCapacity,
+                responseTrailers,
+                trailerCapacity,
+                rawResponseLength);
+        }
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -3386,6 +3924,7 @@ namespace engine
     NTSTATUS SendSingleHttpRequest(
         KH_SESSION session,
         const KhRequest& request,
+        const KhHttpSendOptions& sendOptions,
         _Inout_ KhWorkspace& workspace,
         _Inout_ ApiHttpHeaderScratch& headerScratch,
         _Out_ http::HttpResponse* parsed,
@@ -3411,11 +3950,18 @@ namespace engine
 
         SIZE_T builtRequestLength = 0;
         SIZE_T requestHeaderCount = 0;
+        const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
+        const bool useProxyAbsoluteForm = session->Options.Proxy.Enabled && !IsHttpsRequest(request);
         status = BuildRequestBytes(
             request,
+            useExpectContinue,
+            useProxyAbsoluteForm,
+            session->Options.Proxy,
             workspace,
             headerScratch.HostHeader,
             headerScratch.HostHeaderCapacity,
+            headerScratch.RequestTarget,
+            headerScratch.RequestTargetCapacity,
             headerScratch.RequestHeaders,
             KhMaxHeadersPerRequest,
             headerScratch.RequestTrailers,
@@ -3453,6 +3999,7 @@ namespace engine
         status = SendViaTransport(
             session,
             request,
+            sendOptions,
             workspace,
             pooledConnection,
             reusedConnection,
@@ -3489,9 +4036,14 @@ namespace engine
                 if (NT_SUCCESS(retryStatus)) {
                     retryStatus = BuildRequestBytes(
                         request,
+                        useExpectContinue,
+                        useProxyAbsoluteForm,
+                        session->Options.Proxy,
                         workspace,
                         headerScratch.HostHeader,
                         headerScratch.HostHeaderCapacity,
+                        headerScratch.RequestTarget,
+                        headerScratch.RequestTargetCapacity,
                         headerScratch.RequestHeaders,
                         KhMaxHeadersPerRequest,
                         headerScratch.RequestTrailers,
@@ -3510,6 +4062,7 @@ namespace engine
                 status = SendViaTransport(
                     session,
                     request,
+                    sendOptions,
                     workspace,
                     retryConnection,
                     retryReused,
@@ -3779,6 +4332,7 @@ namespace engine
             status = SendSingleHttpRequest(
                 session,
                 *currentRequest,
+                effectiveOptions,
                 workspace,
                 *headerScratch.Get(),
                 &parsed,

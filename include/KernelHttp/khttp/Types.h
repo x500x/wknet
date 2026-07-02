@@ -136,7 +136,8 @@ namespace khttp
     {
         SendFlagNone = 0,
         SendFlagAggregateWithCallbacks = 0x00000001,
-        SendFlagDisableAutoRedirect = 0x00000002
+        SendFlagDisableAutoRedirect = 0x00000002,
+        SendFlagExpectContinue = 0x00000004
     };
 
     constexpr SIZE_T DefaultRequestBufferBytes = 16 * 1024;
@@ -147,6 +148,8 @@ namespace khttp
     constexpr ULONG DefaultIdleTimeoutMs = 30000;
     constexpr ULONG DefaultTlsHandshakeTimeoutMs = ::KernelHttp::TlsHandshakeReceiveTimeoutMilliseconds;
     constexpr ULONG DefaultMaxRedirects = 10;
+    constexpr ULONG DefaultExpectContinueTimeoutMs = 1000;
+    constexpr ULONG MaxExpectContinueTimeoutMs = ::KernelHttp::WskOperationTimeoutMilliseconds;
 
     typedef NTSTATUS (*HeaderCallback)(
         void* context,
@@ -212,6 +215,7 @@ namespace khttp
         SIZE_T MaxResponseBytes;
         ULONG Flags;
         ULONG MaxRedirects;
+        ULONG ExpectContinueTimeoutMs;
         HeaderCallback OnHeader;
         BodyCallback OnBody;
         void* CallbackContext;

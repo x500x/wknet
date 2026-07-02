@@ -53,6 +53,9 @@ namespace http
         SIZE_T BodyLength = 0;
         bool IncludeContentLength = false;
         HttpRequestBodyMode BodyMode = HttpRequestBodyMode::ContentLength;
+        // Library-controlled opt-in for emitting Expect: 100-continue.
+        // Callers that pass the header without this flag are rejected.
+        bool AllowExpectContinue = false;
     };
 
     class HttpRequestBuilder final
@@ -62,6 +65,20 @@ namespace http
 
         _Must_inspect_result_
         static NTSTATUS Build(
+            _In_ const HttpRequestBuildOptions& options,
+            _Out_writes_bytes_(destinationCapacity) char* destination,
+            SIZE_T destinationCapacity,
+            _Out_opt_ SIZE_T* bytesWritten) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS BuildHeaders(
+            _In_ const HttpRequestBuildOptions& options,
+            _Out_writes_bytes_(destinationCapacity) char* destination,
+            SIZE_T destinationCapacity,
+            _Out_opt_ SIZE_T* bytesWritten) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS BuildBody(
             _In_ const HttpRequestBuildOptions& options,
             _Out_writes_bytes_(destinationCapacity) char* destination,
             SIZE_T destinationCapacity,

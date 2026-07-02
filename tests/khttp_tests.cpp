@@ -232,6 +232,51 @@ namespace
         bool SawLongOriginForm = false;
     };
 
+    struct ExpectContinueCapture
+    {
+        SIZE_T CallCount = 0;
+        SIZE_T HeaderCallCount = 0;
+        SIZE_T BodyCallCount = 0;
+        NTSTATUS FirstStatus = STATUS_SUCCESS;
+        const char* FirstResponse = nullptr;
+        SIZE_T FirstResponseLength = 0;
+        const char* FinalResponse = nullptr;
+        SIZE_T FinalResponseLength = 0;
+        char HeaderSegment[768] = {};
+        SIZE_T HeaderSegmentLength = 0;
+        char BodySegment[256] = {};
+        SIZE_T BodySegmentLength = 0;
+        bool FirstExpectContinueEnabled = false;
+        bool FirstExpectContinueBodySent = false;
+        bool SecondExpectContinueBodySent = false;
+    };
+
+    void CopySegment(
+        const char* source,
+        SIZE_T sourceLength,
+        char* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* copiedLength) noexcept
+    {
+        if (copiedLength != nullptr) {
+            *copiedLength = 0;
+        }
+        if (source == nullptr || destination == nullptr || destinationCapacity == 0) {
+            return;
+        }
+
+        SIZE_T copyLength = sourceLength < destinationCapacity - 1
+            ? sourceLength
+            : destinationCapacity - 1;
+        if (copyLength != 0) {
+            memcpy(destination, source, copyLength);
+        }
+        destination[copyLength] = '\0';
+        if (copiedLength != nullptr) {
+            *copiedLength = copyLength;
+        }
+    }
+
     void RecordCompletion(void* context, NTSTATUS status) noexcept
     {
         auto* capture = static_cast<CompletionCapture*>(context);
@@ -345,6 +390,64 @@ namespace
             "ok";
         response->RawResponse = responseBytes;
         response->RawResponseLength = sizeof(responseBytes) - 1;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS ExpectContinueTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<ExpectContinueCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->CallCount;
+        if (capture->CallCount == 1) {
+            capture->FirstExpectContinueEnabled = request->ExpectContinueEnabled;
+            capture->FirstExpectContinueBodySent = request->ExpectContinueBodySent;
+            CopySegment(
+                request->BuiltRequest,
+                request->BuiltRequestLength,
+                capture->HeaderSegment,
+                sizeof(capture->HeaderSegment),
+                &capture->HeaderSegmentLength);
+
+            if (!request->ExpectContinueEnabled) {
+                response->RawResponse = capture->FinalResponse;
+                response->RawResponseLength = capture->FinalResponseLength;
+                response->ConnectionReusable = false;
+                return STATUS_SUCCESS;
+            }
+
+            ++capture->HeaderCallCount;
+            if (!NT_SUCCESS(capture->FirstStatus)) {
+                return capture->FirstStatus;
+            }
+
+            response->RawResponse = capture->FirstResponse;
+            response->RawResponseLength = capture->FirstResponseLength;
+            response->ConnectionReusable = false;
+            return STATUS_SUCCESS;
+        }
+
+        if (!request->ExpectContinueEnabled || !request->ExpectContinueBodySent) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        ++capture->BodyCallCount;
+        capture->SecondExpectContinueBodySent = request->ExpectContinueBodySent;
+        CopySegment(
+            request->BuiltRequest,
+            request->BuiltRequestLength,
+            capture->BodySegment,
+            sizeof(capture->BodySegment),
+            &capture->BodySegmentLength);
+
+        response->RawResponse = capture->FinalResponse;
+        response->RawResponseLength = capture->FinalResponseLength;
         response->ConnectionReusable = false;
         return STATUS_SUCCESS;
     }
@@ -2057,25 +2160,58 @@ namespace
         Expect(session == nullptr, "disabled stray proxy session is not returned");
     }
 
-    void TestPlainHttpProxyIsRejectedUntilImplemented() noexcept
+    void TestPlainHttpProxyUsesAbsoluteForm() noexcept
     {
         CapturedRequest captured = {};
+        static const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "ok";
+        captured.RawResponse = responseBytes;
+        captured.RawResponseLength = sizeof(responseBytes) - 1;
         khttp::test::SetHttpTransport(TestTransport, &captured);
 
         khttp::SessionConfig config = khttp::DefaultSessionConfig();
         FillProxyConfig(config.Proxy);
+        config.Proxy.AuthHeader = "Basic cHJveHk=";
+        config.Proxy.AuthHeaderLength = Length(config.Proxy.AuthHeader);
 
         khttp::Session* session = nullptr;
         NTSTATUS status = khttp::SessionCreate(&config, &session);
-        Expect(NT_SUCCESS(status), "SessionCreate accepts proxy config before plaintext proxy rejection");
+        Expect(NT_SUCCESS(status), "SessionCreate accepts proxy config before plaintext proxy request");
 
-        const char* url = "http://example.com/proxy";
+        const char* url = "http://example.com:8081/proxy?q=1";
         khttp::Response* response = nullptr;
         status = khttp::Get(session, url, Length(url), &response);
-        Expect(status == STATUS_NOT_SUPPORTED, "plain HTTP over proxy remains explicitly unsupported");
-        Expect(response == nullptr, "plain HTTP proxy rejection returns no response");
-        Expect(captured.CallCount == 0, "plain HTTP proxy rejection does not reach transport");
+        Expect(NT_SUCCESS(status), "plain HTTP over proxy succeeds");
+        Expect(khttp::ResponseStatusCode(response) == 200, "plain HTTP proxy response status");
+        Expect(captured.CallCount == 1, "plain HTTP proxy reaches transport");
+        Expect(captured.ProxyEnabled, "plain HTTP proxy transport observes proxy enabled");
+        Expect(
+            BufferContainsLiteral(
+                captured.BuiltRequest,
+                captured.BuiltRequestLength,
+                "GET http://example.com:8081/proxy?q=1 HTTP/1.1\r\n"),
+            "plain HTTP proxy request uses absolute-form target");
+        Expect(
+            BufferContainsLiteral(
+                captured.BuiltRequest,
+                captured.BuiltRequestLength,
+                "Host: example.com:8081\r\n"),
+            "plain HTTP proxy keeps origin Host header");
+        Expect(
+            BufferContainsLiteral(
+                captured.BuiltRequest,
+                captured.BuiltRequestLength,
+                "Proxy-Authorization: Basic cHJveHk=\r\n"),
+            "plain HTTP proxy includes configured proxy credentials");
+        Expect(
+            !BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "CONNECT "),
+            "plain HTTP proxy does not build CONNECT tunnel request");
 
+        khttp::ResponseRelease(response);
         khttp::SessionClose(session);
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
@@ -3253,6 +3389,262 @@ namespace
             true,
             STATUS_NOT_SUPPORTED,
             "khttp send rejects body with Expect: 100-continue");
+    }
+
+    void TestExpectContinueSendsBodyAfter100() noexcept
+    {
+        static const char continueResponse[] =
+            "HTTP/1.1 100 Continue\r\n"
+            "\r\n";
+        static const char finalResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "ok";
+
+        ExpectContinueCapture capture = {};
+        capture.FirstResponse = continueResponse;
+        capture.FirstResponseLength = sizeof(continueResponse) - 1;
+        capture.FinalResponse = finalResponse;
+        capture.FinalResponseLength = sizeof(finalResponse) - 1;
+        khttp::test::SetHttpTransport(ExpectContinueTransport, &capture);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for expect continue");
+
+        khttp::Request* request = nullptr;
+        status = khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for expect continue");
+
+        const char* url = "http://example.com/expect";
+        status = khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for expect continue");
+        status = khttp::RequestSetMethod(request, khttp::Method::Post);
+        Expect(NT_SUCCESS(status), "RequestSetMethod POST succeeds for expect continue");
+
+        const char* body = "payload";
+        status = khttp::RequestSetBody(request, reinterpret_cast<const UCHAR*>(body), Length(body));
+        Expect(NT_SUCCESS(status), "RequestSetBody succeeds for expect continue");
+
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.Flags = khttp::SendFlagExpectContinue;
+
+        khttp::Response* response = nullptr;
+        status = khttp::Send(session, request, &options, &response);
+        Expect(NT_SUCCESS(status), "expect continue send succeeds after 100");
+        Expect(khttp::ResponseStatusCode(response) == 200, "expect continue final status is returned");
+        Expect(capture.CallCount == 2, "expect continue uses header and body phases");
+        Expect(capture.HeaderCallCount == 1, "expect continue header phase observed");
+        Expect(capture.BodyCallCount == 1, "expect continue body phase observed");
+        Expect(capture.FirstExpectContinueEnabled, "expect continue flag reaches transport");
+        Expect(!capture.FirstExpectContinueBodySent, "first expect continue phase does not send body");
+        Expect(capture.SecondExpectContinueBodySent, "second expect continue phase sends body");
+        Expect(
+            BufferContainsLiteral(capture.HeaderSegment, capture.HeaderSegmentLength, "Expect: 100-continue\r\n"),
+            "expect continue header is injected");
+        Expect(
+            !BufferContainsLiteral(capture.HeaderSegment, capture.HeaderSegmentLength, body),
+            "expect continue header phase excludes request body");
+        Expect(capture.BodySegmentLength == Length(body), "expect continue body segment length");
+        Expect(memcmp(capture.BodySegment, body, Length(body)) == 0, "expect continue body segment bytes");
+
+        khttp::ResponseRelease(response);
+        khttp::RequestRelease(request);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestExpectContinueFinalResponseSkipsBody() noexcept
+    {
+        static const char finalResponse[] =
+            "HTTP/1.1 417 Expectation Failed\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+
+        ExpectContinueCapture capture = {};
+        capture.FirstResponse = finalResponse;
+        capture.FirstResponseLength = sizeof(finalResponse) - 1;
+        capture.FinalResponse = finalResponse;
+        capture.FinalResponseLength = sizeof(finalResponse) - 1;
+        khttp::test::SetHttpTransport(ExpectContinueTransport, &capture);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for expect final response");
+
+        khttp::Request* request = nullptr;
+        status = khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for expect final response");
+
+        const char* url = "http://example.com/expect-final";
+        status = khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for expect final response");
+        status = khttp::RequestSetMethod(request, khttp::Method::Post);
+        Expect(NT_SUCCESS(status), "RequestSetMethod POST succeeds for expect final response");
+
+        const char* body = "payload";
+        status = khttp::RequestSetBody(request, reinterpret_cast<const UCHAR*>(body), Length(body));
+        Expect(NT_SUCCESS(status), "RequestSetBody succeeds for expect final response");
+
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.Flags = khttp::SendFlagExpectContinue;
+
+        khttp::Response* response = nullptr;
+        status = khttp::Send(session, request, &options, &response);
+        Expect(NT_SUCCESS(status), "expect continue returns final response");
+        Expect(khttp::ResponseStatusCode(response) == 417, "expect continue returns 417 to caller");
+        Expect(capture.CallCount == 1, "expect continue final response uses one phase");
+        Expect(capture.BodyCallCount == 0, "expect continue final response skips body");
+        Expect(
+            BufferContainsLiteral(capture.HeaderSegment, capture.HeaderSegmentLength, "Expect: 100-continue\r\n"),
+            "expect continue final response still injects header");
+        Expect(
+            !BufferContainsLiteral(capture.HeaderSegment, capture.HeaderSegmentLength, body),
+            "expect continue final response header phase excludes body");
+
+        khttp::ResponseRelease(response);
+        khttp::RequestRelease(request);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestExpectContinueTimeoutSendsBody() noexcept
+    {
+        static const char finalResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "ok";
+
+        ExpectContinueCapture capture = {};
+        capture.FirstStatus = STATUS_IO_TIMEOUT;
+        capture.FinalResponse = finalResponse;
+        capture.FinalResponseLength = sizeof(finalResponse) - 1;
+        khttp::test::SetHttpTransport(ExpectContinueTransport, &capture);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for expect timeout");
+
+        khttp::Request* request = nullptr;
+        status = khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for expect timeout");
+
+        const char* url = "http://example.com/expect-timeout";
+        status = khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for expect timeout");
+        status = khttp::RequestSetMethod(request, khttp::Method::Post);
+        Expect(NT_SUCCESS(status), "RequestSetMethod POST succeeds for expect timeout");
+
+        const char* body = "payload";
+        status = khttp::RequestSetBody(request, reinterpret_cast<const UCHAR*>(body), Length(body));
+        Expect(NT_SUCCESS(status), "RequestSetBody succeeds for expect timeout");
+
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.Flags = khttp::SendFlagExpectContinue;
+        options.ExpectContinueTimeoutMs = 1;
+
+        khttp::Response* response = nullptr;
+        status = khttp::Send(session, request, &options, &response);
+        Expect(NT_SUCCESS(status), "expect continue timeout sends body");
+        Expect(khttp::ResponseStatusCode(response) == 200, "expect continue timeout final status");
+        Expect(capture.CallCount == 2, "expect continue timeout uses second phase");
+        Expect(capture.BodyCallCount == 1, "expect continue timeout sends body phase");
+        Expect(capture.BodySegmentLength == Length(body), "expect continue timeout body length");
+        Expect(memcmp(capture.BodySegment, body, Length(body)) == 0, "expect continue timeout body bytes");
+
+        khttp::ResponseRelease(response);
+        khttp::RequestRelease(request);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestExpectContinueDisconnectReturnsError() noexcept
+    {
+        ExpectContinueCapture capture = {};
+        capture.FirstStatus = STATUS_CONNECTION_RESET;
+        khttp::test::SetHttpTransport(ExpectContinueTransport, &capture);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for expect disconnect");
+
+        khttp::Request* request = nullptr;
+        status = khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for expect disconnect");
+
+        const char* url = "http://example.com/expect-disconnect";
+        status = khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for expect disconnect");
+        status = khttp::RequestSetMethod(request, khttp::Method::Post);
+        Expect(NT_SUCCESS(status), "RequestSetMethod POST succeeds for expect disconnect");
+
+        const char* body = "payload";
+        status = khttp::RequestSetBody(request, reinterpret_cast<const UCHAR*>(body), Length(body));
+        Expect(NT_SUCCESS(status), "RequestSetBody succeeds for expect disconnect");
+
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.Flags = khttp::SendFlagExpectContinue;
+
+        khttp::Response* response = nullptr;
+        status = khttp::Send(session, request, &options, &response);
+        Expect(status == STATUS_CONNECTION_RESET, "expect continue disconnect returns transport error");
+        Expect(response == nullptr, "expect continue disconnect does not allocate response");
+        Expect(capture.CallCount == 1, "expect continue disconnect uses one phase");
+        Expect(capture.BodyCallCount == 0, "expect continue disconnect skips body");
+
+        khttp::RequestRelease(request);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestExpectContinueWithoutBodyDoesNotInjectHeader() noexcept
+    {
+        static const char finalResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "ok";
+
+        ExpectContinueCapture capture = {};
+        capture.FinalResponse = finalResponse;
+        capture.FinalResponseLength = sizeof(finalResponse) - 1;
+        khttp::test::SetHttpTransport(ExpectContinueTransport, &capture);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for expect without body");
+
+        khttp::Request* request = nullptr;
+        status = khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for expect without body");
+
+        const char* url = "http://example.com/expect-without-body";
+        status = khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for expect without body");
+
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.Flags = khttp::SendFlagExpectContinue;
+
+        khttp::Response* response = nullptr;
+        status = khttp::Send(session, request, &options, &response);
+        Expect(NT_SUCCESS(status), "expect continue flag without body sends normally");
+        Expect(khttp::ResponseStatusCode(response) == 200, "expect without body status");
+        Expect(capture.CallCount == 1, "expect without body uses one phase");
+        Expect(!capture.FirstExpectContinueEnabled, "expect without body does not enable transport phase");
+        Expect(
+            !BufferContainsLiteral(capture.HeaderSegment, capture.HeaderSegmentLength, "Expect: 100-continue\r\n"),
+            "expect without body does not inject header");
+
+        khttp::ResponseRelease(response);
+        khttp::RequestRelease(request);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
     void TestRequestMethodRejectsUnsupportedValues() noexcept
@@ -4489,7 +4881,7 @@ int main() noexcept
     TestConnectionPoolKeyIncludesTlsIdentity();
     TestSessionProxyConfigReachesTransport();
     TestSessionProxyRejectsInvalidConfig();
-    TestPlainHttpProxyIsRejectedUntilImplemented();
+    TestPlainHttpProxyUsesAbsoluteForm();
     TestResolveAllCacheBoundaries();
     TestResolveAllAnyNoMatchQueriesExplicitFamilies();
     TestResolveAllSequentialConnectFallback();
@@ -4508,6 +4900,11 @@ int main() noexcept
     TestRequestBuilder();
     TestRequestTransferEncodingRejected();
     TestRequestReservedHeadersRejected();
+    TestExpectContinueSendsBodyAfter100();
+    TestExpectContinueFinalResponseSkipsBody();
+    TestExpectContinueTimeoutSendsBody();
+    TestExpectContinueDisconnectReturnsError();
+    TestExpectContinueWithoutBodyDoesNotInjectHeader();
     TestRequestMethodRejectsUnsupportedValues();
     TestAutoRedirectFollowsToFinalResponse();
     TestAutoRedirectCanBeDisabled();
