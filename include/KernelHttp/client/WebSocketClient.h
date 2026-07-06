@@ -136,7 +136,9 @@ namespace client
             _Out_writes_bytes_(outputCapacity) UCHAR* output,
             SIZE_T outputCapacity,
             _Out_ SIZE_T* bytesReceived,
-            bool autoReplyPing = true) noexcept;
+            bool autoReplyPing = true,
+            bool deliverFragments = false,
+            _Out_opt_ bool* finalFragment = nullptr) noexcept;
 
         _Must_inspect_result_
         NTSTATUS Close(_In_ const WebSocketIoBuffers& buffers) noexcept;
@@ -272,6 +274,9 @@ namespace client
         bool receiveFragmentOpen_ = false;
         websocket::WebSocketOpcode receiveFragmentOpcode_ = websocket::WebSocketOpcode::Continuation;
         SIZE_T receiveFragmentLength_ = 0;
+        ULONG receiveTextUtf8CodePoint_ = 0;
+        UCHAR receiveTextUtf8Remaining_ = 0;
+        UCHAR receiveTextUtf8Expected_ = 0;
     };
 }
 }

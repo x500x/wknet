@@ -362,6 +362,7 @@ namespace kws
         bool AutoAllocate = true;
         MessageCallback OnMessage = nullptr;
         void* CallbackContext = nullptr;
+        bool DeliverFragments = false;
     };
 
     struct Message final

@@ -234,6 +234,8 @@ namespace
         size_t SelectedSubprotocolLength = 0;
         const char* ResponseExtensions = nullptr;
         size_t ResponseExtensionsLength = 0;
+        unsigned int HandshakeStatusCode = 101;
+        const char* HandshakeReason = "Switching Protocols";
         bool EchoAfterPing = false;
         bool Connected = false;
         NTSTATUS DataSendStatus = STATUS_SUCCESS;
@@ -300,6 +302,26 @@ namespace
                 }
 
                 char response[512] = {};
+                if (HandshakeStatusCode != 101) {
+                    const int written = snprintf(
+                        response,
+                        sizeof(response),
+                        "HTTP/1.1 %u %s\r\n"
+                        "Content-Length: 0\r\n"
+                        "\r\n",
+                        HandshakeStatusCode,
+                        HandshakeReason != nullptr ? HandshakeReason : "WebSocket Rejected");
+                    if (written <= 0 || static_cast<size_t>(written) >= sizeof(response)) {
+                        return STATUS_BUFFER_TOO_SMALL;
+                    }
+
+                    QueueReceive(response, static_cast<size_t>(written));
+                    if (bytesSent != nullptr) {
+                        *bytesSent = dataLength;
+                    }
+                    return STATUS_SUCCESS;
+                }
+
                 const char* extensions = ResponseExtensions != nullptr ? ResponseExtensions : "";
                 const int extensionsLength = static_cast<int>(
                     ResponseExtensions != nullptr ? ResponseExtensionsLength : 0);
@@ -2247,6 +2269,204 @@ namespace
         g_server = nullptr;
     }
 
+    void TestReceiveDefaultAggregatesWireFragments()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        const unsigned char first[] = { 'h', 'e' };
+        const unsigned char second[] = { 'l', 'l', 'o' };
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Text,
+            first,
+            sizeof(first),
+            false);
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Continuation,
+            second,
+            sizeof(second),
+            true);
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for aggregate fragment test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        bool finalFragment = false;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived, true, false, &finalFragment);
+        Expect(NT_SUCCESS(status), "default receive aggregates wire fragments");
+        Expect(opcode == WebSocketOpcode::Text, "aggregated fragmented message reports original opcode");
+        Expect(finalFragment, "aggregated fragmented message is final");
+        Expect(bytesReceived == 5, "aggregated fragmented message length matches");
+        Expect(memcmp(payload, "hello", 5) == 0, "aggregated fragmented message payload matches");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestReceiveCanDeliverWireFragments()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        const unsigned char first[] = { 'h', 'i', ' ', 0xf0, 0x9f };
+        const unsigned char second[] = { 0x98, 0x80, '!' };
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Text,
+            first,
+            sizeof(first),
+            false);
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Continuation,
+            second,
+            sizeof(second),
+            true);
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for wire fragment delivery test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        bool finalFragment = true;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived, true, true, &finalFragment);
+        Expect(NT_SUCCESS(status), "first wire fragment is delivered");
+        Expect(opcode == WebSocketOpcode::Text, "first wire fragment reports text opcode");
+        Expect(!finalFragment, "first wire fragment is non-final");
+        Expect(bytesReceived == sizeof(first), "first wire fragment length matches");
+        Expect(memcmp(payload, first, sizeof(first)) == 0, "first wire fragment payload matches");
+
+        opcode = WebSocketOpcode::Text;
+        bytesReceived = 0;
+        finalFragment = false;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived, true, true, &finalFragment);
+        Expect(NT_SUCCESS(status), "continuation wire fragment is delivered");
+        Expect(opcode == WebSocketOpcode::Continuation, "continuation wire fragment reports continuation opcode");
+        Expect(finalFragment, "continuation wire fragment carries final flag");
+        Expect(bytesReceived == sizeof(second), "continuation wire fragment length matches");
+        Expect(memcmp(payload, second, sizeof(second)) == 0, "continuation wire fragment payload matches");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestReceiveFragmentedTextRejectsUnfinishedFinalCodePoint()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        const unsigned char first[] = { 'x', 0xe2 };
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Text,
+            first,
+            sizeof(first),
+            false);
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Continuation,
+            nullptr,
+            0,
+            true);
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "websocket connect for unfinished UTF-8 receive test succeeds");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        bool finalFragment = true;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived, true, true, &finalFragment);
+        Expect(NT_SUCCESS(status), "first unfinished UTF-8 wire fragment is held open");
+
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived, true, true, &finalFragment);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "final wire fragment rejects unfinished UTF-8 code point");
+        Expect(server.LastClosePayloadLength >= 2, "unfinished UTF-8 sends close status");
+        if (server.LastClosePayloadLength >= 2) {
+            const unsigned int closeCode =
+                (static_cast<unsigned int>(server.LastClosePayload[0]) << 8) |
+                server.LastClosePayload[1];
+            Expect(closeCode == 1007, "unfinished UTF-8 closes with 1007");
+        }
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
     void TestReceiveRejectsMalformedCloseFrames()
     {
         const unsigned char oneByteClose[] = { 0x03 };
@@ -2469,6 +2689,65 @@ namespace
         status = client.Close(buffers);
         Expect(status == STATUS_INVALID_DEVICE_STATE, "websocket close propagates non-terminal errors");
         g_server = nullptr;
+    }
+
+    void ExpectHandshakePolicyStatus(
+        unsigned int statusCode,
+        const char* reason,
+        NTSTATUS expectedStatus,
+        const char* message)
+    {
+        FakeWebSocketServer server;
+        server.HandshakeStatusCode = statusCode;
+        server.HandshakeReason = reason;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        USHORT observedStatusCode = 0;
+        const NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers, &observedStatusCode);
+        Expect(status == expectedStatus, message);
+        Expect(observedStatusCode == statusCode, "websocket failed handshake exposes response status code");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestOpeningHandshakePolicyFailuresAreVisible()
+    {
+        ExpectHandshakePolicyStatus(
+            302,
+            "Found",
+            STATUS_NOT_SUPPORTED,
+            "websocket opening handshake rejects redirect as unsupported policy");
+        ExpectHandshakePolicyStatus(
+            401,
+            "Unauthorized",
+            STATUS_NOT_SUPPORTED,
+            "websocket opening handshake rejects authentication challenge as unsupported policy");
+        ExpectHandshakePolicyStatus(
+            200,
+            "OK",
+            STATUS_INVALID_NETWORK_RESPONSE,
+            "websocket opening handshake rejects non-upgrade success as invalid response");
     }
 
     void TestTlsVersionRangeValidation()
@@ -2738,11 +3017,15 @@ int main()
     TestReceiveHeaderDecodeErrorsCloseTransport();
     TestReceiveCloseEchoesAndBlocksData();
     TestReceiveRejectsInvalidTextUtf8();
+    TestReceiveDefaultAggregatesWireFragments();
+    TestReceiveCanDeliverWireFragments();
+    TestReceiveFragmentedTextRejectsUnfinishedFinalCodePoint();
     TestReceiveRejectsMalformedCloseFrames();
     TestReceiveTimeoutTerminatesTransport();
     TestSendTimeoutTerminatesTransport();
     TestCloseTreatsConnectionResetAsClosed();
     TestClosePropagatesNonTerminalErrors();
+    TestOpeningHandshakePolicyFailuresAreVisible();
     TestTlsVersionRangeValidation();
     TestTlsSha1CompatibilityPolicyValidation();
 

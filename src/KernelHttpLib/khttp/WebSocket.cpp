@@ -245,6 +245,7 @@ NTSTATUS ReceiveEx(
     if (options != nullptr) {
         apiOptions.MaxMessageBytes = options->MaxMessageBytes;
         apiOptions.AutoAllocate = options->AutoAllocate;
+        apiOptions.DeliverFragments = options->DeliverFragments;
         apiOptions.MessageCallback = reinterpret_cast<::KernelHttp::engine::KhWebSocketMessageCallback>(options->OnMessage);
         apiOptions.CallbackContext = options->CallbackContext;
     }

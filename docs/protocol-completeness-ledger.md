@@ -113,12 +113,12 @@
 | 客户端帧 masking | MUST | 已实现/已验证 | `WebSocketFrame.cpp` | `tests/websocket_frame_tests.cpp` | HTTP/2 RFC 8441 路径按规范无 mask。 |
 | 服务端 masked frame | MUST reject | 已实现/已验证 | `WebSocketFrame.cpp`、`WebSocketClient.cpp` | `tests/websocket_frame_tests.cpp` | 关闭码 1002。 |
 | 分片发送与默认聚合接收 | MUST | 已实现/已验证 | `WebSocketClient.cpp` | `tests/websocket_client_tests.cpp` | 文本跨片 UTF-8 校验。 |
-| wire fragment 回调 | SHOULD for streaming clients | 待补全 | `WebSocketClient.cpp`、`khttp/WebSocket.cpp` | `tests/websocket_client_tests.cpp` | 当前文档/实现口径需统一。 |
+| wire fragment 回调 | SHOULD for streaming clients | 已实现/已验证 | `WebSocketClient.cpp`、`khttp/WebSocket.cpp` | `tests/websocket_client_tests.cpp` | `ReceiveOptions.DeliverFragments` 显式开启；默认仍聚合完整消息。 |
 | control frame 自动 Pong 与洪泛上限 | SHOULD/安全边界 | 已实现/已验证 | `WebSocketClient.cpp` | `tests/websocket_client_tests.cpp` | 单次接收控制帧 ≤100。 |
 | close handshake | MUST | 已实现/已验证 | `WebSocketClient.cpp` | `tests/websocket_client_tests.cpp` | 主动/被动 close 已覆盖。 |
 | RFC 8441 WebSocket over HTTP/2 | MAY | 默认关闭/已验证 | `Http2Connection.cpp`、`WebSocketClient.cpp` | `tests/http2_client_tests.cpp`、`tests/websocket_client_tests.cpp` | 仅 `wss` 显式 opt-in。 |
 | permessage-deflate | MAY | 明确非目标/安全拒绝 | `WebSocketFrame.cpp` | `tests/websocket_frame_tests.cpp` | 任何 `Sec-WebSocket-Extensions` 拒绝。 |
-| opening-handshake redirect/401 跟随 | MAY | 明确非目标 | N/A | N/A | 若未来实现必须显式 opt-in 且沿用 HTTP 安全重定向规则。 |
+| opening-handshake redirect/401/407 跟随 | MAY | 明确非目标/安全拒绝 | `WebSocketClient.cpp` | `tests/websocket_client_tests.cpp` | 3xx/401/407 返回 `STATUS_NOT_SUPPORTED`；若未来实现必须显式 opt-in 且沿用 HTTP 安全重定向规则。 |
 
 ## 代理账本
 
@@ -161,6 +161,6 @@ pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1 -Configuration Release -Plat
 
 1. `待补全`：真流式请求体。
 2. `待补全`：HTTP/2 请求 trailers、流式 DATA、高层 h2c 显式入口、GOAWAY/RST 高层重试语义。
-3. `待补全`：WebSocket wire fragment 回调。
+3. WebSocket wire fragment 回调已由 `ReceiveOptions.DeliverFragments` 显式开启，默认仍保持聚合消息兼容行为。
 4. `待补全`：X.509 AKI/SKI 与交叉签名路径构建补全。
 5. `已实现/待补测`：TLS post-handshake/KeyUpdate、Name Constraints、certificatePolicies 的测试审计。

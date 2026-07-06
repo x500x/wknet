@@ -1605,13 +1605,16 @@ namespace engine
         buffers.FrameBufferLength = websocket->Workspace->WebSocketFrameScratch.Length;
         KernelHttp::websocket::WebSocketOpcode opcode = KernelHttp::websocket::WebSocketOpcode::Continuation;
         SIZE_T bytesReceived = 0;
+        bool finalFragment = true;
         status = websocket->Client->ReceiveMessage(
             buffers,
             &opcode,
             websocket->Workspace->WebSocketPayloadScratch.Data,
             maxMessageBytes,
             &bytesReceived,
-            websocket->AutoReplyPing);
+            websocket->AutoReplyPing,
+            effectiveOptions.DeliverFragments,
+            &finalFragment);
         if (!NT_SUCCESS(status)) {
             kprintf("KhWebSocketReceiveSync Client->ReceiveMessage failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
@@ -1635,6 +1638,9 @@ namespace engine
         else if (opcode == KernelHttp::websocket::WebSocketOpcode::Pong) {
             type = KhWebSocketMessageType::Pong;
         }
+        else if (opcode == KernelHttp::websocket::WebSocketOpcode::Continuation) {
+            type = KhWebSocketMessageType::Continuation;
+        }
 
         const UCHAR* data = websocket->Workspace->WebSocketPayloadScratch.Data;
         if (effectiveOptions.MessageCallback != nullptr) {
@@ -1643,7 +1649,7 @@ namespace engine
                 type,
                 data,
                 bytesReceived,
-                true);
+                finalFragment);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -1658,7 +1664,7 @@ namespace engine
             message->Type = websocket->LastMessageType;
             message->Data = websocket->LastMessage;
             message->DataLength = websocket->LastMessageLength;
-            message->FinalFragment = true;
+            message->FinalFragment = finalFragment;
         }
 
         if (type == KhWebSocketMessageType::Close) {

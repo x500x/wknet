@@ -322,19 +322,19 @@
 - Test: `tests/websocket_frame_tests.cpp`
 - Test: `tests/websocket_client_tests.cpp`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
   覆盖文本消息分为多个 wire fragment 时，开启 fragment 回调能收到首帧、续帧、final 标志；默认行为仍返回聚合消息。
 
-- [ ] **Step 2: 增加显式选项**
+- [x] **Step 2: 增加显式选项**
 
   在 `ReceiveOptions` 中增加类似 `DeliverFragments` 的布尔项，默认 `false`。已有 `finalFragment` 回调参数开始承载真实 wire fragment 语义。
 
-- [ ] **Step 3: 保持 UTF-8 增量校验**
+- [x] **Step 3: 保持 UTF-8 增量校验**
 
   文本 fragment 跨片状态仍使用现有增量 UTF-8 校验；最终片不完整码点返回 1007/协议错误。
 
-- [ ] **Step 4: 验证**
+- [x] **Step 4: 验证**
 
   Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test websocket_client_tests -Run`
 
@@ -348,15 +348,15 @@
 - Modify: `docsite/websocket.md`
 - Modify: `docsite/websocket.en.md`
 
-- [ ] **Step 1: 审计 101/401/3xx 行为**
+- [x] **Step 1: 审计 101/401/3xx 行为**
 
   默认仍不跟随 redirect/401；若决定补，必须新增显式 opt-in，并沿用 HTTP redirect 安全规则：跨源清理敏感头，拒绝 HTTPS 降级。
 
-- [ ] **Step 2: 强化失败可见性**
+- [x] **Step 2: 强化失败可见性**
 
   失败时区分 `STATUS_NOT_SUPPORTED`、`STATUS_INVALID_NETWORK_RESPONSE`、握手状态码不接受等场景，让调用方能判断是协议错误还是策略拒绝。
 
-- [ ] **Step 3: 验证**
+- [x] **Step 3: 验证**
 
   Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test websocket_client_tests -Run`
 

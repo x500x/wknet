@@ -290,6 +290,7 @@ namespace engine
         bool AutoAllocate = true;
         KhWebSocketMessageCallback MessageCallback = nullptr;
         void* CallbackContext = nullptr;
+        bool DeliverFragments = false;
     };
 
     struct KhWebSocketMessage final
