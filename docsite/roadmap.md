@@ -17,10 +17,10 @@
 - 后台自动 PING 保活策略（低层已提供显式 `SendPing`，不默认启动定时器）
 - 高层 khttp 暴露 h2c（仅底层 `Http2Client`）
 
-**WebSocket**（注：分片发送 `kws::SendContinuation` 与接收分片回调 `ReceiveOptions.OnMessage` **已支持**）
+**WebSocket**（注：分片发送 `kws::SendContinuation` 与显式接收分片 `ReceiveOptions.DeliverFragments=true` **已支持**）
 - permessage-deflate（RFC 7692）
 - 高层 `kws` 默认自动选择 WebSocket over HTTP/2（RFC 8441 已支持显式 opt-in，默认仍保持 HTTP/1.1 Upgrade）
-- 握手 redirect / 401 跟随
+- 握手 redirect / 401 / 407 跟随（当前安全拒绝为 `STATUS_NOT_SUPPORTED`；未来若做必须显式 opt-in）
 
 **代理**
 - 明文 HTTP over proxy（HTTPS CONNECT 代理隧道已支持高层 Session 显式配置与低层 `HttpsClient` 选项）

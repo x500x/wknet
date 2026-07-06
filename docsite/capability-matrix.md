@@ -33,7 +33,7 @@
 - HTTP/1.1 Upgrade 路径客户端帧**始终掩码**（每帧新随机键）；RFC 8441 over HTTP/2 路径按规范发送无掩码帧；收到**被掩码的服务端帧**→协议错误 1002。
 - `wss` 可通过 `AllowWebSocketOverHttp2` 显式 opt-in RFC 8441；默认仍保持 HTTP/1.1 Upgrade，`ws://` 不隐式走 h2c。
 - **分片发送**：`kws::SendContinuation` + `SendOptions{FinalFragment}`，自动按帧缓冲分块；跨片增量 UTF-8 校验。
-- **接收分片回调**：`ReceiveOptions.OnMessage` 逐消息/分片回调；也可默认聚合完整消息。
+- **接收分片回调**：默认聚合完整消息；显式 `ReceiveOptions.DeliverFragments=true` 时，`ReceiveOptions.OnMessage` 或返回式按 wire fragment 交付并暴露真实 `finalFragment`。
 - 控制帧：自动 Pong（可关）、单次接收控制帧 ≤100（超限 close 1008）；文本/close payload UTF-8 校验（非法 1007）；超 `MaxMessageBytes` close 1009。
 - close 握手：主动（发 close 后等 peer close，3s 超时）与被动（echo 后关）。
 
@@ -61,7 +61,7 @@
 |------|----------|
 | HTTP/1.1 | 拒绝用户设置 `Transfer-Encoding`/`TE`；request trailer 仅 chunked 路径；无入站 parser/server；支持 CONNECT 方法、高层 Session HTTPS 代理 CONNECT 隧道与低层 `HttpsClient` 显式代理隧道；明文 HTTP over proxy 当前显式拒绝；无 TRACE/管线化；`Range`/条件请求透传且响应 `Content-Range` 只读解析；响应默认聚合但 `OnBody` 可增量回调；无流式上传；`Expect:100-continue` 带 body 被拒；`br` 仅 Content-Encoding（TE 中 `br` → `STATUS_NOT_SUPPORTED`） |
 | HTTP/2 | 高层 `khttp` 连接池已接入多活动流复用；低层连接支持交错帧分发与 RFC 8441 extended CONNECT DATA tunnel；不发 PRIORITY；仅提供显式 `SendPing`，不启用后台自动 PING 保活；高层 khttp 不暴露 h2c（仅 `Http2Client`） |
-| WebSocket | 默认仍为 HTTP/1.1 Upgrade；`wss` 显式 opt-in 可走 RFC 8441 over HTTP/2；支持自定义 opening headers；无扩展协商（permessage-deflate 等拒绝）；不跟随握手 redirect/401 |
+| WebSocket | 默认仍为 HTTP/1.1 Upgrade；`wss` 显式 opt-in 可走 RFC 8441 over HTTP/2；支持自定义 opening headers；无扩展协商（permessage-deflate 等拒绝）；不跟随握手 redirect/401/407，3xx/401/407 返回 `STATUS_NOT_SUPPORTED` |
 | TLS | 默认不启用 TLS1.2 RSA kx/CBC/renegotiation/SHA-1（需 `CompatibilityExplicit`）；Ed25519/Ed448 验签为内核内软件实现并默认宣称；不在线抓取 OCSP/CRL；0-RTT 默认关闭 |
 
 ### 默认关闭、需显式开启

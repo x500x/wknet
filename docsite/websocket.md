@@ -29,7 +29,7 @@ kws::Receive / ReceiveEx ; kws::Close / CloseEx ; kws::SelectedSubprotocol
 ```cpp
 enum class kws::MsgType { Text, Binary, Close, Continuation, Ping, Pong };
 struct kws::Message { MsgType Type; const UCHAR* Data; SIZE_T DataLength; bool Final; bool FinalFragment; };
-struct kws::ReceiveOptions { SIZE_T MaxMessageBytes; bool AutoAllocate=true; MessageCallback OnMessage; void* CallbackContext; };
+struct kws::ReceiveOptions { SIZE_T MaxMessageBytes; bool AutoAllocate=true; MessageCallback OnMessage; void* CallbackContext; bool DeliverFragments=false; };
 struct kws::Header { const char* Name; SIZE_T NameLength; const char* Value; SIZE_T ValueLength; };
 struct kws::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subprotocol; SIZE_T SubprotocolLength;
                             const Header* Headers; SIZE_T HeaderCount;
@@ -41,11 +41,12 @@ struct kws::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subpr
 - `ConnectConfig.Headers` 可传调用方自定义握手头，例如 `Origin`、`Authorization`、`Cookie`。
 - 为防止握手被篡改，库受控头会被拒绝：`Host`、`Connection`、`Upgrade`、`Content-Length`、`Transfer-Encoding`、`Sec-WebSocket-Key`、`Sec-WebSocket-Version`、`Sec-WebSocket-Protocol`、`Sec-WebSocket-Extensions`。
 - 字段名/值走普通 HTTP header 文本校验，拒绝空名、超限长度、控制字符与 CRLF 注入。
+- 默认不跟随 opening-handshake 的 redirect、401/407 challenge：3xx/401/407 返回 `STATUS_NOT_SUPPORTED` 并保留握手状态码；其它非 101 响应返回 `STATUS_INVALID_NETWORK_RESPONSE`。跨源 redirect、认证重放等若未来支持，必须通过显式 opt-in 并沿用 HTTP redirect 安全规则。
 
 ### 分片（**已支持**）
 
 - **发送**：`kws::SendContinuation(Ex)` 续帧；`SendText/SendBinary` 的 `*Ex` 可带 `FinalFragment=false` 开启分片。客户端会按帧缓冲自动分块（首帧用真实 opcode，后续用 Continuation），并对文本消息**跨分片增量 UTF-8 校验**，最终片不完整码点 → `STATUS_INVALID_PARAMETER`。
-- **接收**：`ReceiveOptions.OnMessage` 回调或默认返回式，二者都返回**客户端已重组的完整消息**（内核路径上回调的 `finalFragment` 恒为 true，即按消息回调，而非逐 wire 分片）。`Message.Data` 指向内部缓冲，下次收/关前有效。
+- **接收**：默认 `ReceiveOptions.DeliverFragments=false`，`ReceiveOptions.OnMessage` 回调或默认返回式都返回**客户端已重组的完整消息**，`finalFragment=true`。显式设置 `DeliverFragments=true` 后，接收路径按 wire fragment 交付：首帧返回 Text/Binary，续帧返回 Continuation，`finalFragment` 承载真实 FIN；文本消息仍跨分片做增量 UTF-8 校验，最终片不完整码点 → close 1007 / `STATUS_INVALID_NETWORK_RESPONSE`。`Message.Data` 指向内部缓冲，下次收/关前有效。
 
 ### 行为与时序
 
@@ -58,7 +59,7 @@ struct kws::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subpr
 
 ### 边界 / 非目标
 
-高层 `kws` 默认仍是 HTTP/1.1 Upgrade；支持自定义 opening headers；不支持扩展协商（permessage-deflate 拒绝）；`wss` 设置 `ConnectConfig.AllowWebSocketOverHttp2=true` 后可通过 RFC 8441 extended CONNECT over HTTP/2 建立隧道，peer 未启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 时 fail-closed；`ws://` 不隐式走 h2c；不跟随握手 redirect/401。
+高层 `kws` 默认仍是 HTTP/1.1 Upgrade；支持自定义 opening headers；不支持扩展协商（permessage-deflate 拒绝）；`wss` 设置 `ConnectConfig.AllowWebSocketOverHttp2=true` 后可通过 RFC 8441 extended CONNECT over HTTP/2 建立隧道，peer 未启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 时 fail-closed；`ws://` 不隐式走 h2c；不跟随握手 redirect/401/407。
 
 ### 示例
 
