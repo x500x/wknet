@@ -104,6 +104,12 @@ namespace
     const char PkiLeafCertificatePath[] = "tests\\testdata\\pki\\leaf.cert.pem";
     const char PkiBadLeafCertificatePath[] = "tests\\testdata\\pki\\bad-leaf.cert.pem";
     const char PkiIdnaLeafCertificatePath[] = "tests\\testdata\\pki\\idna-leaf.cert.pem";
+    const char PkiCrossTrustedRootCertificatePath[] = "tests\\testdata\\pki\\cross\\trusted-root.cert.pem";
+    const char PkiCrossIntermediateByTrustedCertificatePath[] =
+        "tests\\testdata\\pki\\cross\\intermediate-by-trusted.cert.pem";
+    const char PkiCrossIntermediateByUntrustedCertificatePath[] =
+        "tests\\testdata\\pki\\cross\\intermediate-by-untrusted.cert.pem";
+    const char PkiCrossLeafCertificatePath[] = "tests\\testdata\\pki\\cross\\leaf.cert.pem";
     const char WsPostmanEchoServerKeyExchangePath[] =
         "tests\\testdata\\tls\\ws-postman-echo-server-key-exchange.bin";
     const char PemCertificateBegin[] = "-----BEGIN CERTIFICATE-----";
@@ -5570,6 +5576,125 @@ namespace
         Expect(result.Leaf.DerLength == leafDerLength, "unordered path validation selects the DNS leaf");
     }
 
+    void TestCertificateValidationBacktracksCrossSignedIntermediate()
+    {
+        UCHAR rootPem[TestMaxPemCertificateLength] = {};
+        UCHAR rootDer[TestMaxDerCertificateLength] = {};
+        UCHAR trustedIntermediatePem[TestMaxPemCertificateLength] = {};
+        UCHAR trustedIntermediateDer[TestMaxDerCertificateLength] = {};
+        UCHAR untrustedIntermediatePem[TestMaxPemCertificateLength] = {};
+        UCHAR untrustedIntermediateDer[TestMaxDerCertificateLength] = {};
+        UCHAR leafPem[TestMaxPemCertificateLength] = {};
+        UCHAR leafDer[TestMaxDerCertificateLength] = {};
+        SIZE_T rootPemLength = 0;
+        SIZE_T rootDerLength = 0;
+        SIZE_T trustedIntermediatePemLength = 0;
+        SIZE_T trustedIntermediateDerLength = 0;
+        SIZE_T untrustedIntermediatePemLength = 0;
+        SIZE_T untrustedIntermediateDerLength = 0;
+        SIZE_T leafPemLength = 0;
+        SIZE_T leafDerLength = 0;
+
+        const bool loaded =
+            LoadPemCertificate(PkiCrossTrustedRootCertificatePath, rootPem, sizeof(rootPem), &rootPemLength, rootDer, sizeof(rootDer), &rootDerLength) &&
+            LoadPemCertificate(PkiCrossIntermediateByTrustedCertificatePath, trustedIntermediatePem, sizeof(trustedIntermediatePem), &trustedIntermediatePemLength, trustedIntermediateDer, sizeof(trustedIntermediateDer), &trustedIntermediateDerLength) &&
+            LoadPemCertificate(PkiCrossIntermediateByUntrustedCertificatePath, untrustedIntermediatePem, sizeof(untrustedIntermediatePem), &untrustedIntermediatePemLength, untrustedIntermediateDer, sizeof(untrustedIntermediateDer), &untrustedIntermediateDerLength) &&
+            LoadPemCertificate(PkiCrossLeafCertificatePath, leafPem, sizeof(leafPem), &leafPemLength, leafDer, sizeof(leafDer), &leafDerLength);
+        Expect(loaded, "cross-signed PKI fixtures load");
+        if (!loaded) {
+            return;
+        }
+
+        ParsedCertificate leaf = {};
+        ParsedCertificate trustedIntermediate = {};
+        ParsedCertificate untrustedIntermediate = {};
+        NTSTATUS status = CertificateValidator::ParseCertificate(leafDer, leafDerLength, leaf);
+        ExpectStatus(status, STATUS_SUCCESS, "cross-signed leaf parses");
+        status = CertificateValidator::ParseCertificate(
+            trustedIntermediateDer,
+            trustedIntermediateDerLength,
+            trustedIntermediate);
+        ExpectStatus(status, STATUS_SUCCESS, "trusted cross-signed intermediate parses");
+        status = CertificateValidator::ParseCertificate(
+            untrustedIntermediateDer,
+            untrustedIntermediateDerLength,
+            untrustedIntermediate);
+        ExpectStatus(status, STATUS_SUCCESS, "untrusted cross-signed intermediate parses");
+        if (!leaf.HasAuthorityKeyIdentifier ||
+            !trustedIntermediate.HasSubjectKeyIdentifier ||
+            !untrustedIntermediate.HasSubjectKeyIdentifier) {
+            Expect(false, "AKI/SKI extensions are parsed from cross-signed fixtures");
+            return;
+        }
+        Expect(
+            leaf.AuthorityKeyIdentifierLength == trustedIntermediate.SubjectKeyIdentifierLength &&
+                memcmp(
+                    leaf.AuthorityKeyIdentifier,
+                    trustedIntermediate.SubjectKeyIdentifier,
+                    leaf.AuthorityKeyIdentifierLength) == 0,
+            "leaf AKI matches trusted intermediate SKI");
+        Expect(
+            untrustedIntermediate.SubjectKeyIdentifierLength == trustedIntermediate.SubjectKeyIdentifierLength &&
+                memcmp(
+                    untrustedIntermediate.SubjectKeyIdentifier,
+                    trustedIntermediate.SubjectKeyIdentifier,
+                    trustedIntermediate.SubjectKeyIdentifierLength) == 0,
+            "cross-signed intermediates retain the same SKI");
+
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T certificateListLength = 0;
+        bool appended = AppendCertificateToList(leafDer, leafDerLength, certificateList, sizeof(certificateList), &certificateListLength);
+        appended = appended && AppendCertificateToList(
+            untrustedIntermediateDer,
+            untrustedIntermediateDerLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        appended = appended && AppendCertificateToList(
+            trustedIntermediateDer,
+            trustedIntermediateDerLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(appended, "cross-signed certificate list is built with untrusted candidate first");
+        if (!appended) {
+            return;
+        }
+
+        CertificateAuthorityBundle bundle = {};
+        bundle.Data = rootPem;
+        bundle.DataLength = rootPemLength;
+
+        CertificateStoreOptions storeOptions = {};
+        storeOptions.AuthorityBundles = &bundle;
+        storeOptions.AuthorityBundleCount = 1;
+
+        CertificateStore store;
+        status = store.Initialize(storeOptions);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts cross-sign trusted root");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 3;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "www.cross.example.test";
+        options.HostNameLength = strlen(options.HostName);
+        options.Store = &store;
+
+        CertificateValidationResult result = {};
+        status = CertificateValidator::ValidateChain(chain, options, &result);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate validation backtracks from untrusted cross-sign to trusted path");
+        Expect(
+            result.Leaf.DerLength == leafDerLength &&
+                result.Leaf.HasAuthorityKeyIdentifier,
+            "cross-signed path validation returns parsed leaf metadata");
+    }
+
     void TestCertificateValidationAppliesNameConstraints()
     {
         UCHAR rootPem[TestMaxPemCertificateLength] = {};
@@ -6366,6 +6491,7 @@ int main()
     TestCertificateValidationPinDoesNotCreateTrust();
     TestCertificateValidationAcceptsExternalPemBundle();
     TestCertificateValidationBuildsUnorderedExternalPath();
+    TestCertificateValidationBacktracksCrossSignedIntermediate();
     TestCertificateValidationAppliesNameConstraints();
     TestCertificateValidationMatchesIdnaName();
     TestCertificateValidationMatchesIpAddressSan();

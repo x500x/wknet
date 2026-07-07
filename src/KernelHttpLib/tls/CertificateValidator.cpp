@@ -54,6 +54,8 @@ namespace tls
         const UCHAR OidEd448[] = { 0x2b, 0x65, 0x71 };
         const UCHAR OidBasicConstraints[] = { 0x55, 0x1d, 0x13 };
         const UCHAR OidKeyUsage[] = { 0x55, 0x1d, 0x0f };
+        const UCHAR OidSubjectKeyIdentifier[] = { 0x55, 0x1d, 0x0e };
+        const UCHAR OidAuthorityKeyIdentifier[] = { 0x55, 0x1d, 0x23 };
         const UCHAR OidSubjectAltName[] = { 0x55, 0x1d, 0x11 };
         const UCHAR OidNameConstraints[] = { 0x55, 0x1d, 0x1e };
         const UCHAR OidCertificatePolicies[] = { 0x55, 0x1d, 0x20 };
@@ -1264,6 +1266,81 @@ namespace tls
         }
 
         _Must_inspect_result_
+        NTSTATUS ParseSubjectKeyIdentifier(_In_ const DerElement& extensionValue, _Inout_ ParsedCertificate& certificate) noexcept
+        {
+            SIZE_T valueOffset = 0;
+            DerElement keyIdentifier = {};
+            NTSTATUS status = ReadExpected(
+                extensionValue.Value,
+                extensionValue.ValueLength,
+                &valueOffset,
+                TagOctetString,
+                keyIdentifier);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            if (valueOffset != extensionValue.ValueLength ||
+                keyIdentifier.Value == nullptr ||
+                keyIdentifier.ValueLength == 0) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            certificate.SubjectKeyIdentifier = keyIdentifier.Value;
+            certificate.SubjectKeyIdentifierLength = keyIdentifier.ValueLength;
+            certificate.HasSubjectKeyIdentifier = true;
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ParseAuthorityKeyIdentifier(_In_ const DerElement& extensionValue, _Inout_ ParsedCertificate& certificate) noexcept
+        {
+            SIZE_T valueOffset = 0;
+            DerElement sequence = {};
+            NTSTATUS status = ReadExpected(
+                extensionValue.Value,
+                extensionValue.ValueLength,
+                &valueOffset,
+                TagSequence,
+                sequence);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (valueOffset != extensionValue.ValueLength) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            SIZE_T offset = 0;
+            while (offset < sequence.ValueLength) {
+                DerElement item = {};
+                status = ReadElement(sequence.Value, sequence.ValueLength, &offset, item);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                if (item.Tag == 0x80) {
+                    if (certificate.HasAuthorityKeyIdentifier ||
+                        item.Value == nullptr ||
+                        item.ValueLength == 0) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+
+                    certificate.AuthorityKeyIdentifier = item.Value;
+                    certificate.AuthorityKeyIdentifierLength = item.ValueLength;
+                    certificate.HasAuthorityKeyIdentifier = true;
+                }
+                else if (item.Tag == 0xa1 || item.Tag == 0x82) {
+                    continue;
+                }
+                else {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
         NTSTATUS ParseExtendedKeyUsage(_In_ const DerElement& extensionValue, _Inout_ ParsedCertificate& certificate) noexcept
         {
             SIZE_T valueOffset = 0;
@@ -1367,6 +1444,12 @@ namespace tls
                 }
                 else if (OidEquals(oid, OidKeyUsage, sizeof(OidKeyUsage))) {
                     status = ParseKeyUsage(value, certificate);
+                }
+                else if (OidEquals(oid, OidSubjectKeyIdentifier, sizeof(OidSubjectKeyIdentifier))) {
+                    status = ParseSubjectKeyIdentifier(value, certificate);
+                }
+                else if (OidEquals(oid, OidAuthorityKeyIdentifier, sizeof(OidAuthorityKeyIdentifier))) {
+                    status = ParseAuthorityKeyIdentifier(value, certificate);
                 }
                 else if (OidEquals(oid, OidSubjectAltName, sizeof(OidSubjectAltName))) {
                     status = ParseSubjectAltName(value, certificate);
@@ -2709,81 +2792,316 @@ namespace tls
         }
 
         _Must_inspect_result_
-        NTSTATUS ReorderCertificatePath(
+        NTSTATUS StoreHasTrustedAnchor(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
+            _In_opt_ const CertificateStore* store,
+            _In_ const ParsedCertificate& certificate,
+            _In_reads_bytes_(CertificateSha256ThumbprintLength) const UCHAR* certificateSpkiSha256,
+            SIZE_T subordinateCaCount,
+            _Inout_ ParsedCertificate* anchor,
+            _Out_writes_bytes_(scratchCapacity) UCHAR* scratch,
+            SIZE_T scratchCapacity,
+            _Out_ bool* trusted) noexcept;
+
+        struct CertificatePathSearchFrame final
+        {
+            SIZE_T NextCandidateIndex = 0;
+            UCHAR Priority = 2;
+        };
+
+        _Must_inspect_result_
+        bool CertificateKeyIdentifiersPermitIssuer(
+            _In_ const ParsedCertificate& child,
+            _In_ const ParsedCertificate& issuer,
+            _Out_ bool* strongMatch) noexcept
+        {
+            if (strongMatch != nullptr) {
+                *strongMatch = false;
+            }
+
+            if (strongMatch == nullptr) {
+                return false;
+            }
+
+            if (child.HasAuthorityKeyIdentifier && issuer.HasSubjectKeyIdentifier) {
+                if (child.AuthorityKeyIdentifierLength != issuer.SubjectKeyIdentifierLength ||
+                    !MemoryEquals(
+                        child.AuthorityKeyIdentifier,
+                        issuer.SubjectKeyIdentifier,
+                        child.AuthorityKeyIdentifierLength)) {
+                    return false;
+                }
+
+                *strongMatch = true;
+            }
+
+            return true;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS CertificateCanIssueForPath(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
+            _In_ const ParsedCertificate& child,
+            _In_ const ParsedCertificate& issuer,
+            UCHAR requiredPriority,
+            _Out_ bool* matches) noexcept
+        {
+            if (matches != nullptr) {
+                *matches = false;
+            }
+            if (matches == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (!CertificateIssuerMatches(child, issuer) ||
+                !issuer.HasBasicConstraints ||
+                !issuer.IsCa ||
+                !issuer.HasKeyUsage ||
+                !issuer.AllowsKeyCertSign) {
+                return STATUS_SUCCESS;
+            }
+
+            bool strongKeyIdentifierMatch = false;
+            if (!CertificateKeyIdentifiersPermitIssuer(child, issuer, &strongKeyIdentifierMatch)) {
+                return STATUS_SUCCESS;
+            }
+            if (requiredPriority == 2 && !strongKeyIdentifierMatch) {
+                return STATUS_SUCCESS;
+            }
+
+            const NTSTATUS status = VerifyCertificateSignature(providerCache, child, issuer);
+            if (status == STATUS_INVALID_SIGNATURE) {
+                return STATUS_SUCCESS;
+            }
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            *matches = true;
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        SIZE_T CountSubordinateCaCertificatesInPath(
+            _In_reads_(certificateCount) const ParsedCertificate* certificates,
+            SIZE_T certificateCount,
+            _In_reads_(pathCount) const SIZE_T* pathIndices,
+            SIZE_T pathCount) noexcept
+        {
+            if (certificates == nullptr || pathIndices == nullptr || pathCount < 2) {
+                return 0;
+            }
+
+            SIZE_T count = 0;
+            for (SIZE_T pathIndex = 1; pathIndex < pathCount; ++pathIndex) {
+                const SIZE_T certificateIndex = pathIndices[pathIndex];
+                if (certificateIndex < certificateCount &&
+                    certificates[certificateIndex].IsCa &&
+                    !IsSelfIssued(certificates[certificateIndex])) {
+                    ++count;
+                }
+            }
+
+            return count;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS PathEndsAtTrustedAnchor(
+            _In_opt_ const crypto::CngProviderCache* providerCache,
+            _In_opt_ const CertificateStore* store,
+            _In_reads_(certificateCount) const ParsedCertificate* certificates,
+            SIZE_T certificateCount,
+            _In_reads_(pathCount) const SIZE_T* pathIndices,
+            SIZE_T pathCount,
+            _Inout_ ParsedCertificate* anchor,
+            _Out_writes_bytes_(scratchCapacity) UCHAR* scratch,
+            SIZE_T scratchCapacity,
+            _Out_ bool* trusted) noexcept
+        {
+            if (trusted != nullptr) {
+                *trusted = false;
+            }
+            if (certificates == nullptr ||
+                certificateCount == 0 ||
+                pathIndices == nullptr ||
+                pathCount == 0 ||
+                anchor == nullptr ||
+                scratch == nullptr ||
+                trusted == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            const SIZE_T currentIndex = pathIndices[pathCount - 1];
+            if (currentIndex >= certificateCount) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            HeapArray<UCHAR> certSpkiSha256(CertificateSha256ThumbprintLength);
+            if (!certSpkiSha256.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            NTSTATUS status = HashSubjectPublicKey(providerCache, certificates[currentIndex], certSpkiSha256.Get());
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            const SIZE_T subordinateCaCount = CountSubordinateCaCertificatesInPath(
+                certificates,
+                certificateCount,
+                pathIndices,
+                pathCount);
+            status = StoreHasTrustedAnchor(
+                providerCache,
+                store,
+                certificates[currentIndex],
+                certSpkiSha256.Get(),
+                subordinateCaCount,
+                anchor,
+                scratch,
+                scratchCapacity,
+                trusted);
+            RtlSecureZeroMemory(certSpkiSha256.Get(), certSpkiSha256.Count());
+            return status;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS BuildCertificatePath(
             _Inout_updates_(certificateCount) ParsedCertificate* certificates,
             SIZE_T certificateCount,
             _In_reads_(hostNameLength) const char* hostName,
             SIZE_T hostNameLength,
+            _In_opt_ const crypto::CngProviderCache* providerCache,
+            _In_opt_ const CertificateStore* store,
+            _Inout_ ParsedCertificate* anchor,
+            _Out_writes_bytes_(scratchCapacity) UCHAR* scratch,
+            SIZE_T scratchCapacity,
             _Out_ SIZE_T* pathCount) noexcept
         {
             if (pathCount != nullptr) {
                 *pathCount = 0;
             }
-            if (certificates == nullptr || certificateCount == 0 || pathCount == nullptr) {
+            if (certificates == nullptr ||
+                certificateCount == 0 ||
+                certificateCount > CertificateMaxChainLength ||
+                anchor == nullptr ||
+                scratch == nullptr ||
+                scratchCapacity < CertificateMaxAuthorityDerLength ||
+                pathCount == nullptr) {
                 return STATUS_INVALID_PARAMETER;
             }
 
             HeapArray<ParsedCertificate> ordered(CertificateMaxChainLength);
             HeapArray<UCHAR> used(CertificateMaxChainLength);
-            if (!ordered.IsValid() || !used.IsValid()) {
+            HeapArray<SIZE_T> pathIndices(CertificateMaxChainLength);
+            HeapArray<CertificatePathSearchFrame> frames(CertificateMaxChainLength);
+            if (!ordered.IsValid() || !used.IsValid() || !pathIndices.IsValid() || !frames.IsValid()) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
-            SIZE_T leafIndex = certificateCount;
-            for (SIZE_T index = 0; index < certificateCount; ++index) {
-                if (!CertificateIssuesAny(certificates, certificateCount, index) &&
-                    CertificateNameMatchesHost(certificates[index], hostName, hostNameLength)) {
-                    leafIndex = index;
-                    break;
-                }
-            }
-            if (leafIndex == certificateCount) {
-                for (SIZE_T index = 0; index < certificateCount; ++index) {
-                    if (!CertificateIssuesAny(certificates, certificateCount, index)) {
-                        leafIndex = index;
-                        break;
-                    }
-                }
-            }
-            if (leafIndex == certificateCount) {
-                return STATUS_TRUST_FAILURE;
-            }
-
-            SIZE_T orderedCount = 0;
-            ordered[orderedCount++] = certificates[leafIndex];
-            used[leafIndex] = 1;
-
-            while (orderedCount < certificateCount) {
-                const ParsedCertificate& current = ordered[orderedCount - 1];
-                if (IsSelfIssued(current)) {
-                    break;
-                }
-
-                SIZE_T issuerIndex = certificateCount;
-                for (SIZE_T index = 0; index < certificateCount; ++index) {
-                    if (used[index] != 0) {
+            for (UCHAR leafPass = 0; leafPass < 2; ++leafPass) {
+                for (SIZE_T leafIndex = 0; leafIndex < certificateCount; ++leafIndex) {
+                    if (CertificateIssuesAny(certificates, certificateCount, leafIndex)) {
                         continue;
                     }
-                    if (CertificateIssuerMatches(current, certificates[index])) {
-                        issuerIndex = index;
-                        break;
+
+                    if (leafPass == 0 &&
+                        !CertificateNameMatchesHost(certificates[leafIndex], hostName, hostNameLength)) {
+                        continue;
+                    }
+
+                    RtlZeroMemory(used.Get(), used.Count());
+                    RtlZeroMemory(pathIndices.Get(), pathIndices.Count() * sizeof(SIZE_T));
+                    RtlZeroMemory(frames.Get(), frames.Count() * sizeof(CertificatePathSearchFrame));
+
+                    SIZE_T currentPathCount = 1;
+                    pathIndices[0] = leafIndex;
+                    used[leafIndex] = 1;
+                    frames[0].Priority = 2;
+                    frames[0].NextCandidateIndex = 0;
+
+                    for (;;) {
+                        bool trusted = false;
+                        NTSTATUS status = PathEndsAtTrustedAnchor(
+                            providerCache,
+                            store,
+                            certificates,
+                            certificateCount,
+                            pathIndices.Get(),
+                            currentPathCount,
+                            anchor,
+                            scratch,
+                            scratchCapacity,
+                            &trusted);
+                        if (!NT_SUCCESS(status)) {
+                            return status;
+                        }
+                        if (trusted) {
+                            for (SIZE_T index = 0; index < currentPathCount; ++index) {
+                                ordered[index] = certificates[pathIndices[index]];
+                            }
+                            for (SIZE_T index = 0; index < currentPathCount; ++index) {
+                                certificates[index] = ordered[index];
+                            }
+
+                            *pathCount = currentPathCount;
+                            return STATUS_SUCCESS;
+                        }
+
+                        CertificatePathSearchFrame* const frame = &frames[currentPathCount - 1];
+                        SIZE_T issuerIndex = certificateCount;
+                        while (issuerIndex == certificateCount && frame->Priority != 0) {
+                            while (frame->NextCandidateIndex < certificateCount) {
+                                const SIZE_T candidateIndex = frame->NextCandidateIndex;
+                                ++frame->NextCandidateIndex;
+                                if (used[candidateIndex] != 0) {
+                                    continue;
+                                }
+
+                                bool matches = false;
+                                status = CertificateCanIssueForPath(
+                                    providerCache,
+                                    certificates[pathIndices[currentPathCount - 1]],
+                                    certificates[candidateIndex],
+                                    frame->Priority,
+                                    &matches);
+                                if (!NT_SUCCESS(status)) {
+                                    return status;
+                                }
+
+                                if (matches) {
+                                    issuerIndex = candidateIndex;
+                                    break;
+                                }
+                            }
+
+                            if (issuerIndex == certificateCount) {
+                                --frame->Priority;
+                                frame->NextCandidateIndex = 0;
+                            }
+                        }
+
+                        if (issuerIndex != certificateCount &&
+                            currentPathCount < CertificateMaxChainLength) {
+                            pathIndices[currentPathCount] = issuerIndex;
+                            used[issuerIndex] = 1;
+                            frames[currentPathCount].Priority = 2;
+                            frames[currentPathCount].NextCandidateIndex = 0;
+                            ++currentPathCount;
+                            continue;
+                        }
+
+                        used[pathIndices[currentPathCount - 1]] = 0;
+                        if (currentPathCount == 1) {
+                            break;
+                        }
+
+                        --currentPathCount;
                     }
                 }
-
-                if (issuerIndex == certificateCount) {
-                    break;
-                }
-
-                ordered[orderedCount++] = certificates[issuerIndex];
-                used[issuerIndex] = 1;
             }
 
-            for (SIZE_T index = 0; index < orderedCount; ++index) {
-                certificates[index] = ordered[index];
-            }
-
-            *pathCount = orderedCount;
-            return STATUS_SUCCESS;
+            return STATUS_TRUST_FAILURE;
         }
 
         _Must_inspect_result_
@@ -3667,11 +3985,16 @@ namespace tls
                 validationHost = normalizedHost.Get();
             }
 
-            status = ReorderCertificatePath(
+            status = BuildCertificatePath(
                 parsed,
                 chain.CertificateCount,
                 validationHost,
                 validationHostLength,
+                options.ProviderCache,
+                options.Store,
+                scratch.Anchor,
+                scratch.Authority,
+                scratch.AuthorityLength,
                 &pathCount);
             if (!NT_SUCCESS(status)) {
                 ReleaseCertificateValidationScratch(scratch);

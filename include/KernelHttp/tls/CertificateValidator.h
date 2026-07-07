@@ -53,6 +53,12 @@ namespace tls
         SIZE_T IssuerLength = 0;
         const UCHAR* SubjectPublicKeyInfo = nullptr;
         SIZE_T SubjectPublicKeyInfoLength = 0;
+        const UCHAR* SubjectKeyIdentifier = nullptr;
+        SIZE_T SubjectKeyIdentifierLength = 0;
+        bool HasSubjectKeyIdentifier = false;
+        const UCHAR* AuthorityKeyIdentifier = nullptr;
+        SIZE_T AuthorityKeyIdentifierLength = 0;
+        bool HasAuthorityKeyIdentifier = false;
         const UCHAR* PublicKey = nullptr;
         SIZE_T PublicKeyLength = 0;
         const UCHAR* RsaModulus = nullptr;
