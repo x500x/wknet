@@ -447,15 +447,15 @@
 - Modify: `docsite/roadmap.md`
 - Modify: `docsite/roadmap.en.md`
 
-- [ ] **Step 1: 按账本重写“当前边界”**
+- [x] **Step 1: 按账本重写“当前边界”**
 
   每项能力只允许四类表述：已实现/已验证、默认关闭需开启、安全拒绝、明确非目标。
 
-- [ ] **Step 2: 删除模糊未完成表述**
+- [x] **Step 2: 删除模糊未完成表述**
 
   不写“后续补”“暂时不支持”这种不带原因的描述。确实延期的能力要写触发条件、风险和是否计划。
 
-- [ ] **Step 3: 中英文同步**
+- [x] **Step 3: 中英文同步**
 
   中英文页面的能力分类、默认行为和非目标必须一致。
 
@@ -473,15 +473,15 @@
 - Modify: `README.md`
 - Modify: `README_en.md`
 
-- [ ] **Step 1: 同步新增能力**
+- [x] **Step 1: 同步新增能力**
 
   写清 `Expect: 100-continue`、流式上传、HTTP proxy、h2c、H2 trailers、WebSocket fragment callback、证书路径构建。
 
-- [ ] **Step 2: 写清仍不做的能力**
+- [x] **Step 2: 写清仍不做的能力**
 
   HTTP/3、服务端、在线撤销、WebSocket permessage-deflate 等保持非目标，不和“未完成”混写。
 
-- [ ] **Step 3: docsite 提交边界**
+- [x] **Step 3: docsite 提交边界**
 
   实现提交和 docsite 提交必须分开；docsite 提交信息必须以 `docsite:` 开头。计划文档本身不自动提交。
 
@@ -494,11 +494,11 @@
 **Files:**
 - Test-only
 
-- [ ] **Step 1: 构建并运行协议测试**
+- [x] **Step 1: 构建并运行协议测试**
 
   Run the commands listed in Task 2. Expected: 全部 PASS；任何 SKIP 必须有明确环境原因。
 
-- [ ] **Step 2: 复查禁止项**
+- [x] **Step 2: 复查禁止项**
 
   Run: `pwsh -NoLogo -NoProfile -Command 'rg -n "new |delete |WinHTTP|WinINet|SChannel|兜底|临时|先这样" .\include .\src .\tests .\docsite .\docs'`
 
@@ -509,36 +509,38 @@
 **Files:**
 - Build-only
 
-- [ ] **Step 1: Debug x64**
+- [x] **Step 1: Debug x64**
 
   Run: `pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1 -Configuration Debug -Platform x64`
 
   Expected: `/WX` 下 0 warning。
 
-- [ ] **Step 2: Release x64**
+- [x] **Step 2: Release x64**
 
   Run: `pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1 -Configuration Release -Platform x64`
 
   Expected: `/WX` 下 0 warning。
 
-- [ ] **Step 3: ARM64（环境具备时）**
+- [x] **Step 3: ARM64（环境具备时）**
 
   Run Debug/Release ARM64。若缺 WDK ARM64 工具链，记录为环境限制，不改代码降级。
+
+  Result: 本机 MSVC 14.44.35207 未检测到 HostX64\arm64\cl.exe 或 HostX86\arm64\cl.exe，ARM64 构建记录为环境限制。
 
 ### Task 19: 最终审计
 
 **Files:**
 - Modify as needed only if audit finds mismatch.
 
-- [ ] **Step 1: 对照账本逐项勾选**
+- [x] **Step 1: 对照账本逐项勾选**
 
   每个“待补全”必须变成“已实现/已验证”“安全拒绝”或“明确非目标”之一。
 
-- [ ] **Step 2: 对照 docsite 逐项检查**
+- [x] **Step 2: 对照 docsite 逐项检查**
 
   页面显示不能再让协议能力呈现为不完整的模糊状态。
 
-- [ ] **Step 3: 准备提交说明**
+- [x] **Step 3: 准备提交说明**
 
   如果用户要求提交，按 Conventional Commits。实现提交示例：
 
@@ -565,3 +567,5 @@
 - 不用 `new/delete`；新增对象走现有分配器、lookaside、workspace 或 `HeapObject`/`HeapArray`。
 - 新 API 默认保持兼容；改变默认行为前必须有用户明确确认。
 - 所有协议行为必须在用户态测试中可重放，不能只靠人工连一次服务端。
+
+

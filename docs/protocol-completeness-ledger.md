@@ -30,7 +30,7 @@
 | 用户设置 `Transfer-Encoding`/`TE` | MAY | 安全拒绝 | `HttpRequest.cpp`、`HttpEngine.cpp` | `tests/http_parser_tests.cpp` | 调用方不能破坏 framing，库自己生成 chunked。 |
 | 请求 `Content-Length` body | MUST | 已实现/已验证 | `HttpRequest.cpp`、`HttpEngine.cpp` | `tests/http_parser_tests.cpp` | 小 body 当前一次性写入。 |
 | 请求 chunked body 与 trailer | MUST when chunked | 已实现/已验证 | `HttpRequest.cpp`、`Engine.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | trailer 禁止字段已拒绝。 |
-| 真流式请求体上传 | SHOULD for large clients | 待补全 | `HttpEngine.cpp`、`khttp/Body.cpp` | `tests/khttp_tests.cpp`、`tests/high_level_api_tests.cpp` | 需要 body source ABI；不能靠扩大聚合缓冲。 |
+| 真流式请求体上传 | SHOULD for large clients | 已实现/已验证 | `HttpEngine.cpp`、`khttp/Body.cpp`、`khttp/Http.cpp` | `tests/khttp_tests.cpp`、`tests/high_level_api_tests.cpp` | `BodyCreateStream` / `KhHttpRequestSetBodySource` 按块读取；已知长度走 `Content-Length`，未知长度走库生成 chunked。 |
 | `Expect: 100-continue` | SHOULD | 已实现/已验证 | `HttpRequest.cpp`、`HttpParser.cpp`、`HttpEngine.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | 显式 opt-in；默认关闭；覆盖 100 后发 body、final/417 不发 body、超时后发 body、断连错误。 |
 | 响应状态行与 HTTP/1.0/1.1 版本 | MUST | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 拒绝非 1.x 与非法状态码。 |
 | header section、单行、头数量上限 | MUST/安全边界 | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 64 KiB header section、8 KiB 单行、≤200 headers。 |
@@ -58,13 +58,13 @@
 | DATA 流控与 WINDOW_UPDATE | MUST | 已实现/已验证 | `Http2Stream.cpp`、`Http2Connection.cpp` | `tests/http2_client_tests.cpp` | 连接级与 stream 级均覆盖。 |
 | 多活动 stream 分发 | SHOULD | 已实现/已验证 | `Http2Connection.cpp`、`ConnectionPool.cpp` | `tests/http2_client_tests.cpp`、`tests/khttp_tests.cpp` | 高层连接池已用 stream lease。 |
 | HTTP/2 响应 trailers | MUST | 已实现/已验证 | `Http2Connection.cpp` | `tests/http2_client_tests.cpp` | trailer 伪头拒绝。 |
-| HTTP/2 请求 trailers | SHOULD | 待补全 | `Http2Connection.cpp`、`HttpEngine.cpp` | `tests/http2_client_tests.cpp`、`tests/khttp_tests.cpp` | 需 final HEADERS + END_STREAM；不使用 chunked。 |
-| HTTP/2 流式请求 DATA | SHOULD | 待补全 | `Http2Connection.cpp` | `tests/http2_client_tests.cpp` | 需 body source 驱动，不一次性要求完整 body。 |
+| HTTP/2 请求 trailers | SHOULD | 已实现/已验证 | `Http2Connection.cpp`、`HttpEngine.cpp` | `tests/http2_client_tests.cpp`、`tests/khttp_tests.cpp` | body 结束后发送 final HEADERS + END_STREAM；不使用 chunked，拒绝 trailer 伪头。 |
+| HTTP/2 流式请求 DATA | SHOULD | 已实现/已验证 | `Http2Connection.cpp` | `tests/http2_client_tests.cpp` | body source 驱动，按连接/stream 窗口和 peer `MAX_FRAME_SIZE` 切块。 |
 | RFC 8441 extended CONNECT | MAY | 已实现/已验证 | `Http2Connection.cpp`、`WebSocketClient.cpp` | `tests/http2_client_tests.cpp`、`tests/websocket_client_tests.cpp` | `wss` 显式 opt-in。 |
 | h2 TLS ALPN 高层路径 | SHOULD | 已实现/已验证 | `HttpEngine.cpp`、`TlsConnection.cpp` | `tests/khttp_tests.cpp` | 自动 offer `h2,http/1.1`。 |
-| h2c prior knowledge / Upgrade 低层路径 | MAY | 已实现/已验证 | `client/Http2Client.cpp` | `tests/http2_client_tests.cpp` | 高层尚未暴露。 |
-| h2c 高层显式入口 | MAY | 待补全 | `HttpEngine.cpp`、`client/Http2Client.cpp` | `tests/khttp_tests.cpp`、`tests/http2_client_tests.cpp` | 默认关闭，需 pool key 区分协议模式。 |
-| GOAWAY/RST_STREAM 高层重试语义 | SHOULD | 待补全 | `Http2Connection.cpp`、`HttpEngine.cpp` | `tests/http2_client_tests.cpp`、`tests/khttp_tests.cpp` | `NO_ERROR` 且未处理 stream 可重试安全方法。 |
+| h2c prior knowledge / Upgrade 低层路径 | MAY | 已实现/已验证 | `client/Http2Client.cpp` | `tests/http2_client_tests.cpp` | Upgrade 禁请求体并重放 101 后残留字节。 |
+| h2c 高层显式入口 | MAY | 默认关闭/已验证 | `HttpEngine.cpp`、`client/Http2Client.cpp` | `tests/khttp_tests.cpp`、`tests/http2_client_tests.cpp` | `SendOptions.Http2CleartextMode` 显式开启；pool key 区分 HTTP/1.1、prior knowledge 与 Upgrade。 |
+| GOAWAY/RST_STREAM 高层重试语义 | SHOULD | 已实现/已验证 | `Http2Connection.cpp`、`HttpEngine.cpp` | `tests/http2_client_tests.cpp`、`tests/khttp_tests.cpp` | `NO_ERROR`/未处理 stream 返回 `STATUS_RETRY`；高层只对安全方法 fresh retry 一次，非幂等请求不自动重放。 |
 | PRIORITY 发送 | MAY | 明确非目标 | N/A | N/A | RFC 9113 已弱化优先级，客户端合法省略。 |
 | server push | MAY/deprecated | 安全拒绝 | `Http2Connection.cpp` | `tests/http2_client_tests.cpp` | 客户端 `ENABLE_PUSH=0`，`PUSH_PROMISE` 协议错误。 |
 | 后台自动 PING 保活 | MAY | 明确非目标 | N/A | N/A | 低层保留显式 `SendPing`。 |
@@ -77,14 +77,14 @@
 | 降级哨兵检测 | MUST | 已实现/已验证 | `TlsHandshake13.cpp`、`TlsConnection.cpp` | `tests/tls_handshake_tests.cpp` | 攻击硬失败。 |
 | TLS 1.2 EMS 与安全重协商指示 | SHOULD/MUST by policy | 已实现/已验证 | `TlsConnection.cpp`、`TlsHandshake12.cpp` | `tests/tls_handshake_tests.cpp` | 缺失按本库策略拒绝。 |
 | TLS 1.2 CBC Encrypt-then-MAC | SHOULD | 默认关闭/安全拒绝 | `TlsPolicy.cpp`、`TlsRecord.cpp` | `tests/tls_record_tests.cpp` | CBC 需兼容档开启且必须 EtM。 |
-| TLS 1.3 HRR、binder 重算、NST、KeyUpdate 被动回应 | MUST/SHOULD | 已实现/待补测 | `TlsConnection.cpp`、`TlsHandshake13.cpp` | `tests/tls_record_tests.cpp` | KeyUpdate/post-handshake 需要补审计测试。 |
+| TLS 1.3 HRR、binder 重算、NST、KeyUpdate 被动回应 | MUST/SHOULD | 已实现/已验证 | `TlsConnection.cpp`、`TlsHandshake13.cpp` | `tests/tls_record_tests.cpp`、`tests/tls_interop_matrix_tests.cpp` | 默认不主动 rekey；服务端请求 KeyUpdate 时被动回应并 rekey。 |
 | TLS 1.3 early data | MAY | 默认关闭 | `TlsConnection.cpp` | `tests/tls_handshake_tests.cpp` | 需 replay-safe 且 ticket 允许。 |
 | 会话恢复绑定 policy/SNI/ALPN/cipher/version | SHOULD | 已实现/已验证 | `TlsConnection.cpp` | `tests/tls_handshake_tests.cpp` | 1.2/1.3 各最多 4 条。 |
 | ALPN h2/http1 | SHOULD | 已实现/已验证 | `TlsHandshake13.cpp`、`TlsConnection.cpp` | `tests/tls_handshake_tests.cpp`、`tests/khttp_tests.cpp` | 高层仅接受支持的 ALPN。 |
 | AES-GCM/AES-CBC EtM/ChaCha20-Poly1305 record | MUST for offered suites | 已实现/已验证 | `TlsRecord.cpp`、`crypto/Aead.cpp` | `tests/tls_record_tests.cpp`、`tests/tls_crypto_tests.cpp` | 序列号溢出保护。 |
 | X25519/X448/FFDHE/NIST ECDH | MUST for offered groups | 已实现/已验证 | `crypto/KeyExchange.cpp`、`CngProvider.cpp` | `tests/tls_crypto_tests.cpp` | NIST 曲线走 CNG，部分软件实现。 |
 | RSA-PSS/ECDSA/Ed25519/Ed448 验签 | MUST for offered sigalgs | 已实现/已验证 | `crypto/CngProvider.cpp`、`Ed25519.cpp`、`Ed448.cpp` | `tests/tls_crypto_tests.cpp` | legacy SHA-1 默认关闭。 |
-| post-handshake client auth | MAY | 默认关闭/待补测 | `TlsPolicy.cpp`、`TlsConnection.cpp` | `tests/tls_record_tests.cpp` | 开启后必须走 mTLS 回调，不持有私钥。 |
+| post-handshake client auth | MAY | 默认关闭/已验证 | `TlsPolicy.cpp`、`TlsConnection.cpp` | `tests/tls_record_tests.cpp`、`tests/tls_interop_matrix_tests.cpp` | 开启后走 mTLS 回调，不持有私钥；默认策略关闭。 |
 | TLS 1.2 renegotiation | MAY | 明确非目标 | N/A | N/A | 仅兼容信令，不实现真重协商。 |
 | SChannel 主路径 | N/A | 明确非目标 | N/A | N/A | 不符合内核自实现方向。 |
 
@@ -93,11 +93,11 @@
 | 条目 | RFC/PKIX 级别 | 状态 | 代码入口 | 测试入口 | 备注 |
 |------|---------------|------|----------|----------|------|
 | 链深上限、DER/PEM 输入界限 | MUST/安全边界 | 已实现/已验证 | `CertificateValidator.cpp`、`CertificateStore.cpp` | `tests/tls_handshake_tests.cpp` | 链 ≤8。 |
-| subject/issuer DN 链接与签名验证 | MUST | 已实现/待补测 | `CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | 需补多候选/交叉签名路径测试。 |
-| AKI/SKI 辅助路径选择 | SHOULD | 待补全 | `CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | 避免仅 DN 精确链接导致合法链缺失。 |
+| subject/issuer DN 链接与签名验证 | MUST | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_record_tests.cpp` | 多候选与交叉签名路径有 fixture 覆盖。 |
+| AKI/SKI 辅助路径选择 | SHOULD | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_record_tests.cpp` | 路径候选按 AKI/SKI、issuer/subject 与签名可验证性选择。 |
 | basic constraints/pathLen/KU/EKU | MUST | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | serverAuth 可选策略。 |
-| Name Constraints | MUST if present | 已实现/待补测 | `CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | 需要边界 fixture 扩充。 |
-| certificatePolicies | SHOULD | 已实现/待补测 | `CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | 需要策略链 fixture 扩充。 |
+| Name Constraints | MUST if present | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_record_tests.cpp` | 覆盖允许/拒绝子树、IDNA 与 malformed DER。 |
+| certificatePolicies | SHOULD | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_record_tests.cpp` | 覆盖 non-critical、critical 与 malformed DER。 |
 | 重复扩展与未知 critical 扩展 | MUST reject | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | 解析期拒绝。 |
 | 主机名 SAN/IP/IDNA | MUST | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | 不回退 CN。 |
 | SPKI pin | MAY | 已实现/已验证 | `CertificateStore.cpp`、`CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | 配置 pin 的主机强校验。 |
@@ -157,10 +157,12 @@ pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1 -Configuration Release -Plat
 
 环境具备 ARM64 WDK 工具链时，再运行 ARM64 Debug/Release。禁止运行会卡住的 `pwsh -NoLogo -NoProfile -File .\tests\integration\https_smoke.ps1 -Configuration Debug -Platform x64 -SkipDriverBuild`。
 
-## 下一批迁移目标
+## 迁移结果
 
-1. `待补全`：真流式请求体。
-2. `待补全`：HTTP/2 请求 trailers、流式 DATA、高层 h2c 显式入口、GOAWAY/RST 高层重试语义。
-3. WebSocket wire fragment 回调已由 `ReceiveOptions.DeliverFragments` 显式开启，默认仍保持聚合消息兼容行为。
-4. `待补全`：X.509 AKI/SKI 与交叉签名路径构建补全。
-5. `已实现/待补测`：TLS post-handshake/KeyUpdate、Name Constraints、certificatePolicies 的测试审计。
+本轮计划中的客户端主路径缺口已迁移为 `已实现/已验证`、`默认关闭/已验证`、`安全拒绝` 或 `明确非目标`：
+
+1. HTTP/1.1 真流式请求体、显式 `Expect: 100-continue`、明文 HTTP over proxy 已验证。
+2. HTTP/2 请求 trailers、流式 DATA、高层 h2c 显式入口、GOAWAY/RST 高层重试语义已验证。
+3. WebSocket wire fragment 回调由 `ReceiveOptions.DeliverFragments` 显式开启，默认仍保持聚合消息兼容行为。
+4. X.509 AKI/SKI 与交叉签名路径构建、Name Constraints、certificatePolicies 已验证。
+5. TLS post-handshake/KeyUpdate 边界已审计；默认关闭项保持显式配置入口。
