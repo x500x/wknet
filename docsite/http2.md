@@ -36,13 +36,19 @@ enum class Http2FrameType : UCHAR {
 - DATA 在 headers 前、或 body 被禁（HEAD/1xx/204/304）→ RST_STREAM `PROTOCOL_ERROR`。
 - 连接级窗口越界 → GOAWAY `FLOW_CONTROL_ERROR`；**WINDOW_UPDATE 阈值 = 初始窗口一半（32767）**，达阈值补发。
 - 每个活动 stream 单独维护远端窗口；对端调整 `InitialWindowSize` 时，同步 delta 到所有活动 stream，窗口越界按流控错误处理。
-- 出站请求体受 `min(连接发送窗口, 流远端窗口)` 限制，窗口耗尽则刷缓冲并处理对端 WINDOW_UPDATE。
+- 出站请求体受 `min(连接发送窗口, 流远端窗口, peer MaxFrameSize)` 限制；body source 按窗口切 DATA，窗口耗尽则刷缓冲并处理对端 WINDOW_UPDATE。
 
 ### 多活动流基础
 
 - `Http2Connection` 维护活动 stream 表（默认容量 16，并受对端 `MAX_CONCURRENT_STREAMS` 限制）。
 - `BeginRequest(...)` 只发送 HEADERS/DATA 并返回 stream id；`ReceiveResponse(streamId)` 再收该流响应，帧循环会把其它活动流的 HEADERS/DATA/WINDOW_UPDATE/RST_STREAM 暂存到对应 stream state。
 - 同步 `SendRequest` 复用两阶段路径；高层 `khttp` 连接池通过 stream 租约复用同源 H2 连接，按本地/peer 并发上限分配活动流。
+
+### 请求 body source 与 trailers
+
+- `Http2RequestBody.Source` / 高层 body source 驱动请求 DATA，不要求完整 body 一次性驻留内存。
+- 请求 trailers 不使用 HTTP/1.1 chunked；body 结束后发送 trailing HEADERS + END_STREAM。
+- trailer 复用 HTTP/1.1 禁止字段规则，并额外拒绝任何 trailer 伪头。
 
 ### RFC 8441 extended CONNECT
 
@@ -60,7 +66,8 @@ enum class Http2FrameType : UCHAR {
 ### h2c 模式
 
 - **prior knowledge**：直接 `Initialize` + `SendRequest`。
-- **Upgrade**：`InitializeAfterUpgrade` 跑完前导/SETTINGS 后置 `nextStreamId_=3`（保留 stream 1 给升级请求），用 `ReceiveResponse(streamId=1)`；`EncodeSettingsPayloadBase64Url` 产出 `HTTP2-Settings` 值。客户端 `Http2Client` 的 Upgrade 模式**禁止请求体**并重放 101 后残留字节。
+- **Upgrade**：`InitializeAfterUpgrade` 跑完前导/SETTINGS 后置 `nextStreamId_=3`（保留 stream 1 给升级请求），用 `ReceiveResponse(streamId=1)`；`EncodeSettingsPayloadBase64Url` 产出 `HTTP2-Settings` 值。客户端 `Http2Client` 与高层 `SendOptions.Http2CleartextMode=Upgrade` 的 Upgrade 模式**禁止请求体**并重放 101 后残留字节。
+- 高层 `khttp` 默认不对 `http://` 使用 h2c；只有单次发送显式设置 `Http2CleartextMode::PriorKnowledge` 或 `Upgrade` 才进入 h2c，连接池 key 会区分 HTTP/1.1、prior knowledge 与 Upgrade。
 
 ### HPACK
 
@@ -72,4 +79,4 @@ enum class Http2FrameType : UCHAR {
 
 ### 边界
 
-高层 `khttp` 已接入同源 H2 连接池多活动流复用，低层继续提供 RFC 8441 extended CONNECT tunnel；`kws` 对 RFC 8441 为显式 opt-in，默认不自动切换。不发 PRIORITY，不启用后台自动 PING 保活（低层提供显式 `SendPing`），不支持 server push；高层 khttp 不暴露 h2c（仅 `Http2Client`）。
+高层 `khttp` 已接入同源 H2 连接池多活动流复用，低层继续提供 RFC 8441 extended CONNECT tunnel；`kws` 对 RFC 8441 为显式 opt-in，默认不自动切换。不发 PRIORITY，不启用后台自动 PING 保活（低层提供显式 `SendPing`），不支持 server push；高层 h2c 是显式 opt-in，默认关闭。

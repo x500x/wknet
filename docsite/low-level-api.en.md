@@ -142,7 +142,7 @@ Each enum's purpose:
 | `KhRequestBodyMode` | Request body framing: `ContentLength` for known-size bodies, `Chunked` for streaming data |
 | `KhRequestBodyPartKind` | Multipart part type. `Field` for normal form fields, `FileBytes` and `FilePath` for file uploads |
 | `KhWebSocketMessageType` | WebSocket message type |
-| `KhHttpSendFlags` | Send flags. `KhHttpSendFlagAggregateWithCallbacks` invokes callbacks while retaining aggregated response; `KhHttpSendFlagDisableAutoRedirect` disables auto-redirect |
+| `KhHttpSendFlags` | Send flags. `KhHttpSendFlagAggregateWithCallbacks` invokes callbacks while retaining aggregated response; `KhHttpSendFlagDisableAutoRedirect` disables auto-redirect; `KhHttpSendFlagExpectContinue` explicitly enables `Expect: 100-continue` |
 
 ### Function Overview
 
@@ -169,6 +169,7 @@ The following functions are provided by the low-level API. They are grouped by f
 | `KhHttpRequestSetUrlEncodedBody` | Sets form-urlencoded body |
 | `KhHttpRequestSetMultipartFormDataBody` | Sets multipart/form-data body |
 | `KhHttpRequestSetFileBody` | Sets file body |
+| `KhHttpRequestSetBodySource` | Sets streaming request body read callback |
 | `KhHttpRequestSetBodyMode` | Sets Content-Length or chunked framing |
 | `KhHttpRequestAddTrailer` | Adds trailer for chunked body |
 | `KhHttpRequestClearBody` | Clears request body |
@@ -244,7 +245,7 @@ Creates a low-level HTTP/WS session. Unlike the high-level `khttp::SessionCreate
 | `STATUS_INSUFFICIENT_RESOURCES` | Failed to allocate session or internal resources |
 | Other failure | WSK initialization or engine session creation failed |
 
-NOTE: `KhSessionOptions` / `KhTlsOptions` fields see [Configuration](configuration.md). `KhSessionOptions.Proxy` can explicitly configure HTTPS CONNECT proxy tunnel; plain HTTP over proxy is currently rejected. Must call `KhSessionClose` after success.
+NOTE: `KhSessionOptions` / `KhTlsOptions` fields see [Configuration](configuration.md). `KhSessionOptions.Proxy` explicitly configures HTTP proxy behavior: HTTPS uses CONNECT, plaintext HTTP uses absolute-form. Must call `KhSessionClose` after success.
 
 ##### `KhSessionClose`
 
@@ -471,6 +472,20 @@ Sets file request body. Library copies file path; file content is read at send t
 | `ctLen` | Content-Type byte length |
 
 Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
+
+#### `KhHttpRequestSetBodySource`
+
+```cpp
+NTSTATUS KhHttpRequestSetBodySource(
+    _In_ KH_REQUEST request,
+    _In_ KhRequestBodyReadCallback callback,
+    _In_opt_ void* context,
+    _In_ SIZE_T contentLength,
+    _In_ bool contentLengthKnown
+) noexcept;
+```
+
+Sets a streaming request body read callback. With `contentLengthKnown=true`, the request sends `Content-Length`; for unknown length, pair this with `KhHttpRequestSetBodyMode(request, KhRequestBodyMode::Chunked)` so the library generates chunked framing.
 
 #### `KhHttpRequestSetBodyMode`
 

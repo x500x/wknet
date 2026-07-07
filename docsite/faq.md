@@ -10,7 +10,7 @@ A：同步 HTTP、WebSocket、TLS 和证书验证路径都要求在 `PASSIVE_LEV
 A：不支持。项目定位为客户端协议栈，不提供入站 request parser / server role。
 
 **Q：支持 HTTP 代理 / CONNECT / TRACE 吗？**
-A：支持 HTTPS 的显式 HTTP/1.1 CONNECT 代理隧道：高层 `SessionConfig.Proxy` / 底层 `KhSessionOptions.Proxy` 可配置代理地址、CONNECT authority 和 opaque `Proxy-Authorization` 值，低层 `client::HttpsClient` 也保留显式代理选项。明文 HTTP over proxy 当前显式拒绝，TRACE 不支持。
+A：支持。高层 `SessionConfig.Proxy` / 底层 `KhSessionOptions.Proxy` 可配置代理地址、authority 和 opaque `Proxy-Authorization` 值；HTTPS 走 HTTP/1.1 CONNECT 隧道，明文 HTTP over proxy 发送 absolute-form request target，不建立 CONNECT。TRACE 不支持。
 
 **Q：为什么我的 0-RTT 没有生效 / 返回 `STATUS_NOT_SUPPORTED`？**
 A：TLS 1.3 0-RTT 默认关闭；即使启用 early data，也必须由调用方显式声明该请求 replay-safe，否则返回 `STATUS_NOT_SUPPORTED` 且不发送 early data。

@@ -16,8 +16,15 @@ struct HttpHeader { HttpText Name; HttpText Value; };
 - 方法枚举包含 CONNECT，可构建 `CONNECT authority HTTP/1.1` 请求；TRACE 不支持。
 - body：`ContentLength` 模式发 `Content-Length`（`IncludeContentLength` 可让 0 长 body 也发 `Content-Length: 0`）；`Chunked` 模式发 `Transfer-Encoding: chunked` 并按 `hex\r\n data \r\n ... 0\r\n` 串行化，随后写出请求 trailer（若有）再以 `\r\n` 收尾。
 - **请求 trailer**：仅在 `Chunked` 且确有 chunked 框定（有 body 或 `IncludeContentLength`）时可用，经 `options.Trailers/TrailerCount` 提供；字段名须为合法 token，**禁止 trailer 字段** `Content-Length`/`Transfer-Encoding`/`Host`/`Authorization`/`Proxy-Authorization`/`Cookie`/`Set-Cookie` → `STATUS_NOT_SUPPORTED`；公共 API 为 `KhHttpRequestAddTrailer` / `khttp::RequestAddTrailer`。
-- **禁止的额外头**：`Host`/`Content-Length`/`Connection` → `STATUS_INVALID_PARAMETER`；`Transfer-Encoding`/`TE` → `STATUS_NOT_SUPPORTED`；`Trailer` 头仅在 chunked 框定下允许（否则 `STATUS_NOT_SUPPORTED`）；`Expect: 100-continue` 且有 body → `STATUS_NOT_SUPPORTED`。
+- **禁止的额外头**：`Host`/`Content-Length`/`Connection` → `STATUS_INVALID_PARAMETER`；`Transfer-Encoding`/`TE` → `STATUS_NOT_SUPPORTED`；`Trailer` 头仅在 chunked 框定下允许（否则 `STATUS_NOT_SUPPORTED`）；调用方手写 `Expect: 100-continue` 且未通过库的 expect-continue 选项开启时 → `STATUS_NOT_SUPPORTED`。
 - 引擎层在无 `Accept-Encoding` 时注入默认 `gzip, deflate, br, identity`（deflate 运行时不可用则 `br, identity`）。
+
+### 流式请求体、Expect 与代理
+
+- 高层 `BodyCreateStream` / 底层 `KhHttpRequestSetBodySource` 使用调用方读取回调按块提供请求体；已知长度发送 `Content-Length`，未知长度配合 `RequestBodyMode::Chunked` 由库生成 chunked framing。
+- `BodyAddTrailer*` / `KhHttpRequestAddTrailer` 只在 chunked 请求体结束后发送 trailer，并继续拒绝禁止字段与 CRLF 注入。
+- `SendFlagExpectContinue` 显式开启 `Expect: 100-continue`，只有请求有 body 时才注入；收到 `100` 后发送 body，收到 final/417 不发送 body，等待超时后按 RFC 时序发送 body。
+- `SessionConfig.Proxy` / `KhSessionOptions.Proxy` 对 HTTPS 使用 CONNECT；对 `http://` 使用 absolute-form request target，不建立 CONNECT 隧道，`Proxy-Authorization` 只来自显式代理配置。
 
 ### 响应解析（`HttpParser::ParseResponse`）
 

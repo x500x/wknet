@@ -142,7 +142,7 @@ enum KhHttpSendFlags { KhHttpSendFlagNone = 0,
 | `KhRequestBodyMode` | 请求体 framing：`ContentLength` 用于已知大小的请求体，`Chunked` 用于流式数据 |
 | `KhRequestBodyPartKind` | multipart part 类型。`Field` 用于普通表单字段，`FileBytes` 和 `FilePath` 用于文件上传 |
 | `KhWebSocketMessageType` | WebSocket 消息类型 |
-| `KhHttpSendFlags` | 发送标志。`KhHttpSendFlagAggregateWithCallbacks` 调用回调同时保留聚合响应；`KhHttpSendFlagDisableAutoRedirect` 禁用自动重定向 |
+| `KhHttpSendFlags` | 发送标志。`KhHttpSendFlagAggregateWithCallbacks` 调用回调同时保留聚合响应；`KhHttpSendFlagDisableAutoRedirect` 禁用自动重定向；`KhHttpSendFlagExpectContinue` 显式开启 `Expect: 100-continue` |
 
 ## 函数总览
 
@@ -169,6 +169,7 @@ enum KhHttpSendFlags { KhHttpSendFlagNone = 0,
 | `KhHttpRequestSetUrlEncodedBody` | 设置 form-urlencoded 请求体 |
 | `KhHttpRequestSetMultipartFormDataBody` | 设置 multipart/form-data 请求体 |
 | `KhHttpRequestSetFileBody` | 设置文件请求体 |
+| `KhHttpRequestSetBodySource` | 设置流式请求体读取回调 |
 | `KhHttpRequestSetBodyMode` | 设置 Content-Length 或 chunked framing |
 | `KhHttpRequestAddTrailer` | 为 chunked body 添加 trailer |
 | `KhHttpRequestClearBody` | 清除请求体 |
@@ -244,7 +245,7 @@ NTSTATUS KhSessionCreate(
 | `STATUS_INSUFFICIENT_RESOURCES` | 分配会话或内部资源失败 |
 | 其他失败状态 | WSK 初始化或 engine session 创建失败 |
 
-NOTE: `KhSessionOptions` / `KhTlsOptions` 字段见 [配置项](configuration.md)。`KhSessionOptions.Proxy` 可显式配置 HTTPS CONNECT 代理隧道；明文 HTTP over proxy 当前拒绝。成功后必须调用 `KhSessionClose` 释放会话。
+NOTE: `KhSessionOptions` / `KhTlsOptions` 字段见 [配置项](configuration.md)。`KhSessionOptions.Proxy` 可显式配置 HTTP 代理；HTTPS 走 CONNECT，明文 HTTP 走 absolute-form。成功后必须调用 `KhSessionClose` 释放会话。
 
 #### `KhSessionClose`
 
@@ -471,6 +472,20 @@ NTSTATUS KhHttpRequestSetFileBody(
 | `ctLen` | Content-Type 字节长度 |
 
 返回值：`STATUS_SUCCESS`、`STATUS_INVALID_PARAMETER`、`STATUS_INSUFFICIENT_RESOURCES`
+
+#### `KhHttpRequestSetBodySource`
+
+```cpp
+NTSTATUS KhHttpRequestSetBodySource(
+    _In_ KH_REQUEST request,
+    _In_ KhRequestBodyReadCallback callback,
+    _In_opt_ void* context,
+    _In_ SIZE_T contentLength,
+    _In_ bool contentLengthKnown
+) noexcept;
+```
+
+设置流式请求体读取回调。`contentLengthKnown=true` 时发送 `Content-Length`；未知长度通常配合 `KhHttpRequestSetBodyMode(request, KhRequestBodyMode::Chunked)` 由库生成 chunked framing。
 
 #### `KhHttpRequestSetBodyMode`
 

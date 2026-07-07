@@ -178,7 +178,8 @@ enum class RequestBodyMode : ULONG {
 enum SendFlags : ULONG {
     SendFlagNone = 0,
     SendFlagAggregateWithCallbacks = 0x00000001,
-    SendFlagDisableAutoRedirect = 0x00000002
+    SendFlagDisableAutoRedirect = 0x00000002,
+    SendFlagExpectContinue = 0x00000004
 };
 ```
 
@@ -187,6 +188,7 @@ enum SendFlags : ULONG {
 | `SendFlagNone` | Default behavior |
 | `SendFlagAggregateWithCallbacks` | Invoke header/body callbacks while retaining aggregated response |
 | `SendFlagDisableAutoRedirect` | Disable auto-redirect; return 3xx response directly |
+| `SendFlagExpectContinue` | Explicitly enable `Expect: 100-continue` for HTTP/1.1 requests with a body; default is off |
 
 #### Callback Types
 
@@ -204,6 +206,13 @@ typedef NTSTATUS (*BodyCallback)(
     SIZE_T dataLength,
     bool finalChunk);
 
+typedef NTSTATUS (*RequestBodyReadCallback)(
+    void* context,
+    _Out_writes_bytes_(bufferCapacity) UCHAR* buffer,
+    SIZE_T bufferCapacity,
+    _Out_ SIZE_T* bytesRead,
+    _Out_ bool* endOfBody);
+
 typedef void (*CompletionCallback)(
     void* context,
     NTSTATUS status);
@@ -213,6 +222,7 @@ typedef void (*CompletionCallback)(
 |----------|---------|--------------|
 | `HeaderCallback` | Called per response header received | Returning failure aborts send and propagates the status |
 | `BodyCallback` | Called per response body chunk | Returning failure aborts send and propagates the status; `finalChunk` is `true` for the last chunk |
+| `RequestBodyReadCallback` | Called by the library while sending a streaming request body | Returning failure aborts send; `endOfBody=true` ends the body |
 | `CompletionCallback` | Called when async operation completes | `void`; does not affect operation result |
 
 `context` comes from `SendOptions::CallbackContext` or `AsyncOptions::CompletionContext`.
@@ -255,7 +265,7 @@ struct TlsConfig final {
 
 #### `ProxyConfig`
 
-The `ProxyConfig` struct configures HTTPS CONNECT proxy.
+The `ProxyConfig` struct configures HTTP proxy behavior. For `https://` targets the library establishes a CONNECT tunnel; for `http://` targets it sends an absolute-form request target without CONNECT.
 
 ```cpp
 struct ProxyConfig final {
@@ -272,7 +282,7 @@ struct ProxyConfig final {
 |-------|---------|-------------|
 | `Enabled` | `false` | Whether to enable proxy |
 | `Address` | `{}` | Proxy socket address |
-| `Authority` / `AuthorityLength` | `nullptr` / `0` | CONNECT authority, e.g. `proxy.example:8080` |
+| `Authority` / `AuthorityLength` | `nullptr` / `0` | Proxy authority, e.g. `proxy.example:8080`; used as CONNECT authority for HTTPS and as proxy identity for plaintext HTTP |
 | `AuthHeader` / `AuthHeaderLength` | `nullptr` / `0` | Optional `Proxy-Authorization` value, sent only to proxy |
 
 #### `SessionConfig`
@@ -301,7 +311,7 @@ struct SessionConfig final {
 | `MaxConnsPerHost` | `2` | Maximum connections per host |
 | `IdleTimeoutMs` | `30000` | Idle connection回收 time (ms) |
 | `Tls` | `DefaultTlsConfig()` | Session default TLS config |
-| `Proxy` | disabled | HTTPS CONNECT proxy config |
+| `Proxy` | disabled | HTTP proxy config; HTTPS uses CONNECT, plaintext HTTP uses absolute-form |
 
 #### `SendOptions`
 
@@ -312,6 +322,7 @@ struct SendOptions final {
     SIZE_T MaxResponseBytes;
     ULONG Flags;
     ULONG MaxRedirects;
+    ULONG ExpectContinueTimeoutMs;
     HeaderCallback OnHeader;
     BodyCallback OnBody;
     void* CallbackContext;
@@ -319,6 +330,7 @@ struct SendOptions final {
     bool HasTlsOverride;
     ConnPolicy ConnectionPolicy;
     AddressFamily Family;
+    Http2CleartextMode Http2CleartextMode;
 };
 ```
 
@@ -327,6 +339,7 @@ struct SendOptions final {
 | `MaxResponseBytes` | `0` | 0 means no per-send response body limit |
 | `Flags` | `SendFlagNone` | Send flags |
 | `MaxRedirects` | `0` | 0 uses engine default redirect limit |
+| `ExpectContinueTimeoutMs` | `1000` | Wait time for `100 Continue` after `SendFlagExpectContinue`; timeout sends the body per RFC timing |
 | `OnHeader` | `nullptr` | Response header callback |
 | `OnBody` | `nullptr` | Response body chunk callback |
 | `CallbackContext` | `nullptr` | Context passed to `OnHeader` / `OnBody` |
@@ -334,6 +347,7 @@ struct SendOptions final {
 | `HasTlsOverride` | `false` | When `true`, use `Tls` to override session TLS config |
 | `ConnectionPolicy` | `ReuseOrCreate` | Per-send connection policy |
 | `Family` | `Any` | Per-send address family |
+| `Http2CleartextMode` | `Disabled` | Explicit high-level h2c entry: `Disabled` / `PriorKnowledge` / `Upgrade`, only for `http://` |
 
 #### `AsyncOptions`
 
@@ -538,6 +552,7 @@ These functions build request headers, request body, and send options:
 | `BodyCreateForm` | Create `application/x-www-form-urlencoded` request body |
 | `BodyCreateMultipart` | Create `multipart/form-data` request body |
 | `BodyCreateFile*` | Create file request body |
+| `BodyCreateStream` | Create streaming request body read callback |
 | `BodySetMode` | Set Content-Length or chunked framing |
 | `BodyAddTrailer*` | Add trailer for chunked body |
 | `BodyRelease` | Release request body handle |
@@ -1077,6 +1092,24 @@ for uploading local files.
 | `contentType` | Content-Type; NULL means don't explicitly set |
 | `contentTypeLength` | Content-Type byte length |
 | `body` | Receives `Body*` on success |
+
+Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
+
+##### `BodyCreateStream`
+
+```cpp
+NTSTATUS BodyCreateStream(
+    _In_ RequestBodyReadCallback callback,
+    _In_opt_ void* context,
+    SIZE_T contentLength,
+    bool contentLengthKnown,
+    _In_reads_bytes_opt_(contentTypeLength) const char* contentType,
+    SIZE_T contentTypeLength,
+    _Out_ Body** body
+) noexcept;
+```
+
+Creates a streaming request body. With `contentLengthKnown=true`, the request sends `Content-Length`; for unknown length, usually pair it with `BodySetMode(body, RequestBodyMode::Chunked)` so the library generates chunked framing. The callback context must remain valid for the whole send.
 
 Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_INSUFFICIENT_RESOURCES`
 
@@ -1832,3 +1865,6 @@ NTSTATUS SelectedSubprotocol(
 Reads the WebSocket subprotocol selected by the server. Call after connection established.
 
 Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_FOUND`
+
+
+

@@ -61,7 +61,7 @@ AES-GCM(1.2 显式 nonce / 1.3 12 字节 IV XOR 序列号)、AES-CBC **Encrypt-t
 
 ### 证书校验 `tls::CertificateValidator`
 
-在**扩展内核栈**上运行（`KeExpandKernelStackAndCalloutEx`）。`ValidateChain` 有序步骤：输入界限（链 ≤8）→ 解析（`VerifyCertificate=false` 时只解析叶并返回）→ 主机归一化 → 按 DN 精确链接重排选叶 → 叶 SPKI SHA-256 → Name Constraints → certificatePolicies → 有效期 → EKU serverAuth（可选）→ 叶 basic constraints/KU（须 digitalSignature、非 CA）→ 主机名匹配 → 逐链（DN 链接、CA、keyCertSign、pathLen、签名验证）→ pin → 信任锚（缺失 → `STATUS_TRUST_FAILURE`）→ 撤销。解析期**拒绝重复扩展与未知 critical 扩展**。
+在**扩展内核栈**上运行（`KeExpandKernelStackAndCalloutEx`）。`ValidateChain` 有序步骤：输入界限（链 ≤8）→ 解析（`VerifyCertificate=false` 时只解析叶并返回）→ 主机归一化 → 有界候选路径搜索（subject/issuer、AKI/SKI、签名可验证性，多中间与交叉签名回溯）→ 叶 SPKI SHA-256 → Name Constraints → certificatePolicies → 有效期 → EKU serverAuth（可选）→ 叶 basic constraints/KU（须 digitalSignature、非 CA）→ 主机名匹配 → 逐链（DN 链接、CA、keyCertSign、pathLen、签名验证）→ pin → 信任锚（缺失 → `STATUS_TRUST_FAILURE`）→ 撤销。解析期**拒绝重复扩展与未知 critical 扩展**。
 
 **主机名**：SAN dNSName 通配仅限单个最左标签（匹配段不含 `.`）；IP literal **只匹配 iPAddress SAN**，无 CN/dNSName 回退；**从不用 CN 做主机匹配**（CN 仅在无 SAN dNSName 时用于 name-constraint）；IDNA/punycode（标签 ≤63、总 ≤255）。
 

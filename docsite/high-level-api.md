@@ -182,7 +182,8 @@ enum class RequestBodyMode : ULONG {
 enum SendFlags : ULONG {
     SendFlagNone = 0,
     SendFlagAggregateWithCallbacks = 0x00000001,
-    SendFlagDisableAutoRedirect = 0x00000002
+    SendFlagDisableAutoRedirect = 0x00000002,
+    SendFlagExpectContinue = 0x00000004
 };
 ```
 
@@ -191,6 +192,7 @@ enum SendFlags : ULONG {
 | `SendFlagNone` | 默认行为，不需要显式设置 |
 | `SendFlagAggregateWithCallbacks` | 调用 header/body 回调，同时保留聚合响应。适用于需要流式处理响应但又想保留完整响应的场景 |
 | `SendFlagDisableAutoRedirect` | 禁用自动重定向，直接返回 3xx 响应。适用于需要手动处理重定向的场景 |
+| `SendFlagExpectContinue` | 对有 body 的 HTTP/1.1 请求显式启用 `Expect: 100-continue`；默认不发送 |
 
 ### 回调类型
 
@@ -210,6 +212,13 @@ typedef NTSTATUS (*BodyCallback)(
     SIZE_T dataLength,
     bool finalChunk);
 
+typedef NTSTATUS (*RequestBodyReadCallback)(
+    void* context,
+    _Out_writes_bytes_(bufferCapacity) UCHAR* buffer,
+    SIZE_T bufferCapacity,
+    _Out_ SIZE_T* bytesRead,
+    _Out_ bool* endOfBody);
+
 typedef void (*CompletionCallback)(
     void* context,
     NTSTATUS status);
@@ -219,6 +228,7 @@ typedef void (*CompletionCallback)(
 |------|----------|--------|
 | `HeaderCallback` | 收到响应头时逐个调用 | 返回失败会中止发送并传播该状态。你可以用这个回调来检查响应头或记录日志 |
 | `BodyCallback` | 收到响应体分块时调用 | 返回失败会中止发送并传播该状态。`finalChunk` 为 `true` 时表示这是最后一块数据 |
+| `RequestBodyReadCallback` | 发送流式请求体时由库按块调用 | 返回失败会中止发送；`endOfBody=true` 表示请求体结束 |
 | `CompletionCallback` | 异步操作完成时调用 | `void`，不影响操作结果。主要用于异步操作的完成通知 |
 
 `context` 来自 `SendOptions::CallbackContext` 或 `AsyncOptions::CompletionContext`，这是你传递自定义数据给回调的方式。
@@ -261,7 +271,7 @@ struct TlsConfig final {
 
 ### `ProxyConfig`
 
-`ProxyConfig` 结构体用于配置 HTTPS CONNECT 代理。如果你需要通过代理服务器访问目标网站，可以在这里设置代理参数。
+`ProxyConfig` 结构体用于配置 HTTP 代理。如果目标是 `https://`，库会建立 CONNECT 隧道；如果目标是 `http://`，库会发送 absolute-form 请求目标且不建立 CONNECT 隧道。
 
 ```cpp
 struct ProxyConfig final {
@@ -278,7 +288,7 @@ struct ProxyConfig final {
 |------|------|------|
 | `Enabled` | `false` | 是否启用代理。设为 `true` 时才会使用代理连接 |
 | `Address` | `{}` | 代理服务器的 socket 地址 |
-| `Authority` / `AuthorityLength` | `nullptr` / `0` | CONNECT authority，例如 `proxy.example:8080`。这是代理服务器的地址和端口 |
+| `Authority` / `AuthorityLength` | `nullptr` / `0` | 代理 authority，例如 `proxy.example:8080`。HTTPS CONNECT 使用它作为 CONNECT authority；明文 HTTP proxy 使用它标识代理端 |
 | `AuthHeader` / `AuthHeaderLength` | `nullptr` / `0` | 可选 `Proxy-Authorization` 值，只发给代理。如果代理需要认证，在这里设置认证头 |
 
 ### `SessionConfig`
@@ -307,7 +317,7 @@ struct SessionConfig final {
 | `MaxConnsPerHost` | `2` | 单主机最大连接数。HTTP/2 下通常 1 个连接就够了 |
 | `IdleTimeoutMs` | `30000` | 空闲连接回收时间，单位毫秒。30 秒是合理的默认值 |
 | `Tls` | `DefaultTlsConfig()` | 会话默认 TLS 配置。可以在单次发送时覆盖 |
-| `Proxy` | disabled | HTTPS CONNECT 代理配置。默认不启用代理 |
+| `Proxy` | disabled | HTTP 代理配置。HTTPS 使用 CONNECT，明文 HTTP 使用 absolute-form。默认不启用代理 |
 
 ### `SendOptions`
 
@@ -318,6 +328,7 @@ struct SendOptions final {
     SIZE_T MaxResponseBytes;
     ULONG Flags;
     ULONG MaxRedirects;
+    ULONG ExpectContinueTimeoutMs;
     HeaderCallback OnHeader;
     BodyCallback OnBody;
     void* CallbackContext;
@@ -325,6 +336,7 @@ struct SendOptions final {
     bool HasTlsOverride;
     ConnPolicy ConnectionPolicy;
     AddressFamily Family;
+    Http2CleartextMode Http2CleartextMode;
 };
 ```
 
@@ -333,6 +345,7 @@ struct SendOptions final {
 | `MaxResponseBytes` | `0` | 0 表示本次发送不设置调用方响应体聚合上限；非零值表示本次主动限制。大多数情况下保持 0 即可 |
 | `Flags` | `SendFlagNone` | 发送标志。可以组合多个标志，例如 `SendFlagAggregateWithCallbacks | SendFlagDisableAutoRedirect` |
 | `MaxRedirects` | `0` | 0 表示使用 engine 默认重定向上限（通常 5 次）；非零值覆盖。设为 1 可以快速发现重定向问题 |
+| `ExpectContinueTimeoutMs` | `1000` | `SendFlagExpectContinue` 开启后等待 `100 Continue` 的时间；超时后按 RFC 时序发送 body |
 | `OnHeader` | `nullptr` | 响应头回调。用于流式处理响应头，例如记录日志或检查特定头 |
 | `OnBody` | `nullptr` | 响应体分块回调。用于流式处理响应体，例如实时计算哈希或边下载边处理 |
 | `CallbackContext` | `nullptr` | 传给 `OnHeader` / `OnBody` 的上下文。这是你传递自定义数据给回调的方式 |
@@ -340,6 +353,7 @@ struct SendOptions final {
 | `HasTlsOverride` | `false` | `true` 时使用 `Tls` 覆盖会话 TLS 配置。适用于需要为特定请求使用不同证书或 TLS 策略的场景 |
 | `ConnectionPolicy` | `ReuseOrCreate` | 本次发送连接策略。`ReuseOrCreate` 是最常用的选择，它会复用已有连接或创建新连接 |
 | `Family` | `Any` | 本次发送地址族。除非需要强制使用 IPv4 或 IPv6，否则保持 `Any` |
+| `Http2CleartextMode` | `Disabled` | 高层 h2c 显式入口：`Disabled` / `PriorKnowledge` / `Upgrade`，仅对 `http://` 生效 |
 
 ### `AsyncOptions`
 
@@ -546,6 +560,7 @@ struct Message final {
 | `BodyCreateForm` | 创建 `application/x-www-form-urlencoded` 请求体 |
 | `BodyCreateMultipart` | 创建 `multipart/form-data` 请求体 |
 | `BodyCreateFile*` | 创建文件请求体 |
+| `BodyCreateStream` | 创建流式请求体读取回调 |
 | `BodySetMode` | 设置 Content-Length 或 chunked framing |
 | `BodyAddTrailer*` | 为 chunked body 添加 trailer |
 | `BodyRelease` | 释放请求体句柄 |
@@ -1079,6 +1094,24 @@ NTSTATUS BodyCreateFileEx(
 | `contentType` | Content-Type；为空则不显式设置 |
 | `contentTypeLength` | Content-Type 字节长度 |
 | `body` | 成功时接收 `Body*` |
+
+返回值：`STATUS_SUCCESS`、`STATUS_INVALID_PARAMETER`、`STATUS_INSUFFICIENT_RESOURCES`
+
+### `BodyCreateStream`
+
+```cpp
+NTSTATUS BodyCreateStream(
+    _In_ RequestBodyReadCallback callback,
+    _In_opt_ void* context,
+    SIZE_T contentLength,
+    bool contentLengthKnown,
+    _In_reads_bytes_opt_(contentTypeLength) const char* contentType,
+    SIZE_T contentTypeLength,
+    _Out_ Body** body
+) noexcept;
+```
+
+创建流式请求体。`contentLengthKnown=true` 时发送 `Content-Length`；未知长度通常配合 `BodySetMode(body, RequestBodyMode::Chunked)` 由库生成 chunked framing。回调对象生命周期必须覆盖发送过程。
 
 返回值：`STATUS_SUCCESS`、`STATUS_INVALID_PARAMETER`、`STATUS_INSUFFICIENT_RESOURCES`
 

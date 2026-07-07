@@ -13,7 +13,7 @@
 | `MaxConnsPerHost` | `ULONG` | 2 | 单主机最大连接 |
 | `IdleTimeoutMs` | `ULONG` | 30000 | 空闲回收时间 |
 | `Tls` | `TlsConfig` | 见下 | TLS 子配置 |
-| `Proxy` | `ProxyConfig` | disabled | 显式 HTTPS CONNECT 代理配置（明文 HTTP over proxy 当前拒绝） |
+| `Proxy` | `ProxyConfig` | disabled | 显式 HTTP 代理配置；HTTPS 使用 CONNECT，明文 HTTP 使用 absolute-form |
 
 ### 高层 TLS 配置 `khttp::TlsConfig`（`DefaultTlsConfig()`）
 
@@ -93,5 +93,5 @@ config.PoolCapacity     = 32;            // 高并发增大池
 config.MaxConnsPerHost  = 8;
 config.IdleTimeoutMs    = 120000;        // 延长空闲超时减少重连
 config.MaxResponseBytes = 4*1024*1024;   // 大响应
-config.Proxy.Enabled    = true;          // HTTPS CONNECT 代理
+config.Proxy.Enabled    = true;          // HTTP 代理：HTTPS CONNECT，明文 HTTP absolute-form
 ```

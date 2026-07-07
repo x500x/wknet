@@ -3,7 +3,7 @@
 ### 已实现 / 已验证能力
 
 **HTTP/1.1（RFC 9110/9112）**
-- 请求体 `Content-Length` 或显式 chunked（构建器自动生成；用户手设 `Transfer-Encoding`/`TE` 仍拒绝；`Trailer` 头仅在 chunked 请求 trailer 场景允许）。
+- 请求体支持 `Content-Length`、库生成 chunked 与真流式上传：高层 `BodyCreateStream` / 底层 `KhHttpRequestSetBodySource` 按块读取；用户手设 `Transfer-Encoding`/`TE` 仍安全拒绝；`Trailer` 头仅在 chunked 请求 trailer 场景允许。
 - 请求 trailer：`KhHttpRequestAddTrailer` / `khttp::RequestAddTrailer` 在 `Chunked` body 模式下发送终止块后的 trailer 字段，并拒绝禁止字段与 CRLF 注入。
 - 响应解析：状态行仅接受 HTTP/1.0、1.1；头行 ≤8 KiB、头段 ≤64 KiB、头数 ≤200；**拒绝 obs-fold 折行**；多个 `Content-Length`、`TE`+`CL` 冲突 → `STATUS_INVALID_NETWORK_RESPONSE`。
 - body 框定：Content-Length / chunked / close-delimited；**无 body 状态**：1xx、204、**205**、304，及 HEAD 响应。
@@ -11,7 +11,8 @@
 - `206 Partial Content` / `Content-Range` 提供只读解析（`HttpResponse::IsPartialContent` / `GetContentRange`），请求侧 `Range` 与条件请求仍按普通额外头透传。
 - `Content-Encoding` 解码：`gzip`（校验 CRC32+ISIZE+头 CRC16）、`deflate`（自动识别 zlib 包装并校验 Adler-32，底层用内核 `RtlDecompressBufferEx`，带运行时探测）、`br`（内置 Brotli）、`compress`（完整 LZW `.Z`）、`identity`；最多 2 级链，反序解码。
 - **解压炸弹防护**：decoded aggregate 跟随响应/调用方容量，单级膨胀比 ≤64（`MaxDecodeExpansionRatio`）。
-- 中间 1xx（除 101）静默吞掉重解析；自动 redirect、keep-alive 连接池复用。
+- 中间 1xx（除 101）静默吞掉重解析；`SendFlagExpectContinue` 显式开启 `Expect: 100-continue`，覆盖 100 后发送 body、final/417 不发送 body、超时后发送 body 与断连错误；自动 redirect、keep-alive 连接池复用。
+- HTTP proxy：HTTPS 走 CONNECT 隧道；明文 HTTP over proxy 使用 absolute-form request target，`Proxy-Authorization` 只来自显式代理配置。
 
 **HTTP/2（RFC 9113 + HPACK RFC 7541）**
 - 连接前导 + SETTINGS 交换；客户端发 7 项 SETTINGS（含 `ENABLE_CONNECT_PROTOCOL`）、立即发 ACK 不阻塞等服务端 ACK。
@@ -23,7 +24,9 @@
 - DATA 流控：连接级 + per-stream 窗口；连接级 WINDOW_UPDATE 阈值为初始窗口一半（32767）；初始窗口 SETTINGS 更新会同步调整活动 stream；越界 GOAWAY `FLOW_CONTROL_ERROR`。
 - 1xx interim 处理（拒绝 `:status 101` 与 interim+END_STREAM）；PUSH_PROMISE 一律协议错误。
 - RFC 8441 extended CONNECT：`CONNECT` + `:protocol: websocket` 需对端 `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`；低层 `SendStreamData` / `ReceiveStreamData` 可承载 WebSocket frame bytes，高层 `kws` 可在显式 opt-in 后走该路径。
-- 三模式：TLS-ALPN `h2`、h2c prior knowledge、h2c Upgrade（Upgrade 模式禁请求体、重放 101 后残留字节、用 stream 1）。
+- 三模式：TLS-ALPN `h2`、显式 h2c prior knowledge、显式 h2c Upgrade（Upgrade 模式禁请求体、重放 101 后残留字节、用 stream 1）；高层通过 `SendOptions.Http2CleartextMode` opt-in，默认 HTTP/1.1。
+- HTTP/2 请求 body 由 body source 驱动，按连接/stream 流控和 peer `MAX_FRAME_SIZE` 切 DATA；请求 trailers 以 final HEADERS + END_STREAM 发送并拒绝 trailer 伪头。
+- GOAWAY/RST 高层重试语义：clean GOAWAY 或 `REFUSED_STREAM` 表示未处理 stream 时返回 `STATUS_RETRY`，高层只对安全方法 fresh retry 一次，非幂等请求不自动重放。
 
 **HPACK**：整数续字节 ≤5、Huffman（拒绝 >30 bit 码/EOS/非法 padding）、动态表大小更新仅限块首且 ≤协商值、header-list 大小按 `name+value+32` 计；**编码端对 `authorization`/`cookie`/`proxy-authorization` 强制 Never-Indexed**。
 
@@ -46,7 +49,7 @@
 - 记录层：AES-GCM(1.2/1.3)、AES-CBC EtM（MAC 常量时间先验后解）、ChaCha20-Poly1305；序列号溢出保护；多项抗洪泛记录上限。
 
 **证书校验**（在扩展内核栈上运行）
-- 链 ≤8；按 DN 精确链接重排；逐链签名验证、有效期、basic constraints/pathLen、KU（keyCertSign）、EKU serverAuth（可选）、Name Constraints、certificatePolicies、信任锚。
+- 链 ≤8；有界候选路径搜索按 subject/issuer、AKI/SKI 与签名可验证性选择链，覆盖多中间与交叉签名；逐链签名验证、有效期、basic constraints/pathLen、KU（keyCertSign）、EKU serverAuth（可选）、Name Constraints、certificatePolicies、信任锚。
 - 解析期**拒绝重复扩展与未知 critical 扩展**。
 - 主机名：SAN dNSName 通配仅限**单个最左标签**；IP literal **只匹配 iPAddress SAN**；**从不回退 CN**（CN 仅用于 name-constraint）；IDNA/punycode。
 - 撤销：纯离线、表驱动（OCSP stapling 由调用方解析入表 + OCSP/CRL 缓存）；`OnlineRequired` 下查不到 → **fail-closed**（`STATUS_TRUST_FAILURE`）。
@@ -59,18 +62,18 @@
 
 | 协议 | 当前边界 |
 |------|----------|
-| HTTP/1.1 | 拒绝用户设置 `Transfer-Encoding`/`TE`；request trailer 仅 chunked 路径；无入站 parser/server；支持 CONNECT 方法、高层 Session HTTPS 代理 CONNECT 隧道与低层 `HttpsClient` 显式代理隧道；明文 HTTP over proxy 当前显式拒绝；无 TRACE/管线化；`Range`/条件请求透传且响应 `Content-Range` 只读解析；响应默认聚合但 `OnBody` 可增量回调；无流式上传；`Expect:100-continue` 带 body 被拒；`br` 仅 Content-Encoding（TE 中 `br` → `STATUS_NOT_SUPPORTED`） |
-| HTTP/2 | 高层 `khttp` 连接池已接入多活动流复用；低层连接支持交错帧分发与 RFC 8441 extended CONNECT DATA tunnel；不发 PRIORITY；仅提供显式 `SendPing`，不启用后台自动 PING 保活；高层 khttp 不暴露 h2c（仅 `Http2Client`） |
+| HTTP/1.1 | 拒绝用户设置 `Transfer-Encoding`/`TE`；request trailer 仅 chunked 路径；无入站 parser/server；支持 CONNECT 方法、HTTPS 代理 CONNECT 隧道、明文 HTTP over proxy absolute-form、流式上传与显式 `Expect: 100-continue`；无 TRACE/管线化；`Range`/条件请求透传且响应 `Content-Range` 只读解析；`OnBody` 可零聚合增量回调，设置 `SendFlagAggregateWithCallbacks` 时才同时保留聚合响应；`br` 仅 Content-Encoding（TE 中 `br` → `STATUS_NOT_SUPPORTED`） |
+| HTTP/2 | 高层 `khttp` 连接池已接入多活动流复用；低层连接支持交错帧分发、请求 body source、请求 trailers 与 RFC 8441 extended CONNECT DATA tunnel；h2c 仅通过 `Http2CleartextMode` 显式开启，默认关闭；不发 PRIORITY；仅提供显式 `SendPing`，不启用后台自动 PING 保活；server push 安全拒绝 |
 | WebSocket | 默认仍为 HTTP/1.1 Upgrade；`wss` 显式 opt-in 可走 RFC 8441 over HTTP/2；支持自定义 opening headers；无扩展协商（permessage-deflate 等拒绝）；不跟随握手 redirect/401/407，3xx/401/407 返回 `STATUS_NOT_SUPPORTED` |
 | TLS | 默认不启用 TLS1.2 RSA kx/CBC/renegotiation/SHA-1（需 `CompatibilityExplicit`）；Ed25519/Ed448 验签为内核内软件实现并默认宣称；不在线抓取 OCSP/CRL；0-RTT 默认关闭 |
 
 ### 默认关闭、需显式开启
 
-`TlsPolicy`（须 `Profile=CompatibilityExplicit`）：`EnableTls12RsaKeyExchange`、`EnableTls12Cbc`、`EnableTls12Renegotiation`（仅信令，不真重协商）、`EnableTls12Sha1Signatures`、`EnablePostHandshakeClientAuth`、`RequireRevocationCheck`。TLS1.3 0-RTT：连接选项 `EnableEarlyData`+`EarlyDataReplaySafe`，且需 ticket 通告 `max_early_data_size`。
+`SendFlagExpectContinue` 显式开启 `Expect: 100-continue`；`SendOptions.Http2CleartextMode` 显式开启 h2c prior knowledge/Upgrade。`TlsPolicy`（须 `Profile=CompatibilityExplicit`）：`EnableTls12RsaKeyExchange`、`EnableTls12Cbc`、`EnableTls12Renegotiation`（仅信令，不真重协商）、`EnableTls12Sha1Signatures`、`EnablePostHandshakeClientAuth`、`RequireRevocationCheck`。TLS1.3 0-RTT：连接选项 `EnableEarlyData`+`EarlyDataReplaySafe`，且需 ticket 通告 `max_early_data_size`。
 
 ### 明确非目标
 
-HTTP/3·QUIC、服务端/入站解析、TRACE、管线化、`Expect:100-continue`、流式请求体上传、明文 HTTP over proxy、高层 `kws` 默认自动选择 WebSocket over HTTP/2、WebSocket permessage-deflate、在线 OCSP/CRL 抓取。详见 [路线图与非目标](roadmap.md)。
+HTTP/3·QUIC、服务端/入站解析、TRACE、管线化、高层 `kws` 默认自动选择 WebSocket over HTTP/2、WebSocket permessage-deflate、在线 OCSP/CRL 抓取。详见 [路线图与非目标](roadmap.md)。
 
 ### 关键默认行为
 

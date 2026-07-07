@@ -10,7 +10,7 @@ A: Synchronous HTTP, WebSocket, TLS, and certificate validation require `PASSIVE
 A: Not supported — this is a client protocol stack.
 
 **Q: HTTP proxy / CONNECT / TRACE?**
-A: Explicit HTTP/1.1 CONNECT tunneling for HTTPS is supported through high-level `SessionConfig.Proxy` / low-level `KhSessionOptions.Proxy`, and `client::HttpsClient` also keeps explicit proxy options. Plaintext HTTP over proxy is explicitly rejected for now. TRACE is unsupported.
+A: Yes. High-level `SessionConfig.Proxy` / low-level `KhSessionOptions.Proxy` configure proxy address, authority, and an opaque `Proxy-Authorization` value. HTTPS uses an HTTP/1.1 CONNECT tunnel; plaintext HTTP over proxy sends an absolute-form request target without CONNECT. TRACE is unsupported.
 
 **Q: Why is my 0-RTT ignored / returning `STATUS_NOT_SUPPORTED`?**
 A: TLS 1.3 0-RTT is off by default; even with early data enabled, the caller must mark the request replay-safe, otherwise it returns `STATUS_NOT_SUPPORTED` and sends no early data.
