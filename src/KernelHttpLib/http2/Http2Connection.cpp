@@ -999,7 +999,7 @@ namespace http2
             blockOffset += chunkLen;
         }
 
-        if (!endStream) {
+        if (sendOffset != 0) {
             status = SendRaw(transport, sendBuf, sendOffset);
             if (!NT_SUCCESS(status)) {
                 kprintf("Http2Connection send HEADERS failed: 0x%08X stream=%u bytes=%Iu\r\n",

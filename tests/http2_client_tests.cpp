@@ -2492,6 +2492,67 @@ namespace
             "HTTP/2 DELETE DATA payload matches body");
     }
 
+    void TestGetWithoutBodySendsHeadersEndStream()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
+        Expect(AppendResponseHeaders(true, true, script, sizeof(script), &scriptLength),
+            "HTTP/2 GET response headers fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(status == STATUS_SUCCESS, "HTTP/2 connection initializes for GET end-stream test");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/httpbin/get") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        char responseBody[32] = {};
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+
+        status = connection.SendRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            nullptr,
+            0,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            responseBody,
+            sizeof(responseBody),
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer));
+
+        Expect(status == STATUS_SUCCESS, "HTTP/2 GET without body succeeds");
+        Expect(statusCode == 200, "HTTP/2 GET response status is decoded");
+
+        KernelHttp::http2::Http2FrameHeader headersFrame = {};
+        Expect(
+            FindSentFrame(
+                transport,
+                KernelHttp::http2::Http2FrameType::Headers,
+                1,
+                0,
+                &headersFrame,
+                nullptr),
+            "HTTP/2 GET request sends HEADERS");
+        Expect((headersFrame.Flags & Http2FrameFlags::EndStream) != 0,
+            "HTTP/2 GET HEADERS ends stream when there is no request body");
+    }
+
     void TestInitialWindowSizeDoesNotOverwriteConnectionWindow()
     {
         UCHAR script[512] = {};
@@ -4423,6 +4484,7 @@ int main()
     TestConnectionAcceptsRaisedMaxFrameSizePayload();
     TestTimeoutBeforeEndStreamFailsResponse();
     TestDeleteWithBodySendsDataEndStream();
+    TestGetWithoutBodySendsHeadersEndStream();
     TestInitialWindowSizeDoesNotOverwriteConnectionWindow();
     TestDynamicInitialWindowSizeAdjustsActiveStreamWindow();
     TestPostBodyExceedingInitialWindowAcceptsBothWindowUpdateOrders();
