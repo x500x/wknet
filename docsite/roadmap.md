@@ -45,4 +45,4 @@
 - 评估 WebSocket over HTTP/2 从显式 opt-in 走向自动选择的 API 与兼容性策略。
 - 保持明文 HTTP over proxy 的 absolute-form 路径与 HTTPS CONNECT 隧道路径分离，继续审计代理鉴权 opaque 透传边界。
 
-> 这些是对**当前公开行为**的描述，便于评估适用性；不代表内部审计细节。能力现状见 [能力边界](capability-matrix.md)。
+> 这些是对**当前公开行为**的描述，便于评估适用性；不代表内部审计细节。能力现状见 [能力账本](capability-matrix.md)。

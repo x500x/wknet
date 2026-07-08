@@ -1,4 +1,4 @@
-# 能力边界
+# 能力账本
 
 ### 已实现 / 已验证能力
 
@@ -58,22 +58,59 @@
 
 **密码学**：SHA-1/256/384/512、HMAC、HKDF；AES-GCM（CNG）、**ChaCha20-Poly1305 / AES-CCM / X25519 / X448 / FFDHE2048-8192 为内核内软件实现**；NIST 曲线走 CNG ECDH；签名验证 RSA-PKCS1/RSA-PSS(salt=摘要长)/ECDSA；最小 RSA 模数 2048 位；FFDHE 公钥范围校验；密钥材料统一 `RtlSecureZeroMemory` 清零。
 
-### 重要边界
-
-| 协议 | 当前边界 |
-|------|----------|
-| HTTP/1.1 | 拒绝用户设置 `Transfer-Encoding`/`TE`；request trailer 仅 chunked 路径；无入站 parser/server；支持 CONNECT 方法、HTTPS 代理 CONNECT 隧道、明文 HTTP over proxy absolute-form、流式上传与显式 `Expect: 100-continue`；无 TRACE/管线化；`Range`/条件请求透传且响应 `Content-Range` 只读解析；`OnBody` 可零聚合增量回调，设置 `SendFlagAggregateWithCallbacks` 时才同时保留聚合响应；`br` 仅 Content-Encoding（TE 中 `br` → `STATUS_NOT_SUPPORTED`） |
-| HTTP/2 | 高层 `khttp` 连接池已接入多活动流复用；低层连接支持交错帧分发、请求 body source、请求 trailers 与 RFC 8441 extended CONNECT DATA tunnel；h2c 仅通过 `Http2CleartextMode` 显式开启，默认关闭；不发 PRIORITY；仅提供显式 `SendPing`，不启用后台自动 PING 保活；server push 安全拒绝 |
-| WebSocket | 默认仍为 HTTP/1.1 Upgrade；`wss` 显式 opt-in 可走 RFC 8441 over HTTP/2；支持自定义 opening headers；无扩展协商（permessage-deflate 等拒绝）；不跟随握手 redirect/401/407，3xx/401/407 返回 `STATUS_NOT_SUPPORTED` |
-| TLS | 默认不启用 TLS1.2 RSA kx/CBC/renegotiation/SHA-1（需 `CompatibilityExplicit`）；Ed25519/Ed448 验签为内核内软件实现并默认宣称；不在线抓取 OCSP/CRL；0-RTT 默认关闭 |
-
 ### 默认关闭、需显式开启
 
-`SendFlagExpectContinue` 显式开启 `Expect: 100-continue`；`SendOptions.Http2CleartextMode` 显式开启 h2c prior knowledge/Upgrade。`TlsPolicy`（须 `Profile=CompatibilityExplicit`）：`EnableTls12RsaKeyExchange`、`EnableTls12Cbc`、`EnableTls12Renegotiation`（仅信令，不真重协商）、`EnableTls12Sha1Signatures`、`EnablePostHandshakeClientAuth`、`RequireRevocationCheck`。TLS1.3 0-RTT：连接选项 `EnableEarlyData`+`EarlyDataReplaySafe`，且需 ticket 通告 `max_early_data_size`。
+| 能力 | 开启方式 / 说明 |
+|------|-----------------|
+| `Expect: 100-continue` | `SendFlagExpectContinue` 显式开启 |
+| h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode` 显式开启；默认不走明文 HTTP/2 |
+| WebSocket over HTTP/2 | `AllowWebSocketOverHttp2=true` 显式开启；默认 HTTP/1.1 Upgrade |
+| TLS1.2 RSA kx / CBC / SHA-1 | `TlsPolicy.Profile=CompatibilityExplicit` 后分别开启 `EnableTls12RsaKeyExchange`、`EnableTls12Cbc`、`EnableTls12Sha1Signatures` |
+| TLS1.3 0-RTT | 连接选项 `EnableEarlyData` + `EarlyDataReplaySafe`，且 ticket 通告 `max_early_data_size` |
+| TLS1.3 post-handshake client auth | `EnablePostHandshakeClientAuth`；开启后经 mTLS 回调签名，私钥不进入库 |
+| 强撤销要求 | `RequireRevocationCheck`；查不到调用方提供的 OCSP/CRL 数据时 fail-closed |
 
-### 明确非目标
+### 安全拒绝 / 策略约束
 
-HTTP/3·QUIC、服务端/入站解析、TRACE、管线化、高层 `kws` 默认自动选择 WebSocket over HTTP/2、WebSocket permessage-deflate、在线 OCSP/CRL 抓取。详见 [路线图与非目标](roadmap.md)。
+这些是有意的安全或协议策略，不表示缺少实现。
+
+| 行为 | 处理 |
+|------|------|
+| 用户手写请求 `Transfer-Encoding` / `TE` | 拒绝；请求 framing 由库生成和校验 |
+| HTTP/1.1 request trailer | 仅允许 chunked 请求路径 |
+| HTTP `br` Transfer-Encoding | 拒绝；`br` 仅作为 `Content-Encoding` 支持 |
+| HTTP/2 `PUSH_PROMISE` | server push 禁用，收到后视为协议错误 |
+| WebSocket 服务端返回未请求扩展 | 拒绝，避免隐式启用 permessage-deflate 等扩展 |
+| WebSocket 握手 redirect / 401 / 407 | 不自动跟随或认证，返回 `STATUS_NOT_SUPPORTED` |
+| TLS 1.3 到 TLS 1.2 | 不做握手内自动降级；只有可验证的版本协商证据才允许上层显式重连 1.2 |
+| 证书主机名 | IP literal 只匹配 iPAddress SAN；域名不回退 CN |
+| HTTPS redirect 到 HTTP | 默认拒绝降级 |
+
+### 明确未实现 / 非目标
+
+这些能力当前不提供；其中部分是明确非目标，部分只是没有做成公共能力。
+
+| 能力 | 当前结论 |
+|------|----------|
+| HTTP 入站 request parser / server role | 非目标；当前项目定位为客户端协议栈 |
+| TRACE / HTTP 管线化 | 非目标 |
+| RFC 9111 cache | 不提供内核缓存 API |
+| `Range` / 条件请求语义处理 | 仅普通 header 透传；不合并、不验证语义；响应 `Content-Range` 只读解析 |
+| 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
+| HTTP/2 priority 公共调度能力 | 不作为公共能力 |
+| HTTP/2 后台自动 PING 保活 | 不提供；调用方可显式 `SendPing` |
+| WebSocket extensions（如 permessage-deflate） | 非目标；不协商 |
+| WebSocket over HTTP/2 默认自动选择 | 当前不做；必须显式 opt-in |
+| TLS 1.2 真重协商 | 非目标；兼容档仅处理安全重协商信令，不执行 renegotiation |
+| 在线 OCSP/CRL 抓取 | 非目标；调用方通过外部 trust/cert/revocation 数据或已缓存条目驱动强撤销判定 |
+| HTTP/3 / QUIC | 非目标 |
+
+### 实现策略和信任模型
+
+- 传输层主路径使用 WSK；TLS、HTTP、证书校验按内核自实现路线推进。
+- 密码学优先使用内核态 CNG/BCrypt；ChaCha20-Poly1305、AES-CCM、X25519、X448、FFDHE、Ed25519/Ed448 验签等由内核内软件实现补齐。
+- 不把 WinHTTP、WinINet、SChannel 作为内核主路径。
+- 库层不硬编码系统 CA；信任锚、CA 包、撤销缓存和 pin 由调用方显式提供。
 
 ### 关键默认行为
 

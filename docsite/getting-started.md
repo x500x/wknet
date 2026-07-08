@@ -66,4 +66,4 @@ NTSTATUS SimpleHttpGet() {
 }
 ```
 
-> 下一步：阅读 [能力边界](capability-matrix.md) 了解协议支持范围，再看 [高层 API](high-level-api.md)。
+> 下一步：阅读 [能力账本](capability-matrix.md) 了解协议支持范围和当前缺口，再看 [高层 API](high-level-api.md)。

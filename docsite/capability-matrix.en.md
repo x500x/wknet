@@ -10,4 +10,57 @@ This page is grounded in the actual `src/KernelHttpLib/` implementation.
 
 **TLS 1.2/1.3**: single-version path (no in-handshake fallback — failures classified as `VersionNegotiation` for an explicit caller retry at 1.2); cipher/group/sig split into default / optional / legacy; TLS1.2 enforces EMS + secure-reneg indication + Encrypt-then-MAC for CBC; TLS1.3 HelloRetryRequest, reactive-only KeyUpdate, NewSessionTicket, record padding, `signature_algorithms_cert`, OCSP stapling parse; resumption bound to policy identity + SNI + ALPN + cipher + version. Certificate validation (on an expanded kernel stack): chain ≤8 with bounded candidate path search, subject/issuer plus AKI/SKI matching, cross-signed intermediates, signature/validity/basic-constraints/pathLen/KU/EKU/name-constraints/cert-policies/trust-anchor; rejects duplicate and unknown-critical extensions; hostname match with single-label wildcard, IP literals match iPAddress SAN only, **never falls back to CN**; revocation offline + table-driven, **fail-closed** when required-but-absent; SPKI pinning (fail-open for un-pinned hosts); mTLS via caller `Sign` callback (private key never enters the library). Crypto: ChaCha20-Poly1305/AES-CCM/X25519/X448/FFDHE/Ed25519/Ed448 verification are in-kernel **software**; min RSA modulus 2048.
 
-**Boundaries / non-goals**: no TRACE/pipelining/server role; caller-supplied request `Transfer-Encoding`/`TE` is rejected because the library owns framing; h2c and `Expect: 100-continue` are explicit opt-ins, not defaults; high-level WebSocket over HTTP/2 is opt-in, not automatic by default; TLS 1.2 RSA-kx/CBC/renegotiation/SHA-1 off by default (`CompatibilityExplicit`); no online OCSP/CRL fetch; 0-RTT off by default; HTTP/3·QUIC is out of scope. Redirect exhaustion returns the 3xx response (no error). See [Roadmap](roadmap.md).
+## Default-Off Opt-Ins
+
+| Capability | How it is enabled |
+|------------|-------------------|
+| `Expect: 100-continue` | `SendFlagExpectContinue` |
+| h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode` |
+| WebSocket over HTTP/2 | `AllowWebSocketOverHttp2=true` |
+| TLS 1.2 RSA-kx / CBC / SHA-1 | `TlsPolicy.Profile=CompatibilityExplicit` plus the matching compatibility switch |
+| TLS 1.3 0-RTT | `EnableEarlyData` + `EarlyDataReplaySafe`, with a ticket that advertises `max_early_data_size` |
+| TLS 1.3 post-handshake client auth | `EnablePostHandshakeClientAuth`; signatures use the mTLS callback and private keys never enter the library |
+
+## Security Refusals / Policy Constraints
+
+These are deliberate security or protocol choices, not missing implementation.
+
+| Behavior | Handling |
+|----------|----------|
+| Caller-supplied request `Transfer-Encoding` / `TE` | Rejected; request framing is generated and validated by the library |
+| HTTP/1.1 request trailers | Allowed only on the chunked request path |
+| HTTP `br` Transfer-Encoding | Rejected; `br` is supported only as `Content-Encoding` |
+| HTTP/2 `PUSH_PROMISE` | Server push is disabled and treated as a protocol error |
+| Unexpected WebSocket extensions | Rejected to avoid implicitly enabling extensions such as permessage-deflate |
+| WebSocket handshake redirect / 401 / 407 | Not followed automatically; returns `STATUS_NOT_SUPPORTED` |
+| TLS 1.3 to TLS 1.2 | No in-handshake automatic fallback; only verified version-negotiation evidence allows an explicit caller retry at 1.2 |
+| Certificate hostname matching | IP literals match iPAddress SAN only; DNS names never fall back to CN |
+| HTTPS redirect to HTTP | Rejected by default |
+
+## Missing / Explicit Non-Goals
+
+These capabilities are not provided today; some are explicit non-goals, while others are simply not public capabilities.
+
+| Capability | Current conclusion |
+|------------|--------------------|
+| HTTP inbound request parser / server role | Non-goal; this project is a client protocol stack |
+| TRACE / HTTP pipelining | Non-goal |
+| RFC 9111 cache | No kernel cache API is provided |
+| `Range` / conditional request semantics | Pass-through headers only; no semantic merge or validation; response `Content-Range` is read-only |
+| Full `Accept-Encoding` qvalue/content negotiation | Not provided; default header only describes the implemented decoder subset and callers may override it |
+| HTTP/2 priority as public scheduling | Not exposed as a public capability |
+| HTTP/2 background automatic PING keepalive | Not provided; callers can use explicit `SendPing` |
+| WebSocket extensions such as permessage-deflate | Non-goal; not negotiated |
+| Automatic default WebSocket over HTTP/2 selection | Not done today; explicit opt-in is required |
+| TLS 1.2 true renegotiation | Non-goal; compatibility profile handles secure renegotiation signaling but does not perform renegotiation |
+| Online OCSP/CRL fetching | Non-goal; callers provide external trust/certificate/revocation data or cached entries |
+| HTTP/3 / QUIC | Non-goal |
+
+## Implementation Strategy and Trust Model
+
+- The transport main path uses WSK; TLS, HTTP, and certificate validation are implemented in the kernel path.
+- Cryptography uses kernel-mode CNG/BCrypt first. ChaCha20-Poly1305, AES-CCM, X25519, X448, FFDHE, and Ed25519/Ed448 verification are filled in by in-kernel software implementations.
+- WinHTTP, WinINet, and SChannel are not used as the kernel main path.
+- The library does not hard-code system CAs; callers explicitly provide trust anchors, CA bundles, revocation cache entries, and pins.
+
+See [Roadmap](roadmap.md).

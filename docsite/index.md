@@ -15,7 +15,7 @@ KernelHttp 是一个纯内核态的 HTTP/HTTPS 客户端库，专为 Windows 内
 - [快速开始](getting-started.md) · [构建与测试](build-and-test.md)
 
 **协议参考**
-- [能力边界](capability-matrix.md)（**必读**）· [架构总览](architecture.md)
+- [能力账本](capability-matrix.md)（**必读**）· [架构总览](architecture.md)
 - [HTTP/1.1 协议](http1.md) · [HTTP/2 与 HPACK](http2.md) · [WebSocket 协议](websocket.md)
 - [TLS 与证书](tls-and-certificates.md) · [密码学层](cryptography.md)
 
