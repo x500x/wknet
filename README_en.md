@@ -32,29 +32,74 @@ KernelHttp is a pure kernel-mode HTTP/HTTPS client library designed specifically
 - **📦 Response Encoding**: Supports `Content-Encoding: gzip/deflate/br/compress/identity` and HTTP/1.1 response `Transfer-Encoding` chains for `chunked/gzip/deflate/compress`
 - **🧱 Heap Memory Management**: Uses `HeapObject<T>` / `HeapArray<T>` for unified heap memory management, high-frequency buffers resident in Workspace
 
-### Protocol Capability Boundaries
+### Protocol Capability Ledger
 
-KernelHttp implements protocol behavior on the Windows kernel path: transport uses WSK first, cryptography uses CNG/BCrypt first, and the library does not depend on WinHTTP, WinINet, or SChannel. Current boundaries:
+KernelHttp separates implemented behavior, default-off capabilities, security refusals, missing/non-goal capabilities, and implementation strategy. This is meant to make the actual gaps visible instead of mixing them with policy choices.
 
-| Protocol | Supported | Current Boundary |
-|----------|-----------|------------------|
-| HTTP/1.1 | `Content-Length`, explicit chunked and true streaming request bodies (`BodyCreateStream` / `KhHttpRequestSetBodySource`), request trailers on the chunked path, explicit opt-in `Expect: 100-continue`, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer syntax/forbidden-field validation and read-only API exposure, read-only `206` / `Content-Range` parsing, RFC 3986 relative redirect resolution, CONNECT request construction, high-level proxy config for HTTPS CONNECT and plaintext HTTP absolute-form | User-supplied request `Transfer-Encoding`/`TE` is rejected; request trailers are chunked-only; no inbound request parser/server role is provided; TRACE is unsupported; `Range`/conditional requests are pass-through headers only; `Accept-Encoding` does not promise full qvalue/content negotiation; `br` is supported only as `Content-Encoding` |
-| HTTP/2 | TLS ALPN, explicit h2c prior knowledge / Upgrade, SETTINGS (including `ENABLE_CONNECT_PROTOCOL`), HEADERS/CONTINUATION, streaming DATA body sources, request/response trailers, PING, GOAWAY/RST retry semantics, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits, active-stream table with two-stage `BeginRequest` / `ReceiveResponse(streamId)`, RFC 8441 extended CONNECT DATA tunnel, high-level pooled multi-stream reuse | High-level h2c requires explicit `SendOptions.Http2CleartextMode` and is disabled by default; high-level `kws` does not automatically select RFC 8441; server push and priority are not public capabilities; disabled `PUSH_PROMISE` is a protocol error; missing SETTINGS ACK closes with `SETTINGS_TIMEOUT` |
-| WebSocket | ws/wss handshake (constant-time accept check), caller-supplied opening handshake headers (controlled headers and invalid text rejected), text/binary send, empty messages, **fragment send (`kws::SendContinuation`) and receive-fragment callback (`ReceiveOptions.DeliverFragments` / `OnMessage`)**, control-frame validation, auto-Pong, public Ping/Pong/CloseEx, selected subprotocol query, cross-fragment UTF-8 validation, complete-message aggregation by default; `wss` can opt in to RFC 8441 WebSocket over HTTP/2 | Default path remains HTTP/1.1 Upgrade; RFC 8441 requires explicit `AllowWebSocketOverHttp2=true`, negotiated TLS ALPN `h2`, and peer `SETTINGS_ENABLE_CONNECT_PROTOCOL`; `ws://` does not implicitly use h2c; extension negotiation is unsupported (rejects `Sec-WebSocket-Extensions`); handshake redirects/401 are not followed; active close sends a close frame then waits for peer close (3 s timeout), received peer close is echoed before closing |
-| TLS | TLS 1.2/1.3, all standard TLS 1.3 cipher suites, TLS 1.2 ECDHE/DHE/RSA key exchange, AES-GCM/AES-CBC/ChaCha20-Poly1305, X25519/X448/NIST P curves/FFDHE, RSA-PSS/RSA-PKCS1/ECDSA/Ed25519/Ed448 signature schemes, SNI, ALPN, PSK/session ticket, explicit opt-in 0-RTT, reactive KeyUpdate, record padding, client certificates (mTLS), OCSP stapling parse, certificate chain reordering and validation, Name Constraints, certificatePolicies, IDNA, OCSP/CRL revocation cache, SPKI pin. ChaCha20-Poly1305/AES-CCM/X25519/X448/FFDHE/Ed25519/Ed448 verification are in-kernel software implementations | The default policy does not enable TLS 1.2 RSA key exchange, CBC, renegotiation, or SHA-1 signatures; those require `TlsSecurityProfile::CompatibilityExplicit` plus the matching explicit option. No hard-coded system CA; revocation is offline/table-driven and fail-closed when required-but-absent |
+**Implemented / Verified Capabilities**
 
-| Unsupported Optional Capability | Current Handling |
-|---------------------------------|------------------|
-| WebSocket extensions such as permessage-deflate | Out of scope; unexpected server extensions are rejected |
-| High-level automatic WebSocket over HTTP/2 RFC 8441 | Explicit opt-in only; default remains HTTP/1.1 Upgrade to avoid silent behavior changes |
-| TRACE | Out of scope; HTTP proxy is supported as HTTPS CONNECT or plaintext absolute-form |
-| HTTP inbound request parser / server role | Out of scope; this project is a client protocol stack |
-| HTTP/2 server push / priority | Push is disabled, forbidden `PUSH_PROMISE` is a protocol error, and priority is not a public scheduling capability |
-| RFC 9111 cache / Range / conditional requests | No kernel cache API is provided; `Range` and conditional request fields are pass-through only and are not semantically merged or validated; response `Content-Range` has read-only parsing |
-| Accept-Encoding qvalue/content negotiation | The default header only describes the implemented response decoder subset; callers may override it, but full negotiation semantics are not provided |
-| TLS 1.2 RSA key exchange / CBC / renegotiation | Implemented but disabled by default; callers must use `CompatibilityExplicit` policy and enable RSA, CBC, or renegotiation explicitly |
-| TLS 1.3 0-RTT | Implemented but disabled by default; callers must enable early data and mark the request replay-safe |
-| Online OCSP/CRL fetching | The library does not recursively fetch revocation data; callers provide external trust/certificate/revocation data or cached entries for hard revocation decisions |
+| Protocol | Current usable behavior |
+|----------|-------------------------|
+| HTTP/1.1 | `Content-Length`, library-generated chunked, true streaming request bodies (`BodyCreateStream` / `KhHttpRequestSetBodySource`), request trailers on the chunked path, `Expect: 100-continue`, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer validation and read-only API exposure, read-only `206` / `Content-Range` parsing, RFC 3986 relative redirects, CONNECT request construction, HTTPS CONNECT proxy, plaintext HTTP proxy absolute-form |
+| HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS including `ENABLE_CONNECT_PROTOCOL`, HEADERS/CONTINUATION, DATA body sources, request/response trailers, explicit `SendPing`, GOAWAY/RST retry semantics, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits, active-stream table, two-stage `BeginRequest` / `ReceiveResponse(streamId)`, RFC 8441 extended CONNECT DATA tunnel, high-level pooled multi-stream reuse |
+| WebSocket | ws/wss handshake, constant-time accept check, caller-supplied opening handshake headers, text/binary send, empty messages, fragment send (`kws::SendContinuation`), receive-fragment callback (`ReceiveOptions.DeliverFragments` / `OnMessage`), control-frame validation, auto-Pong, public Ping/Pong/CloseEx, selected subprotocol query, cross-fragment UTF-8 validation, complete-message aggregation by default, explicit opt-in RFC 8441 WebSocket over HTTP/2 |
+| TLS and certificates | TLS 1.2/1.3, standard TLS 1.3 cipher suites, TLS 1.2 ECDHE/DHE plus compatibility-profile RSA key exchange, AES-GCM/AES-CBC/ChaCha20-Poly1305, X25519/X448/NIST P curves/FFDHE, RSA-PSS/RSA-PKCS1/ECDSA/Ed25519/Ed448 signature schemes, SNI, ALPN, PSK/session ticket, 0-RTT, reactive KeyUpdate, record padding, client certificates (mTLS), OCSP stapling parse, certificate chain reordering and validation, Name Constraints, certificatePolicies, IDNA, OCSP/CRL revocation cache, SPKI pin |
+
+**Default-Off / Explicit Opt-In**
+
+These capabilities are implemented but not enabled by default; they are not missing.
+
+| Capability | How it is enabled |
+|------------|-------------------|
+| `Expect: 100-continue` | `SendFlagExpectContinue` |
+| h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode`; plaintext HTTP/2 is off by default |
+| WebSocket over HTTP/2 | `AllowWebSocketOverHttp2=true`; default remains HTTP/1.1 Upgrade |
+| TLS 1.2 RSA key exchange / CBC / SHA-1 signatures | `CompatibilityExplicit` policy plus the matching compatibility switches |
+| TLS 1.3 0-RTT | Enable early data and mark the request replay-safe |
+| TLS 1.3 post-handshake client auth | Enable the policy; signatures use the mTLS callback and private keys never enter the library |
+| Hard revocation requirement | `RequireRevocationCheck`; missing caller-provided OCSP/CRL data fails closed |
+
+**Security Refusals / Policy Constraints**
+
+These are deliberate security or protocol choices, not missing implementation.
+
+| Behavior | Handling |
+|----------|----------|
+| Caller-supplied request `Transfer-Encoding` / `TE` | Rejected; request framing is generated and validated by the library |
+| HTTP/1.1 request trailers | Allowed only on the chunked request path |
+| HTTP `br` Transfer-Encoding | Rejected; `br` is supported only as `Content-Encoding` |
+| HTTP/2 `PUSH_PROMISE` | Server push is disabled and treated as a protocol error |
+| Unexpected WebSocket extensions | Rejected to avoid implicitly enabling extensions such as permessage-deflate |
+| WebSocket handshake redirect / 401 / 407 | Not followed automatically; returns `STATUS_NOT_SUPPORTED` |
+| TLS 1.3 to TLS 1.2 | No in-handshake automatic fallback; only verified version-negotiation evidence allows an explicit caller retry at 1.2 |
+| Certificate hostname matching | IP literals match iPAddress SAN only; DNS names never fall back to CN |
+| HTTPS redirect to HTTP | Rejected by default |
+
+**Missing / Explicit Non-Goals**
+
+These capabilities are not provided today; some are explicit non-goals, while others are simply not public capabilities.
+
+| Capability | Current conclusion |
+|------------|--------------------|
+| HTTP inbound request parser / server role | Non-goal; this project is a client protocol stack |
+| TRACE / HTTP pipelining | Non-goal |
+| RFC 9111 cache | No kernel cache API is provided |
+| `Range` / conditional request semantics | Pass-through headers only; no semantic merge or validation; response `Content-Range` is read-only |
+| Full `Accept-Encoding` qvalue/content negotiation | Not provided; default header only describes the implemented decoder subset and callers may override it |
+| HTTP/2 priority as public scheduling | Not exposed as a public capability |
+| HTTP/2 background automatic PING keepalive | Not provided; callers can use explicit `SendPing` |
+| WebSocket extensions such as permessage-deflate | Non-goal; not negotiated |
+| Automatic default WebSocket over HTTP/2 selection | Not done today; explicit opt-in is required |
+| TLS 1.2 true renegotiation | Non-goal; compatibility profile handles secure renegotiation signaling but does not perform renegotiation |
+| Online OCSP/CRL fetching | Non-goal; callers provide external trust/certificate/revocation data or cached entries |
+| HTTP/3 / QUIC | Non-goal |
+
+**Implementation strategy and trust model**:
+
+- The transport main path uses WSK; TLS, HTTP, and certificate validation are implemented in the kernel path.
+- Cryptography uses kernel-mode CNG/BCrypt first. ChaCha20-Poly1305, AES-CCM, X25519, X448, FFDHE, and Ed25519/Ed448 verification are filled in by in-kernel software implementations.
+- WinHTTP, WinINet, and SChannel are not used as the kernel main path.
+- The library does not hard-code system CAs; callers explicitly provide trust anchors, CA bundles, revocation cache entries, and pins.
 
 Automatic redirects reject HTTPS-to-HTTP downgrades by default. Cross scheme/host/port redirects strip `Authorization`, `Cookie`, and `Proxy-Authorization`. 301/302 rewrite POST to GET by default, 303 rewrites every method except HEAD to GET, and 307/308 preserve method and body. Reused stale-connection failures are retried fresh only for safe/idempotent requests such as `GET`, `HEAD`, and `OPTIONS`; POST/PUT/PATCH/DELETE are not replayed automatically.
 
