@@ -25,7 +25,7 @@ A: No. Only safe/idempotent `GET`/`HEAD`/`OPTIONS` get a fresh retry on reused s
 A: Auto-redirect rejects HTTPS→HTTP downgrade by default and strips `Authorization`/`Cookie`/`Proxy-Authorization` across scheme/host/port.
 
 **Q: WebSocket over HTTP/2 (RFC 8441)?**
-A: It is supported as an explicit opt-in. Set `ConnectConfig.AllowWebSocketOverHttp2=true` for `wss`; the client offers `h2,http/1.1` and uses RFC 8441 extended CONNECT when h2 is negotiated and the peer enables `SETTINGS_ENABLE_CONNECT_PROTOCOL`. The default remains HTTP/1.1 Upgrade, and `ws://` does not implicitly use h2c. `permessage-deflate` is also explicit opt-in and remains off by default; unrequested or invalid extensions are rejected.
+A: Yes, and `wss` uses automatic selection by default. The client offers `h2,http/1.1` and uses RFC 8441 extended CONNECT when h2 is negotiated and the peer enables `SETTINGS_ENABLE_CONNECT_PROTOCOL`; Auto returns to HTTP/1.1 Upgrade when RFC 8441 is unsupported, `Http11Only` forces HTTP/1.1, and `ws://` does not implicitly use h2c. `permessage-deflate` is still explicit opt-in and remains off by default; unrequested or invalid extensions are rejected.
 
 **Q: Why no stack / new-delete in the library?**
 A: Kernel constraints. The library forbids stack buffers (use heap; hot buffers resident in Workspace) and raw `new/delete` (unless overloaded in the lib). Use `HeapObject<T>` / `HeapArray<T>`.

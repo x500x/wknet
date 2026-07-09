@@ -849,7 +849,7 @@ NTSTATUS KhWebSocketConnectAsync(
 
 返回值：`STATUS_SUCCESS`、`STATUS_INVALID_PARAMETER`、`STATUS_NOT_SUPPORTED`、网络/TLS/HTTP 握手失败状态
 
-NOTE: `KhWebSocketConnectOptions.Headers/HeaderCount` 可传 opening-handshake 额外头；库受控头（`Host`、`Connection`、`Upgrade`、`Sec-WebSocket-*` 等）会被拒绝。`AllowWebSocketOverHttp2=true` 时，`wss` 可显式 opt-in RFC 8441；默认仍为 HTTP/1.1 Upgrade。
+NOTE: `KhWebSocketConnectOptions.Headers/HeaderCount` 可传 opening-handshake 额外头；库受控头（`Host`、`Connection`、`Upgrade`、`Sec-WebSocket-*` 等）会被拒绝。`KhWebSocketTransportMode::Auto` 的 ABI 零值默认会让 `wss` 自动选择 RFC 8441；需要强制 HTTP/1.1 时使用 `Http11Only`。
 
 #### WebSocket 发送函数
 

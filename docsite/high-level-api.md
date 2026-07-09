@@ -482,6 +482,7 @@ struct ConnectConfig final {
     SIZE_T MaxMessageBytes;
     bool AutoReplyPing;
     bool AllowWebSocketOverHttp2;
+    khttp::WebSocketTransportMode TransportMode;
 };
 ```
 
@@ -494,7 +495,8 @@ struct ConnectConfig final {
 | `Family` | `Any` | 地址族。除非需要强制 IPv4/IPv6，否则保持 `Any` |
 | `MaxMessageBytes` | `DefaultMaxWebSocketMessageBytes` | 单消息默认上限。防止恶意服务器发送超大消息 |
 | `AutoReplyPing` | `true` | 收到 ping 时自动 pong。大多数情况下保持 `true` 即可 |
-| `AllowWebSocketOverHttp2` | `false` | 显式 opt-in RFC 8441 WebSocket over HTTP/2。这是较新的特性，默认关闭 |
+| `AllowWebSocketOverHttp2` | `false` | `LegacyBoolean` 兼容字段；新代码优先使用 `TransportMode` |
+| `TransportMode` | `Auto` | `wss` 默认自动选择 RFC 8441 WebSocket over HTTP/2；使用 `Http11Only` 可强制 HTTP/1.1 |
 
 #### `kws::SendOptions`
 

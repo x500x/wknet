@@ -13,7 +13,6 @@
 - server push（客户端 `ENABLE_PUSH=0`，收到 `PUSH_PROMISE` 安全拒绝）
 
 **WebSocket**（注：分片发送 `kws::SendContinuation` 与显式接收分片 `ReceiveOptions.DeliverFragments=true` **已支持**）
-- 高层 `kws` 默认自动选择 WebSocket over HTTP/2（RFC 8441 已支持显式 opt-in，默认仍保持 HTTP/1.1 Upgrade）
 - 握手 redirect / 401 / 407 跟随（当前安全拒绝为 `STATUS_NOT_SUPPORTED`；未来若做必须显式 opt-in）
 
 **TLS**
@@ -34,14 +33,12 @@
 - 高层 h2c prior knowledge / Upgrade（`SendOptions.Http2CleartextMode`）
 - HTTP/2 后台 PING 保活（session `Http2KeepAlive.Enabled=true`，默认关闭）
 - HTTP/2 per-request priority（`SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority`）
-- WebSocket over HTTP/2（`ConnectConfig.AllowWebSocketOverHttp2`）
 - WebSocket permessage-deflate（`ConnectConfig.PerMessageDeflate.Enable=true`，默认关闭）
 
 ### 未来改进方向（持续）
 
 - 继续扩展协议安全边界上的有界账本，例如更细的超时、取消、帧/控制信令与恶意输入防护；普通 buffered response 默认不设置低位库级总量硬顶。
 - 继续减少热路径重复分配，优先复用 Workspace / lookaside / 连接生命周期常驻缓冲。
-- 评估 WebSocket over HTTP/2 从显式 opt-in 走向自动选择的 API 与兼容性策略。
 - 保持明文 HTTP over proxy 的 absolute-form 路径与 HTTPS CONNECT 隧道路径分离，继续审计代理鉴权 opaque 透传边界。
 
 > 这些是对**当前公开行为**的描述，便于评估适用性；不代表内部审计细节。能力现状见 [能力账本](capability-matrix.md)。

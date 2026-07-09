@@ -474,6 +474,7 @@ struct ConnectConfig final {
     SIZE_T MaxMessageBytes;
     bool AutoReplyPing;
     bool AllowWebSocketOverHttp2;
+    khttp::WebSocketTransportMode TransportMode;
 };
 ```
 
@@ -486,7 +487,8 @@ struct ConnectConfig final {
 | `Family` | `Any` | Address family |
 | `MaxMessageBytes` | `DefaultMaxWebSocketMessageBytes` | Default per-message limit |
 | `AutoReplyPing` | `true` | Auto-reply pong on ping |
-| `AllowWebSocketOverHttp2` | `false` | Explicit opt-in for RFC 8441 WebSocket over HTTP/2 |
+| `AllowWebSocketOverHttp2` | `false` | LegacyBoolean compatibility field; new code should prefer `TransportMode` |
+| `TransportMode` | `Auto` | `wss` selects RFC 8441 WebSocket over HTTP/2 automatically; use `Http11Only` to force HTTP/1.1 |
 
 ##### `kws::SendOptions`
 

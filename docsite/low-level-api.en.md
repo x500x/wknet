@@ -849,7 +849,7 @@ Establishes WebSocket connection. `ConnectSync` blocks until handshake completes
 
 Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_SUPPORTED`, network/TLS/HTTP handshake failure.
 
-NOTE: `KhWebSocketConnectOptions.Headers/HeaderCount` can pass extra opening-handshake headers; library-controlled headers (`Host`, `Connection`, `Upgrade`, `Sec-WebSocket-*`, etc.) will be rejected. When `AllowWebSocketOverHttp2=true`, `wss` can explicitly opt-in RFC 8441; default is still HTTP/1.1 Upgrade.
+NOTE: `KhWebSocketConnectOptions.Headers/HeaderCount` can pass extra opening-handshake headers; library-controlled headers (`Host`, `Connection`, `Upgrade`, `Sec-WebSocket-*`, etc.) will be rejected. ABI-zero `KhWebSocketTransportMode::Auto` makes `wss` select RFC 8441 automatically; use `Http11Only` to force HTTP/1.1.
 
 #### WebSocket Send Functions
 

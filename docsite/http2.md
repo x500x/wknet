@@ -61,7 +61,7 @@ enum class Http2FrameType : UCHAR {
 - 请求头构造支持 `Method=CONNECT` + `ConnectProtocol="websocket"`，编码为 `:method: CONNECT` 与 `:protocol: websocket`。
 - 发送前校验对端 `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`，否则返回 `STATUS_NOT_SUPPORTED` 且不分配 stream。
 - tunnel stream 收到 `2xx` 响应头后，可用 `SendStreamData` / `ReceiveStreamData` 双向传输 DATA payload（例如 WebSocket frame bytes）。
-- 这是低层 HTTP/2 tunnel primitive；高层 `kws` 在 `wss` 且显式设置 `AllowWebSocketOverHttp2` 时可走 RFC 8441，默认仍使用 HTTP/1.1 Upgrade。
+- 这是低层 HTTP/2 tunnel primitive；高层 `kws` 在 `wss` 默认自动选择 RFC 8441，显式 `Http11Only` 时强制 HTTP/1.1 Upgrade。
 
 ### GOAWAY / RST_STREAM / PUSH_PROMISE
 
@@ -85,4 +85,4 @@ enum class Http2FrameType : UCHAR {
 
 ### 边界
 
-高层 `khttp` 已接入同源 H2 连接池多活动流复用，低层继续提供 RFC 8441 extended CONNECT tunnel；`kws` 对 RFC 8441 为显式 opt-in，默认不自动切换。PRIORITY 为显式 per-request 能力，不实现复杂本地树调度；后台 PING 保活默认关闭，可在 session 上显式开启，低层仍提供显式 `SendPing`；不支持 server push；高层 h2c 是显式 opt-in，默认关闭。
+高层 `khttp` 已接入同源 H2 连接池多活动流复用，低层继续提供 RFC 8441 extended CONNECT tunnel；`kws` 对 `wss` 默认自动选择 RFC 8441，`Http11Only` 可强制 HTTP/1.1。PRIORITY 为显式 per-request 能力，不实现复杂本地树调度；后台 PING 保活默认关闭，可在 session 上显式开启，低层仍提供显式 `SendPing`；不支持 server push；高层 h2c 是显式 opt-in，默认关闭。

@@ -24,7 +24,7 @@
 - 高层 `khttp` 连接池接入 HTTP/2 stream 租约，同源 H2 连接可按本地/peer 并发上限承载多个活动请求；连接级错误广播给活动流。
 - DATA 流控：连接级 + per-stream 窗口；连接级 WINDOW_UPDATE 阈值为初始窗口一半（32767）；初始窗口 SETTINGS 更新会同步调整活动 stream；越界 GOAWAY `FLOW_CONTROL_ERROR`。
 - 1xx interim 处理（拒绝 `:status 101` 与 interim+END_STREAM）；PUSH_PROMISE 一律协议错误。
-- RFC 8441 extended CONNECT：`CONNECT` + `:protocol: websocket` 需对端 `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`；低层 `SendStreamData` / `ReceiveStreamData` 可承载 WebSocket frame bytes，高层 `kws` 可在显式 opt-in 后走该路径。
+- RFC 8441 extended CONNECT：`CONNECT` + `:protocol: websocket` 需对端 `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`；低层 `SendStreamData` / `ReceiveStreamData` 可承载 WebSocket frame bytes，高层 `kws` 对 `wss` 默认自动选择该路径，必要时可用 `Http11Only` 强制 HTTP/1.1。
 - 三模式：TLS-ALPN `h2`、显式 h2c prior knowledge、显式 h2c Upgrade（Upgrade 模式禁请求体、重放 101 后残留字节、用 stream 1）；高层通过 `SendOptions.Http2CleartextMode` opt-in，默认 HTTP/1.1。
 - HTTP/2 请求 body 由 body source 驱动，按连接/stream 流控和 peer `MAX_FRAME_SIZE` 切 DATA；请求 trailers 以 final HEADERS + END_STREAM 发送并拒绝 trailer 伪头。
 - 显式 per-request priority：`SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority` 可在首个 HEADERS 帧携带 priority 字段；底层支持独立 PRIORITY frame 编解码，收到 peer PRIORITY 只校验语义，不改变安全边界。
@@ -37,7 +37,7 @@
 - ws/wss 握手；`Sec-WebSocket-Accept` **常量时间**比对；`permessage-deflate` 显式 opt-in（默认关闭），未请求/未知/非法扩展拒绝；子协议协商。
 - 支持调用方提供 opening-handshake headers（如 `Origin`、`Authorization`、`Cookie`），拒绝库受控头（`Host`、`Connection`、`Upgrade`、`Sec-WebSocket-*` 等）和非法头文本。
 - HTTP/1.1 Upgrade 路径客户端帧**始终掩码**（每帧新随机键）；RFC 8441 over HTTP/2 路径按规范发送无掩码帧；收到**被掩码的服务端帧**→协议错误 1002。
-- `wss` 可通过 `AllowWebSocketOverHttp2` 显式 opt-in RFC 8441；默认仍保持 HTTP/1.1 Upgrade，`ws://` 不隐式走 h2c。
+- `wss` 默认自动 offer `h2,http/1.1` 并在协商到 h2 时使用 RFC 8441；peer 未启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 时按 Auto 规则回到 HTTP/1.1，`ws://` 不隐式走 h2c。
 - **分片发送**：`kws::SendContinuation` + `SendOptions{FinalFragment}`，自动按帧缓冲分块；跨片增量 UTF-8 校验。
 - **接收分片回调**：默认聚合完整消息；显式 `ReceiveOptions.DeliverFragments=true` 时，`ReceiveOptions.OnMessage` 或返回式按 wire fragment 交付并暴露真实 `finalFragment`。
 - 控制帧：自动 Pong（可关）、单次接收控制帧 ≤100（超限 close 1008）；文本/close payload UTF-8 校验（非法 1007）；超 `MaxMessageBytes` close 1009。
@@ -71,7 +71,6 @@
 | HTTP/2 后台 PING 保活 | session `Http2KeepAlive.Enabled=true`；默认关闭 |
 | HTTP/2 per-request priority | `SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority` |
 | WebSocket permessage-deflate | `ConnectConfig.PerMessageDeflate.Enable=true`；默认不协商 |
-| WebSocket over HTTP/2 | `AllowWebSocketOverHttp2=true` 显式开启；默认 HTTP/1.1 Upgrade |
 | TLS1.2 RSA kx / CBC / SHA-1 | `TlsPolicy.Profile=CompatibilityExplicit` 后分别开启 `EnableTls12RsaKeyExchange`、`EnableTls12Cbc`、`EnableTls12Sha1Signatures` |
 | TLS1.2 真重协商 | `CompatibilityExplicit` + `EnableTls12Renegotiation`，次数由 `MaxTls12Renegotiations` 限制 |
 | TLS1.3 0-RTT | 连接选项 `EnableEarlyData` + `EarlyDataReplaySafe`，且 ticket 通告 `max_early_data_size` |
@@ -106,7 +105,6 @@
 | 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
 | HTTP/2 复杂本地 priority tree 调度 | 非目标；不维护本地依赖树，不实现带宽调度器 |
 | 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；不协商其它扩展 |
-| WebSocket over HTTP/2 默认自动选择 | 当前不做；必须显式 opt-in |
 | 在线 OCSP/CRL 抓取 | 非目标；调用方通过外部 trust/cert/revocation 数据或已缓存条目驱动强撤销判定 |
 | HTTP/3 / QUIC | 非目标 |
 
