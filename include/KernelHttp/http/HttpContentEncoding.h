@@ -7,6 +7,7 @@ namespace KernelHttp
 namespace http
 {
     constexpr SIZE_T HttpMaxAcceptEncodingPreferences = 8;
+    constexpr SIZE_T HttpMaxAcceptEncodingEntries = 16;
     constexpr USHORT HttpAcceptEncodingQValueMax = 1000;
 
     enum class HttpAcceptCoding : UCHAR
@@ -16,7 +17,14 @@ namespace http
         Deflate = 2,
         Brotli = 3,
         Compress = 4,
-        Any = 5
+        Zstd = 5,
+        DictionaryCompressedBrotli = 6,
+        DictionaryCompressedZstd = 7,
+        Aes128Gcm = 8,
+        Exi = 9,
+        Pack200Gzip = 10,
+        Any = 11,
+        Extension = 12
     };
 
     struct HttpAcceptEncodingPreference final
@@ -26,10 +34,29 @@ namespace http
         USHORT QValue = HttpAcceptEncodingQValueMax;
     };
 
+    struct HttpAcceptEncodingEntry final
+    {
+        HttpText Token = {};
+        HttpAcceptCoding Coding = HttpAcceptCoding::Identity;
+        USHORT QValue = HttpAcceptEncodingQValueMax;
+        SIZE_T Order = 0;
+        bool Wildcard = false;
+        bool Extension = false;
+    };
+
+    struct HttpAcceptEncodingRules final
+    {
+        HttpAcceptEncodingEntry* Entries = nullptr;
+        SIZE_T EntryCapacity = 0;
+        SIZE_T EntryCount = 0;
+        bool EmptyHeader = false;
+    };
+
     struct HttpAcceptEncodingPolicy final
     {
         const HttpAcceptEncodingPreference* Preferences = nullptr;
         SIZE_T PreferenceCount = 0;
+        const HttpAcceptEncodingRules* Rules = nullptr;
     };
 
     struct HttpContentDecodeBuffers final
@@ -74,6 +101,32 @@ namespace http
             _Out_writes_bytes_(destinationCapacity) char* destination,
             SIZE_T destinationCapacity,
             _Out_ HttpText* value) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS ParseAcceptEncoding(
+            HttpText value,
+            _Inout_ HttpAcceptEncodingRules* rules) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS BuildAcceptEncodingRulesFromPreferences(
+            _In_reads_(preferenceCount) const HttpAcceptEncodingPreference* preferences,
+            SIZE_T preferenceCount,
+            _Inout_ HttpAcceptEncodingRules* rules) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS IsContentCodingAcceptable(
+            _In_ const HttpAcceptEncodingRules* rules,
+            HttpText coding,
+            _Out_ bool* acceptable,
+            _Out_opt_ USHORT* qvalue = nullptr) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS NegotiateContentCoding(
+            _In_ const HttpAcceptEncodingRules* rules,
+            _In_reads_(codingCount) const HttpText* serverCodings,
+            SIZE_T codingCount,
+            _Out_ HttpText* selected,
+            _Out_opt_ USHORT* qvalue = nullptr) noexcept;
     };
 }
 }

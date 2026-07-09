@@ -133,13 +133,45 @@ namespace engine
             value);
     }
 
-    http::HttpAcceptEncodingPolicy AcceptEncodingPolicyFromOptions(
-        _In_ const KhHttpSendOptions& sendOptions) noexcept
+    _Must_inspect_result_
+    NTSTATUS BuildAcceptEncodingPolicyFromRequestHeaders(
+        _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        _Inout_ http::HttpAcceptEncodingRules* rules,
+        _Out_ http::HttpAcceptEncodingPolicy* policy) noexcept
     {
-        http::HttpAcceptEncodingPolicy policy = {};
-        policy.Preferences = sendOptions.AcceptEncodingPreferences;
-        policy.PreferenceCount = sendOptions.AcceptEncodingPreferenceCount;
-        return policy;
+        if (policy != nullptr) {
+            *policy = {};
+        }
+        if (policy == nullptr ||
+            rules == nullptr ||
+            rules->Entries == nullptr ||
+            (requestHeaders == nullptr && requestHeaderCount != 0)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        rules->EntryCount = 0;
+        rules->EmptyHeader = false;
+        bool foundAcceptEncoding = false;
+        for (SIZE_T index = 0; index < requestHeaderCount; ++index) {
+            const http::HttpHeader& header = requestHeaders[index];
+            if (!http::TextEqualsIgnoreCase(header.Name, http::MakeText("Accept-Encoding"))) {
+                continue;
+            }
+
+            foundAcceptEncoding = true;
+            NTSTATUS status = http::HttpContentEncoding::ParseAcceptEncoding(header.Value, rules);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        if (!foundAcceptEncoding) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        policy->Rules = rules;
+        return STATUS_SUCCESS;
     }
 
     bool RequestHasHeader(_In_ const KhRequest& request, _In_z_ const char* name) noexcept
@@ -1927,8 +1959,24 @@ namespace engine
             return status;
         }
 
+        HeapArray<http::HttpAcceptEncodingEntry> acceptEncodingEntries(http::HttpMaxAcceptEncodingEntries);
+        if (!acceptEncodingEntries.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        http::HttpAcceptEncodingRules acceptEncodingRules = {};
+        acceptEncodingRules.Entries = acceptEncodingEntries.Get();
+        acceptEncodingRules.EntryCapacity = acceptEncodingEntries.Count();
+        http::HttpAcceptEncodingPolicy acceptPolicy = {};
+        status = BuildAcceptEncodingPolicyFromRequestHeaders(
+            requestHeaders,
+            requestHeaderCount,
+            &acceptEncodingRules,
+            &acceptPolicy);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         http::HttpContentDecodeResult decoded = {};
-        http::HttpAcceptEncodingPolicy acceptPolicy = AcceptEncodingPolicyFromOptions(sendOptions);
         status = DecodeContentWithWorkspace(
             responseHeaders,
             responseHeaderCount,
@@ -2503,8 +2551,24 @@ namespace engine
             return status;
         }
 
+        HeapArray<http::HttpAcceptEncodingEntry> acceptEncodingEntries(http::HttpMaxAcceptEncodingEntries);
+        if (!acceptEncodingEntries.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        http::HttpAcceptEncodingRules acceptEncodingRules = {};
+        acceptEncodingRules.Entries = acceptEncodingEntries.Get();
+        acceptEncodingRules.EntryCapacity = acceptEncodingEntries.Count();
+        http::HttpAcceptEncodingPolicy acceptPolicy = {};
+        status = BuildAcceptEncodingPolicyFromRequestHeaders(
+            requestHeaders,
+            requestHeaderCount,
+            &acceptEncodingRules,
+            &acceptPolicy);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         http::HttpContentDecodeResult decoded = {};
-        http::HttpAcceptEncodingPolicy acceptPolicy = AcceptEncodingPolicyFromOptions(sendOptions);
         status = DecodeContentWithWorkspace(
             responseHeaders,
             responseHeaderCount,
@@ -2596,9 +2660,12 @@ namespace engine
         }
 
         http::HttpText acceptEncoding = {};
-        NTSTATUS status = BuildEffectiveAcceptEncoding(sendOptions, workspace, &acceptEncoding);
-        if (!NT_SUCCESS(status)) {
-            return status;
+        NTSTATUS status = STATUS_SUCCESS;
+        if (!RequestHasHeader(request, "Accept-Encoding")) {
+            status = BuildEffectiveAcceptEncoding(sendOptions, workspace, &acceptEncoding);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
         }
 
         http::HttpRequestBuildOptions buildOptions = {};
@@ -4533,9 +4600,25 @@ namespace engine
             !IsSupportedHttpAlpn(request.Tls.Alpn, request.Tls.AlpnLength)) {
             return STATUS_NOT_SUPPORTED;
         }
+
+        HeapArray<http::HttpAcceptEncodingEntry> acceptEncodingEntries(http::HttpMaxAcceptEncodingEntries);
+        if (!acceptEncodingEntries.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        http::HttpAcceptEncodingRules acceptEncodingRules = {};
+        acceptEncodingRules.Entries = acceptEncodingEntries.Get();
+        acceptEncodingRules.EntryCapacity = acceptEncodingEntries.Count();
+        http::HttpAcceptEncodingPolicy acceptPolicy = {};
+        NTSTATUS status = BuildAcceptEncodingPolicyFromRequestHeaders(
+            requestHeaders,
+            requestHeaderCount,
+            &acceptEncodingRules,
+            &acceptPolicy);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
-        UNREFERENCED_PARAMETER(requestHeaders);
-        UNREFERENCED_PARAMETER(requestHeaderCount);
         UNREFERENCED_PARAMETER(cancellationOperation);
 
         if (g_testHttpTransport == nullptr) {
@@ -4549,7 +4632,7 @@ namespace engine
         SIZE_T bodyBytesLength = builtRequestLength - headerBytesLength;
         const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
         KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled;
-        NTSTATUS status = EffectiveHttp2CleartextMode(
+        status = EffectiveHttp2CleartextMode(
             sendOptions,
             request,
             &http2CleartextMode);
@@ -4766,7 +4849,6 @@ namespace engine
         RtlCopyMemory(workspace.Response.Data, testResponse.RawResponse, testResponse.RawResponseLength);
         workspace.ResponseLength = testResponse.RawResponseLength;
 
-        http::HttpAcceptEncodingPolicy acceptPolicy = AcceptEncodingPolicyFromOptions(sendOptions);
         status = ParseResponseBytes(
             workspace,
             workspace.ResponseLength,
@@ -4840,7 +4922,7 @@ namespace engine
 
         const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
         KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled;
-        NTSTATUS status = EffectiveHttp2CleartextMode(
+        status = EffectiveHttp2CleartextMode(
             sendOptions,
             request,
             &http2CleartextMode);
@@ -5008,7 +5090,6 @@ namespace engine
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        http::HttpAcceptEncodingPolicy acceptPolicy = AcceptEncodingPolicyFromOptions(sendOptions);
         if (allowHttp11Pipeline) {
             if (!KhConnectionPoolHasHttp1PipelineLease(pooledConnection)) {
                 status = KhConnectionPoolPromoteHttp1PipelineLease(

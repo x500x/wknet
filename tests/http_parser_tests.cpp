@@ -5,6 +5,7 @@
 #include <KernelHttp/http/HttpParser.h>
 #include <KernelHttp/http/HttpRequest.h>
 #include <KernelHttp/http/HttpCachePolicy.h>
+#include <KernelHttp/http/HttpContentEncoding.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -26,6 +27,9 @@ using KernelHttp::http::TextEqualsIgnoreCase;
 using KernelHttp::http::HttpCacheControl;
 using KernelHttp::http::HttpCacheMetadata;
 using KernelHttp::http::HttpByteRange;
+using KernelHttp::http::HttpAcceptEncodingEntry;
+using KernelHttp::http::HttpAcceptEncodingRules;
+using KernelHttp::http::HttpContentEncoding;
 
 namespace
 {
@@ -1111,6 +1115,105 @@ namespace
         Expect(memcmp(buffer, expected, strlen(expected)) == 0, "Accept-Encoding request bytes match expected output");
     }
 
+    void TestAcceptEncodingQValueParsing()
+    {
+        HttpAcceptEncodingEntry entries[KernelHttp::http::HttpMaxAcceptEncodingEntries] = {};
+        HttpAcceptEncodingRules rules = {};
+        rules.Entries = entries;
+        rules.EntryCapacity = sizeof(entries) / sizeof(entries[0]);
+
+        NTSTATUS status = HttpContentEncoding::ParseAcceptEncoding(
+            MakeText("br;q=0.8, gzip;q=1.000, identity;q=0, *;q=0.001"),
+            &rules);
+        Expect(NT_SUCCESS(status), "Accept-Encoding qvalues parse");
+
+        bool acceptable = false;
+        USHORT qvalue = 0;
+        status = HttpContentEncoding::IsContentCodingAcceptable(
+            &rules,
+            MakeText("br"),
+            &acceptable,
+            &qvalue);
+        Expect(NT_SUCCESS(status) && acceptable && qvalue == 800, "br qvalue is exposed");
+
+        status = HttpContentEncoding::IsContentCodingAcceptable(
+            &rules,
+            MakeText("identity"),
+            &acceptable,
+            &qvalue);
+        Expect(NT_SUCCESS(status) && !acceptable && qvalue == 0, "identity q=0 is rejected");
+
+        status = HttpContentEncoding::IsContentCodingAcceptable(
+            &rules,
+            MakeText("zstd"),
+            &acceptable,
+            &qvalue);
+        Expect(NT_SUCCESS(status) && acceptable && qvalue == 1, "wildcard qvalue applies to zstd");
+    }
+
+    void TestAcceptEncodingRejectsInvalidQValues()
+    {
+        HttpAcceptEncodingEntry entries[KernelHttp::http::HttpMaxAcceptEncodingEntries] = {};
+        HttpAcceptEncodingRules rules = {};
+        rules.Entries = entries;
+        rules.EntryCapacity = sizeof(entries) / sizeof(entries[0]);
+
+        NTSTATUS status = HttpContentEncoding::ParseAcceptEncoding(MakeText("gzip;q=1.0000"), &rules);
+        Expect(status == STATUS_INVALID_PARAMETER, "qvalue with too many digits rejects");
+
+        rules.EntryCount = 0;
+        rules.EmptyHeader = false;
+        status = HttpContentEncoding::ParseAcceptEncoding(MakeText("gzip, gzip;q=0.5"), &rules);
+        Expect(status == STATUS_INVALID_PARAMETER, "duplicate Accept-Encoding token rejects");
+
+        rules.EntryCount = 0;
+        rules.EmptyHeader = false;
+        status = HttpContentEncoding::ParseAcceptEncoding(MakeText("gzip,,br"), &rules);
+        Expect(status == STATUS_INVALID_PARAMETER, "empty Accept-Encoding list element rejects");
+    }
+
+    void TestAcceptEncodingNegotiation()
+    {
+        HttpAcceptEncodingEntry entries[KernelHttp::http::HttpMaxAcceptEncodingEntries] = {};
+        HttpAcceptEncodingRules rules = {};
+        rules.Entries = entries;
+        rules.EntryCapacity = sizeof(entries) / sizeof(entries[0]);
+
+        NTSTATUS status = HttpContentEncoding::ParseAcceptEncoding(
+            MakeText("gzip;q=0.5, br;q=0.9, zstd;q=0.9"),
+            &rules);
+        Expect(NT_SUCCESS(status), "Accept-Encoding negotiation rules parse");
+
+        const HttpText serverCodings[] = {
+            MakeText("gzip"),
+            MakeText("zstd"),
+            MakeText("br")
+        };
+        HttpText selected = {};
+        USHORT qvalue = 0;
+        status = HttpContentEncoding::NegotiateContentCoding(
+            &rules,
+            serverCodings,
+            sizeof(serverCodings) / sizeof(serverCodings[0]),
+            &selected,
+            &qvalue);
+        Expect(NT_SUCCESS(status), "content coding negotiation selects an acceptable coding");
+        Expect(TextEqualsLiteral(selected, "zstd") && qvalue == 900, "server order breaks equal qvalue ties");
+
+        HttpAcceptEncodingRules emptyRules = {};
+        emptyRules.Entries = entries;
+        emptyRules.EntryCapacity = sizeof(entries) / sizeof(entries[0]);
+        status = HttpContentEncoding::ParseAcceptEncoding(MakeText(""), &emptyRules);
+        Expect(NT_SUCCESS(status), "empty Accept-Encoding header parses");
+        bool acceptable = true;
+        status = HttpContentEncoding::IsContentCodingAcceptable(
+            &emptyRules,
+            MakeText("gzip"),
+            &acceptable,
+            nullptr);
+        Expect(NT_SUCCESS(status) && !acceptable, "empty Accept-Encoding only accepts identity");
+    }
+
     void TestParseContentLengthResponse()
     {
         const char responseBytes[] =
@@ -1772,7 +1875,7 @@ namespace
     {
         const char responseBytes[] =
             "HTTP/1.1 200 OK\r\n"
-            "Content-Encoding: gzip, gzip, gzip\r\n"
+            "Content-Encoding: identity, identity, identity, identity, identity, identity, identity, identity, identity\r\n"
             "Content-Length: 1\r\n"
             "\r\n"
             "x";
@@ -1795,7 +1898,7 @@ namespace
             options,
             response);
 
-        Expect(status == STATUS_NOT_SUPPORTED, "content decoder rejects more than two content codings");
+        Expect(status == STATUS_NOT_SUPPORTED, "content decoder rejects content coding chains beyond the hard parser limit");
     }
 
     void TestChunkedDecodeRequiresCapacity()
@@ -2783,6 +2886,9 @@ int main()
     TestBuildRealHostGetRequest();
     TestRequestSizeProbe();
     TestBuildAcceptEncodingRequest();
+    TestAcceptEncodingQValueParsing();
+    TestAcceptEncodingRejectsInvalidQValues();
+    TestAcceptEncodingNegotiation();
     TestParseContentLengthResponse();
     TestParseChunkedResponse();
     TestParseIdentityContentEncoding();

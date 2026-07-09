@@ -1549,6 +1549,52 @@ namespace
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
+    void TestCustomAcceptEncodingHeaderDrivesResponseValidation() noexcept
+    {
+        char response[256] = {};
+        const int headerLength = snprintf(
+            response,
+            sizeof(response),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Encoding: gzip\r\n"
+            "Content-Length: %zu\r\n"
+            "\r\n",
+            sizeof(GzipBody));
+        Expect(headerLength > 0, "custom Accept-Encoding gzip fixture header builds");
+        SIZE_T responseLength = static_cast<SIZE_T>(headerLength);
+        Expect(responseLength + sizeof(GzipBody) <= sizeof(response), "custom Accept-Encoding gzip fixture fits");
+        if (responseLength + sizeof(GzipBody) <= sizeof(response)) {
+            memcpy(response + responseLength, GzipBody, sizeof(GzipBody));
+            responseLength += sizeof(GzipBody);
+        }
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = responseLength;
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for custom Accept-Encoding validation");
+
+        khttp::Headers* headers = nullptr;
+        status = khttp::HeadersCreate(&headers);
+        Expect(NT_SUCCESS(status), "HeadersCreate succeeds for custom Accept-Encoding validation");
+        status = khttp::HeadersAdd(headers, "Accept-Encoding", "identity");
+        Expect(NT_SUCCESS(status), "identity Accept-Encoding header is added");
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/custom-accept-encoding";
+        status = khttp::GetEx(session, url, Length(url), headers, nullptr, &resp);
+        Expect(status == STATUS_NOT_SUPPORTED, "custom identity Accept-Encoding rejects gzip response");
+        Expect(captured.CallCount == 1, "custom Accept-Encoding validation reaches transport once");
+        Expect(resp == nullptr, "custom Accept-Encoding rejected response is not allocated");
+
+        khttp::HeadersRelease(headers);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
     void TestTraceRequiresExplicitOptIn() noexcept
     {
         const char* response =
@@ -6844,6 +6890,7 @@ int main() noexcept
     TestAcceptEncodingQValueOptions();
     TestAcceptEncodingRejectsInvalidPreferences();
     TestAcceptEncodingQZeroResponseFailsClosed();
+    TestCustomAcceptEncodingHeaderDrivesResponseValidation();
     TestTraceRequiresExplicitOptIn();
     TestTypedRangeAndConditionHeaders();
     TestTypedSuffixRangeHeader();

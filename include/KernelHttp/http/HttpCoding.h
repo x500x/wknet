@@ -12,7 +12,13 @@ namespace http
         Gzip,
         Deflate,
         Brotli,
-        Compress
+        Compress,
+        Zstd,
+        DictionaryCompressedBrotli,
+        DictionaryCompressedZstd,
+        Aes128Gcm,
+        Exi,
+        Pack200Gzip
     };
 
     struct HttpCodingDecodeBuffers final
