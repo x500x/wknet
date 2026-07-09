@@ -102,10 +102,10 @@
 |------|----------|
 | HTTP 入站 request parser / server role | 非目标；当前项目定位为客户端协议栈 |
 | RFC 9111 cache | 不提供内核缓存 API |
-| `Range` / 条件请求完整缓存语义 | 已提供 typed helper 与响应 `Content-Range` 只读解析；不做分片合并、缓存合并或 RFC9111 cache |
+| Range / 条件请求缓存合并语义 | 不做分片合并、缓存合并或 RFC9111 cache |
 | 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
-| HTTP/2 复杂本地 priority tree 调度 | 非目标；已提供显式 per-request priority，不实现复杂树调度策略 |
-| 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；`permessage-deflate` 已支持显式 opt-in，默认不协商 |
+| HTTP/2 复杂本地 priority tree 调度 | 非目标；不维护本地依赖树，不实现带宽调度器 |
+| 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；不协商其它扩展 |
 | WebSocket over HTTP/2 默认自动选择 | 当前不做；必须显式 opt-in |
 | 在线 OCSP/CRL 抓取 | 非目标；调用方通过外部 trust/cert/revocation 数据或已缓存条目驱动强撤销判定 |
 | HTTP/3 / QUIC | 非目标 |
