@@ -23,8 +23,8 @@
 | 库级资源上限由调用方容量驱动，无独立硬天花板；热路径无 lookaside | `engine/Workspace.h:9-46`、`khttp/Types.h:183-188,194-195`、`engine/Engine.h:169-173,183`；`KernelHttpConfig.h:51-108`（仅 `ExAllocatePool2`，无 lookaside） | **P0** |
 | 高层 `khttp` 无全局代理配置（低层 `HttpsClient` 有 CONNECT，但未接入引擎） | `client/HttpsClient.h:23-53`、`HttpsClient.cpp:305,327-370,411-443`；`HttpEngine.cpp` 不引用 `HttpsClient`；`Types.h:180-190`、`Engine.h:166-178` 无 proxy | **P1** |
 | 高层 HTTP/2 仍是每调用单流，无连接池级多流复用 | `HttpEngine.cpp:1239-1252`（缓存单 `Http2Connection`）、`:1261`（阻塞单流 `SendRequest`）；低层 `Http2Connection.h:230-268` 两阶段接口无高层调用者 | **P2** |
-| 高层 `kws` 强制 HTTP/1.1 Upgrade，不自动选择 WS-over-HTTP/2 | `WebSocketClient.cpp:880-911`（强制 ALPN http/1.1 并拒绝其它）；低层原语 `Http2Connection.cpp:1003-1031`、`Http2Connection.h:278-306` 就绪 | **P3** |
-| 高层不暴露 h2c、不发主动 PING、permessage-deflate/push/priority 拒绝、无在线 OCSP/CRL、WS 不跟随 redirect | 见各项 | **P4（维持/小型增量）** |
+| 高层 `kws` 默认 HTTP/1.1 Upgrade，WS-over-HTTP/2 需显式 opt-in | `ConnectConfig.AllowWebSocketOverHttp2` / `TransportMode` 控制；协商 h2 且 peer 启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 时走 RFC 8441，默认仍保持 HTTP/1.1 Upgrade | **P3（显式能力已完成，默认自动选择仍不做）** |
+| 高层显式能力边界：h2c opt-in、显式 PING、permessage-deflate 显式 opt-in、push 拒绝、priority 显式 per-request、无在线 OCSP/CRL、WS 不跟随 redirect | 见各项 | **P4（维持/小型增量）** |
 
 ---
 
@@ -166,7 +166,7 @@
 
 ### 现状
 
-- 高层 `kws` 主路径强制 HTTP/1.1 Upgrade：`WsEngine.cpp:21-106`（`BuildWebSocketHandshakeRequest` 硬编码 Upgrade 头）、`WsEngine.cpp:771-859`（`CompleteWebSocketConnect` 总是构造 `client::WebSocketClient`）、`WebSocketClient.cpp:880-911`（**强制 ALPN http/1.1 并拒绝非 http/1.1 协商结果**，`STATUS_NOT_SUPPORTED`）。`kws::ConnectConfig`（`Types.h:268-279`）无协议选择字段。
+- 高层 `kws` 默认仍走 HTTP/1.1 Upgrade；`ConnectConfig.AllowWebSocketOverHttp2` / `TransportMode` 可显式选择 RFC 8441。`wss` opt-in 后会 offer `h2,http/1.1`，协商到 h2 且 peer 启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 时走 extended CONNECT；默认自动选择仍不做。
 - 低层 RFC 8441 原语就绪：`Http2Connection.cpp:102-130`（`ValidateExtendedConnectRequest`）、`:1003-1031`（校验 `peerSettings_.EnableConnectProtocol` 并置 `TunnelMode`）、`SendStreamData`/`ReceiveStreamData`（`Http2Connection.h:278-306`）。
 - WS 帧编解码 transport-agnostic（`WebSocketFrame.h:37-90` 的 `WebSocketCodec`），但 `EncodeClientFrame`（:66/:71）**强制掩码**；RFC 8441 在 H2 上**禁止掩码**，需新增无掩码编码变体。
 
@@ -200,18 +200,19 @@
 
 ## P4 — 维持非目标 / 小型增量（建议保持现状或低优先）
 
-> 进度（截至 2026-06-19）：P4 已完成：高层 `khttp` 继续不暴露 h2c，h2c 仍限定在低层 `Http2Client`；低层 `Http2Connection` 新增显式 `SendPing`，用于调用方主动发 HTTP/2 PING 保活 / 探测，默认不引入后台定时器或自动策略；permessage-deflate、HTTP/2 server push、WS 握手 redirect / 401 跟随、在线 OCSP/CRL 抓取、HTTP/3·QUIC、服务端 / 入站 parser、TRACE、管线化、`Expect:100-continue` 与流式上传继续明确保持非目标。已通过 `http2_client_tests`、`http2_frame_tests`、`websocket_frame_tests`、`websocket_client_tests`、`khttp_tests` 与 Debug x64 构建（0 警告）。
+> 进度（截至 2026-06-19）：P4 已完成：低层 `Http2Connection` 新增显式 `SendPing`，用于调用方主动发 HTTP/2 PING 保活 / 探测；HTTP/2 server push、WS 握手 redirect / 401 跟随、在线 OCSP/CRL 抓取、HTTP/3·QUIC、服务端 / 入站 parser 继续明确保持非目标。已通过 `http2_client_tests`、`http2_frame_tests`、`websocket_frame_tests`、`websocket_client_tests`、`khttp_tests` 与 Debug x64 构建（0 警告）。
+> 后续状态更新：HTTP/1.1 pipeline、WebSocket `permessage-deflate`、HTTP/2 后台 PING 保活和 per-request priority 已从“保持拒绝/低层显式原语”迁移为显式 opt-in 能力；默认仍关闭，安全拒绝边界保持不变。
 
 | 项目 | 建议 |
 |------|------|
 | 高层 `khttp` 暴露 h2c | 低价值，保持仅 `Http2Client`；如确需，作小型增量 |
-| 主动 PING 保活 | 已完成低层小型增量：`Http2Connection::SendPing` 显式发送 PING；不默认启用后台保活策略 |
-| permessage-deflate（RFC 7692） | **保持拒绝**——需内核 DEFLATE，价值有限 |
-| HTTP/2 server push / PRIORITY | **保持拒绝 / strip**（趋势已废弃） |
+| 主动 PING 保活 | 已完成：低层 `Http2Connection::SendPing` 显式发送 PING；高层 session 可通过 `Http2KeepAlive.Enabled=true` 显式开启后台保活，默认关闭 |
+| permessage-deflate（RFC 7692） | 已实现显式 opt-in：默认关闭，HTTP/1.1 Upgrade 与 RFC 8441 路径共享协商，非法/未请求扩展拒绝 |
+| HTTP/2 server push / PRIORITY | server push 保持拒绝；PRIORITY 已补齐显式 per-request 能力，不实现复杂本地树调度 |
 | 流式响应回调 | `SendOptions.OnBody`（`Types.h:200`）已提供增量回调；真流式（不缓冲）需引擎改造，单独评估 |
 | 在线 OCSP/CRL 抓取 | 内核态刻意省略，**保持**静态表 + stapling |
 | WS 握手 redirect / 401 跟随 | 低价值，**保持不跟随** |
-| HTTP/3·QUIC、服务端 / 入站 parser、TRACE、管线化、`Expect:100-continue`、流式上传 | **明确非目标，保持** |
+| HTTP/3·QUIC、服务端 / 入站 parser | **明确非目标，保持** |
 
 ---
 

@@ -45,7 +45,7 @@
 | Redirect 安全规则 | MAY | 已实现/已验证 | `HttpEngine.cpp` | `tests/khttp_tests.cpp` | HTTPS 降级拒绝、跨源清理敏感头。 |
 | Stale 连接安全重试 | MAY | 已实现/已验证 | `HttpEngine.cpp` | `tests/khttp_tests.cpp` | 仅安全方法，ForceNew 一次。 |
 | 明文 HTTP over proxy | SHOULD for client completeness | 已实现/已验证 | `HttpEngine.cpp`、`ConnectionPool.cpp` | `tests/khttp_tests.cpp` | 使用 absolute-form target，Host 保持 origin，`Proxy-Authorization` 仅来自显式 proxy config；HTTPS CONNECT 保持现状。 |
-| HTTP 管线化 | MAY | 明确非目标 | N/A | N/A | 串行请求/响应，避免复杂队头与重试语义。 |
+| HTTP 管线化 | MAY | 默认关闭/已验证 | `ConnectionPool.cpp`、`HttpEngine.cpp`、`Session.cpp` | `tests/khttp_tests.cpp` | session `EnableHttp11Pipeline=true` 显式开启；FIFO 响应绑定；默认仅 `GET`/`HEAD`/`OPTIONS`，深度和方法 mask 可配置；带 body、`Expect:100-continue`、redirect 重放/重排不进入 pipeline。 |
 | HTTP 服务端/入站 request parser | N/A | 明确非目标 | N/A | N/A | 项目定位为客户端协议栈。 |
 
 ## HTTP/2 与 HPACK 账本
@@ -67,9 +67,9 @@
 | h2c prior knowledge / Upgrade 低层路径 | MAY | 已实现/已验证 | `client/Http2Client.cpp` | `tests/http2_client_tests.cpp` | Upgrade 禁请求体并重放 101 后残留字节。 |
 | h2c 高层显式入口 | MAY | 默认关闭/已验证 | `HttpEngine.cpp`、`client/Http2Client.cpp` | `tests/khttp_tests.cpp`、`tests/http2_client_tests.cpp` | `SendOptions.Http2CleartextMode` 显式开启；pool key 区分 HTTP/1.1、prior knowledge 与 Upgrade。 |
 | GOAWAY/RST_STREAM 高层重试语义 | SHOULD | 已实现/已验证 | `Http2Connection.cpp`、`HttpEngine.cpp` | `tests/http2_client_tests.cpp`、`tests/khttp_tests.cpp` | `NO_ERROR`/未处理 stream 返回 `STATUS_RETRY`；高层只对安全方法 fresh retry 一次，非幂等请求不自动重放。 |
-| PRIORITY 发送 | MAY | 明确非目标 | N/A | N/A | RFC 9113 已弱化优先级，客户端合法省略。 |
+| PRIORITY 发送 | MAY | 已实现/已验证 | `Http2Frame.cpp`、`Http2Connection.cpp`、`client/Http2Client.cpp` | `tests/http2_frame_tests.cpp`、`tests/http2_client_tests.cpp` | 显式 per-request priority；支持 HEADERS priority 字段与独立 PRIORITY frame 编解码，收到 peer PRIORITY 只校验/记录语义，不改变安全边界。 |
 | server push | MAY/deprecated | 安全拒绝 | `Http2Connection.cpp` | `tests/http2_client_tests.cpp` | 客户端 `ENABLE_PUSH=0`，`PUSH_PROMISE` 协议错误。 |
-| 后台自动 PING 保活 | MAY | 明确非目标 | N/A | N/A | 低层保留显式 `SendPing`。 |
+| 后台自动 PING 保活 | MAY | 默认关闭/已验证 | `ConnectionPool.cpp`、`Http2Connection.cpp` | `tests/khttp_tests.cpp`、`tests/http2_client_tests.cpp` | session `Http2KeepAlive.Enabled=true` 显式开启；只扫描 idle 可复用池化 H2 连接，ACK 超时关闭该 idle 连接；低层保留显式 `SendPing`。 |
 
 ## TLS 1.2/1.3 账本
 
@@ -87,7 +87,7 @@
 | X25519/X448/FFDHE/NIST ECDH | MUST for offered groups | 已实现/已验证 | `crypto/KeyExchange.cpp`、`CngProvider.cpp` | `tests/tls_crypto_tests.cpp` | NIST 曲线走 CNG，部分软件实现。 |
 | RSA-PSS/ECDSA/Ed25519/Ed448 验签 | MUST for offered sigalgs | 已实现/已验证 | `crypto/CngProvider.cpp`、`Ed25519.cpp`、`Ed448.cpp` | `tests/tls_crypto_tests.cpp` | legacy SHA-1 默认关闭。 |
 | post-handshake client auth | MAY | 默认关闭/已验证 | `TlsPolicy.cpp`、`TlsConnection.cpp` | `tests/tls_record_tests.cpp`、`tests/tls_interop_matrix_tests.cpp` | 开启后走 mTLS 回调，不持有私钥；默认策略关闭。 |
-| TLS 1.2 renegotiation | MAY | 明确非目标 | N/A | N/A | 仅兼容信令，不实现真重协商。 |
+| TLS 1.2 renegotiation | MAY | 默认关闭/已验证 | `TlsConnection.cpp`、`TlsHandshake12.cpp` | `tests/tls_record_tests.cpp`、`tests/khttp_tests.cpp`、`tests/integration/tls_matrix.ps1` | 需 `CompatibilityExplicit` + `EnableTls12Renegotiation`，次数由 `MaxTls12Renegotiations` 限制；支持服务器 `HelloRequest` 与低层客户端主动全量重协商；不支持 abbreviated/session resumption；ALPN 按本次重协商结果更新，非空结果必须来自本次 offer。 |
 | SChannel 主路径 | N/A | 明确非目标 | N/A | N/A | 不符合内核自实现方向。 |
 
 ## X.509 证书校验账本
@@ -103,7 +103,7 @@
 | 重复扩展与未知 critical 扩展 | MUST reject | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | 解析期拒绝。 |
 | 主机名 SAN/IP/IDNA | MUST | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | 不回退 CN。 |
 | SPKI pin | MAY | 已实现/已验证 | `CertificateStore.cpp`、`CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | 配置 pin 的主机强校验。 |
-| 离线撤销表 | MAY | 已实现/已验证 | `CertificateStore.cpp`、`CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | `OnlineRequired` fail-closed。 |
+| 离线撤销证据 | MAY | 已实现/已验证 | `CertificateStore.cpp`、`CertificateValidator.cpp`、`TlsConnection.cpp` | `tests/tls_record_tests.cpp`、`tests/tls_interop_matrix_tests.cpp` | OCSP stapling、静态条目与 revocation provider 都必须提供可验证 DER evidence；校验签名、issuer/serial、thisUpdate/nextUpdate 与 OCSP/CRL 状态；`OnlineRequired`/`RequireRevocationCheck` 查不到或证据无效即 fail-closed。 |
 | 在线 OCSP/CRL 抓取 | MAY | 明确非目标 | N/A | N/A | 内核态避免网络抓取副作用。 |
 
 ## WebSocket 账本
@@ -119,7 +119,7 @@
 | control frame 自动 Pong 与洪泛上限 | SHOULD/安全边界 | 已实现/已验证 | `WebSocketClient.cpp` | `tests/websocket_client_tests.cpp` | 单次接收控制帧 ≤100。 |
 | close handshake | MUST | 已实现/已验证 | `WebSocketClient.cpp` | `tests/websocket_client_tests.cpp` | 主动/被动 close 已覆盖。 |
 | RFC 8441 WebSocket over HTTP/2 | MAY | 默认关闭/已验证 | `Http2Connection.cpp`、`WebSocketClient.cpp` | `tests/http2_client_tests.cpp`、`tests/websocket_client_tests.cpp` | 仅 `wss` 显式 opt-in。 |
-| permessage-deflate | MAY | 明确非目标/安全拒绝 | `WebSocketFrame.cpp` | `tests/websocket_frame_tests.cpp` | 任何 `Sec-WebSocket-Extensions` 拒绝。 |
+| permessage-deflate | MAY | 显式 opt-in 已实现/已验证 | `WebSocketFrame.cpp`、`WebSocketDeflate.cpp`、`WebSocketClient.cpp` | `tests/websocket_frame_tests.cpp`、`tests/websocket_client_tests.cpp` | 默认关闭；未请求扩展、未知扩展、重复/非法参数拒绝；解压受消息大小、输出容量和膨胀比限制。 |
 | opening-handshake redirect/401/407 跟随 | MAY | 明确非目标/安全拒绝 | `WebSocketClient.cpp` | `tests/websocket_client_tests.cpp` | 3xx/401/407 返回 `STATUS_NOT_SUPPORTED`；若未来实现必须显式 opt-in 且沿用 HTTP 安全重定向规则。 |
 
 ## 代理账本
@@ -164,7 +164,7 @@ pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1 -Configuration Release -Plat
 本轮计划中的客户端主路径缺口已迁移为 `已实现/已验证`、`默认关闭/已验证`、`安全拒绝` 或 `明确非目标`：
 
 1. HTTP/1.1 真流式请求体、显式 `Expect: 100-continue`、明文 HTTP over proxy 已验证。
-2. HTTP/2 请求 trailers、流式 DATA、高层 h2c 显式入口、GOAWAY/RST 高层重试语义已验证。
+2. HTTP/2 请求 trailers、流式 DATA、高层 h2c 显式入口、GOAWAY/RST 高层重试语义、显式 per-request PRIORITY 已验证。
 3. WebSocket wire fragment 回调由 `ReceiveOptions.DeliverFragments` 显式开启，默认仍保持聚合消息兼容行为。
 4. X.509 AKI/SKI 与交叉签名路径构建、Name Constraints、certificatePolicies 已验证。
 5. TLS post-handshake/KeyUpdate 边界已审计；默认关闭项保持显式配置入口。

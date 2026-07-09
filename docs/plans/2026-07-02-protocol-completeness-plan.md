@@ -22,7 +22,7 @@
 
 - 核心补全：HTTP/1.1 `Expect: 100-continue`、流式请求体、明文 HTTP over proxy、HTTP/2 高层语义一致性、HTTP/2 请求 trailers/流式 DATA、WebSocket wire fragment 回调、TLS/证书路径构建审计。
 - 安全拒绝：HTTP obs-fold、HTTP/2 server push、非法 CONTINUATION/PING/WINDOW_UPDATE、WebSocket 扩展默认拒绝、TLS 降级哨兵、未知 critical 证书扩展。
-- 明确非目标：HTTP/3/QUIC、服务端/入站 request parser、HTTP 管线化、TRACE、在线 OCSP/CRL 网络抓取、WebSocket permessage-deflate 自动协商、把 WinHTTP/WinINet/SChannel 作为内核主路径。
+- 明确非目标：HTTP/3/QUIC、服务端/入站 request parser、在线 OCSP/CRL 网络抓取、WebSocket permessage-deflate 自动协商、把 WinHTTP/WinINet/SChannel 作为内核主路径；HTTP/1.1 pipeline、TRACE、Expect 与流式上传已后续迁移为显式 opt-in 或已验证能力。
 - 显示要求：`docsite/capability-matrix*.md` 不应只写“未支持”；必须写“为何不做、是否安全拒绝、是否可选开启、未来是否计划”。
 
 ## 文件结构地图
@@ -479,7 +479,7 @@
 
 - [x] **Step 2: 写清仍不做的能力**
 
-  HTTP/3、服务端、在线撤销、WebSocket permessage-deflate 等保持非目标，不和“未完成”混写。
+  HTTP/3、服务端、在线撤销等保持非目标，不和“未完成”混写；WebSocket permessage-deflate 已后续迁移为显式 opt-in 能力。
 
 - [x] **Step 3: docsite 提交边界**
 
