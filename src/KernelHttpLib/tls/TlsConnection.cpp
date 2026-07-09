@@ -5020,19 +5020,14 @@ namespace tls
             return FinishTls12RenegotiationAttempt(status);
         }
 
-        HeapArray<char> renegotiatedAlpn(16);
-        if (!renegotiatedAlpn.IsValid()) {
-            return FinishTls12RenegotiationAttempt(STATUS_INSUFFICIENT_RESOURCES);
-        }
-        SIZE_T renegotiatedAlpnLength = 0;
-        status = ParseServerHelloAlpn(serverHello, renegotiatedAlpn.Get(), renegotiatedAlpn.Count(), &renegotiatedAlpnLength);
+        status = ParseServerHelloAlpn(serverHello, negotiatedAlpn_, 16, &negotiatedAlpnLength_);
         if (!NT_SUCCESS(status)) {
             return FinishTls12RenegotiationAttempt(status);
         }
-        if (renegotiatedAlpnLength != 0 &&
-            (renegotiatedAlpnLength != negotiatedAlpnLength_ ||
-                RtlCompareMemory(renegotiatedAlpn.Get(), negotiatedAlpn_, negotiatedAlpnLength_) != negotiatedAlpnLength_)) {
-            return FinishTls12RenegotiationAttempt(STATUS_INVALID_NETWORK_RESPONSE);
+        if (negotiatedAlpnLength_ != 0 &&
+            !IsOfferedAlpn(options, negotiatedAlpn_, negotiatedAlpnLength_)) {
+            RecordHandshakeFailure(TlsHandshakeFailureCategory::AlpnMismatch, STATUS_NOT_SUPPORTED);
+            return FinishTls12RenegotiationAttempt(STATUS_NOT_SUPPORTED);
         }
 
         status = transcript_.Initialize(TlsHandshake12::PrfHashForCipherSuite(context_.CipherSuite()));

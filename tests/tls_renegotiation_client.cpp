@@ -30,6 +30,18 @@ namespace
     constexpr int WsaShutdown = 10058;
     constexpr int WsaNotConnected = 10057;
 
+    bool TextEquals(const char* left, SIZE_T leftLength, const char* right, SIZE_T rightLength) noexcept
+    {
+        if (leftLength != rightLength) {
+            return false;
+        }
+        if (leftLength == 0) {
+            return true;
+        }
+
+        return left != nullptr && right != nullptr && memcmp(left, right, leftLength) == 0;
+    }
+
     struct SockAddr final
     {
         USHORT Family = 0;
@@ -283,14 +295,20 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if (argc != 2) {
-        printf("usage: tls_renegotiation_client <port>\n");
+    if (argc != 2 && argc != 3) {
+        printf("usage: tls_renegotiation_client <port> [--client-renegotiate]\n");
         return 2;
     }
 
     USHORT port = 0;
     if (!ParsePort(argv[1], &port)) {
         printf("invalid port: %s\n", argv[1] != nullptr ? argv[1] : "(null)");
+        return 2;
+    }
+    const bool clientInitiatedRenegotiation =
+        argc == 3 && strcmp(argv[2], "--client-renegotiate") == 0;
+    if (argc == 3 && !clientInitiatedRenegotiation) {
+        printf("unknown option: %s\n", argv[2]);
         return 2;
     }
 
@@ -327,6 +345,14 @@ int main(int argc, char** argv)
         options.Policy.Profile = KernelHttp::tls::TlsSecurityProfile::CompatibilityExplicit;
         options.Policy.EnableTls12Renegotiation = true;
         options.MaxTls12Renegotiations = 1;
+        const KernelHttp::tls::TlsAlpnProtocol alpnProtocols[] = {
+            { "h2", sizeof("h2") - 1 },
+            { "http/1.1", sizeof("http/1.1") - 1 }
+        };
+        if (clientInitiatedRenegotiation) {
+            options.AlpnProtocols = alpnProtocols;
+            options.AlpnProtocolCount = sizeof(alpnProtocols) / sizeof(alpnProtocols[0]);
+        }
 
         status = connection.Connect(transport, options);
         if (!NT_SUCCESS(status)) {
@@ -337,6 +363,41 @@ int main(int argc, char** argv)
                 static_cast<unsigned long>(failure.Category),
                 static_cast<unsigned>(failure.Status));
             goto Cleanup;
+        }
+
+        const char* initialAlpn = connection.NegotiatedAlpn();
+        const SIZE_T initialAlpnLength = connection.NegotiatedAlpnLength();
+        const bool shouldObserveAlpnRenegotiation =
+            TextEquals(initialAlpn, initialAlpnLength, "h2", sizeof("h2") - 1);
+
+        if (clientInitiatedRenegotiation) {
+            status = connection.RenegotiateTls12(transport);
+            if (!NT_SUCCESS(status)) {
+                const KernelHttp::tls::TlsHandshakeFailure& failure = connection.LastHandshakeFailure();
+                printf(
+                    "TLS client-initiated renegotiation failed: 0x%08X category=%lu detail=0x%08X\n",
+                    static_cast<unsigned>(status),
+                    static_cast<unsigned long>(failure.Category),
+                    static_cast<unsigned>(failure.Status));
+                goto Cleanup;
+            }
+
+            const char* renegotiatedAlpn = connection.NegotiatedAlpn();
+            const SIZE_T renegotiatedAlpnLength = connection.NegotiatedAlpnLength();
+            if (shouldObserveAlpnRenegotiation &&
+                renegotiatedAlpnLength != 0 &&
+                !TextEquals(renegotiatedAlpn, renegotiatedAlpnLength, "http/1.1", sizeof("http/1.1") - 1)) {
+                printf(
+                    "TLS ALPN renegotiation produced unexpected protocol: %.*s\n",
+                    static_cast<int>(renegotiatedAlpnLength),
+                    renegotiatedAlpn != nullptr ? renegotiatedAlpn : "");
+                goto Cleanup;
+            }
+
+            printf(
+                "TLS 1.2 client-initiated renegotiation complete alpn=%.*s\n",
+                static_cast<int>(renegotiatedAlpnLength),
+                renegotiatedAlpn != nullptr ? renegotiatedAlpn : "");
         }
 
         static const char request[] =

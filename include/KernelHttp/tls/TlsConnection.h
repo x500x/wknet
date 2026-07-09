@@ -114,6 +114,10 @@ namespace tls
             ULONG receiveTimeoutMilliseconds = WskOperationTimeoutMilliseconds) noexcept;
 
         _Must_inspect_result_
+        NTSTATUS RenegotiateTls12(
+            _Inout_ core::ITransport& transport) noexcept;
+
+        _Must_inspect_result_
         bool IsEstablished() const noexcept;
 
         const TlsContext& Context() const noexcept;
@@ -249,10 +253,6 @@ namespace tls
             _Inout_ core::ITransport& transport,
             _In_reads_bytes_(fragmentLength) const UCHAR* fragment,
             SIZE_T fragmentLength) noexcept;
-
-        _Must_inspect_result_
-        NTSTATUS RenegotiateTls12(
-            _Inout_ core::ITransport& transport) noexcept;
 
         _Must_inspect_result_
         NTSTATUS FinishTls12RenegotiationAttempt(NTSTATUS status) noexcept;

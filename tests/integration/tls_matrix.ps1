@@ -473,10 +473,14 @@ function Invoke-OpenSslScenario {
 function Invoke-KernelHttpRenegotiationScenario {
     param(
         [string]$OpenSsl,
-        [pscustomobject]$RsaFixture
+        [pscustomobject]$RsaFixture,
+        [switch]$ClientInitiated
     )
 
     $scenarioName = 'tls12-kernelhttp-renegotiation'
+    if ($ClientInitiated) {
+        $scenarioName = 'tls12-kernelhttp-client-renegotiation'
+    }
     if ($null -eq $RsaFixture -or
         -not (Test-Path -LiteralPath $RsaFixture.Cert) -or
         -not (Test-Path -LiteralPath $RsaFixture.Key)) {
@@ -513,6 +517,9 @@ function Invoke-KernelHttpRenegotiationScenario {
         $RsaFixture.Cert,
         $RsaFixture.Key
     )
+    if ($ClientInitiated) {
+        $serverArgs += 'client'
+    }
 
     $server = Start-Process `
         -FilePath $serverBinary `
@@ -542,9 +549,14 @@ function Invoke-KernelHttpRenegotiationScenario {
             throw "OpenSSL server did not listen for $scenarioName. See $serverErr"
         }
 
+        $clientArgs = @("$port")
+        if ($ClientInitiated) {
+            $clientArgs += '--client-renegotiate'
+        }
+
         $clientResult = Invoke-NativeWithTimeout `
             -FilePath $client `
-            -ArgumentList @("$port") `
+            -ArgumentList $clientArgs `
             -TimeoutMilliseconds 30000 `
             -LogPrefix "$safeName.client"
 
@@ -722,6 +734,11 @@ function Invoke-OpenSslWireMatrix {
     Invoke-KernelHttpRenegotiationScenario `
         -OpenSsl $OpenSsl `
         -RsaFixture $rsaFixture
+
+    Invoke-KernelHttpRenegotiationScenario `
+        -OpenSsl $OpenSsl `
+        -RsaFixture $rsaFixture `
+        -ClientInitiated
 
     Add-Skip 'tls13-resumption-0rtt' 'project matrix binary covers PSK/0-RTT; this OpenSSL CLI harness does not use public endpoints or keep server state for early_data replay'
     Add-Skip 'tls13-keyupdate' 'project matrix binary covers KeyUpdate; OpenSSL s_client has no stable noninteractive KeyUpdate path in this harness'

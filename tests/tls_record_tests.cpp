@@ -2405,6 +2405,20 @@ namespace
         Expect(parsed.BodyLength == 1, "TLS 1.2 non-empty HelloRequest body length is visible to connection policy");
     }
 
+    void TestTls12ClientInitiatedRenegotiationRequiresEstablishedConnection()
+    {
+        ScriptedTlsTransport transport(nullptr, 0);
+        TlsConnection connection;
+
+        const NTSTATUS status = connection.RenegotiateTls12(transport);
+
+        ExpectStatus(
+            status,
+            STATUS_NOT_SUPPORTED,
+            "TLS 1.2 client-initiated renegotiation requires an established compatible connection");
+        Expect(transport.SendCalls() == 0, "TLS 1.2 rejected client-initiated renegotiation sends no record");
+    }
+
     void TestTls12ConnectionClientHelloFollowsCompatibilityPolicy()
     {
         ScriptedTlsTransport transport(nullptr, 0);
@@ -6722,6 +6736,7 @@ int main()
     TestTls12ClientHelloAdvertisesStrictExtensions();
     TestTls12ClientHelloCarriesRenegotiationInfo();
     TestParseTls12HelloRequest();
+    TestTls12ClientInitiatedRenegotiationRequiresEstablishedConnection();
     TestTls12ConnectionClientHelloFollowsCompatibilityPolicy();
     TestClientHelloRejectsInvalidSniNames();
     TestClientHelloAdvertisesSessionTicket();

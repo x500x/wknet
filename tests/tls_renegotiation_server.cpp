@@ -29,6 +29,21 @@ namespace
     constexpr int SocketReceiveTimeout = 0x1006;
     constexpr int SocketShutdownBoth = 2;
     constexpr int SslFileTypePem = 1;
+    constexpr int SslTlsextErrOk = 0;
+    constexpr int SslTlsextErrNoAck = 3;
+    constexpr uint64_t SslOpAllowClientRenegotiation = 1ULL << 8;
+
+    enum class RenegotiationMode
+    {
+        ServerInitiated,
+        ClientInitiated
+    };
+
+    struct AlpnSelectionState final
+    {
+        bool Enabled = false;
+        ULONG CallbackCalls = 0;
+    };
 
     struct SockAddr final
     {
@@ -93,6 +108,15 @@ namespace
         using SslCtxUsePrivateKeyFileFn = int (__cdecl*)(SslCtx*, const char*, int);
         using SslCtxCheckPrivateKeyFn = int (__cdecl*)(const SslCtx*);
         using SslCtxSetCipherListFn = int (__cdecl*)(SslCtx*, const char*);
+        using SslCtxSetOptionsFn = uint64_t (__cdecl*)(SslCtx*, uint64_t);
+        using SslAlpnSelectCallback = int (__cdecl*)(
+            Ssl*,
+            const UCHAR**,
+            UCHAR*,
+            const UCHAR*,
+            unsigned int,
+            void*);
+        using SslCtxSetAlpnSelectCbFn = void (__cdecl*)(SslCtx*, SslAlpnSelectCallback, void*);
         using SslNewFn = Ssl* (__cdecl*)(SslCtx*);
         using SslFreeFn = void (__cdecl*)(Ssl*);
         using SslSetFdFn = int (__cdecl*)(Ssl*, int);
@@ -118,6 +142,8 @@ namespace
         SslCtxUsePrivateKeyFileFn SslCtxUsePrivateKeyFile = nullptr;
         SslCtxCheckPrivateKeyFn SslCtxCheckPrivateKey = nullptr;
         SslCtxSetCipherListFn SslCtxSetCipherList = nullptr;
+        SslCtxSetOptionsFn SslCtxSetOptions = nullptr;
+        SslCtxSetAlpnSelectCbFn SslCtxSetAlpnSelectCb = nullptr;
         SslNewFn SslNew = nullptr;
         SslFreeFn SslFree = nullptr;
         SslSetFdFn SslSetFd = nullptr;
@@ -148,6 +174,16 @@ namespace
         }
 
         return true;
+    }
+
+    template<typename T>
+    void LoadOptionalProc(HMODULE module, const char* name, T* function) noexcept
+    {
+        if (module == nullptr || name == nullptr || function == nullptr) {
+            return;
+        }
+
+        *function = reinterpret_cast<T>(GetProcAddress(module, name));
     }
 
     bool LoadWinsock(WinsockApi& api) noexcept
@@ -194,7 +230,7 @@ namespace
             return false;
         }
 
-        return
+        const bool loaded =
             LoadProc(api.SslModule, "OPENSSL_init_ssl", &api.OpensslInitSsl) &&
             LoadProc(api.SslModule, "TLS_server_method", &api.TlsServerMethod) &&
             LoadProc(api.SslModule, "SSL_CTX_new", &api.SslCtxNew) &&
@@ -217,6 +253,13 @@ namespace
             LoadProc(api.SslModule, "SSL_get_version", &api.SslGetVersion) &&
             LoadProc(api.CryptoModule, "ERR_get_error", &api.ErrGetError) &&
             LoadProc(api.CryptoModule, "ERR_error_string_n", &api.ErrErrorStringN);
+
+        if (loaded) {
+            LoadOptionalProc(api.SslModule, "SSL_CTX_set_options", &api.SslCtxSetOptions);
+            LoadOptionalProc(api.SslModule, "SSL_CTX_set_alpn_select_cb", &api.SslCtxSetAlpnSelectCb);
+        }
+
+        return loaded;
     }
 
     void UnloadOpenSsl(OpenSslApi& api) noexcept
@@ -335,11 +378,88 @@ namespace
         }
     }
 
-    bool ConfigureContext(const OpenSslApi& api, SslCtx* ctx, const char* certPath, const char* keyPath) noexcept
+    bool OfferedAlpnContains(
+        const UCHAR* offered,
+        unsigned int offeredLength,
+        const UCHAR* protocol,
+        UCHAR protocolLength) noexcept
+    {
+        if (offered == nullptr || protocol == nullptr || protocolLength == 0) {
+            return false;
+        }
+
+        unsigned int offset = 0;
+        while (offset < offeredLength) {
+            const UCHAR currentLength = offered[offset++];
+            if (currentLength == 0 || currentLength > offeredLength - offset) {
+                return false;
+            }
+
+            if (currentLength == protocolLength &&
+                memcmp(offered + offset, protocol, protocolLength) == 0) {
+                return true;
+            }
+
+            offset += currentLength;
+        }
+
+        return false;
+    }
+
+    int __cdecl SelectAlpn(
+        Ssl* ssl,
+        const UCHAR** out,
+        UCHAR* outLength,
+        const UCHAR* offered,
+        unsigned int offeredLength,
+        void* arg)
+    {
+        (void)ssl;
+        if (out == nullptr || outLength == nullptr || arg == nullptr) {
+            return SslTlsextErrNoAck;
+        }
+
+        auto* state = static_cast<AlpnSelectionState*>(arg);
+        ++state->CallbackCalls;
+
+        static const UCHAR h2[] = { 'h', '2' };
+        static const UCHAR http11[] = { 'h', 't', 't', 'p', '/', '1', '.', '1' };
+        const bool preferHttp11 = state->CallbackCalls > 1;
+        const UCHAR* preferred = preferHttp11 ? http11 : h2;
+        const UCHAR preferredLength =
+            preferHttp11 ? static_cast<UCHAR>(sizeof(http11)) : static_cast<UCHAR>(sizeof(h2));
+        const UCHAR* alternate = preferHttp11 ? h2 : http11;
+        const UCHAR alternateLength =
+            preferHttp11 ? static_cast<UCHAR>(sizeof(h2)) : static_cast<UCHAR>(sizeof(http11));
+
+        if (OfferedAlpnContains(offered, offeredLength, preferred, preferredLength)) {
+            *out = preferred;
+            *outLength = preferredLength;
+            return SslTlsextErrOk;
+        }
+        if (OfferedAlpnContains(offered, offeredLength, alternate, alternateLength)) {
+            *out = alternate;
+            *outLength = alternateLength;
+            return SslTlsextErrOk;
+        }
+
+        return SslTlsextErrNoAck;
+    }
+
+    bool ConfigureContext(
+        const OpenSslApi& api,
+        SslCtx* ctx,
+        const char* certPath,
+        const char* keyPath,
+        AlpnSelectionState* alpnState) noexcept
     {
         if (api.SslCtxSetCipherList(ctx, "ECDHE-RSA-AES128-GCM-SHA256") != 1) {
             PrintOpenSslError(api, "SSL_CTX_set_cipher_list", nullptr, 0);
             return false;
+        }
+
+        if (api.SslCtxSetOptions != nullptr) {
+            api.SslCtxSetOptions(ctx, SslOpAllowClientRenegotiation);
         }
 
         if (api.SslCtxUseCertificateFile(ctx, certPath, SslFileTypePem) != 1) {
@@ -355,6 +475,11 @@ namespace
         if (api.SslCtxCheckPrivateKey(ctx) != 1) {
             PrintOpenSslError(api, "SSL_CTX_check_private_key", nullptr, 0);
             return false;
+        }
+
+        if (api.SslCtxSetAlpnSelectCb != nullptr && alpnState != nullptr) {
+            alpnState->Enabled = true;
+            api.SslCtxSetAlpnSelectCb(ctx, SelectAlpn, alpnState);
         }
 
         return true;
@@ -447,7 +572,13 @@ namespace
         return true;
     }
 
-    int RunServer(USHORT port, const char* cryptoPath, const char* sslPath, const char* certPath, const char* keyPath) noexcept
+    int RunServer(
+        USHORT port,
+        const char* cryptoPath,
+        const char* sslPath,
+        const char* certPath,
+        const char* keyPath,
+        RenegotiationMode mode) noexcept
     {
         WinsockApi winsock = {};
         OpenSslApi openssl = {};
@@ -459,6 +590,7 @@ namespace
         int acceptedAddressLength = sizeof(acceptedAddress);
         bool acceptedTlsClient = false;
         int exitCode = 1;
+        AlpnSelectionState alpnState = {};
 
         if (!LoadWinsock(winsock)) {
             printf("failed to load ws2_32.dll\n");
@@ -491,7 +623,12 @@ namespace
             goto Cleanup;
         }
 
-        if (!ConfigureContext(openssl, ctx, certPath, keyPath)) {
+        if (!ConfigureContext(
+                openssl,
+                ctx,
+                certPath,
+                keyPath,
+                mode == RenegotiationMode::ClientInitiated ? &alpnState : nullptr)) {
             goto Cleanup;
         }
 
@@ -548,13 +685,20 @@ namespace
             goto Cleanup;
         }
 
-        if (!SetSocketTimeouts(winsock, clientSocket, 1000)) {
-            printf("setsockopt renegotiation timeout failed: %d\n", winsock.WsaGetLastError());
-            goto Cleanup;
-        }
+        if (mode == RenegotiationMode::ServerInitiated) {
+            if (!SetSocketTimeouts(winsock, clientSocket, 1000)) {
+                printf("setsockopt renegotiation timeout failed: %d\n", winsock.WsaGetLastError());
+                goto Cleanup;
+            }
 
-        if (!CompleteRenegotiation(openssl, ssl)) {
-            goto Cleanup;
+            if (!CompleteRenegotiation(openssl, ssl)) {
+                goto Cleanup;
+            }
+        }
+        else {
+            printf(
+                "server accepted client-initiated renegotiation alpnCallbacks=%lu\n",
+                static_cast<unsigned long>(alpnState.CallbackCalls));
         }
 
         static const char response[] =
@@ -593,8 +737,8 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if (argc != 6) {
-        printf("usage: tls_renegotiation_server <port> <libcrypto.dll> <libssl.dll> <cert.pem> <key.pem>\n");
+    if (argc != 6 && argc != 7) {
+        printf("usage: tls_renegotiation_server <port> <libcrypto.dll> <libssl.dll> <cert.pem> <key.pem> [client]\n");
         return 2;
     }
 
@@ -604,5 +748,14 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    return RunServer(port, argv[2], argv[3], argv[4], argv[5]);
+    RenegotiationMode mode = RenegotiationMode::ServerInitiated;
+    if (argc == 7) {
+        if (strcmp(argv[6], "client") != 0) {
+            printf("unknown renegotiation mode: %s\n", argv[6]);
+            return 2;
+        }
+        mode = RenegotiationMode::ClientInitiated;
+    }
+
+    return RunServer(port, argv[2], argv[3], argv[4], argv[5], mode);
 }
