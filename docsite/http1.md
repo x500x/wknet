@@ -17,7 +17,7 @@ struct HttpHeader { HttpText Name; HttpText Value; };
 - body：`ContentLength` 模式发 `Content-Length`（`IncludeContentLength` 可让 0 长 body 也发 `Content-Length: 0`）；`Chunked` 模式发 `Transfer-Encoding: chunked` 并按 `hex\r\n data \r\n ... 0\r\n` 串行化，随后写出请求 trailer（若有）再以 `\r\n` 收尾。
 - **请求 trailer**：仅在 `Chunked` 且确有 chunked 框定（有 body 或 `IncludeContentLength`）时可用，经 `options.Trailers/TrailerCount` 提供；字段名须为合法 token，**禁止 trailer 字段** `Content-Length`/`Transfer-Encoding`/`Host`/`Authorization`/`Proxy-Authorization`/`Cookie`/`Set-Cookie` → `STATUS_NOT_SUPPORTED`；公共 API 为 `KhHttpRequestAddTrailer` / `khttp::RequestAddTrailer`。
 - **禁止的额外头**：`Host`/`Content-Length`/`Connection` → `STATUS_INVALID_PARAMETER`；`Transfer-Encoding`/`TE` → `STATUS_NOT_SUPPORTED`；`Trailer` 头仅在 chunked 框定下允许（否则 `STATUS_NOT_SUPPORTED`）；调用方手写 `Expect: 100-continue` 且未通过库的 expect-continue 选项开启时 → `STATUS_NOT_SUPPORTED`。
-- 引擎层在无 `Accept-Encoding` 时注入默认 `gzip, deflate, br, identity`（deflate 运行时不可用则 `br, identity`）。
+- 引擎层在无 `Accept-Encoding` 时注入默认 `gzip, deflate, br, zstd, identity`（deflate 运行时不可用则 `br, identity`）。typed preferences 可生成带 qvalue 的 `Accept-Encoding`，并驱动响应 `Content-Encoding` fail-closed 校验。
 
 ### 流式请求体、Expect 与代理
 
@@ -58,6 +58,11 @@ struct HttpHeader { HttpText Name; HttpText Value; };
 | `deflate` | 自动识别 zlib 包装并校验 **Adler-32**；裸 DEFLATE 用内核 `RtlDecompressBufferEx`，附运行时探测 `DeflateRuntimeAvailable` |
 | `br` | 内置 Brotli 解码 |
 | `compress` | 完整 LZW（`.Z`，9–16 bit，block 模式） |
+| `zstd` | 内置 Zstandard 解码 |
+| `dcz` | 调用方提供 zstd 字典，缺字典 fail-closed |
+| `aes128gcm` | RFC 8188 keying material 解密，缺 key 或认证失败 fail-closed |
+| `exi` | 已识别 coding token；完整 EXI 解码器待补全，当前 fail-closed |
+| `pack200-gzip` | 已识别 coding token；完整 Pack200 解包与 JAR 重建待补全，当前 fail-closed |
 | `identity` | 跳过 |
 
 - 链最多 **2 级**（>2 → `STATUS_NOT_SUPPORTED`），按**反序**解码。

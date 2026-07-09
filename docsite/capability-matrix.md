@@ -9,7 +9,8 @@
 - body 框定：Content-Length / chunked / close-delimited；**无 body 状态**：1xx、204、**205**、304，及 HEAD 响应。
 - chunked：块数 ≤8192、chunk-size 行 ≤32、严格 chunk 扩展语法校验；trailer 校验并拒绝禁止字段（`Content-Length`/`Transfer-Encoding`/`Host`/`Authorization`/`Proxy-Authorization`/`Cookie`/`Set-Cookie`）。
 - `206 Partial Content` / `Content-Range` 提供只读解析（`HttpResponse::IsPartialContent` / `GetContentRange`）；请求侧提供 `Range` 与条件请求 typed helper。绑定 RFC 9111 cache 后，Range 请求与 `206` 响应参与自动验证、切片命中和 partial 合并。
-- `Content-Encoding` 解码：`gzip`（校验 CRC32+ISIZE+头 CRC16）、`deflate`（自动识别 zlib 包装并校验 Adler-32，底层用内核 `RtlDecompressBufferEx`，带运行时探测）、`br`（内置 Brotli）、`compress`（完整 LZW `.Z`）、`identity`；最多 2 级链，反序解码。
+- `Content-Encoding` 解码：`gzip`（校验 CRC32+ISIZE+头 CRC16）、`deflate`（自动识别 zlib 包装并校验 Adler-32，底层用内核 `RtlDecompressBufferEx`，带运行时探测）、`br`（内置 Brotli）、`compress`（完整 LZW `.Z`）、`zstd`（内置 Zstandard 解码）、`dcz`（调用方提供 zstd 字典）、`aes128gcm`（RFC 8188 keying material 解密）、`identity`；最多 2 级链，反序解码。`exi` 与 `pack200-gzip` 已识别并接入安全拒绝路径，完整解码器补全前不提供子集成功实现。
+- `Accept-Encoding`：默认自动发送 `gzip, deflate, br, zstd, identity`（deflate 运行时不可用则 `br, identity`）；typed preferences 支持 qvalue、`identity;q=0`、`*;q=0`、重复项拒绝，并驱动响应 `Content-Encoding` fail-closed 校验。
 - **解压炸弹防护**：decoded aggregate 跟随响应/调用方容量，单级膨胀比 ≤64（`MaxDecodeExpansionRatio`）。
 - 中间 1xx（除 101）静默吞掉重解析；`SendFlagExpectContinue` 显式开启 `Expect: 100-continue`，覆盖 100 后发送 body、final/417 不发送 body、超时后发送 body 与断连错误；自动 redirect、keep-alive 连接池复用。
 - HTTP proxy：HTTPS 走 CONNECT 隧道；明文 HTTP over proxy 使用 absolute-form request target，`Proxy-Authorization` 只来自显式代理配置。
@@ -102,7 +103,6 @@
 |------|----------|
 | HTTP 入站 request parser / server role | 非目标；当前项目定位为客户端协议栈 |
 | 磁盘持久化 HTTP cache | 非目标；RFC 9111 cache 为显式内存内 NonPaged 对象，不跨重启持久化 |
-| 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
 | HTTP/2 复杂本地 priority tree 调度 | 非目标；不维护本地依赖树，不实现带宽调度器 |
 | 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；不协商其它扩展 |
 | 在线 OCSP/CRL 抓取 | 非目标；调用方通过外部 trust/cert/revocation 数据或已缓存条目驱动强撤销判定 |
