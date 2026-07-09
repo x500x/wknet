@@ -3,11 +3,13 @@
 #endif
 
 #include <KernelHttp/KernelHttp.h>
+#include <KernelHttp/core/ITransport.h>
 #include <KernelHttp/core/Lookaside.h>
 #include <KernelHttp/engine/Async.h>
 #include <KernelHttp/engine/ConnectionPool.h>
 #include <KernelHttp/engine/HandleTypes.h>
 #include <KernelHttp/engine/Workspace.h>
+#include <KernelHttp/http2/Http2Connection.h>
 #include <KernelHttp/khttp/Test.h>
 #include <KernelHttp/net/WskSocket.h>
 
@@ -131,6 +133,86 @@ namespace
         cursor += sizeof(GzipBody);
         return cursor;
     }
+
+    struct Http2KeepAliveTestTransport final : public KernelHttp::core::ITransport
+    {
+        bool TimeoutAck = false;
+        ULONG SendCalls = 0;
+        ULONG ReceiveCalls = 0;
+        ULONG LastTimeoutMs = 0;
+        SIZE_T AckOffset = 0;
+        UCHAR AckFrame[17] = {};
+        UCHAR LastPingOpaque[8] = {};
+
+        NTSTATUS Send(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept override
+        {
+            if (bytesSent != nullptr) {
+                *bytesSent = 0;
+            }
+            if (data == nullptr || length != sizeof(AckFrame)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            const UCHAR* bytes = static_cast<const UCHAR*>(data);
+            if (bytes[0] != 0 || bytes[1] != 0 || bytes[2] != 8 ||
+                bytes[3] != 0x06 || bytes[4] != 0 || bytes[5] != 0 ||
+                bytes[6] != 0 || bytes[7] != 0 || bytes[8] != 0) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            ++SendCalls;
+            memcpy(LastPingOpaque, bytes + 9, sizeof(LastPingOpaque));
+            AckFrame[0] = 0;
+            AckFrame[1] = 0;
+            AckFrame[2] = 8;
+            AckFrame[3] = 0x06;
+            AckFrame[4] = 0x01;
+            AckFrame[5] = 0;
+            AckFrame[6] = 0;
+            AckFrame[7] = 0;
+            AckFrame[8] = 0;
+            memcpy(AckFrame + 9, LastPingOpaque, sizeof(LastPingOpaque));
+            AckOffset = 0;
+
+            if (bytesSent != nullptr) {
+                *bytesSent = length;
+            }
+            return STATUS_SUCCESS;
+        }
+
+        NTSTATUS Receive(void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept override
+        {
+            return ReceiveWithTimeout(buffer, length, bytesReceived, 0);
+        }
+
+        NTSTATUS ReceiveWithTimeout(
+            void* buffer,
+            SIZE_T length,
+            SIZE_T* bytesReceived,
+            ULONG timeoutMilliseconds) noexcept override
+        {
+            if (bytesReceived != nullptr) {
+                *bytesReceived = 0;
+            }
+            LastTimeoutMs = timeoutMilliseconds;
+            if (TimeoutAck) {
+                return STATUS_IO_TIMEOUT;
+            }
+            if (buffer == nullptr || length == 0 || AckOffset >= sizeof(AckFrame)) {
+                return STATUS_CONNECTION_DISCONNECTED;
+            }
+
+            ++ReceiveCalls;
+            const SIZE_T remaining = sizeof(AckFrame) - AckOffset;
+            const SIZE_T copyLength = remaining < length ? remaining : length;
+            memcpy(buffer, AckFrame + AckOffset, copyLength);
+            AckOffset += copyLength;
+            if (bytesReceived != nullptr) {
+                *bytesReceived = copyLength;
+            }
+            return STATUS_SUCCESS;
+        }
+    };
 
     SIZE_T BuildLargeHttpResponse(char* buffer, SIZE_T capacity) noexcept
     {
@@ -2646,6 +2728,10 @@ namespace
             &reused);
         Expect(NT_SUCCESS(status), "first HTTP/2 pool acquire succeeds");
         Expect(first != nullptr && !reused, "first HTTP/2 acquire is fresh");
+        Http2KeepAliveTestTransport transport = {};
+        KernelHttp::http2::Http2Connection connection;
+        first->Transport = &transport;
+        first->Http2 = &connection;
 
         status = KernelHttp::engine::KhConnectionPoolPromoteHttp2StreamLease(&pool, first, 2);
         Expect(NT_SUCCESS(status), "first HTTP/2 stream lease promotes connection");
@@ -2687,6 +2773,212 @@ namespace
 
         KernelHttp::engine::KhConnectionPoolRelease(&pool, third, true);
         KernelHttp::engine::KhConnectionPoolRelease(&pool, first, true);
+        KernelHttp::engine::KhConnectionPoolShutdown(&pool);
+    }
+
+    void TestHttp2KeepAliveDefaultDisabled() noexcept
+    {
+        KernelHttp::engine::KhConnectionPool pool = {};
+        NTSTATUS status = KernelHttp::engine::KhConnectionPoolInitialize(&pool, 2, 1, 30000);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive default-disabled pool initializes");
+
+        KernelHttp::engine::KhConnectionPoolKey key = {};
+        memcpy(key.Scheme, "https", Length("https"));
+        key.SchemeLength = Length("https");
+        memcpy(key.Host, "example.com", Length("example.com"));
+        key.HostLength = Length("example.com");
+        key.Port = 443;
+        memcpy(key.Alpn, "h2", Length("h2"));
+        key.AlpnLength = Length("h2");
+
+        Http2KeepAliveTestTransport transport = {};
+        KernelHttp::http2::Http2Connection connection;
+        KernelHttp::engine::KhPooledConnection* pooled = nullptr;
+        bool reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquire(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            &pooled,
+            &reused);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive default-disabled acquire succeeds");
+        pooled->Transport = &transport;
+        pooled->Http2 = &connection;
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, pooled, true);
+
+        bool attempted = true;
+        status = KernelHttp::engine::KhConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive default-disabled sweep succeeds");
+        Expect(!attempted, "HTTP/2 keepalive default-disabled sweep does not attempt PING");
+        Expect(transport.SendCalls == 0, "HTTP/2 keepalive default-disabled sweep sends no PING");
+        KernelHttp::engine::KhConnectionPoolShutdown(&pool);
+    }
+
+    void TestHttp2KeepAliveSendsPingForIdleConnection() noexcept
+    {
+        KernelHttp::engine::KhHttp2KeepAliveOptions keepAlive = {};
+        keepAlive.Enabled = true;
+        keepAlive.IdleMilliseconds = 1;
+        keepAlive.IntervalMilliseconds = 1;
+        keepAlive.AckTimeoutMilliseconds = 7;
+
+        KernelHttp::engine::KhConnectionPool pool = {};
+        NTSTATUS status = KernelHttp::engine::KhConnectionPoolInitialize(&pool, 2, 1, 30000, &keepAlive);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive enabled pool initializes");
+
+        KernelHttp::engine::KhConnectionPoolKey key = {};
+        memcpy(key.Scheme, "https", Length("https"));
+        key.SchemeLength = Length("https");
+        memcpy(key.Host, "example.com", Length("example.com"));
+        key.HostLength = Length("example.com");
+        key.Port = 443;
+        memcpy(key.Alpn, "h2", Length("h2"));
+        key.AlpnLength = Length("h2");
+
+        Http2KeepAliveTestTransport transport = {};
+        KernelHttp::http2::Http2Connection connection;
+        KernelHttp::engine::KhPooledConnection* pooled = nullptr;
+        bool reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquire(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            &pooled,
+            &reused);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive idle acquire succeeds");
+        pooled->Transport = &transport;
+        pooled->Http2 = &connection;
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, pooled, true);
+
+        bool attempted = false;
+        status = KernelHttp::engine::KhConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive idle sweep succeeds");
+        Expect(attempted, "HTTP/2 keepalive idle sweep attempts PING");
+        Expect(transport.SendCalls == 1, "HTTP/2 keepalive idle sweep sends one PING");
+        Expect(transport.LastTimeoutMs == keepAlive.AckTimeoutMilliseconds,
+            "HTTP/2 keepalive idle sweep uses ACK timeout");
+        Expect(pooled->Http2LastKeepAliveTime != 0, "HTTP/2 keepalive records successful PING time");
+        KernelHttp::engine::KhConnectionPoolShutdown(&pool);
+    }
+
+    void TestHttp2KeepAliveSkipsNotDueAndActiveConnections() noexcept
+    {
+        KernelHttp::engine::KhHttp2KeepAliveOptions keepAlive = {};
+        keepAlive.Enabled = true;
+        keepAlive.IdleMilliseconds = 1000;
+        keepAlive.IntervalMilliseconds = 1000;
+        keepAlive.AckTimeoutMilliseconds = 5;
+
+        KernelHttp::engine::KhConnectionPool pool = {};
+        NTSTATUS status = KernelHttp::engine::KhConnectionPoolInitialize(&pool, 2, 1, 30000, &keepAlive);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive skip pool initializes");
+
+        KernelHttp::engine::KhConnectionPoolKey key = {};
+        memcpy(key.Scheme, "https", Length("https"));
+        key.SchemeLength = Length("https");
+        memcpy(key.Host, "example.com", Length("example.com"));
+        key.HostLength = Length("example.com");
+        key.Port = 443;
+        memcpy(key.Alpn, "h2", Length("h2"));
+        key.AlpnLength = Length("h2");
+
+        Http2KeepAliveTestTransport transport = {};
+        KernelHttp::http2::Http2Connection connection;
+        KernelHttp::engine::KhPooledConnection* pooled = nullptr;
+        bool reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquire(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            &pooled,
+            &reused);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive not-due acquire succeeds");
+        pooled->Transport = &transport;
+        pooled->Http2 = &connection;
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, pooled, true);
+
+        bool attempted = true;
+        status = KernelHttp::engine::KhConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive not-due sweep succeeds");
+        Expect(!attempted, "HTTP/2 keepalive not-due sweep skips PING");
+        Expect(transport.SendCalls == 0, "HTTP/2 keepalive not-due sweep sends no PING");
+
+        status = KernelHttp::engine::KhConnectionPoolAcquire(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            &pooled,
+            &reused);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive active acquire succeeds");
+        pooled->Transport = &transport;
+        pooled->Http2 = &connection;
+        status = KernelHttp::engine::KhConnectionPoolPromoteHttp2StreamLease(&pool, pooled, 2);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive active stream lease promotes");
+
+        attempted = true;
+        status = KernelHttp::engine::KhConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive active sweep succeeds");
+        Expect(!attempted, "HTTP/2 keepalive active stream sweep skips PING");
+        Expect(transport.SendCalls == 0, "HTTP/2 keepalive active stream sends no PING");
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, pooled, false);
+        KernelHttp::engine::KhConnectionPoolShutdown(&pool);
+    }
+
+    void TestHttp2KeepAliveAckTimeoutClosesIdleConnection() noexcept
+    {
+        KernelHttp::engine::KhHttp2KeepAliveOptions keepAlive = {};
+        keepAlive.Enabled = true;
+        keepAlive.IdleMilliseconds = 1;
+        keepAlive.IntervalMilliseconds = 1;
+        keepAlive.AckTimeoutMilliseconds = 5;
+
+        KernelHttp::engine::KhConnectionPool pool = {};
+        NTSTATUS status = KernelHttp::engine::KhConnectionPoolInitialize(&pool, 2, 1, 30000, &keepAlive);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive timeout pool initializes");
+
+        KernelHttp::engine::KhConnectionPoolKey key = {};
+        memcpy(key.Scheme, "https", Length("https"));
+        key.SchemeLength = Length("https");
+        memcpy(key.Host, "example.com", Length("example.com"));
+        key.HostLength = Length("example.com");
+        key.Port = 443;
+        memcpy(key.Alpn, "h2", Length("h2"));
+        key.AlpnLength = Length("h2");
+
+        Http2KeepAliveTestTransport transport = {};
+        transport.TimeoutAck = true;
+        KernelHttp::http2::Http2Connection connection;
+        KernelHttp::engine::KhPooledConnection* pooled = nullptr;
+        bool reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquire(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            &pooled,
+            &reused);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive timeout acquire succeeds");
+        pooled->Transport = &transport;
+        pooled->Http2 = &connection;
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, pooled, true);
+
+        bool attempted = false;
+        status = KernelHttp::engine::KhConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
+        Expect(status == STATUS_IO_TIMEOUT, "HTTP/2 keepalive ACK timeout is reported");
+        Expect(attempted, "HTTP/2 keepalive timeout sweep attempts PING");
+        Expect(transport.SendCalls == 1, "HTTP/2 keepalive timeout sends one PING");
+        Expect(pool.ActiveCount == 0, "HTTP/2 keepalive timeout closes idle pooled connection");
+
+        KernelHttp::engine::KhPooledConnection* fresh = nullptr;
+        reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquire(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            &fresh,
+            &reused);
+        Expect(NT_SUCCESS(status), "HTTP/2 keepalive timeout allows fresh acquire");
+        Expect(fresh != nullptr && !reused, "HTTP/2 keepalive timeout does not reuse closed connection");
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, fresh, false);
         KernelHttp::engine::KhConnectionPoolShutdown(&pool);
     }
 
@@ -5430,6 +5722,38 @@ namespace
         Expect(session == nullptr, "khttp SessionCreate does not allocate a paged session");
     }
 
+    void TestHttp2KeepAliveSessionConfigDefaultsAndValidation() noexcept
+    {
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        Expect(!config.Http2KeepAlive.Enabled, "HTTP/2 keepalive is disabled by default");
+        Expect(
+            config.Http2KeepAlive.IdleMs == khttp::DefaultHttp2KeepAliveIdleMs,
+            "HTTP/2 keepalive default idle matches constant");
+        Expect(
+            config.Http2KeepAlive.IntervalMs == khttp::DefaultHttp2KeepAliveIntervalMs,
+            "HTTP/2 keepalive default interval matches constant");
+        Expect(
+            config.Http2KeepAlive.AckTimeoutMs == khttp::DefaultHttp2KeepAliveAckTimeoutMs,
+            "HTTP/2 keepalive default ACK timeout matches constant");
+
+        config.Http2KeepAlive.Enabled = true;
+        config.Http2KeepAlive.IdleMs = 0;
+        config.Http2KeepAlive.IntervalMs = 0;
+        config.Http2KeepAlive.AckTimeoutMs = 0;
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "khttp SessionCreate normalizes zero HTTP/2 keepalive timings");
+        khttp::SessionClose(session);
+
+        config = khttp::DefaultSessionConfig();
+        config.Http2KeepAlive.Enabled = true;
+        config.Http2KeepAlive.AckTimeoutMs = KernelHttp::WskOperationTimeoutMilliseconds + 1;
+        session = nullptr;
+        status = khttp::SessionCreate(&config, &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "khttp SessionCreate rejects oversized HTTP/2 keepalive ACK timeout");
+        Expect(session == nullptr, "khttp SessionCreate does not allocate invalid HTTP/2 keepalive session");
+    }
+
     void TestIrqlCheck() noexcept
     {
         khttp::test::SetCurrentIrql(2);
@@ -5957,6 +6281,10 @@ int main() noexcept
     TestConnectionPoolSharesActiveHttp1PipelineLeases();
     TestConnectionPoolHttp1PipelineFailureClosesLeases();
     TestConnectionPoolSharesActiveHttp2StreamLeases();
+    TestHttp2KeepAliveDefaultDisabled();
+    TestHttp2KeepAliveSendsPingForIdleConnection();
+    TestHttp2KeepAliveSkipsNotDueAndActiveConnections();
+    TestHttp2KeepAliveAckTimeoutClosesIdleConnection();
     TestConnectionPoolHostQuotaSeparatesTlsReuseIdentity();
     TestConnectionPoolKeyIncludesTlsIdentity();
     TestSessionProxyConfigReachesTransport();
@@ -6003,6 +6331,7 @@ int main() noexcept
     TestLookasideListBaseline();
     TestKernelHttpHardLimitsAreStable();
     TestPagedPoolRejected();
+    TestHttp2KeepAliveSessionConfigDefaultsAndValidation();
     TestIrqlCheck();
     TestWebSocketRoundTrip();
     TestWebSocketHttp2OptInPropagates();

@@ -76,6 +76,10 @@ namespace engine
         SIZE_T Http1PipelineBufferedCapacity = 0;
         bool CloseWhenIdle = false;
         bool ProxyTunnelEstablished = false;
+        bool Http2KeepAliveInProgress = false;
+        ULONGLONG Http2LastKeepAliveTime = 0;
+        ULONGLONG Http2KeepAliveSequence = 0;
+        UCHAR Http2KeepAliveOpaqueData[8] = {};
         KhConnectionPoolKey Key = {};
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         KMUTEX Http1PipelineSendLock = {};
@@ -84,10 +88,10 @@ namespace engine
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         net::WskSocket* Socket = nullptr;
         core::WskTransport* RawTransport = nullptr;
-        core::ITransport* Transport = nullptr;
         tls::TlsConnection* Tls = nullptr;
-        http2::Http2Connection* Http2 = nullptr;
 #endif
+        core::ITransport* Transport = nullptr;
+        http2::Http2Connection* Http2 = nullptr;
     };
 
     struct KhConnectionPool final
@@ -98,8 +102,13 @@ namespace engine
         ULONG MaxConnectionsPerHost = 0;
         ULONG NextConnectionId = 1;
         ULONG IdleTimeoutMilliseconds = 0;
+        KhHttp2KeepAliveOptions Http2KeepAlive = {};
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         FAST_MUTEX Lock = {};
+        KEVENT Http2KeepAliveStopEvent = {};
+        PETHREAD Http2KeepAliveThread = nullptr;
+        volatile LONG Http2KeepAliveWorkerStarted = 0;
+        volatile LONG Http2KeepAliveStopping = 0;
 #endif
     };
 
@@ -108,7 +117,18 @@ namespace engine
         _Inout_ KhConnectionPool* pool,
         ULONG capacity,
         ULONG maxConnectionsPerHost,
-        ULONG idleTimeoutMilliseconds) noexcept;
+        ULONG idleTimeoutMilliseconds,
+        _In_opt_ const KhHttp2KeepAliveOptions* http2KeepAlive = nullptr) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhConnectionPoolStartHttp2KeepAlive(_Inout_ KhConnectionPool* pool) noexcept;
+
+    void KhConnectionPoolStopHttp2KeepAlive(_Inout_opt_ KhConnectionPool* pool) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhConnectionPoolRunHttp2KeepAliveSweep(
+        _Inout_ KhConnectionPool* pool,
+        _Out_opt_ bool* attempted) noexcept;
 
     void KhConnectionPoolShutdown(_Inout_ KhConnectionPool* pool) noexcept;
 

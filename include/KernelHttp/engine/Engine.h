@@ -52,6 +52,9 @@ namespace engine
     constexpr ULONG KhDefaultMaxRedirects = 10;
     constexpr ULONG KhDefaultExpectContinueTimeoutMilliseconds = 1000;
     constexpr ULONG KhMaxExpectContinueTimeoutMilliseconds = WskOperationTimeoutMilliseconds;
+    constexpr ULONG KhDefaultHttp2KeepAliveIdleMilliseconds = 30000;
+    constexpr ULONG KhDefaultHttp2KeepAliveIntervalMilliseconds = 30000;
+    constexpr ULONG KhDefaultHttp2KeepAliveAckTimeoutMilliseconds = 5000;
     constexpr ULONG KhDefaultHttp11PipelineMaxDepth = 4;
     constexpr ULONG KhMaxHttp11PipelineDepth = 64;
     constexpr ULONG KhHttp11PipelineMethodGet = 0x00000001;
@@ -229,6 +232,14 @@ namespace engine
         SIZE_T AuthHeaderLength = 0;
     };
 
+    struct KhHttp2KeepAliveOptions final
+    {
+        bool Enabled = false;
+        ULONG IdleMilliseconds = KhDefaultHttp2KeepAliveIdleMilliseconds;
+        ULONG IntervalMilliseconds = KhDefaultHttp2KeepAliveIntervalMilliseconds;
+        ULONG AckTimeoutMilliseconds = KhDefaultHttp2KeepAliveAckTimeoutMilliseconds;
+    };
+
     struct KhSessionOptions final
     {
         KhPoolType ResponsePoolType = KhPoolType::NonPaged;
@@ -243,6 +254,7 @@ namespace engine
         bool EnableHttp11Pipeline = false;
         ULONG Http11PipelineMaxDepth = KhDefaultHttp11PipelineMaxDepth;
         ULONG Http11PipelineMethodMask = KhDefaultHttp11PipelineMethodMask;
+        KhHttp2KeepAliveOptions Http2KeepAlive = {};
         KhTlsOptions Tls = {};
         KhProxyOptions Proxy = {};
     };

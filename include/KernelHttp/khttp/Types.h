@@ -169,6 +169,9 @@ namespace khttp
     constexpr ULONG DefaultMaxRedirects = 10;
     constexpr ULONG DefaultExpectContinueTimeoutMs = 1000;
     constexpr ULONG MaxExpectContinueTimeoutMs = ::KernelHttp::WskOperationTimeoutMilliseconds;
+    constexpr ULONG DefaultHttp2KeepAliveIdleMs = ::KernelHttp::engine::KhDefaultHttp2KeepAliveIdleMilliseconds;
+    constexpr ULONG DefaultHttp2KeepAliveIntervalMs = ::KernelHttp::engine::KhDefaultHttp2KeepAliveIntervalMilliseconds;
+    constexpr ULONG DefaultHttp2KeepAliveAckTimeoutMs = ::KernelHttp::engine::KhDefaultHttp2KeepAliveAckTimeoutMilliseconds;
     constexpr ULONG DefaultHttp11PipelineMaxDepth = ::KernelHttp::engine::KhDefaultHttp11PipelineMaxDepth;
     constexpr ULONG Http11PipelineMethodGet = ::KernelHttp::engine::KhHttp11PipelineMethodGet;
     constexpr ULONG Http11PipelineMethodPost = ::KernelHttp::engine::KhHttp11PipelineMethodPost;
@@ -234,6 +237,14 @@ namespace khttp
         SIZE_T AuthHeaderLength = 0;
     };
 
+    struct Http2KeepAliveConfig final
+    {
+        bool Enabled = false;
+        ULONG IdleMs = DefaultHttp2KeepAliveIdleMs;
+        ULONG IntervalMs = DefaultHttp2KeepAliveIntervalMs;
+        ULONG AckTimeoutMs = DefaultHttp2KeepAliveAckTimeoutMs;
+    };
+
     struct SessionConfig final
     {
         PoolType ResponsePool = PoolType::NonPaged;
@@ -246,6 +257,7 @@ namespace khttp
         bool EnableHttp11Pipeline = false;
         ULONG Http11PipelineMaxDepth = DefaultHttp11PipelineMaxDepth;
         ULONG Http11PipelineMethodMask = DefaultHttp11PipelineMethodMask;
+        Http2KeepAliveConfig Http2KeepAlive = {};
         TlsConfig Tls = {};
         ProxyConfig Proxy = {};
     };

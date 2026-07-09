@@ -21,6 +21,13 @@ namespace
             config != nullptr ? config->Http11PipelineMaxDepth : DefaultHttp11PipelineMaxDepth;
         apiOptions.Http11PipelineMethodMask =
             config != nullptr ? config->Http11PipelineMethodMask : DefaultHttp11PipelineMethodMask;
+        apiOptions.Http2KeepAlive.Enabled = config != nullptr ? config->Http2KeepAlive.Enabled : false;
+        apiOptions.Http2KeepAlive.IdleMilliseconds =
+            config != nullptr ? config->Http2KeepAlive.IdleMs : DefaultHttp2KeepAliveIdleMs;
+        apiOptions.Http2KeepAlive.IntervalMilliseconds =
+            config != nullptr ? config->Http2KeepAlive.IntervalMs : DefaultHttp2KeepAliveIntervalMs;
+        apiOptions.Http2KeepAlive.AckTimeoutMilliseconds =
+            config != nullptr ? config->Http2KeepAlive.AckTimeoutMs : DefaultHttp2KeepAliveAckTimeoutMs;
 
         TlsConfig tls = {};
         if (config != nullptr) {

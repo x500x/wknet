@@ -595,6 +595,34 @@ namespace
         return true;
     }
 
+    KhHttp2KeepAliveOptions NormalizeHttp2KeepAliveOptions(
+        const KhHttp2KeepAliveOptions& options) noexcept
+    {
+        KhHttp2KeepAliveOptions normalized = options;
+        if (normalized.IdleMilliseconds == 0) {
+            normalized.IdleMilliseconds = KhDefaultHttp2KeepAliveIdleMilliseconds;
+        }
+        if (normalized.IntervalMilliseconds == 0) {
+            normalized.IntervalMilliseconds = KhDefaultHttp2KeepAliveIntervalMilliseconds;
+        }
+        if (normalized.AckTimeoutMilliseconds == 0) {
+            normalized.AckTimeoutMilliseconds = KhDefaultHttp2KeepAliveAckTimeoutMilliseconds;
+        }
+        return normalized;
+    }
+
+    bool IsValidHttp2KeepAliveOptions(const KhHttp2KeepAliveOptions& options) noexcept
+    {
+        if (!options.Enabled) {
+            return true;
+        }
+
+        return options.IdleMilliseconds != 0 &&
+            options.IntervalMilliseconds != 0 &&
+            options.AckTimeoutMilliseconds != 0 &&
+            options.AckTimeoutMilliseconds <= WskOperationTimeoutMilliseconds;
+    }
+
     bool IsValidSessionOptions(const KhSessionOptions& options) noexcept
     {
         if (options.RequestBufferBytes == 0) {
@@ -626,6 +654,7 @@ namespace
         }
 
         return IsValidHttp11PipelineOptions(options) &&
+            IsValidHttp2KeepAliveOptions(options.Http2KeepAlive) &&
             IsValidTlsOptions(options.Tls) &&
             IsValidProxyOptions(options.Proxy);
     }
@@ -2280,6 +2309,8 @@ namespace
             effectiveOptions = *options;
         }
 
+        effectiveOptions.Http2KeepAlive =
+            NormalizeHttp2KeepAliveOptions(effectiveOptions.Http2KeepAlive);
         if (!IsValidSessionOptions(effectiveOptions)) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -2340,8 +2371,21 @@ namespace
             &newSession->ConnectionPool,
             effectiveOptions.ConnectionPoolCapacity,
             effectiveOptions.MaxConnectionsPerHost,
-            effectiveOptions.IdleTimeoutMilliseconds);
+            effectiveOptions.IdleTimeoutMilliseconds,
+            &effectiveOptions.Http2KeepAlive);
         if (!NT_SUCCESS(status)) {
+            newSession->ProviderCache->Shutdown();
+            FreeHandle(newSession->ProviderCache);
+            newSession->ProviderCache = nullptr;
+            KhWorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
+            newSession->Workspace = nullptr;
+            FreeHandle(newSession);
+            return status;
+        }
+
+        status = KhConnectionPoolStartHttp2KeepAlive(&newSession->ConnectionPool);
+        if (!NT_SUCCESS(status)) {
+            KhConnectionPoolShutdown(&newSession->ConnectionPool);
             newSession->ProviderCache->Shutdown();
             FreeHandle(newSession->ProviderCache);
             newSession->ProviderCache = nullptr;

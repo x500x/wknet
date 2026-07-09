@@ -9,6 +9,13 @@
 #include <stdlib.h>
 #endif
 
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+extern "C" NTSYSAPI NTSTATUS NTAPI ZwWaitForSingleObject(
+    _In_ HANDLE Handle,
+    _In_ BOOLEAN Alertable,
+    _In_opt_ PLARGE_INTEGER Timeout);
+#endif
+
 namespace KernelHttp
 {
 namespace engine
@@ -20,10 +27,10 @@ namespace
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         net::WskSocket* Socket = nullptr;
         core::WskTransport* RawTransport = nullptr;
-        core::ITransport* Transport = nullptr;
         tls::TlsConnection* Tls = nullptr;
-        http2::Http2Connection* Http2 = nullptr;
 #endif
+        core::ITransport* Transport = nullptr;
+        http2::Http2Connection* Http2 = nullptr;
     };
 
     void DetachConnectionResources(
@@ -258,16 +265,15 @@ namespace
     _Must_inspect_result_
     bool HasDetachedConnectionResources(_In_ const KhDetachedConnectionResources& detached) noexcept
     {
+        bool hasResources = false;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
-        return detached.Socket != nullptr ||
+        hasResources = detached.Socket != nullptr ||
             detached.RawTransport != nullptr ||
-            detached.Transport != nullptr ||
-            detached.Tls != nullptr ||
-            detached.Http2 != nullptr;
-#else
-        UNREFERENCED_PARAMETER(detached);
-        return false;
+            detached.Tls != nullptr;
 #endif
+        return hasResources ||
+            detached.Transport != nullptr ||
+            detached.Http2 != nullptr;
     }
 
     _Must_inspect_result_
@@ -284,11 +290,9 @@ namespace
             return false;
         }
 
-#if !defined(KERNEL_HTTP_USER_MODE_TEST)
         if (connection.Http2 == nullptr || connection.Transport == nullptr) {
             return false;
         }
-#endif
 
         return true;
     }
@@ -384,10 +388,10 @@ namespace
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         detached->Socket = connection.Socket;
         detached->RawTransport = connection.RawTransport;
-        detached->Transport = connection.Transport;
         detached->Tls = connection.Tls;
-        detached->Http2 = connection.Http2;
 #endif
+        detached->Transport = connection.Transport;
+        detached->Http2 = connection.Http2;
         FreeHttp1PipelineBuffer(connection);
         RtlZeroMemory(&connection, sizeof(connection));
         InitializePooledConnectionSlot(connection);
@@ -429,13 +433,137 @@ namespace
         }
 #endif
     }
+
+    KhHttp2KeepAliveOptions NormalizeHttp2KeepAliveOptions(
+        const KhHttp2KeepAliveOptions* options) noexcept
+    {
+        KhHttp2KeepAliveOptions normalized = {};
+        if (options != nullptr) {
+            normalized = *options;
+        }
+
+        if (normalized.IdleMilliseconds == 0) {
+            normalized.IdleMilliseconds = KhDefaultHttp2KeepAliveIdleMilliseconds;
+        }
+        if (normalized.IntervalMilliseconds == 0) {
+            normalized.IntervalMilliseconds = KhDefaultHttp2KeepAliveIntervalMilliseconds;
+        }
+        if (normalized.AckTimeoutMilliseconds == 0) {
+            normalized.AckTimeoutMilliseconds = KhDefaultHttp2KeepAliveAckTimeoutMilliseconds;
+        }
+        return normalized;
+    }
+
+    bool IsValidHttp2KeepAliveOptions(const KhHttp2KeepAliveOptions& options) noexcept
+    {
+        if (!options.Enabled) {
+            return true;
+        }
+
+        return options.IdleMilliseconds != 0 &&
+            options.IntervalMilliseconds != 0 &&
+            options.AckTimeoutMilliseconds != 0 &&
+            options.AckTimeoutMilliseconds <= WskOperationTimeoutMilliseconds;
+    }
+
+    void StoreHttp2KeepAliveOpaqueData(_Inout_ KhPooledConnection& connection) noexcept
+    {
+        const ULONGLONG first =
+            (static_cast<ULONGLONG>(connection.Id) << 32) ^
+            static_cast<ULONGLONG>(connection.Http2KeepAliveSequence);
+        const ULONGLONG second =
+            0x4B48503250494E47ULL ^
+            (static_cast<ULONGLONG>(connection.Http2KeepAliveSequence) << 1) ^
+            static_cast<ULONGLONG>(connection.Id);
+
+        for (ULONG index = 0; index < 4; ++index) {
+            connection.Http2KeepAliveOpaqueData[index] =
+                static_cast<UCHAR>((first >> (24 - index * 8)) & 0xff);
+            connection.Http2KeepAliveOpaqueData[index + 4] =
+                static_cast<UCHAR>((second >> (24 - index * 8)) & 0xff);
+        }
+    }
+
+    bool IsHttp2KeepAliveDue(
+        _In_ const KhConnectionPool& pool,
+        _In_ const KhPooledConnection& connection,
+        ULONGLONG now) noexcept
+    {
+        if (!pool.Http2KeepAlive.Enabled ||
+            !connection.Connected ||
+            connection.InUse ||
+            connection.CloseWhenIdle ||
+            connection.Http2KeepAliveInProgress ||
+            connection.Http2StreamLeases != 0 ||
+            connection.Http1PipelineLeases != 0 ||
+            connection.Transport == nullptr ||
+            connection.Http2 == nullptr ||
+            !connection.Http2->IsReusable() ||
+            connection.LastUsedTime == 0 ||
+            now < connection.LastUsedTime) {
+            return false;
+        }
+
+        const ULONGLONG idle100ns =
+            static_cast<ULONGLONG>(pool.Http2KeepAlive.IdleMilliseconds) * 10000ULL;
+        if (now - connection.LastUsedTime < idle100ns) {
+            return false;
+        }
+
+        if (connection.Http2LastKeepAliveTime == 0) {
+            return true;
+        }
+
+        if (now < connection.Http2LastKeepAliveTime) {
+            return true;
+        }
+
+        const ULONGLONG interval100ns =
+            static_cast<ULONGLONG>(pool.Http2KeepAlive.IntervalMilliseconds) * 10000ULL;
+        return now - connection.Http2LastKeepAliveTime >= interval100ns;
+    }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    void Http2KeepAliveWorkerRoutine(_In_ void* context)
+    {
+        auto* pool = static_cast<KhConnectionPool*>(context);
+        if (pool == nullptr) {
+            PsTerminateSystemThread(STATUS_INVALID_PARAMETER);
+        }
+
+        for (;;) {
+            LARGE_INTEGER timeout = {};
+            timeout.QuadPart =
+                -static_cast<LONGLONG>(pool->Http2KeepAlive.IntervalMilliseconds) * 10000LL;
+            const NTSTATUS waitStatus = KeWaitForSingleObject(
+                &pool->Http2KeepAliveStopEvent,
+                Executive,
+                KernelMode,
+                FALSE,
+                &timeout);
+            if (waitStatus == STATUS_SUCCESS ||
+                InterlockedCompareExchange(&pool->Http2KeepAliveStopping, 0, 0) != 0) {
+                break;
+            }
+
+            bool attempted = false;
+            const NTSTATUS sweepStatus = KhConnectionPoolRunHttp2KeepAliveSweep(pool, &attempted);
+            UNREFERENCED_PARAMETER(sweepStatus);
+            UNREFERENCED_PARAMETER(attempted);
+        }
+
+        InterlockedExchange(&pool->Http2KeepAliveWorkerStarted, 0);
+        PsTerminateSystemThread(STATUS_SUCCESS);
+    }
+#endif
 }
 
     NTSTATUS KhConnectionPoolInitialize(
         KhConnectionPool* pool,
         ULONG capacity,
         ULONG maxConnectionsPerHost,
-        ULONG idleTimeoutMilliseconds) noexcept
+        ULONG idleTimeoutMilliseconds,
+        const KhHttp2KeepAliveOptions* http2KeepAlive) noexcept
     {
         if (pool == nullptr ||
             capacity == 0 ||
@@ -446,6 +574,13 @@ namespace
 
         RtlZeroMemory(pool, sizeof(*pool));
         InitializePoolLock(pool);
+        pool->Http2KeepAlive = NormalizeHttp2KeepAliveOptions(http2KeepAlive);
+        if (!IsValidHttp2KeepAliveOptions(pool->Http2KeepAlive)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        KeInitializeEvent(&pool->Http2KeepAliveStopEvent, NotificationEvent, FALSE);
+#endif
         pool->Entries = static_cast<KhPooledConnection*>(
             AllocatePoolMemory(sizeof(KhPooledConnection) * capacity));
         if (pool->Entries == nullptr) {
@@ -462,11 +597,182 @@ namespace
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS KhConnectionPoolStartHttp2KeepAlive(KhConnectionPool* pool) noexcept
+    {
+        if (pool == nullptr || pool->Entries == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (!pool->Http2KeepAlive.Enabled) {
+            return STATUS_SUCCESS;
+        }
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        return STATUS_SUCCESS;
+#else
+        if (InterlockedCompareExchange(&pool->Http2KeepAliveWorkerStarted, 1, 0) != 0) {
+            return STATUS_SUCCESS;
+        }
+
+        InterlockedExchange(&pool->Http2KeepAliveStopping, 0);
+        KeClearEvent(&pool->Http2KeepAliveStopEvent);
+
+        HANDLE threadHandle = nullptr;
+        NTSTATUS status = PsCreateSystemThread(
+            &threadHandle,
+            THREAD_ALL_ACCESS,
+            nullptr,
+            nullptr,
+            nullptr,
+            Http2KeepAliveWorkerRoutine,
+            pool);
+        if (!NT_SUCCESS(status)) {
+            InterlockedExchange(&pool->Http2KeepAliveWorkerStarted, 0);
+            InterlockedExchange(&pool->Http2KeepAliveStopping, 1);
+            KeSetEvent(&pool->Http2KeepAliveStopEvent, IO_NO_INCREMENT, FALSE);
+            return status;
+        }
+
+        PETHREAD threadObject = nullptr;
+        status = ObReferenceObjectByHandle(
+            threadHandle,
+            THREAD_ALL_ACCESS,
+            *PsThreadType,
+            KernelMode,
+            reinterpret_cast<PVOID*>(&threadObject),
+            nullptr);
+        if (!NT_SUCCESS(status)) {
+            InterlockedExchange(&pool->Http2KeepAliveStopping, 1);
+            KeSetEvent(&pool->Http2KeepAliveStopEvent, IO_NO_INCREMENT, FALSE);
+            LARGE_INTEGER timeout = {};
+            timeout.QuadPart = -static_cast<LONGLONG>(WskOperationTimeoutMilliseconds) * 10000LL;
+            const NTSTATUS waitStatus = ZwWaitForSingleObject(threadHandle, FALSE, &timeout);
+            UNREFERENCED_PARAMETER(waitStatus);
+            ZwClose(threadHandle);
+            InterlockedExchange(&pool->Http2KeepAliveWorkerStarted, 0);
+            return status;
+        }
+
+        ZwClose(threadHandle);
+        pool->Http2KeepAliveThread = threadObject;
+        return STATUS_SUCCESS;
+#endif
+    }
+
+    void KhConnectionPoolStopHttp2KeepAlive(KhConnectionPool* pool) noexcept
+    {
+        if (pool == nullptr) {
+            return;
+        }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        PETHREAD thread = nullptr;
+        if (pool->Http2KeepAliveThread != nullptr ||
+            InterlockedCompareExchange(&pool->Http2KeepAliveWorkerStarted, 0, 0) != 0) {
+            InterlockedExchange(&pool->Http2KeepAliveStopping, 1);
+            KeSetEvent(&pool->Http2KeepAliveStopEvent, IO_NO_INCREMENT, FALSE);
+            thread = pool->Http2KeepAliveThread;
+        }
+
+        if (thread != nullptr) {
+            LARGE_INTEGER timeout = {};
+            timeout.QuadPart = -static_cast<LONGLONG>(WskOperationTimeoutMilliseconds) * 10000LL;
+            const NTSTATUS waitStatus = KeWaitForSingleObject(
+                thread,
+                Executive,
+                KernelMode,
+                FALSE,
+                &timeout);
+            UNREFERENCED_PARAMETER(waitStatus);
+            ObDereferenceObject(thread);
+            pool->Http2KeepAliveThread = nullptr;
+        }
+
+        InterlockedExchange(&pool->Http2KeepAliveStopping, 0);
+#endif
+    }
+
+    NTSTATUS KhConnectionPoolRunHttp2KeepAliveSweep(
+        KhConnectionPool* pool,
+        bool* attempted) noexcept
+    {
+        if (attempted != nullptr) {
+            *attempted = false;
+        }
+        if (pool == nullptr || pool->Entries == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (!pool->Http2KeepAlive.Enabled) {
+            return STATUS_SUCCESS;
+        }
+
+        KhPooledConnection* selected = nullptr;
+        core::ITransport* transport = nullptr;
+        http2::Http2Connection* http2Connection = nullptr;
+        const UCHAR* opaqueData = nullptr;
+        const ULONGLONG now = QueryPoolTime();
+
+        LockPool(pool);
+        for (ULONG index = 0; index < pool->Capacity; ++index) {
+            KhPooledConnection& candidate = pool->Entries[index];
+            if (!IsHttp2KeepAliveDue(*pool, candidate, now)) {
+                continue;
+            }
+
+            candidate.InUse = true;
+            candidate.Http2KeepAliveInProgress = true;
+            ++candidate.Http2KeepAliveSequence;
+            StoreHttp2KeepAliveOpaqueData(candidate);
+            selected = &candidate;
+            transport = candidate.Transport;
+            http2Connection = candidate.Http2;
+            opaqueData = candidate.Http2KeepAliveOpaqueData;
+            if (attempted != nullptr) {
+                *attempted = true;
+            }
+            break;
+        }
+        UnlockPool(pool);
+
+        if (selected == nullptr) {
+            return STATUS_SUCCESS;
+        }
+
+        NTSTATUS status = http2Connection->SendPingAndWaitForAck(
+            *transport,
+            opaqueData,
+            pool->Http2KeepAlive.AckTimeoutMilliseconds);
+
+        KhDetachedConnectionResources detached = {};
+        LockPool(pool);
+        selected->Http2KeepAliveInProgress = false;
+        if (NT_SUCCESS(status) && selected->Http2 != nullptr && selected->Http2->IsReusable()) {
+            selected->Http2LastKeepAliveTime = QueryPoolTime();
+            selected->LastUsedTime = selected->Http2LastKeepAliveTime;
+            selected->InUse = false;
+        }
+        else {
+            if (NT_SUCCESS(status)) {
+                status = STATUS_CONNECTION_DISCONNECTED;
+            }
+            const bool wasConnected = selected->Connected;
+            DetachConnectionResources(*selected, &detached);
+            if (wasConnected && pool->ActiveCount != 0) {
+                --pool->ActiveCount;
+            }
+        }
+        UnlockPool(pool);
+
+        CloseDetachedConnectionResources(&detached);
+        return status;
+    }
+
     void KhConnectionPoolShutdown(KhConnectionPool* pool) noexcept
     {
         if (pool == nullptr) {
             return;
         }
+
+        KhConnectionPoolStopHttp2KeepAlive(pool);
 
         if (pool->Entries == nullptr) {
             RtlZeroMemory(pool, sizeof(*pool));
