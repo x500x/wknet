@@ -29,7 +29,7 @@ KernelHttp is a pure kernel-mode HTTP/HTTPS client library designed specifically
 - **⚡ Asynchronous Operations**: Supports async requests with concurrency protection and workspace isolation, avoiding blocking kernel threads
 - **🎯 Two-Layer API**: Provides both high-level simplified API (`khttp`) and low-level fine-grained control API (`engine`)
 - **🛡️ Certificate Verification**: Supports Certificate Pinning, Trust Anchors, SPKI hash verification, and TLS 1.3 signature scheme validation
-- **📦 Response Encoding**: Supports `Content-Encoding: gzip/deflate/br/compress/identity` and HTTP/1.1 response `Transfer-Encoding` chains for `chunked/gzip/deflate/compress`
+- **📦 Response Encoding**: Supports `Content-Encoding: gzip/deflate/br/compress/zstd/dcz/aes128gcm/identity`, recognizes `exi/pack200-gzip` and fails closed until complete decoders are finished, and supports HTTP/1.1 response `Transfer-Encoding` chains for `chunked/gzip/deflate/compress`
 - **🧱 Heap Memory Management**: Uses `HeapObject<T>` / `HeapArray<T>` for unified heap memory management, high-frequency buffers resident in Workspace
 
 ### Protocol Capability Ledger
@@ -89,7 +89,6 @@ These capabilities are not provided today. Capabilities that are implemented but
 |------------|--------------------|
 | HTTP inbound request parser / server role | Non-goal; this project is a client protocol stack |
 | Persistent on-disk HTTP cache | Non-goal; RFC 9111 cache is an explicit in-memory NonPaged object and is not persisted across reboot |
-| Full `Accept-Encoding` qvalue/content negotiation | Not provided; default header only describes the implemented decoder subset and callers may override it |
 | Complex local HTTP/2 priority-tree scheduling | Non-goal; no local dependency tree or bandwidth scheduler is maintained |
 | WebSocket extensions other than `permessage-deflate` | Non-goal; no other extensions are negotiated |
 | Online OCSP/CRL fetching | Non-goal; callers provide external trust/certificate/revocation data or cached entries |
@@ -398,8 +397,8 @@ KernelHttp/
 │       │   ├── HttpParser.h         # HTTP response parser
 │       │   ├── HttpRequest.h        # HTTP request builder
 │       │   ├── HttpResponse.h       # HTTP response structure
-│       │   ├── HttpCoding.h          # Shared coding decoder (gzip/deflate/br/compress)
-│       │   ├── HttpContentEncoding.h # Content encoding (gzip/deflate/br)
+│       │   ├── HttpCoding.h          # Shared coding decoder (gzip/deflate/br/compress/zstd/dcz/aes128gcm/identity)
+│       │   ├── HttpContentEncoding.h # Content encoding negotiation and decoding
 │       │   └── HttpTransferCoding.h  # HTTP/1.1 Transfer-Encoding chain parser
 │       ├── http2/                   # HTTP/2 protocol
 │       │   ├── Http2Frame.h         # Frame types, SETTINGS, frame codec

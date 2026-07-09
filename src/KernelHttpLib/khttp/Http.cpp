@@ -102,6 +102,7 @@ namespace
         dst.Http2CleartextMode = detail::ToApiHttp2CleartextMode(src.Http2CleartextMode);
         dst.AcceptEncodingPreferences = src.AcceptEncodingPreferences;
         dst.AcceptEncodingPreferenceCount = src.AcceptEncodingPreferenceCount;
+        dst.ContentCodingMaterials = src.ContentCodingMaterials;
         dst.Http2Priority = src.Http2Priority;
         dst.Cache = detail::ToApiCache(src.Cache);
     }

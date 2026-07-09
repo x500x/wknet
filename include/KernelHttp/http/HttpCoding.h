@@ -21,12 +21,35 @@ namespace http
         Pack200Gzip
     };
 
+    struct HttpCodingExternalMaterial final
+    {
+        HttpCoding Coding = HttpCoding::Identity;
+        const UCHAR* Dictionary = nullptr;
+        SIZE_T DictionaryLength = 0;
+        const UCHAR* Aes128GcmKeyingMaterial = nullptr;
+        SIZE_T Aes128GcmKeyingMaterialLength = 0;
+    };
+
+    using HttpCodingMaterialCallback = NTSTATUS(*)(
+        _In_opt_ void* context,
+        HttpCoding coding,
+        _Out_ HttpCodingExternalMaterial* material);
+
+    struct HttpCodingDecodeMaterials final
+    {
+        const HttpCodingExternalMaterial* Items = nullptr;
+        SIZE_T ItemCount = 0;
+        HttpCodingMaterialCallback Callback = nullptr;
+        void* CallbackContext = nullptr;
+    };
+
     struct HttpCodingDecodeBuffers final
     {
         char* DecodedBody = nullptr;
         SIZE_T DecodedBodyCapacity = 0;
         char* ScratchBody = nullptr;
         SIZE_T ScratchBodyCapacity = 0;
+        const HttpCodingDecodeMaterials* Materials = nullptr;
     };
 
     struct HttpCodingDecodeResult final
@@ -51,7 +74,8 @@ namespace http
             SIZE_T sourceLength,
             _Out_writes_bytes_(destinationCapacity) char* destination,
             SIZE_T destinationCapacity,
-            _Out_ SIZE_T* decodedLength) noexcept;
+            _Out_ SIZE_T* decodedLength,
+            _In_opt_ const HttpCodingDecodeMaterials* materials = nullptr) noexcept;
 
         _Must_inspect_result_
         static NTSTATUS DecodeChainReverse(

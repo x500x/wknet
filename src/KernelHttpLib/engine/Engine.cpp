@@ -973,6 +973,12 @@ namespace
             return false;
         }
 
+        if (options.ContentCodingMaterials != nullptr &&
+            options.ContentCodingMaterials->Items == nullptr &&
+            options.ContentCodingMaterials->ItemCount != 0) {
+            return false;
+        }
+
         if (options.HeaderCallback == nullptr && options.BodyCallback == nullptr && options.CallbackContext != nullptr) {
             return false;
         }

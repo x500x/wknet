@@ -40,7 +40,8 @@
 | `Content-Length`/`Transfer-Encoding` 冲突 | MUST reject | 已实现/已验证 | `HttpParser.cpp`、`HttpTransferCoding.cpp` | `tests/http_parser_tests.cpp` | 多 CL、TE+CL 冲突拒绝。 |
 | response body framing：CL/chunked/close-delimited/no-body | MUST | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 1xx/204/205/304/HEAD 无 body。 |
 | 响应 trailer 解析与查询 | MUST when chunked | 已实现/已验证 | `HttpParser.cpp`、`Engine.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | 禁止 trailer 字段拒绝。 |
-| Content-Encoding gzip/deflate/br/compress/identity | MAY | 已实现/已验证 | `HttpContentEncoding.cpp`、`HttpCoding.cpp` | `tests/http_parser_tests.cpp` | 解压膨胀比受限。 |
+| Content-Encoding gzip/deflate/br/compress/zstd/dcz/aes128gcm/identity | MAY | 已实现/已验证 | `HttpContentEncoding.cpp`、`HttpCoding.cpp`、`third_party/zstd` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | dcz/aes128gcm 需要调用方提供解码材料；缺材料、认证失败或膨胀超限 fail-closed。 |
+| Content-Encoding exi/pack200-gzip | MAY | 待补全完整解码/安全拒绝 | `HttpContentEncoding.cpp`、`HttpExiDecoder.cpp`、`HttpPack200Decoder.cpp` | `tests/http_parser_tests.cpp` | 已识别 coding token 并接入 fail-closed 路径；完整 EXI 与完整 Pack200 解码未完成前不提供子集成功实现。 |
 | Transfer-Encoding gzip/deflate/compress/chunked | MAY | 已实现/已验证 | `HttpTransferCoding.cpp` | `tests/http_parser_tests.cpp` | `br` 作为 TE 安全拒绝。 |
 | Redirect 安全规则 | MAY | 已实现/已验证 | `HttpEngine.cpp` | `tests/khttp_tests.cpp` | HTTPS 降级拒绝、跨源清理敏感头。 |
 | Stale 连接安全重试 | MAY | 已实现/已验证 | `HttpEngine.cpp` | `tests/khttp_tests.cpp` | 仅安全方法，ForceNew 一次。 |

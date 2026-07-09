@@ -72,6 +72,18 @@ namespace
         0x00
     };
 
+    const unsigned char ZstdDictionary[] = {
+        0x65, 0x6e, 0x63, 0x6f, 0x64, 0x65, 0x64, 0x20,
+        0x72, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+        0x20
+    };
+
+    const unsigned char DczBody[] = {
+        0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x15, 0x55, 0x00,
+        0x00, 0x20, 0x62, 0x6f, 0x64, 0x79, 0x01, 0x00,
+        0x34, 0x4f, 0x20
+    };
+
     SIZE_T BuildTransferGzipChunkedResponse(char* buffer, SIZE_T capacity) noexcept
     {
         if (buffer == nullptr) {
@@ -1315,7 +1327,7 @@ namespace
             BufferContainsLiteral(
                 captured.BuiltRequest,
                 captured.BuiltRequestLength,
-                "Accept-Encoding: gzip, deflate, br, identity\r\n"),
+                "Accept-Encoding: gzip, deflate, br, zstd, identity\r\n"),
             "default Accept-Encoding is added");
 
         Expect(khttp::ResponseStatusCode(resp) == 200, "status code is 200");
@@ -1591,6 +1603,73 @@ namespace
         Expect(resp == nullptr, "custom Accept-Encoding rejected response is not allocated");
 
         khttp::HeadersRelease(headers);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestContentCodingMaterialsDecodeDcz() noexcept
+    {
+        char response[256] = {};
+        const int headerLength = snprintf(
+            response,
+            sizeof(response),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Encoding: dcz\r\n"
+            "Content-Length: %zu\r\n"
+            "\r\n",
+            sizeof(DczBody));
+        Expect(headerLength > 0, "dcz content-encoding fixture header builds");
+        SIZE_T responseLength = static_cast<SIZE_T>(headerLength);
+        Expect(responseLength + sizeof(DczBody) <= sizeof(response), "dcz content-encoding fixture fits");
+        if (responseLength + sizeof(DczBody) <= sizeof(response)) {
+            memcpy(response + responseLength, DczBody, sizeof(DczBody));
+            responseLength += sizeof(DczBody);
+        }
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = responseLength;
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for dcz material decode");
+
+        KernelHttp::http::HttpAcceptEncodingPreference preferences[] = {
+            { KernelHttp::http::HttpAcceptCoding::DictionaryCompressedZstd, 1000 },
+            { KernelHttp::http::HttpAcceptCoding::Identity, 1000 }
+        };
+        KernelHttp::http::HttpCodingExternalMaterial material = {};
+        material.Coding = KernelHttp::http::HttpCoding::DictionaryCompressedZstd;
+        material.Dictionary = ZstdDictionary;
+        material.DictionaryLength = sizeof(ZstdDictionary);
+        KernelHttp::http::HttpCodingDecodeMaterials materials = {};
+        materials.Items = &material;
+        materials.ItemCount = 1;
+
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.AcceptEncodingPreferences = preferences;
+        options.AcceptEncodingPreferenceCount = sizeof(preferences) / sizeof(preferences[0]);
+        options.ContentCodingMaterials = &materials;
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/dcz";
+        status = khttp::GetEx(session, url, Length(url), nullptr, &options, &resp);
+        Expect(NT_SUCCESS(status), "GetEx decodes dcz with content coding materials");
+        Expect(
+            BufferContainsLiteral(
+                captured.BuiltRequest,
+                captured.BuiltRequestLength,
+                "Accept-Encoding: dcz, identity\r\n"),
+            "dcz Accept-Encoding preference is emitted");
+        Expect(khttp::ResponseBodyLength(resp) == Length(EncodedBodyLiteral), "dcz decoded body length matches");
+        const UCHAR* body = khttp::ResponseBody(resp);
+        Expect(
+            body != nullptr &&
+                memcmp(body, EncodedBodyLiteral, Length(EncodedBodyLiteral)) == 0,
+            "dcz decoded body matches");
+
+        khttp::ResponseRelease(resp);
         khttp::SessionClose(session);
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
@@ -4781,7 +4860,7 @@ namespace
             !BufferContainsLiteral(
                 captured.BuiltRequest,
                 captured.BuiltRequestLength,
-                "Accept-Encoding: gzip, deflate, br, identity\r\n"),
+                "Accept-Encoding: gzip, deflate, br, zstd, identity\r\n"),
             "default Accept-Encoding is not duplicated over custom value");
         Expect(
             BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "Range: bytes=0-3\r\n"),
@@ -6956,6 +7035,7 @@ int main() noexcept
     TestAcceptEncodingRejectsInvalidPreferences();
     TestAcceptEncodingQZeroResponseFailsClosed();
     TestCustomAcceptEncodingHeaderDrivesResponseValidation();
+    TestContentCodingMaterialsDecodeDcz();
     TestTraceRequiresExplicitOptIn();
     TestTypedRangeAndConditionHeaders();
     TestTypedSuffixRangeHeader();

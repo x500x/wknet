@@ -9,7 +9,7 @@ namespace http
     namespace
     {
         constexpr SIZE_T MaxContentCodings = 8;
-        constexpr char DefaultAcceptEncoding[] = "gzip, deflate, br, identity";
+        constexpr char DefaultAcceptEncoding[] = "gzip, deflate, br, zstd, identity";
         constexpr char DeflateUnavailableAcceptEncoding[] = "br, identity";
 
         bool IsOptionalWhitespace(char value) noexcept
@@ -847,6 +847,7 @@ namespace http
         codingBuffers.DecodedBodyCapacity = buffers.DecodedBodyCapacity;
         codingBuffers.ScratchBody = buffers.ScratchBody;
         codingBuffers.ScratchBodyCapacity = buffers.ScratchBodyCapacity;
+        codingBuffers.Materials = buffers.Materials;
 
         HttpCodingDecodeResult decoded = {};
         status = HttpCodingCodec::DecodeChainReverse(

@@ -20,6 +20,7 @@ namespace http
         bool MessageCompleteOnConnectionClose = false;
         bool ResponseBodyForbidden = false;
         const HttpAcceptEncodingPolicy* AcceptEncodingPolicy = nullptr;
+        const HttpCodingDecodeMaterials* ContentCodingMaterials = nullptr;
     };
 
     class HttpParser final

@@ -56,6 +56,8 @@
     <ClCompile Include="http\HttpCoding.cpp" />
     <ClCompile Include="http\HttpCachePolicy.cpp" />
     <ClCompile Include="http\HttpContentEncoding.cpp" />
+    <ClCompile Include="http\HttpExiDecoder.cpp" />
+    <ClCompile Include="http\HttpPack200Decoder.cpp" />
     <ClCompile Include="http\HttpParser.cpp" />
     <ClCompile Include="http\HttpRequest.cpp" />
     <ClCompile Include="http\HttpResponse.cpp" />
@@ -126,6 +128,10 @@
       <CompileAs>CompileAsC</CompileAs>
       <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
+    <ClCompile Include="..\..\third_party\zstd\zstddeclib.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;4189;4244;4267;4574;4701;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\include\KernelHttp\KernelHttp.h" />
@@ -167,6 +173,8 @@
     <ClInclude Include="..\..\include\KernelHttp\http\HttpResponse.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpTransferCoding.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpTypes.h" />
+    <ClInclude Include="http\HttpExiDecoder.h" />
+    <ClInclude Include="http\HttpPack200Decoder.h" />
     <ClInclude Include="..\..\include\KernelHttp\http2\Hpack.h" />
     <ClInclude Include="..\..\include\KernelHttp\http2\HpackHuffman.h" />
     <ClInclude Include="..\..\include\KernelHttp\http2\HpackStaticTable.h" />

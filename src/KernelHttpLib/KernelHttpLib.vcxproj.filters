@@ -143,6 +143,12 @@
     <ClCompile Include="http\HttpCoding.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
+    <ClCompile Include="http\HttpExiDecoder.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200Decoder.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
     <ClCompile Include="http\HttpCachePolicy.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
@@ -404,6 +410,12 @@
       <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\http\HttpTypes.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiDecoder.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200Decoder.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\http2\Hpack.h">

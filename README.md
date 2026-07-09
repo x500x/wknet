@@ -29,7 +29,7 @@ KernelHttp 是一个纯内核态的 HTTP/HTTPS 客户端库，专为 Windows 内
 - **⚡ 异步操作**：支持异步请求，带并发保护和 Workspace 隔离，避免阻塞内核线程
 - **🎯 两层 API**：提供高层简洁 API（`khttp`）和底层精细控制 API（`engine`）
 - **🛡️ 证书验证**：支持证书锁定（Certificate Pinning）、信任锚（Trust Anchor）、SPKI 哈希验证和 TLS 1.3 签名方案校验
-- **📦 响应编码**：支持 `Content-Encoding: gzip/deflate/br/compress/identity`，并支持 HTTP/1.1 响应 `Transfer-Encoding` 的 `chunked/gzip/deflate/compress` 链式解码
+- **📦 响应编码**：支持 `Content-Encoding: gzip/deflate/br/compress/zstd/dcz/aes128gcm/identity`，识别 `exi/pack200-gzip` 并在完整解码器补全前 fail-closed；支持 HTTP/1.1 响应 `Transfer-Encoding` 的 `chunked/gzip/deflate/compress` 链式解码
 - **🧱 堆内存管理**：响应聚合默认不设低位总量硬顶（`MaxResponseBytes=0`），按需使用堆内存增长；使用 `HeapObject<T>` / `HeapArray<T>` 统一管理堆内存，高频缓冲常驻 Workspace
 
 ### 协议能力账本
@@ -89,7 +89,6 @@ KernelHttp 的公开能力按类别列账，避免把“没有实现”“默认
 |------|----------|
 | HTTP 入站 request parser / server role | 非目标；当前项目定位为客户端协议栈 |
 | 磁盘持久化 HTTP cache | 非目标；RFC 9111 cache 为显式内存内 NonPaged 对象，不跨重启持久化 |
-| 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
 | HTTP/2 复杂本地 priority tree 调度 | 非目标；不维护本地依赖树，不实现带宽调度器 |
 | 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；不协商其它扩展 |
 | 在线 OCSP/CRL 抓取 | 非目标；调用方通过外部 trust/cert/revocation 数据或已缓存条目驱动强撤销判定 |
@@ -398,8 +397,8 @@ KernelHttp/
 │       │   ├── HttpParser.h         # HTTP 响应解析器
 │       │   ├── HttpRequest.h        # HTTP 请求构建器
 │       │   ├── HttpResponse.h       # HTTP 响应结构
-│       │   ├── HttpCoding.h          # 共享编码解码（gzip/deflate/br/compress）
-│       │   ├── HttpContentEncoding.h # 内容编码（gzip/deflate/br）
+│       │   ├── HttpCoding.h          # 共享编码解码（gzip/deflate/br/compress/zstd/dcz/aes128gcm/identity）
+│       │   ├── HttpContentEncoding.h # 内容编码协商与解码
 │       │   └── HttpTransferCoding.h  # HTTP/1.1 Transfer-Encoding 链解析
 │       ├── http2/                   # HTTP/2 协议
 │       │   ├── Http2Frame.h         # 帧类型、SETTINGS、帧编解码

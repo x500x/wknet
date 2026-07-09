@@ -85,6 +85,9 @@ $brotliSources = @(
     'dec\bit_reader.c', 'dec\decode.c', 'dec\huffman.c',
     'dec\prefix.c', 'dec\state.c', 'dec\static_init.c'
 ) | ForEach-Object { Join-Path $brotliRoot $_ }
+$zstdSources = @(
+    Join-Path $repoRoot 'third_party\zstd\zstddeclib.c'
+)
 
 $includeArgs = @(
     "/I", (Join-Path $repoRoot 'include'),
@@ -99,7 +102,7 @@ $clArgs = @(
 ) + $includeArgs + @(
     "/Fe:$exePath",
     "/Fo:$objDir\"
-) + @($testCpp) + $libSources + $sampleSources + $brotliSources
+) + @($testCpp) + $libSources + $sampleSources + $brotliSources + $zstdSources
 
 & cl.exe @clArgs
 if ($LASTEXITCODE -ne 0) {

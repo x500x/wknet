@@ -70,6 +70,7 @@ SendOptions::SendOptions() noexcept :
     Http2CleartextMode(::khttp::Http2CleartextMode::Disabled),
     AcceptEncodingPreferences(nullptr),
     AcceptEncodingPreferenceCount(0),
+    ContentCodingMaterials(nullptr),
     Http2Priority(nullptr),
     Cache(nullptr)
 #if defined(KERNEL_HTTP_USER_MODE_TEST)

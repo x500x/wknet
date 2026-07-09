@@ -912,7 +912,7 @@ namespace samples
 
         const http::HttpHeader headers[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         http::HttpRequestBuildOptions request = {};
@@ -984,7 +984,7 @@ namespace samples
 
         const http::HttpHeader headers[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         http::HttpRequestBuildOptions request = {};
@@ -1027,7 +1027,7 @@ namespace samples
 
         const http::HttpHeader headers[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS POST\"}";
@@ -1074,7 +1074,7 @@ namespace samples
 
         const http::HttpHeader headers[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS PUT\"}";
@@ -1121,7 +1121,7 @@ namespace samples
 
         const http::HttpHeader headers[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS PATCH\"}";
@@ -1168,7 +1168,7 @@ namespace samples
 
         const http::HttpHeader headers[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         http::HttpRequestBuildOptions request = {};
@@ -1212,7 +1212,7 @@ namespace samples
 
         const http::HttpHeader headers[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         http::HttpRequestBuildOptions request = {};
@@ -1339,7 +1339,7 @@ namespace samples
 
         const http::HttpHeader headers[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         http::HttpRequestBuildOptions request = {};
@@ -1388,7 +1388,7 @@ namespace samples
 
         const http::HttpHeader headers[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         http::HttpRequestBuildOptions request = {};
@@ -1428,7 +1428,7 @@ namespace samples
 
         const http::HttpHeader headers[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         http::HttpRequestBuildOptions request = {};
@@ -1481,7 +1481,7 @@ namespace samples
 
         const http::HttpHeader commonHeaders[] = {
             { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, identity") }
+            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         NTSTATUS sampleStatus = SendHttpBinDevHttpsGet(

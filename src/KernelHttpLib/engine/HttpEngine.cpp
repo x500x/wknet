@@ -42,7 +42,7 @@ namespace engine
         KhHttpResponseTrailerScratchBytes +
         KhHttpHostHeaderScratchBytes +
         KhHttpRequestTargetScratchBytes;
-    constexpr char KhDefaultAcceptEncoding[] = "gzip, deflate, br, identity";
+    constexpr char KhDefaultAcceptEncoding[] = "gzip, deflate, br, zstd, identity";
     constexpr char KhDeflateUnavailableAcceptEncoding[] = "br, identity";
     constexpr SIZE_T KhWorkspaceCacheMaxRetainedBytes = 256 * 1024;
 
@@ -1481,6 +1481,7 @@ namespace engine
         SIZE_T responseLength,
         bool messageCompleteOnConnectionClose,
         _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const http::HttpCodingDecodeMaterials* materials,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* headers,
         SIZE_T headerCapacity,
@@ -1502,6 +1503,7 @@ namespace engine
         parseOptions.ScratchBodyCapacity = workspace.Request.Length;
         parseOptions.MessageCompleteOnConnectionClose = messageCompleteOnConnectionClose;
         parseOptions.AcceptEncodingPolicy = acceptPolicy;
+        parseOptions.ContentCodingMaterials = materials;
 
         SIZE_T parseLength = responseLength;
         for (;;) {
@@ -1747,6 +1749,7 @@ namespace engine
         SIZE_T responseBodyLength,
         _Inout_ KhWorkspace& workspace,
         _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const http::HttpCodingDecodeMaterials* materials,
         _Out_ http::HttpContentDecodeResult* decoded) noexcept
     {
         if (decoded == nullptr) {
@@ -1761,6 +1764,7 @@ namespace engine
             decodeBuffers.DecodedBodyCapacity = workspace.DecodedBody.Length;
             decodeBuffers.ScratchBody = reinterpret_cast<char*>(workspace.Request.Data);
             decodeBuffers.ScratchBodyCapacity = workspace.Request.Length;
+            decodeBuffers.Materials = materials;
 
             NTSTATUS status = http::HttpContentEncoding::Decode(
                 responseHeaders,
@@ -1984,6 +1988,7 @@ namespace engine
             responseBodyLength,
             workspace,
             &acceptPolicy,
+            sendOptions.ContentCodingMaterials,
             &decoded);
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
@@ -2576,6 +2581,7 @@ namespace engine
             responseBodyLength,
             workspace,
             &acceptPolicy,
+            sendOptions.ContentCodingMaterials,
             &decoded);
         if (!NT_SUCCESS(status)) {
             kprintf("High-level h2c Upgrade content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
@@ -2789,6 +2795,7 @@ namespace engine
         _Inout_ KhWorkspace& workspace,
         bool responseBodyForbidden,
         _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const http::HttpCodingDecodeMaterials* materials,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -2806,6 +2813,7 @@ namespace engine
         SIZE_T requestLength,
         bool responseBodyForbidden,
         _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const http::HttpCodingDecodeMaterials* materials,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -2865,6 +2873,7 @@ namespace engine
             workspace,
             responseBodyForbidden,
             acceptPolicy,
+            materials,
             parsed,
             responseHeaders,
             headerCapacity,
@@ -3266,6 +3275,7 @@ namespace engine
         bool preserveInformationalResponses,
         ULONG readTimeoutMilliseconds,
         _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const http::HttpCodingDecodeMaterials* materials,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -3296,6 +3306,7 @@ namespace engine
             parseOptions.ScratchBodyCapacity = workspace.Request.Length;
             parseOptions.ResponseBodyForbidden = responseBodyForbidden;
             parseOptions.AcceptEncodingPolicy = acceptPolicy;
+            parseOptions.ContentCodingMaterials = materials;
 
             NTSTATUS status = http::HttpParser::ParseResponse(
                 reinterpret_cast<const char*>(workspace.Response.Data),
@@ -3478,6 +3489,7 @@ namespace engine
         _Inout_ KhWorkspace& workspace,
         bool responseBodyForbidden,
         _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const http::HttpCodingDecodeMaterials* materials,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -3492,6 +3504,7 @@ namespace engine
             false,
             WskOperationTimeoutMilliseconds,
             acceptPolicy,
+            materials,
             parsed,
             responseHeaders,
             headerCapacity,
@@ -3509,6 +3522,7 @@ namespace engine
         ULONG expectContinueTimeoutMilliseconds,
         bool responseBodyForbidden,
         _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const http::HttpCodingDecodeMaterials* materials,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -3536,6 +3550,7 @@ namespace engine
                 true,
                 expectContinueTimeoutMilliseconds,
                 acceptPolicy,
+                materials,
                 parsed,
                 responseHeaders,
                 headerCapacity,
@@ -3602,6 +3617,7 @@ namespace engine
                     workspace,
                     responseBodyForbidden,
                     acceptPolicy,
+                    materials,
                     parsed,
                     responseHeaders,
                     headerCapacity,
@@ -3632,6 +3648,7 @@ namespace engine
             workspace,
             responseBodyForbidden,
             acceptPolicy,
+            materials,
             parsed,
             responseHeaders,
             headerCapacity,
@@ -3650,6 +3667,7 @@ namespace engine
         ULONG expectContinueTimeoutMilliseconds,
         bool responseBodyForbidden,
         _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const http::HttpCodingDecodeMaterials* materials,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -3672,6 +3690,7 @@ namespace engine
                 true,
                 expectContinueTimeoutMilliseconds,
                 acceptPolicy,
+                materials,
                 parsed,
                 responseHeaders,
                 headerCapacity,
@@ -3735,6 +3754,7 @@ namespace engine
                     workspace,
                     responseBodyForbidden,
                     acceptPolicy,
+                    materials,
                     parsed,
                     responseHeaders,
                     headerCapacity,
@@ -3762,6 +3782,7 @@ namespace engine
             workspace,
             responseBodyForbidden,
             acceptPolicy,
+            materials,
             parsed,
             responseHeaders,
             headerCapacity,
@@ -4111,6 +4132,7 @@ namespace engine
             *connection.RawTransport,
             workspace,
             true,
+            nullptr,
             nullptr,
             &proxyResponse,
             responseHeaders,
@@ -4854,6 +4876,7 @@ namespace engine
             workspace.ResponseLength,
             !testResponse.ConnectionReusable,
             &acceptPolicy,
+            sendOptions.ContentCodingMaterials,
             parsed,
             responseHeaders,
             headerCapacity,
@@ -5114,6 +5137,7 @@ namespace engine
                 builtRequestLength,
                 request.Method == KhHttpMethod::Head,
                 &acceptPolicy,
+                sendOptions.ContentCodingMaterials,
                 parsed,
                 responseHeaders,
                 headerCapacity,
@@ -5134,6 +5158,7 @@ namespace engine
                     EffectiveExpectContinueTimeoutMilliseconds(sendOptions),
                     request.Method == KhHttpMethod::Head,
                     &acceptPolicy,
+                    sendOptions.ContentCodingMaterials,
                     parsed,
                     responseHeaders,
                     headerCapacity,
@@ -5150,6 +5175,7 @@ namespace engine
                     EffectiveExpectContinueTimeoutMilliseconds(sendOptions),
                     request.Method == KhHttpMethod::Head,
                     &acceptPolicy,
+                    sendOptions.ContentCodingMaterials,
                     parsed,
                     responseHeaders,
                     headerCapacity,
@@ -5181,6 +5207,7 @@ namespace engine
                 workspace,
                 request.Method == KhHttpMethod::Head,
                 &acceptPolicy,
+                sendOptions.ContentCodingMaterials,
                 parsed,
                 responseHeaders,
                 headerCapacity,

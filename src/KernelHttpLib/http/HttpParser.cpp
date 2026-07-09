@@ -671,6 +671,7 @@ namespace http
             buffers.DecodedBodyCapacity = options.DecodedBodyCapacity;
             buffers.ScratchBody = options.ScratchBody;
             buffers.ScratchBodyCapacity = options.ScratchBodyCapacity;
+            buffers.Materials = options.ContentCodingMaterials;
 
             HttpContentDecodeResult decoded = {};
             NTSTATUS status = HttpContentEncoding::Decode(

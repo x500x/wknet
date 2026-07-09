@@ -311,6 +311,7 @@ namespace engine
         KhHttp2CleartextMode Http2CleartextMode = KhHttp2CleartextMode::Disabled;
         const http::HttpAcceptEncodingPreference* AcceptEncodingPreferences = nullptr;
         SIZE_T AcceptEncodingPreferenceCount = 0;
+        const http::HttpCodingDecodeMaterials* ContentCodingMaterials = nullptr;
         const http2::Http2Priority* Http2Priority = nullptr;
         KH_HTTP_CACHE Cache = nullptr;
     };

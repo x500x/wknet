@@ -1,5 +1,6 @@
 #pragma once
 
+#include <KernelHttp/http/HttpCoding.h>
 #include <KernelHttp/http/HttpTypes.h>
 
 namespace KernelHttp
@@ -65,6 +66,7 @@ namespace http
         SIZE_T DecodedBodyCapacity = 0;
         char* ScratchBody = nullptr;
         SIZE_T ScratchBodyCapacity = 0;
+        const HttpCodingDecodeMaterials* Materials = nullptr;
     };
 
     struct HttpContentDecodeResult final

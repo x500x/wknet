@@ -1381,7 +1381,7 @@ namespace
     {
         const HttpHeader extraHeaders[] = {
             { MakeText("accept"), MakeText("*/*") },
-            { MakeText("accept-encoding"), MakeText("gzip, deflate, br, identity") }
+            { MakeText("accept-encoding"), MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         Http2RequestOptions options = {};
@@ -1414,7 +1414,7 @@ namespace
 
         const HttpHeader* acceptEncoding = FindHeader(headers, headerCount, "accept-encoding");
         Expect(acceptEncoding != nullptr, "accept-encoding header exists");
-        Expect(TextEquals(acceptEncoding->Value, "gzip, deflate, br, identity"), "accept-encoding value is preserved");
+        Expect(TextEquals(acceptEncoding->Value, "gzip, deflate, br, zstd, identity"), "accept-encoding value is preserved");
 
         const HttpHeader* accept = FindHeader(headers, headerCount, "accept");
         Expect(accept != nullptr, "accept extra header is preserved");

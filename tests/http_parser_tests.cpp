@@ -239,6 +239,61 @@ namespace
         0x2a, 0x03, 0xbd, 0x1b, 0xc2, 0xb8, 0x0e
     };
 
+    const unsigned char ZstdBody[] = {
+        0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x15, 0xa9, 0x00,
+        0x00, 0x65, 0x6e, 0x63, 0x6f, 0x64, 0x65, 0x64,
+        0x20, 0x72, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+        0x65, 0x20, 0x62, 0x6f, 0x64, 0x79
+    };
+
+    const unsigned char ZstdDictionary[] = {
+        0x65, 0x6e, 0x63, 0x6f, 0x64, 0x65, 0x64, 0x20,
+        0x72, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+        0x20
+    };
+
+    const unsigned char DczBody[] = {
+        0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x15, 0x55, 0x00,
+        0x00, 0x20, 0x62, 0x6f, 0x64, 0x79, 0x01, 0x00,
+        0x34, 0x4f, 0x20
+    };
+
+    const unsigned char Aes128GcmIkm[] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
+    };
+
+    const unsigned char Aes128GcmBody[] = {
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+        0x00, 0x00, 0x10, 0x00, 0x00, 0xb0, 0x66, 0x4c,
+        0xef, 0x4f, 0x27, 0x76, 0xe8, 0x71, 0xf4, 0x4a,
+        0xd4, 0xa8, 0xc8, 0x7d, 0x06, 0x76, 0x62, 0x54,
+        0x41, 0xef, 0x5c, 0x1a, 0x21, 0x42, 0x83, 0x09,
+        0x96, 0x69, 0x29, 0x61, 0x35, 0xa4, 0x44, 0xe7,
+        0xdf, 0x9e, 0x02
+    };
+
+    const unsigned char ExiBody[] = {
+        0x24, 0x45, 0x58, 0x49, 0xa0, 0x00, 0x4a, 0x01,
+        0x05, 0x72, 0x6f, 0x6f, 0x74, 0x03, 0x06, 0x74,
+        0x65, 0x78, 0x74, 0x00
+    };
+
+    const unsigned char Pack200GzipBody[] = {
+        0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x0a, 0x3b, 0xf5, 0xef, 0x02, 0x2f, 0xe3,
+        0x2a, 0x01, 0x06, 0x06, 0x06, 0x06, 0x46, 0x26,
+        0x10, 0x09, 0x05, 0x22, 0xbe, 0xae, 0x21, 0x8e,
+        0xba, 0x9e, 0x7e, 0x6e, 0xfa, 0xbe, 0x8e, 0x7e,
+        0x9e, 0x6e, 0xae, 0xc1, 0x21, 0x7a, 0xbe, 0x6e,
+        0x8c, 0x92, 0xbe, 0x89, 0x79, 0x99, 0x69, 0xa9,
+        0xc5, 0x25, 0xba, 0x61, 0xa9, 0x45, 0xc5, 0x99,
+        0xf9, 0x79, 0x56, 0x0a, 0x86, 0x7a, 0x06, 0xbc,
+        0x5c, 0xbc, 0x5c, 0x00, 0x73, 0xaa, 0x1c, 0xc6,
+        0x48, 0x00, 0x00, 0x00
+    };
+
     // UNIX compress .Z stream for "encoded response body" with 16-bit max codes and no block reset.
     const unsigned char CompressBody[] = {
         0x1f, 0x9d, 0x10, 0x65, 0xdc, 0x8c, 0x79, 0x43,
@@ -1083,7 +1138,7 @@ namespace
 
         const HttpHeader extra[] = {
             { MakeText("Accept"), MakeText("*/*") },
-            { MakeText("Accept-Encoding"), MakeText("gzip, deflate, br, identity") }
+            { MakeText("Accept-Encoding"), MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         HttpRequestBuildOptions options = {};
@@ -1107,7 +1162,7 @@ namespace
             "User-Agent: KernelHttp/0.1\r\n"
             "Connection: close\r\n"
             "Accept: */*\r\n"
-            "Accept-Encoding: gzip, deflate, br, identity\r\n"
+            "Accept-Encoding: gzip, deflate, br, zstd, identity\r\n"
             "\r\n";
 
         Expect(status == STATUS_SUCCESS, "Accept-Encoding request builds successfully");
@@ -1422,6 +1477,252 @@ namespace
 
         Expect(status == STATUS_SUCCESS, "brotli content encoding parses successfully");
         Expect(MemoryEqualsLiteral(response.Body, response.BodyLength, EncodedBodyLiteral), "brotli body is decoded");
+    }
+
+    void TestParseZstdContentEncoding()
+    {
+        char responseBytes[256] = {};
+        size_t responseLength = 0;
+        Expect(
+            BuildEncodedResponse("zstd", ZstdBody, sizeof(ZstdBody), responseBytes, sizeof(responseBytes), &responseLength),
+            "zstd response fixture builds");
+
+        HttpHeader headers[8] = {};
+        char decoded[64] = {};
+        HttpParseOptions options = {};
+        options.Headers = headers;
+        options.HeaderCapacity = 8;
+        options.DecodedBody = decoded;
+        options.DecodedBodyCapacity = sizeof(decoded);
+
+        HttpResponse response = {};
+        const NTSTATUS status = HttpParser::ParseResponse(
+            responseBytes,
+            responseLength,
+            options,
+            response);
+
+        Expect(status == STATUS_SUCCESS, "zstd content encoding parses successfully");
+        Expect(MemoryEqualsLiteral(response.Body, response.BodyLength, EncodedBodyLiteral), "zstd body is decoded");
+    }
+
+    void TestDecodeDictionaryCompressedZstdContentEncoding()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Content-Encoding"), MakeText("dcz") }
+        };
+        KernelHttp::http::HttpCodingExternalMaterial material = {};
+        material.Coding = KernelHttp::http::HttpCoding::DictionaryCompressedZstd;
+        material.Dictionary = ZstdDictionary;
+        material.DictionaryLength = sizeof(ZstdDictionary);
+        KernelHttp::http::HttpCodingDecodeMaterials materials = {};
+        materials.Items = &material;
+        materials.ItemCount = 1;
+
+        char decoded[64] = {};
+        char scratch[64] = {};
+        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        buffers.DecodedBody = decoded;
+        buffers.DecodedBodyCapacity = sizeof(decoded);
+        buffers.ScratchBody = scratch;
+        buffers.ScratchBodyCapacity = sizeof(scratch);
+        buffers.Materials = &materials;
+
+        KernelHttp::http::HttpContentDecodeResult result = {};
+        const NTSTATUS status = HttpContentEncoding::Decode(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            reinterpret_cast<const char*>(DczBody),
+            sizeof(DczBody),
+            buffers,
+            result);
+
+        Expect(status == STATUS_SUCCESS, "dcz content encoding decodes with dictionary material");
+        Expect(MemoryEqualsLiteral(result.Body, result.BodyLength, EncodedBodyLiteral), "dcz body is decoded");
+    }
+
+    void TestDecodeDictionaryCompressedZstdRequiresDictionary()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Content-Encoding"), MakeText("dcz") }
+        };
+        char decoded[64] = {};
+        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        buffers.DecodedBody = decoded;
+        buffers.DecodedBodyCapacity = sizeof(decoded);
+
+        KernelHttp::http::HttpContentDecodeResult result = {};
+        const NTSTATUS status = HttpContentEncoding::Decode(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            reinterpret_cast<const char*>(DczBody),
+            sizeof(DczBody),
+            buffers,
+            result);
+
+        Expect(status == STATUS_NOT_SUPPORTED, "dcz content encoding fails closed without dictionary material");
+    }
+
+    void TestDecodeAes128GcmContentEncoding()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Content-Encoding"), MakeText("aes128gcm") }
+        };
+        KernelHttp::http::HttpCodingExternalMaterial material = {};
+        material.Coding = KernelHttp::http::HttpCoding::Aes128Gcm;
+        material.Aes128GcmKeyingMaterial = Aes128GcmIkm;
+        material.Aes128GcmKeyingMaterialLength = sizeof(Aes128GcmIkm);
+        KernelHttp::http::HttpCodingDecodeMaterials materials = {};
+        materials.Items = &material;
+        materials.ItemCount = 1;
+
+        char decoded[64] = {};
+        char scratch[64] = {};
+        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        buffers.DecodedBody = decoded;
+        buffers.DecodedBodyCapacity = sizeof(decoded);
+        buffers.ScratchBody = scratch;
+        buffers.ScratchBodyCapacity = sizeof(scratch);
+        buffers.Materials = &materials;
+
+        KernelHttp::http::HttpContentDecodeResult result = {};
+        const NTSTATUS status = HttpContentEncoding::Decode(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            reinterpret_cast<const char*>(Aes128GcmBody),
+            sizeof(Aes128GcmBody),
+            buffers,
+            result);
+
+        Expect(status == STATUS_SUCCESS, "aes128gcm content encoding decrypts with keying material");
+        Expect(MemoryEqualsLiteral(result.Body, result.BodyLength, EncodedBodyLiteral), "aes128gcm body is decrypted");
+    }
+
+    void TestDecodeAes128GcmRejectsWrongKey()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Content-Encoding"), MakeText("aes128gcm") }
+        };
+        unsigned char wrongIkm[sizeof(Aes128GcmIkm)] = {};
+        KernelHttp::http::HttpCodingExternalMaterial material = {};
+        material.Coding = KernelHttp::http::HttpCoding::Aes128Gcm;
+        material.Aes128GcmKeyingMaterial = wrongIkm;
+        material.Aes128GcmKeyingMaterialLength = sizeof(wrongIkm);
+        KernelHttp::http::HttpCodingDecodeMaterials materials = {};
+        materials.Items = &material;
+        materials.ItemCount = 1;
+
+        char decoded[64] = {};
+        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        buffers.DecodedBody = decoded;
+        buffers.DecodedBodyCapacity = sizeof(decoded);
+        buffers.Materials = &materials;
+
+        KernelHttp::http::HttpContentDecodeResult result = {};
+        const NTSTATUS status = HttpContentEncoding::Decode(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            reinterpret_cast<const char*>(Aes128GcmBody),
+            sizeof(Aes128GcmBody),
+            buffers,
+            result);
+
+        Expect(!NT_SUCCESS(status), "aes128gcm rejects incorrect keying material");
+    }
+
+    void TestDecodeExiContentEncodingFailsClosedUntilFullDecoder()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Content-Encoding"), MakeText("exi") }
+        };
+        char decoded[64] = {};
+        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        buffers.DecodedBody = decoded;
+        buffers.DecodedBodyCapacity = sizeof(decoded);
+
+        KernelHttp::http::HttpContentDecodeResult result = {};
+        const NTSTATUS status = HttpContentEncoding::Decode(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            reinterpret_cast<const char*>(ExiBody),
+            sizeof(ExiBody),
+            buffers,
+            result);
+
+        Expect(!NT_SUCCESS(status), "exi content encoding fails closed until full EXI decoder is complete");
+    }
+
+    void TestDecodeExiRejectsUnsupportedHeader()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Content-Encoding"), MakeText("exi") }
+        };
+        const unsigned char unsupported[] = {
+            0x24, 0x45, 0x58, 0x49, 0x80, 0x41, 0x5c, 0x9b,
+            0xdb, 0xdd, 0x30, 0x67, 0x46, 0x57, 0x87, 0x40
+        };
+        char decoded[64] = {};
+        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        buffers.DecodedBody = decoded;
+        buffers.DecodedBodyCapacity = sizeof(decoded);
+
+        KernelHttp::http::HttpContentDecodeResult result = {};
+        const NTSTATUS status = HttpContentEncoding::Decode(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            reinterpret_cast<const char*>(unsupported),
+            sizeof(unsupported),
+            buffers,
+            result);
+
+        Expect(!NT_SUCCESS(status), "exi rejects invalid or unsupported EXI stream");
+    }
+
+    void TestDecodePack200GzipContentEncodingFailsClosedUntilFullDecoder()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Content-Encoding"), MakeText("pack200-gzip") }
+        };
+        char decoded[256] = {};
+        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        buffers.DecodedBody = decoded;
+        buffers.DecodedBodyCapacity = sizeof(decoded);
+
+        KernelHttp::http::HttpContentDecodeResult result = {};
+        const NTSTATUS status = HttpContentEncoding::Decode(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            reinterpret_cast<const char*>(Pack200GzipBody),
+            sizeof(Pack200GzipBody),
+            buffers,
+            result);
+
+        Expect(status == STATUS_NOT_SUPPORTED, "pack200-gzip content encoding fails closed until full Pack200 decoder is complete");
+    }
+
+    void TestDecodePack200GzipRejectsCorruptPack()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Content-Encoding"), MakeText("pack200-gzip") }
+        };
+        unsigned char corrupt[sizeof(Pack200GzipBody)] = {};
+        memcpy(corrupt, Pack200GzipBody, sizeof(corrupt));
+        corrupt[sizeof(corrupt) - 5] ^= 0x7f;
+        char decoded[256] = {};
+        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        buffers.DecodedBody = decoded;
+        buffers.DecodedBodyCapacity = sizeof(decoded);
+
+        KernelHttp::http::HttpContentDecodeResult result = {};
+        const NTSTATUS status = HttpContentEncoding::Decode(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            reinterpret_cast<const char*>(corrupt),
+            sizeof(corrupt),
+            buffers,
+            result);
+
+        Expect(!NT_SUCCESS(status), "pack200-gzip rejects corrupt gzip or pack200 stream");
     }
 
     void TestParseCompressContentEncoding()
@@ -1822,7 +2123,7 @@ namespace
     {
         const char responseBytes[] =
             "HTTP/1.1 200 OK\r\n"
-            "Content-Encoding: zstd\r\n"
+            "Content-Encoding: unknown-coding\r\n"
             "Content-Length: 4\r\n"
             "\r\n"
             "data";
@@ -2896,6 +3197,15 @@ int main()
     TestParseDeflateRawContentEncoding();
     TestParseGzipContentEncoding();
     TestParseBrotliContentEncoding();
+    TestParseZstdContentEncoding();
+    TestDecodeDictionaryCompressedZstdContentEncoding();
+    TestDecodeDictionaryCompressedZstdRequiresDictionary();
+    TestDecodeAes128GcmContentEncoding();
+    TestDecodeAes128GcmRejectsWrongKey();
+    TestDecodeExiContentEncodingFailsClosedUntilFullDecoder();
+    TestDecodeExiRejectsUnsupportedHeader();
+    TestDecodePack200GzipContentEncodingFailsClosedUntilFullDecoder();
+    TestDecodePack200GzipRejectsCorruptPack();
     TestParseCompressContentEncoding();
     TestParseChunkedGzipContentEncoding();
     TestTransferEncodingGzipChunked();

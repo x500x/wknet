@@ -1,7 +1,12 @@
 #include <KernelHttp/http/HttpCoding.h>
 #include <KernelHttp/KernelHttpLimits.h>
+#include <KernelHttp/crypto/Aead.h>
+#include <KernelHttp/crypto/CngProvider.h>
+#include "HttpExiDecoder.h"
+#include "HttpPack200Decoder.h"
 
 #include <brotli/decode.h>
+#include <brotli/shared_dictionary.h>
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <stdlib.h>
@@ -19,6 +24,22 @@ namespace KernelHttp
 {
 namespace http
 {
+    extern "C"
+    {
+        typedef struct ZSTD_DCtx_s ZSTD_DCtx;
+        ZSTD_DCtx* ZSTD_createDCtx(void);
+        size_t ZSTD_freeDCtx(ZSTD_DCtx* dctx);
+        size_t ZSTD_decompress_usingDict(
+            ZSTD_DCtx* dctx,
+            void* dst,
+            size_t dstCapacity,
+            const void* src,
+            size_t srcSize,
+            const void* dict,
+            size_t dictSize);
+        unsigned ZSTD_isError(size_t code);
+    }
+
     namespace
     {
         constexpr SIZE_T MaxDecodedBytes = KH_HARD_MAX_DECODED_BYTES;
@@ -187,6 +208,44 @@ namespace http
 #else
             ExFreePoolWithTag(memory, PoolTag);
 #endif
+        }
+
+        _Must_inspect_result_
+        bool ResolveMaterial(
+            const HttpCodingDecodeMaterials* materials,
+            HttpCoding coding,
+            HttpCodingExternalMaterial* material) noexcept
+        {
+            if (material == nullptr) {
+                return false;
+            }
+            *material = {};
+            material->Coding = coding;
+
+            if (materials == nullptr) {
+                return false;
+            }
+
+            if (materials->Items != nullptr) {
+                for (SIZE_T index = 0; index < materials->ItemCount; ++index) {
+                    const HttpCodingExternalMaterial& item = materials->Items[index];
+                    if (item.Coding == coding) {
+                        *material = item;
+                        return true;
+                    }
+                }
+            }
+
+            if (materials->Callback != nullptr) {
+                HttpCodingExternalMaterial callbackMaterial = {};
+                const NTSTATUS status = materials->Callback(materials->CallbackContext, coding, &callbackMaterial);
+                if (NT_SUCCESS(status) && callbackMaterial.Coding == coding) {
+                    *material = callbackMaterial;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         void* BrotliAlloc(void* opaque, size_t size) noexcept
@@ -537,7 +596,9 @@ namespace http
             SIZE_T compressedLength,
             char* destination,
             SIZE_T destinationCapacity,
-            SIZE_T* decodedLength) noexcept
+            SIZE_T* decodedLength,
+            const UCHAR* dictionary = nullptr,
+            SIZE_T dictionaryLength = 0) noexcept
         {
             if (decodedLength == nullptr || compressed == nullptr) {
                 return STATUS_INVALID_PARAMETER;
@@ -548,6 +609,18 @@ namespace http
             BrotliDecoderState* state = BrotliDecoderCreateInstance(BrotliAlloc, BrotliFree, nullptr);
             if (state == nullptr) {
                 return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            if (dictionary != nullptr && dictionaryLength != 0) {
+                const BROTLI_BOOL attached = BrotliDecoderAttachDictionary(
+                    state,
+                    BROTLI_SHARED_DICTIONARY_RAW,
+                    dictionaryLength,
+                    dictionary);
+                if (attached == BROTLI_FALSE) {
+                    BrotliDecoderDestroyInstance(state);
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
             }
 
             size_t availableIn = compressedLength;
@@ -583,6 +656,267 @@ namespace http
             }
 
             BrotliDecoderDestroyInstance(state);
+            return status;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS DecodeZstd(
+            const UCHAR* compressed,
+            SIZE_T compressedLength,
+            char* destination,
+            SIZE_T destinationCapacity,
+            SIZE_T* decodedLength,
+            const UCHAR* dictionary = nullptr,
+            SIZE_T dictionaryLength = 0) noexcept
+        {
+            if (decodedLength == nullptr || compressed == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            *decodedLength = 0;
+
+            ZSTD_DCtx* context = ZSTD_createDCtx();
+            if (context == nullptr) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            const size_t result = ZSTD_decompress_usingDict(
+                context,
+                destination,
+                destinationCapacity,
+                compressed,
+                compressedLength,
+                dictionary,
+                dictionaryLength);
+            const size_t freeResult = ZSTD_freeDCtx(context);
+            UNREFERENCED_PARAMETER(freeResult);
+
+            if (ZSTD_isError(result)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            *decodedLength = result;
+            return STATUS_SUCCESS;
+        }
+
+        void XorAes128GcmSequence(UCHAR* nonce, SIZE_T sequence) noexcept
+        {
+            if (nonce == nullptr) {
+                return;
+            }
+
+            for (SIZE_T index = 0; index < 8; ++index) {
+                const SIZE_T shift = (7 - index) * 8;
+                nonce[4 + index] ^= static_cast<UCHAR>((sequence >> shift) & 0xFF);
+            }
+        }
+
+        _Must_inspect_result_
+        NTSTATUS AppendAes128GcmRecordPlaintext(
+            const UCHAR* plaintext,
+            SIZE_T plaintextLength,
+            bool finalRecord,
+            char* destination,
+            SIZE_T destinationCapacity,
+            SIZE_T* decodedLength) noexcept
+        {
+            if (plaintext == nullptr || decodedLength == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            SIZE_T delimiterIndex = static_cast<SIZE_T>(-1);
+            for (SIZE_T index = plaintextLength; index > 0; --index) {
+                if (plaintext[index - 1] != 0) {
+                    delimiterIndex = index - 1;
+                    break;
+                }
+            }
+
+            if (delimiterIndex == static_cast<SIZE_T>(-1)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            const UCHAR expectedDelimiter = finalRecord ? 2 : 1;
+            if (plaintext[delimiterIndex] != expectedDelimiter) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            if (delimiterIndex > destinationCapacity ||
+                *decodedLength > destinationCapacity - delimiterIndex ||
+                destination == nullptr) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+
+            if (delimiterIndex != 0) {
+                RtlCopyMemory(destination + *decodedLength, plaintext, delimiterIndex);
+                *decodedLength += delimiterIndex;
+            }
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS DecodeAes128Gcm(
+            const UCHAR* encrypted,
+            SIZE_T encryptedLength,
+            char* destination,
+            SIZE_T destinationCapacity,
+            SIZE_T* decodedLength,
+            const UCHAR* keyingMaterial,
+            SIZE_T keyingMaterialLength) noexcept
+        {
+            constexpr SIZE_T SaltLength = 16;
+            constexpr SIZE_T RecordTagLength = 16;
+            constexpr SIZE_T NonceLength = 12;
+            constexpr SIZE_T PrkLength = 32;
+            constexpr SIZE_T CekLength = 16;
+            constexpr SIZE_T HeaderFixedLength = SaltLength + 4 + 1;
+            constexpr UCHAR CekInfo[] = {
+                'C', 'o', 'n', 't', 'e', 'n', 't', '-', 'E', 'n', 'c', 'o', 'd', 'i', 'n', 'g', ':',
+                ' ', 'a', 'e', 's', '1', '2', '8', 'g', 'c', 'm', 0
+            };
+            constexpr UCHAR NonceInfo[] = {
+                'C', 'o', 'n', 't', 'e', 'n', 't', '-', 'E', 'n', 'c', 'o', 'd', 'i', 'n', 'g', ':',
+                ' ', 'n', 'o', 'n', 'c', 'e', 0
+            };
+
+            if (decodedLength == nullptr ||
+                encrypted == nullptr ||
+                keyingMaterial == nullptr ||
+                keyingMaterialLength == 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            *decodedLength = 0;
+
+            if (encryptedLength < HeaderFixedLength) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            const UCHAR* salt = encrypted;
+            const ULONG recordSize = ReadBigEndian32(encrypted + SaltLength);
+            const UCHAR keyIdLength = encrypted[SaltLength + 4];
+            SIZE_T cursor = HeaderFixedLength;
+            if (cursor > encryptedLength ||
+                keyIdLength > encryptedLength - cursor) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            cursor += keyIdLength;
+
+            if (recordSize < RecordTagLength + 1 ||
+                cursor >= encryptedLength) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            UCHAR prk[PrkLength] = {};
+            UCHAR cek[CekLength] = {};
+            UCHAR nonceBase[NonceLength] = {};
+            SIZE_T bytesWritten = 0;
+            NTSTATUS status = crypto::CngProvider::HkdfExtract(
+                crypto::HashAlgorithm::Sha256,
+                salt,
+                SaltLength,
+                keyingMaterial,
+                keyingMaterialLength,
+                prk,
+                sizeof(prk),
+                &bytesWritten);
+            if (!NT_SUCCESS(status) || bytesWritten != sizeof(prk)) {
+                RtlSecureZeroMemory(prk, sizeof(prk));
+                return NT_SUCCESS(status) ? STATUS_INVALID_NETWORK_RESPONSE : status;
+            }
+
+            status = crypto::CngProvider::HkdfExpand(
+                crypto::HashAlgorithm::Sha256,
+                prk,
+                sizeof(prk),
+                CekInfo,
+                sizeof(CekInfo),
+                cek,
+                sizeof(cek));
+            if (NT_SUCCESS(status)) {
+                status = crypto::CngProvider::HkdfExpand(
+                    crypto::HashAlgorithm::Sha256,
+                    prk,
+                    sizeof(prk),
+                    NonceInfo,
+                    sizeof(NonceInfo),
+                    nonceBase,
+                    sizeof(nonceBase));
+            }
+            RtlSecureZeroMemory(prk, sizeof(prk));
+            if (!NT_SUCCESS(status)) {
+                RtlSecureZeroMemory(cek, sizeof(cek));
+                RtlSecureZeroMemory(nonceBase, sizeof(nonceBase));
+                return status;
+            }
+
+            HeapArray<UCHAR> plaintext(recordSize - RecordTagLength);
+            if (!plaintext.IsValid()) {
+                RtlSecureZeroMemory(cek, sizeof(cek));
+                RtlSecureZeroMemory(nonceBase, sizeof(nonceBase));
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            SIZE_T sequence = 0;
+            while (cursor < encryptedLength) {
+                const SIZE_T remaining = encryptedLength - cursor;
+                const bool finalRecord = remaining <= recordSize;
+                const SIZE_T recordLength = finalRecord ? remaining : recordSize;
+                if (recordLength <= RecordTagLength ||
+                    (!finalRecord && recordLength != recordSize)) {
+                    status = STATUS_INVALID_NETWORK_RESPONSE;
+                    break;
+                }
+
+                const SIZE_T ciphertextLength = recordLength - RecordTagLength;
+                if (ciphertextLength > plaintext.Count()) {
+                    status = STATUS_BUFFER_TOO_SMALL;
+                    break;
+                }
+
+                UCHAR nonce[NonceLength] = {};
+                RtlCopyMemory(nonce, nonceBase, sizeof(nonce));
+                XorAes128GcmSequence(nonce, sequence);
+
+                crypto::AeadKey key = {};
+                key.Algorithm = crypto::AeadAlgorithm::Aes128Gcm;
+                key.Key = cek;
+                key.KeyLength = sizeof(cek);
+                crypto::AeadParameters parameters = {};
+                parameters.Nonce = { nonce, sizeof(nonce) };
+                parameters.Tag = { encrypted + cursor + ciphertextLength, RecordTagLength };
+
+                SIZE_T plainLength = 0;
+                status = crypto::Aead::Decrypt(
+                    nullptr,
+                    key,
+                    parameters,
+                    encrypted + cursor,
+                    ciphertextLength,
+                    plaintext.Get(),
+                    plaintext.Count(),
+                    &plainLength);
+                RtlSecureZeroMemory(nonce, sizeof(nonce));
+                if (!NT_SUCCESS(status)) {
+                    break;
+                }
+
+                status = AppendAes128GcmRecordPlaintext(
+                    plaintext.Get(),
+                    plainLength,
+                    finalRecord,
+                    destination,
+                    destinationCapacity,
+                    decodedLength);
+                if (!NT_SUCCESS(status)) {
+                    break;
+                }
+
+                cursor += recordLength;
+                ++sequence;
+            }
+
+            RtlSecureZeroMemory(plaintext.Get(), plaintext.Count());
+            RtlSecureZeroMemory(cek, sizeof(cek));
+            RtlSecureZeroMemory(nonceBase, sizeof(nonceBase));
             return status;
         }
 
@@ -991,13 +1325,15 @@ namespace http
         SIZE_T sourceLength,
         char* destination,
         SIZE_T destinationCapacity,
-        SIZE_T* decodedLength) noexcept
+        SIZE_T* decodedLength,
+        const HttpCodingDecodeMaterials* materials) noexcept
     {
         if (decodedLength == nullptr || (source == nullptr && sourceLength != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
 
         const UCHAR* input = reinterpret_cast<const UCHAR*>(source);
+        HttpCodingExternalMaterial material = {};
         switch (coding) {
         case HttpCoding::Gzip:
             return DecodeGzip(input, sourceLength, destination, destinationCapacity, decodedLength);
@@ -1007,6 +1343,54 @@ namespace http
             return DecodeBrotli(input, sourceLength, destination, destinationCapacity, decodedLength);
         case HttpCoding::Compress:
             return DecodeCompress(input, sourceLength, destination, destinationCapacity, decodedLength);
+        case HttpCoding::Zstd:
+            return DecodeZstd(input, sourceLength, destination, destinationCapacity, decodedLength);
+        case HttpCoding::DictionaryCompressedBrotli:
+            if (!ResolveMaterial(materials, coding, &material) ||
+                material.Dictionary == nullptr ||
+                material.DictionaryLength == 0) {
+                return STATUS_NOT_SUPPORTED;
+            }
+            return DecodeBrotli(
+                input,
+                sourceLength,
+                destination,
+                destinationCapacity,
+                decodedLength,
+                material.Dictionary,
+                material.DictionaryLength);
+        case HttpCoding::DictionaryCompressedZstd:
+            if (!ResolveMaterial(materials, coding, &material) ||
+                material.Dictionary == nullptr ||
+                material.DictionaryLength == 0) {
+                return STATUS_NOT_SUPPORTED;
+            }
+            return DecodeZstd(
+                input,
+                sourceLength,
+                destination,
+                destinationCapacity,
+                decodedLength,
+                material.Dictionary,
+                material.DictionaryLength);
+        case HttpCoding::Aes128Gcm:
+            if (!ResolveMaterial(materials, coding, &material) ||
+                material.Aes128GcmKeyingMaterial == nullptr ||
+                material.Aes128GcmKeyingMaterialLength == 0) {
+                return STATUS_NOT_SUPPORTED;
+            }
+            return DecodeAes128Gcm(
+                input,
+                sourceLength,
+                destination,
+                destinationCapacity,
+                decodedLength,
+                material.Aes128GcmKeyingMaterial,
+                material.Aes128GcmKeyingMaterialLength);
+        case HttpCoding::Exi:
+            return DecodeExiContent(input, sourceLength, destination, destinationCapacity, decodedLength);
+        case HttpCoding::Pack200Gzip:
+            return DecodePack200GzipContent(input, sourceLength, destination, destinationCapacity, decodedLength);
         case HttpCoding::Identity:
             *decodedLength = sourceLength;
             return STATUS_SUCCESS;
@@ -1062,7 +1446,8 @@ namespace http
                 currentLength,
                 destination,
                 decodeCapacity,
-                &decodedLength);
+                &decodedLength,
+                buffers.Materials);
             if (!NT_SUCCESS(status)) {
                 result = {};
                 return status;
