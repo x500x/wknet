@@ -96,7 +96,7 @@
 
 ### 明确未实现 / 非目标
 
-这些能力当前不提供；其中部分是明确非目标，部分只是没有做成公共能力。
+这些能力当前不提供；已经实现但默认关闭的能力只记录在上一节，不放在这里。
 
 | 能力 | 当前结论 |
 |------|----------|
@@ -104,10 +104,9 @@
 | RFC 9111 cache | 不提供内核缓存 API |
 | `Range` / 条件请求完整缓存语义 | 已提供 typed helper 与响应 `Content-Range` 只读解析；不做分片合并、缓存合并或 RFC9111 cache |
 | 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
-| HTTP/2 priority 公共调度能力 | 已提供显式 per-request priority；不实现复杂树调度策略 |
-| WebSocket 其它 extensions | 非目标；`permessage-deflate` 已支持显式 opt-in，默认不协商 |
+| HTTP/2 复杂本地 priority tree 调度 | 非目标；已提供显式 per-request priority，不实现复杂树调度策略 |
+| 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；`permessage-deflate` 已支持显式 opt-in，默认不协商 |
 | WebSocket over HTTP/2 默认自动选择 | 当前不做；必须显式 opt-in |
-| TLS 1.2 真重协商 | 已实现/显式开启；需 `CompatibilityExplicit` + `EnableTls12Renegotiation`，次数由 `MaxTls12Renegotiations` 限制；支持服务器 `HelloRequest` 与低层客户端主动全量重协商；不支持 abbreviated/session resumption；ALPN 按本次重协商结果更新 |
 | 在线 OCSP/CRL 抓取 | 非目标；调用方通过外部 trust/cert/revocation 数据或已缓存条目驱动强撤销判定 |
 | HTTP/3 / QUIC | 非目标 |
 

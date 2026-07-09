@@ -45,7 +45,7 @@ These are deliberate security or protocol choices, not missing implementation.
 
 ## Missing / Explicit Non-Goals
 
-These capabilities are not provided today; some are explicit non-goals, while others are simply not public capabilities.
+These capabilities are not provided today. Capabilities that are implemented but off by default are listed only in the previous section.
 
 | Capability | Current conclusion |
 |------------|--------------------|
@@ -53,10 +53,9 @@ These capabilities are not provided today; some are explicit non-goals, while ot
 | RFC 9111 cache | No kernel cache API is provided |
 | Full `Range` / conditional cache semantics | Typed helpers and read-only response `Content-Range` parsing are provided; no range merge, cache merge, or RFC9111 cache |
 | Full `Accept-Encoding` qvalue/content negotiation | Not provided; default header only describes the implemented decoder subset and callers may override it |
-| HTTP/2 priority as public scheduling | Explicit per-request priority is exposed; no complex local tree scheduler is implemented |
-| Other WebSocket extensions | Non-goal; `permessage-deflate` is supported as explicit opt-in and remains off by default |
+| Complex local HTTP/2 priority-tree scheduling | Non-goal; explicit per-request priority is exposed and no complex local tree scheduler is implemented |
+| WebSocket extensions other than `permessage-deflate` | Non-goal; `permessage-deflate` is supported as explicit opt-in and remains off by default |
 | Automatic default WebSocket over HTTP/2 selection | Not done today; explicit opt-in is required |
-| TLS 1.2 true renegotiation | Implemented / explicit opt-in; requires `CompatibilityExplicit` + `EnableTls12Renegotiation`, with attempts limited by `MaxTls12Renegotiations`; supports server `HelloRequest` and low-level client-initiated full renegotiation; abbreviated/session resumption is not supported; ALPN is updated from the renegotiation result |
 | Online OCSP/CRL fetching | Non-goal; callers provide external trust/certificate/revocation data or cached entries |
 | HTTP/3 / QUIC | Non-goal |
 
