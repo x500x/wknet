@@ -44,7 +44,7 @@ struct HttpHeader { HttpText Name; HttpText Value; };
   - chunked/TE 链 → `HttpTransferCoding::DecodeResponseBody`。
   - Content-Length 路径：不足 → `STATUS_MORE_PROCESSING_REQUIRED`。
   - close-delimited：仅当 `MessageCompleteOnConnectionClose` 且无 CL/TE。
-- 请求侧提供 `Range` 与条件请求 typed helper；`206 Partial Content` 可用 `HttpResponse::IsPartialContent` 判断；`GetContentRange` 只读解析 `Content-Range: bytes ...`，不会影响 body 框定，也不做分片合并或缓存合并。
+- 请求侧提供 `Range` 与条件请求 typed helper；绑定 RFC 9111 cache 后，这些头参与自动验证、`304` 合并和 `206 Partial Content` 分片合并；`HttpResponse::IsPartialContent` 与 `GetContentRange` 仍只读暴露响应语义，不改变 body 框定。
 
 ### chunked 解码
 

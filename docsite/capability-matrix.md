@@ -8,7 +8,7 @@
 - 响应解析：状态行仅接受 HTTP/1.0、1.1；头行 ≤8 KiB、头段 ≤64 KiB、头数 ≤200；**拒绝 obs-fold 折行**；多个 `Content-Length`、`TE`+`CL` 冲突 → `STATUS_INVALID_NETWORK_RESPONSE`。
 - body 框定：Content-Length / chunked / close-delimited；**无 body 状态**：1xx、204、**205**、304，及 HEAD 响应。
 - chunked：块数 ≤8192、chunk-size 行 ≤32、严格 chunk 扩展语法校验；trailer 校验并拒绝禁止字段（`Content-Length`/`Transfer-Encoding`/`Host`/`Authorization`/`Proxy-Authorization`/`Cookie`/`Set-Cookie`）。
-- `206 Partial Content` / `Content-Range` 提供只读解析（`HttpResponse::IsPartialContent` / `GetContentRange`）；请求侧提供 `Range` 与条件请求 typed helper，不做分片合并或缓存语义。
+- `206 Partial Content` / `Content-Range` 提供只读解析（`HttpResponse::IsPartialContent` / `GetContentRange`）；请求侧提供 `Range` 与条件请求 typed helper。绑定 RFC 9111 cache 后，Range 请求与 `206` 响应参与自动验证、切片命中和 partial 合并。
 - `Content-Encoding` 解码：`gzip`（校验 CRC32+ISIZE+头 CRC16）、`deflate`（自动识别 zlib 包装并校验 Adler-32，底层用内核 `RtlDecompressBufferEx`，带运行时探测）、`br`（内置 Brotli）、`compress`（完整 LZW `.Z`）、`identity`；最多 2 级链，反序解码。
 - **解压炸弹防护**：decoded aggregate 跟随响应/调用方容量，单级膨胀比 ≤64（`MaxDecodeExpansionRatio`）。
 - 中间 1xx（除 101）静默吞掉重解析；`SendFlagExpectContinue` 显式开启 `Expect: 100-continue`，覆盖 100 后发送 body、final/417 不发送 body、超时后发送 body 与断连错误；自动 redirect、keep-alive 连接池复用。
@@ -93,6 +93,7 @@
 | TLS 1.3 到 TLS 1.2 | 不做握手内自动降级；只有可验证的版本协商证据才允许上层显式重连 1.2 |
 | 证书主机名 | IP literal 只匹配 iPAddress SAN；域名不回退 CN |
 | HTTPS redirect 到 HTTP | 默认拒绝降级 |
+| RFC 9111 cache | 提供显式内存内内核缓存 API；支持 fresh hit、验证、`Vary`、private/shared 规则、unsafe method 失效、Range/206 partial 合并 |
 
 ### 明确未实现 / 非目标
 
@@ -101,8 +102,7 @@
 | 能力 | 当前结论 |
 |------|----------|
 | HTTP 入站 request parser / server role | 非目标；当前项目定位为客户端协议栈 |
-| RFC 9111 cache | 不提供内核缓存 API |
-| Range / 条件请求缓存合并语义 | 不做分片合并、缓存合并或 RFC9111 cache |
+| 磁盘持久化 HTTP cache | 非目标；RFC 9111 cache 为显式内存内 NonPaged 对象，不跨重启持久化 |
 | 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
 | HTTP/2 复杂本地 priority tree 调度 | 非目标；不维护本地依赖树，不实现带宽调度器 |
 | 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；不协商其它扩展 |

@@ -107,6 +107,7 @@ KhHttpRequestRelease(request);
 | `KH_SESSION` | `KhSession*` | `KhSessionCreate` | `KhSessionClose` | HTTP/WS 会话。需要传入 `net::WskClient*` |
 | `KH_REQUEST` | `KhRequest*` | `KhHttpRequestCreate` | `KhHttpRequestRelease` | 请求 builder 句柄；通过 `Set*` 函数构造请求 |
 | `KH_RESPONSE` | `KhResponse*` | 由发送结果返回 | `KhResponseRelease` | 响应句柄，通过 `KhResponseGetView` 读取内容 |
+| `KH_HTTP_CACHE` | `KhHttpCache*` | `KhHttpCacheCreate` | `KhHttpCacheClose` | RFC 9111 内存内缓存句柄，可绑定到会话或单次发送 |
 | `KH_WEBSOCKET` | `KhWebSocket*` | `KhWebSocketConnectSync` / `KhWebSocketConnectAsync` | `KhWebSocketCloseSync` | WebSocket 连接句柄 |
 | `KH_ASYNC_OPERATION` | `KhAsyncOperation*` | 异步发送返回 | `KhAsyncRelease` | 异步操作句柄，可等待、取消、取结果 |
 
@@ -154,6 +155,7 @@ enum KhHttpSendFlags { KhHttpSendFlagNone = 0,
 |------|------|
 | `KhSessionCreate` | 创建底层会话，需要传入 `net::WskClient*` |
 | `KhSessionClose` | 关闭会话 |
+| `KhHttpCacheCreate` / `KhHttpCacheClose` / `KhHttpCacheClear` / `KhHttpCacheGetStats` | 管理 RFC 9111 内存内缓存 |
 | `KhEngineDrainAsync` | 等待所有在飞异步操作（卸载前必调） |
 | `KhEngineCloseActiveHandles` | 强制关闭所有活跃句柄 |
 
@@ -636,7 +638,7 @@ NTSTATUS KhHttpSendSync(
 | `STATUS_INSUFFICIENT_RESOURCES` | 内存不足或连接池满了 |
 | 其他 `NTSTATUS` | 传输、TLS、解析或回调返回的错误 |
 
-NOTE: `KhHttpSendOptions` 字段：`MaxResponseBytes`、`Flags`、`MaxRedirects`、`HeaderCallback`、`BodyCallback`、`CallbackContext`、`CompletionCallback`、`CompletionContext`、`Http2CleartextMode`、`AcceptEncodingPreferences`、`Http2Priority`。
+NOTE: `KhSessionOptions::Cache` 设置会话默认 RFC 9111 缓存；`KhHttpSendOptions::Cache` 可为单次发送覆盖。`KhHttpSendOptions` 字段：`MaxResponseBytes`、`Flags`、`MaxRedirects`、`HeaderCallback`、`BodyCallback`、`CallbackContext`、`CompletionCallback`、`CompletionContext`、`Http2CleartextMode`、`AcceptEncodingPreferences`、`Http2Priority`、`Cache`。
 
 #### `KhHttpSendAsync`
 

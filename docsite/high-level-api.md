@@ -184,7 +184,10 @@ enum SendFlags : ULONG {
     SendFlagAggregateWithCallbacks = 0x00000001,
     SendFlagDisableAutoRedirect = 0x00000002,
     SendFlagExpectContinue = 0x00000004,
-    SendFlagAllowTrace = 0x00000008
+    SendFlagAllowTrace = 0x00000008,
+    SendFlagBypassCache = 0x00000010,
+    SendFlagNoCacheStore = 0x00000020,
+    SendFlagOnlyIfCached = 0x00000040
 };
 ```
 
@@ -195,6 +198,9 @@ enum SendFlags : ULONG {
 | `SendFlagDisableAutoRedirect` | 禁用自动重定向，直接返回 3xx 响应。适用于需要手动处理重定向的场景 |
 | `SendFlagExpectContinue` | 对有 body 的 HTTP/1.1 请求显式启用 `Expect: 100-continue`；默认不发送 |
 | `SendFlagAllowTrace` | 显式允许 TRACE；body、trailer 与敏感头仍会拒绝 |
+| `SendFlagBypassCache` | 跳过缓存读取，仍允许按 RFC 9111 写入响应 |
+| `SendFlagNoCacheStore` | 禁止本次响应写入缓存 |
+| `SendFlagOnlyIfCached` | 只允许缓存命中；未命中或必须联网验证时返回 `STATUS_NOT_FOUND` |
 
 ### 回调类型
 
@@ -313,6 +319,7 @@ struct SessionConfig final {
     Http2KeepAliveConfig Http2KeepAlive;
     TlsConfig Tls;
     ProxyConfig Proxy;
+    Cache* Cache;
 };
 ```
 
@@ -330,6 +337,7 @@ struct SessionConfig final {
 | `Http2KeepAlive` | disabled | HTTP/2 池化连接后台 PING 保活；默认关闭，`Enabled=true` 后按 `IdleMs` / `IntervalMs` / `AckTimeoutMs` 驱动 |
 | `Tls` | `DefaultTlsConfig()` | 会话默认 TLS 配置。可以在单次发送时覆盖 |
 | `Proxy` | disabled | HTTP 代理配置。HTTPS 使用 CONNECT，明文 HTTP 使用 absolute-form。默认不启用代理 |
+| `Cache` | `nullptr` | 会话默认 RFC 9111 内存内缓存；为 `nullptr` 时不自动缓存 |
 
 ### `SendOptions`
 
@@ -350,6 +358,7 @@ struct SendOptions final {
     AddressFamily Family;
     Http2CleartextMode Http2CleartextMode;
     const ::KernelHttp::http2::Http2Priority* Http2Priority;
+    Cache* Cache;
 };
 ```
 
@@ -364,6 +373,7 @@ struct SendOptions final {
 | `CallbackContext` | `nullptr` | 传给 `OnHeader` / `OnBody` 的上下文。这是你传递自定义数据给回调的方式 |
 | `Tls` | `DefaultTlsConfig()` | 单次 TLS 配置。仅在 `HasTlsOverride` 为 `true` 时生效 |
 | `HasTlsOverride` | `false` | `true` 时使用 `Tls` 覆盖会话 TLS 配置。适用于需要为特定请求使用不同证书或 TLS 策略的场景 |
+| `Cache` | `nullptr` | 单次请求使用的 RFC 9111 缓存；非空时覆盖会话默认缓存 |
 | `ConnectionPolicy` | `ReuseOrCreate` | 本次发送连接策略。`ReuseOrCreate` 是最常用的选择，它会复用已有连接或创建新连接 |
 | `Family` | `Any` | 本次发送地址族。除非需要强制使用 IPv4 或 IPv6，否则保持 `Any` |
 | `Http2CleartextMode` | `Disabled` | 高层 h2c 显式入口：`Disabled` / `PriorKnowledge` / `Upgrade`，仅对 `http://` 生效 |
@@ -560,6 +570,7 @@ struct Message final {
 | `RequestCreate` | 创建绑定到会话的发送句柄 |
 | `RequestRelease` | 释放发送句柄 |
 | `Destroy` | 等待/收尾库级异步运行时 |
+| `CacheCreate` / `CacheRelease` / `CacheClear` / `CacheGetStats` | 创建、释放、清空和查询 RFC 9111 内存内缓存 |
 
 ### Headers / Body / Options
 

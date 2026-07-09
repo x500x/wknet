@@ -107,6 +107,7 @@ The low-level API uses opaque handles to manage resources. These handles are hea
 | `KH_SESSION` | `KhSession*` | `KhSessionCreate` | `KhSessionClose` | HTTP/WS session. Requires passing `net::WskClient*` |
 | `KH_REQUEST` | `KhRequest*` | `KhHttpRequestCreate` | `KhHttpRequestRelease` | Request builder handle; constructs requests via `Set*` functions |
 | `KH_RESPONSE` | `KhResponse*` | Returned by send result | `KhResponseRelease` | Response handle; read content via `KhResponseGetView` |
+| `KH_HTTP_CACHE` | `KhHttpCache*` | `KhHttpCacheCreate` | `KhHttpCacheClose` | RFC 9111 in-memory cache handle; bind to a session or a single send |
 | `KH_WEBSOCKET` | `KhWebSocket*` | `KhWebSocketConnectSync` / `KhWebSocketConnectAsync` | `KhWebSocketCloseSync` | WebSocket connection handle |
 | `KH_ASYNC_OPERATION` | `KhAsyncOperation*` | Returned by async send | `KhAsyncRelease` | Async operation handle; can wait, cancel, get result |
 
@@ -154,6 +155,7 @@ The following functions are provided by the low-level API. They are grouped by f
 |----------|-------------|
 | `KhSessionCreate` | Creates low-level session; requires passing `net::WskClient*` |
 | `KhSessionClose` | Closes session |
+| `KhHttpCacheCreate` / `KhHttpCacheClose` / `KhHttpCacheClear` / `KhHttpCacheGetStats` | Manage the RFC 9111 in-memory cache |
 | `KhEngineDrainAsync` | Waits for all in-flight async operations (must call before unload) |
 | `KhEngineCloseActiveHandles` | Force closes all active handles |
 
@@ -636,7 +638,7 @@ Synchronous HTTP send. Function blocks until request completes.
 | `STATUS_INSUFFICIENT_RESOURCES` | Out of memory or connection pool full |
 | Other `NTSTATUS` | Transport, TLS, parse, or callback error |
 
-NOTE: `KhHttpSendOptions` fields: `MaxResponseBytes`, `Flags`, `MaxRedirects`, `HeaderCallback`, `BodyCallback`, `CallbackContext`, `CompletionCallback`, `CompletionContext`, `Http2CleartextMode`, `AcceptEncodingPreferences`, `Http2Priority`.
+NOTE: `KhSessionOptions::Cache` sets the session default RFC 9111 cache; `KhHttpSendOptions::Cache` overrides it for one send. `KhHttpSendOptions` fields: `MaxResponseBytes`, `Flags`, `MaxRedirects`, `HeaderCallback`, `BodyCallback`, `CallbackContext`, `CompletionCallback`, `CompletionContext`, `Http2CleartextMode`, `AcceptEncodingPreferences`, `Http2Priority`, `Cache`.
 
 #### `KhHttpSendAsync`
 

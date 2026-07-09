@@ -42,6 +42,7 @@ These are deliberate security or protocol choices, not missing implementation.
 | TLS 1.3 to TLS 1.2 | No in-handshake automatic fallback; only verified version-negotiation evidence allows an explicit caller retry at 1.2 |
 | Certificate hostname matching | IP literals match iPAddress SAN only; DNS names never fall back to CN |
 | HTTPS redirect to HTTP | Rejected by default |
+| RFC 9111 cache | Explicit in-memory kernel cache API; supports fresh hits, validation, `Vary`, private/shared rules, unsafe-method invalidation, and Range/206 partial combining |
 
 ## Missing / Explicit Non-Goals
 
@@ -50,8 +51,7 @@ These capabilities are not provided today. Capabilities that are implemented but
 | Capability | Current conclusion |
 |------------|--------------------|
 | HTTP inbound request parser / server role | Non-goal; this project is a client protocol stack |
-| RFC 9111 cache | No kernel cache API is provided |
-| Range / conditional cache merge semantics | No range merge, cache merge, or RFC9111 cache |
+| Persistent on-disk HTTP cache | Non-goal; RFC 9111 cache is an explicit in-memory NonPaged object and is not persisted across reboot |
 | Full `Accept-Encoding` qvalue/content negotiation | Not provided; default header only describes the implemented decoder subset and callers may override it |
 | Complex local HTTP/2 priority-tree scheduling | Non-goal; no local dependency tree or bandwidth scheduler is maintained |
 | WebSocket extensions other than `permessage-deflate` | Non-goal; no other extensions are negotiated |

@@ -180,7 +180,10 @@ enum SendFlags : ULONG {
     SendFlagAggregateWithCallbacks = 0x00000001,
     SendFlagDisableAutoRedirect = 0x00000002,
     SendFlagExpectContinue = 0x00000004,
-    SendFlagAllowTrace = 0x00000008
+    SendFlagAllowTrace = 0x00000008,
+    SendFlagBypassCache = 0x00000010,
+    SendFlagNoCacheStore = 0x00000020,
+    SendFlagOnlyIfCached = 0x00000040
 };
 ```
 
@@ -191,6 +194,9 @@ enum SendFlags : ULONG {
 | `SendFlagDisableAutoRedirect` | Disable auto-redirect; return 3xx response directly |
 | `SendFlagExpectContinue` | Explicitly enable `Expect: 100-continue` for HTTP/1.1 requests with a body; default is off |
 | `SendFlagAllowTrace` | Explicitly allow TRACE; bodies, trailers, and sensitive headers are still rejected |
+| `SendFlagBypassCache` | Skip cache lookup while still allowing the response to be stored by RFC 9111 rules |
+| `SendFlagNoCacheStore` | Do not store this response in the cache |
+| `SendFlagOnlyIfCached` | Use only cached responses; miss or required network validation returns `STATUS_NOT_FOUND` |
 
 #### Callback Types
 
@@ -307,6 +313,7 @@ struct SessionConfig final {
     Http2KeepAliveConfig Http2KeepAlive;
     TlsConfig Tls;
     ProxyConfig Proxy;
+    Cache* Cache;
 };
 ```
 
@@ -324,6 +331,7 @@ struct SessionConfig final {
 | `Http2KeepAlive` | disabled | HTTP/2 pooled-connection background PING keepalive; set `Enabled=true` and tune `IdleMs` / `IntervalMs` / `AckTimeoutMs` |
 | `Tls` | `DefaultTlsConfig()` | Session default TLS config |
 | `Proxy` | disabled | HTTP proxy config; HTTPS uses CONNECT, plaintext HTTP uses absolute-form |
+| `Cache` | `nullptr` | Session default RFC 9111 in-memory cache; `nullptr` disables automatic caching |
 
 #### `SendOptions`
 
@@ -344,6 +352,7 @@ struct SendOptions final {
     AddressFamily Family;
     Http2CleartextMode Http2CleartextMode;
     const ::KernelHttp::http2::Http2Priority* Http2Priority;
+    Cache* Cache;
 };
 ```
 
@@ -359,6 +368,7 @@ struct SendOptions final {
 | `Tls` | `DefaultTlsConfig()` | Per-send TLS config |
 | `HasTlsOverride` | `false` | When `true`, use `Tls` to override session TLS config |
 | `ConnectionPolicy` | `ReuseOrCreate` | Per-send connection policy |
+| `Cache` | `nullptr` | Per-send RFC 9111 cache; non-null overrides the session default cache |
 | `Family` | `Any` | Per-send address family |
 | `Http2CleartextMode` | `Disabled` | Explicit high-level h2c entry: `Disabled` / `PriorKnowledge` / `Upgrade`, only for `http://` |
 | `Http2Priority` | `nullptr` | HTTP/2 per-request priority; when non-null, the first HEADERS frame carries the priority field. Ignored on HTTP/1.1 paths |
@@ -552,6 +562,7 @@ These functions manage HTTP session and request handle creation and destruction:
 | `RequestCreate` | Creates send handle bound to session |
 | `RequestRelease` | Releases send handle |
 | `Destroy` | Waits/cleans up library-level async runtime |
+| `CacheCreate` / `CacheRelease` / `CacheClear` / `CacheGetStats` | Create, release, clear, and inspect the RFC 9111 in-memory cache |
 
 #### Headers / Body / Options
 
