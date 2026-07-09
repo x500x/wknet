@@ -1145,7 +1145,7 @@ namespace
         SIZE_T NextLength = 0;
         bool LastAllowWebSocketOverHttp2 = false;
         KernelHttp::engine::KhWebSocketTransportMode LastTransportMode =
-            KernelHttp::engine::KhWebSocketTransportMode::LegacyBoolean;
+            KernelHttp::engine::KhWebSocketTransportMode::Auto;
         KernelHttp::websocket::PerMessageDeflateOptions LastPerMessageDeflate = {};
         ULONG LastMaxTls12Renegotiations = 0;
         NTSTATUS SendStatus = STATUS_SUCCESS;
@@ -5945,6 +5945,71 @@ namespace
         khttp::SessionClose(session);
     }
 
+    void TestWebSocketTransportModeDefaults() noexcept
+    {
+        Expect(
+            static_cast<ULONG>(khttp::WebSocketTransportMode::Auto) == 0,
+            "public websocket Auto transport mode remains ABI zero");
+        Expect(
+            static_cast<ULONG>(KernelHttp::engine::KhWebSocketTransportMode::Auto) == 0,
+            "engine websocket Auto transport mode remains ABI zero");
+
+        kws::ConnectConfig aggregateConfig = {};
+        Expect(
+            aggregateConfig.TransportMode == khttp::WebSocketTransportMode::Auto,
+            "aggregate websocket connect config defaults to Auto");
+
+        kws::ConnectConfig defaultConfig = kws::DefaultConnectConfig();
+        Expect(
+            defaultConfig.TransportMode == khttp::WebSocketTransportMode::Auto,
+            "DefaultConnectConfig defaults to Auto");
+
+        KernelHttp::engine::KhWebSocketConnectOptions engineOptions = {};
+        Expect(
+            engineOptions.TransportMode == KernelHttp::engine::KhWebSocketTransportMode::Auto,
+            "engine websocket connect options default to Auto");
+
+        WsCapture capture = {};
+        khttp::test::SetWebSocketTransport(
+            WsConnectCallback,
+            WsSendCallback,
+            WsReceiveCallback,
+            WsCloseCallback,
+            &capture);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for websocket transport defaults");
+
+        const char* url = "wss://example.com/socket";
+        kws::WebSocket* ws = nullptr;
+        status = kws::Connect(session, url, Length(url), &ws);
+        Expect(NT_SUCCESS(status), "URL websocket connect succeeds with default Auto transport");
+        Expect(
+            capture.LastTransportMode == KernelHttp::engine::KhWebSocketTransportMode::Auto,
+            "URL websocket connect propagates Auto transport mode");
+        status = kws::Close(ws);
+        Expect(NT_SUCCESS(status), "URL websocket default transport close succeeds");
+
+        capture = {};
+        kws::ConnectConfig http11Config = kws::DefaultConnectConfig();
+        http11Config.Url = url;
+        http11Config.UrlLength = Length(url);
+        http11Config.TransportMode = khttp::WebSocketTransportMode::Http11Only;
+        ws = nullptr;
+        status = kws::Connect(session, &http11Config, &ws);
+        Expect(NT_SUCCESS(status), "explicit HTTP/1.1 websocket connect succeeds");
+        Expect(
+            capture.LastTransportMode == KernelHttp::engine::KhWebSocketTransportMode::Http11Only,
+            "explicit HTTP/1.1 websocket transport mode propagates");
+        Expect(!capture.LastAllowWebSocketOverHttp2, "explicit HTTP/1.1 websocket connect does not set legacy h2 flag");
+        status = kws::Close(ws);
+        Expect(NT_SUCCESS(status), "explicit HTTP/1.1 websocket close succeeds");
+
+        khttp::SessionClose(session);
+        khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
+
     void TestWebSocketRoundTrip() noexcept
     {
         WsCapture capture = {};
@@ -6970,6 +7035,7 @@ int main() noexcept
     TestPagedPoolRejected();
     TestHttp2KeepAliveSessionConfigDefaultsAndValidation();
     TestIrqlCheck();
+    TestWebSocketTransportModeDefaults();
     TestWebSocketRoundTrip();
     TestWebSocketPerMessageDeflateOptInPropagates();
     TestWebSocketHttp2OptInPropagates();

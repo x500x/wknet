@@ -12,6 +12,7 @@ using KernelHttp::client::WebSocketConnectOptions;
 using KernelHttp::client::WebSocketHandshakeChallenge;
 using KernelHttp::client::WebSocketHandshakeRetryAction;
 using KernelHttp::client::WebSocketIoBuffers;
+using KernelHttp::client::WebSocketTransportMode;
 using KernelHttp::http::HttpHeader;
 using KernelHttp::websocket::WebSocketCodec;
 using KernelHttp::websocket::WebSocketDeflateContext;
@@ -599,6 +600,51 @@ namespace
         options.UseTls = false;
         options.VerifyCertificate = false;
         return options;
+    }
+
+    void TestTransportModeDefaults()
+    {
+        Expect(
+            static_cast<ULONG>(WebSocketTransportMode::Auto) == 0,
+            "client websocket Auto transport mode remains ABI zero");
+
+        WebSocketConnectOptions defaults = {};
+        Expect(
+            defaults.TransportMode == WebSocketTransportMode::Auto,
+            "client websocket connect options default to Auto");
+
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        NTSTATUS status = client.Connect(wskClient, options, buffers);
+        Expect(NT_SUCCESS(status), "plaintext websocket default Auto connect succeeds");
+        Expect(
+            strncmp(server.LastHandshakeRequest, "GET / HTTP/1.1\r\n", strlen("GET / HTTP/1.1\r\n")) == 0,
+            "plaintext websocket default Auto uses HTTP/1.1 handshake");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
     }
 
     void ExpectHandshakeHost(const char* host, USHORT port, const wchar_t* serviceName, const char* expectedHost)
@@ -3423,6 +3469,7 @@ namespace net
 
 int main()
 {
+    TestTransportModeDefaults();
     TestHandshakeHostHeaderFormatting();
     TestHandshakeCustomHeaders();
     TestHandshakeBufferedFrameSurvivesSendScratchReuse();

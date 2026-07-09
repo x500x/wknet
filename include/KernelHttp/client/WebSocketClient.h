@@ -31,10 +31,10 @@ namespace client
 {
     enum class WebSocketTransportMode : ULONG
     {
-        LegacyBoolean = 0,
+        Auto = 0,
         Http11Only = 1,
-        Auto = 2,
-        Http2Required = 3
+        Http2Required = 2,
+        LegacyBoolean = 3
     };
 
     struct WebSocketHandshakeChallenge final
@@ -88,7 +88,7 @@ namespace client
         bool UseTls = false;
         bool VerifyCertificate = true;
         bool AllowWebSocketOverHttp2 = false;
-        WebSocketTransportMode TransportMode = WebSocketTransportMode::LegacyBoolean;
+        WebSocketTransportMode TransportMode = WebSocketTransportMode::Auto;
         websocket::PerMessageDeflateOptions PerMessageDeflate = {};
         WebSocketHandshakeChallengeCallback ChallengeCallback = nullptr;
         void* ChallengeContext = nullptr;

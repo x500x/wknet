@@ -42,7 +42,7 @@ KernelHttp 的公开能力按类别列账，避免把“没有实现”“默认
 |------|--------------|
 | HTTP/1.1 | `Content-Length`、库生成 chunked、`BodyCreateStream`/`KhHttpRequestSetBodySource` 真流式请求体、请求 trailer（chunked 路径）、`Expect: 100-continue`、TRACE 显式 opt-in、Range/条件请求 typed helper、响应 `Transfer-Encoding` 链（`chunked`/`gzip`/`deflate`/`compress`）、close-delimited 响应、HEAD/101/无 body 状态码、中间 1xx 跳过、chunked trailer 校验与只读 API、`206`/`Content-Range` 只读解析、RFC 3986 相对 redirect、CONNECT 方法构建、HTTPS CONNECT 代理、明文 HTTP over proxy absolute-form、session 显式开启的 HTTP/1.1 pipeline（默认关闭，FIFO 响应绑定） |
 | HTTP/2 | TLS ALPN、h2c prior knowledge / Upgrade、SETTINGS（含 `ENABLE_CONNECT_PROTOCOL`）、HEADERS/CONTINUATION、DATA body source、请求/响应 trailers、显式 per-request PRIORITY、显式 `SendPing`、session 显式开启的后台 PING 保活（默认关闭）、GOAWAY/RST 可重试语义、WINDOW_UPDATE、HPACK、header block 语义校验、HPACK header-list/table-size 限制、活动 stream 表、`BeginRequest`/`ReceiveResponse(streamId)` 两阶段接口、RFC 8441 extended CONNECT DATA tunnel、高层连接池 HTTP/2 多活动流复用 |
-| WebSocket | ws/wss 握手、Accept 常量时间校验、自定义 opening handshake headers、文本/二进制发送、空消息、分片发送（`kws::SendContinuation`）、接收分片回调（`ReceiveOptions.OnMessage`）、控制帧校验、自动 Pong、Ping/Pong/CloseEx、selected subprotocol 查询、跨片 UTF-8 校验、默认聚合完整消息、显式 opt-in RFC 8441 WebSocket over HTTP/2 |
+| WebSocket | ws/wss 握手、Accept 常量时间校验、自定义 opening handshake headers、文本/二进制发送、空消息、分片发送（`kws::SendContinuation`）、接收分片回调（`ReceiveOptions.OnMessage`）、控制帧校验、自动 Pong、Ping/Pong/CloseEx、selected subprotocol 查询、跨片 UTF-8 校验、默认聚合完整消息、默认自动选择 RFC 8441 WebSocket over HTTP/2（`wss` offer `h2,http/1.1`，可用 `Http11Only` 强制 HTTP/1.1） |
 | TLS 与证书 | TLS 1.2/1.3、TLS 1.3 标准 cipher suite、TLS 1.2 ECDHE/DHE 与兼容档 RSA key exchange、AES-GCM/AES-CBC/ChaCha20-Poly1305、X25519/X448/NIST P curves/FFDHE、RSA-PSS/RSA-PKCS1/ECDSA/Ed25519/Ed448 signature scheme、SNI、ALPN、PSK/session ticket、0-RTT、被动 KeyUpdate、record padding、客户端证书（mTLS）、OCSP stapling 解析、证书链重排和校验、Name Constraints、certificatePolicies、IDNA、OCSP/CRL DER 撤销证据校验、撤销 provider callback、SPKI pin |
 
 **默认关闭 / 需显式开启**
@@ -57,7 +57,6 @@ KernelHttp 的公开能力按类别列账，避免把“没有实现”“默认
 | h2c prior knowledge / Upgrade | 通过 `SendOptions.Http2CleartextMode` 显式开启；默认不走明文 HTTP/2 |
 | HTTP/2 后台 PING 保活 | 通过 session `Http2KeepAlive.Enabled=true` 显式开启；idle、interval、ACK timeout 可配置 |
 | HTTP/2 per-request priority | 通过 `SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority` 指向 priority 描述 |
-| WebSocket over HTTP/2 | 通过 `AllowWebSocketOverHttp2=true` 显式开启；默认 HTTP/1.1 Upgrade |
 | WebSocket permessage-deflate | 通过 `ConnectConfig.PerMessageDeflate.Enable=true` 显式开启；默认不协商 |
 | TLS 1.2 RSA key exchange / CBC / SHA-1 签名 | 已实现但默认关闭；必须使用 `CompatibilityExplicit` policy 并分别开启对应兼容开关 |
 | TLS 1.2 真重协商 | 通过 `CompatibilityExplicit` + `EnableTls12Renegotiation` 显式开启；次数由 `MaxTls12Renegotiations` 限制 |
@@ -93,7 +92,6 @@ KernelHttp 的公开能力按类别列账，避免把“没有实现”“默认
 | 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
 | HTTP/2 复杂本地 priority tree 调度 | 非目标；不维护本地依赖树，不实现带宽调度器 |
 | 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；不协商其它扩展 |
-| WebSocket over HTTP/2 默认自动选择 | 当前不做；必须显式 opt-in |
 | 在线 OCSP/CRL 抓取 | 非目标；调用方通过外部 trust/cert/revocation 数据或已缓存条目驱动强撤销判定 |
 | HTTP/3 / QUIC | 非目标 |
 

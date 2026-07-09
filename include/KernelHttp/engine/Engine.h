@@ -155,10 +155,10 @@ namespace engine
 
     enum class KhWebSocketTransportMode : ULONG
     {
-        LegacyBoolean = 0,
+        Auto = 0,
         Http11Only = 1,
-        Auto = 2,
-        Http2Required = 3
+        Http2Required = 2,
+        LegacyBoolean = 3
     };
 
     enum KhHttpSendFlags : ULONG
@@ -390,7 +390,7 @@ namespace engine
         SIZE_T MaxMessageBytes = KhDefaultMaxWebSocketMessageBytes;
         bool AutoReplyPing = true;
         bool AllowWebSocketOverHttp2 = false;
-        KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::LegacyBoolean;
+        KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::Auto;
         websocket::PerMessageDeflateOptions PerMessageDeflate = {};
         KhWebSocketHandshakeChallengeCallback ChallengeCallback = nullptr;
         void* ChallengeContext = nullptr;
@@ -818,7 +818,7 @@ namespace engine
         ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;
         ULONG MaxTls12Renegotiations = KhDefaultMaxTls12Renegotiations;
         bool AllowWebSocketOverHttp2 = false;
-        KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::LegacyBoolean;
+        KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::Auto;
         websocket::PerMessageDeflateOptions PerMessageDeflate = {};
     };
 

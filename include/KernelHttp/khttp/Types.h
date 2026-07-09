@@ -146,10 +146,10 @@ namespace khttp
 
     enum class WebSocketTransportMode : ULONG
     {
-        LegacyBoolean = 0,
+        Auto = 0,
         Http11Only = 1,
-        Auto = 2,
-        Http2Required = 3
+        Http2Required = 2,
+        LegacyBoolean = 3
     };
 
     enum SendFlags : ULONG
@@ -429,7 +429,7 @@ namespace kws
         SIZE_T MaxMessageBytes = khttp::DefaultMaxWebSocketMessageBytes;
         bool AutoReplyPing = true;
         bool AllowWebSocketOverHttp2 = false;
-        khttp::WebSocketTransportMode TransportMode = khttp::WebSocketTransportMode::LegacyBoolean;
+        khttp::WebSocketTransportMode TransportMode = khttp::WebSocketTransportMode::Auto;
         ::KernelHttp::websocket::PerMessageDeflateOptions PerMessageDeflate = {};
         HandshakeChallengeCallback ChallengeCallback = nullptr;
         void* ChallengeContext = nullptr;
