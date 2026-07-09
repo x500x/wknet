@@ -169,6 +169,17 @@ namespace khttp
     constexpr ULONG DefaultMaxRedirects = 10;
     constexpr ULONG DefaultExpectContinueTimeoutMs = 1000;
     constexpr ULONG MaxExpectContinueTimeoutMs = ::KernelHttp::WskOperationTimeoutMilliseconds;
+    constexpr ULONG DefaultHttp11PipelineMaxDepth = ::KernelHttp::engine::KhDefaultHttp11PipelineMaxDepth;
+    constexpr ULONG Http11PipelineMethodGet = ::KernelHttp::engine::KhHttp11PipelineMethodGet;
+    constexpr ULONG Http11PipelineMethodPost = ::KernelHttp::engine::KhHttp11PipelineMethodPost;
+    constexpr ULONG Http11PipelineMethodPut = ::KernelHttp::engine::KhHttp11PipelineMethodPut;
+    constexpr ULONG Http11PipelineMethodPatch = ::KernelHttp::engine::KhHttp11PipelineMethodPatch;
+    constexpr ULONG Http11PipelineMethodDelete = ::KernelHttp::engine::KhHttp11PipelineMethodDelete;
+    constexpr ULONG Http11PipelineMethodHead = ::KernelHttp::engine::KhHttp11PipelineMethodHead;
+    constexpr ULONG Http11PipelineMethodOptions = ::KernelHttp::engine::KhHttp11PipelineMethodOptions;
+    constexpr ULONG Http11PipelineMethodConnect = ::KernelHttp::engine::KhHttp11PipelineMethodConnect;
+    constexpr ULONG Http11PipelineMethodTrace = ::KernelHttp::engine::KhHttp11PipelineMethodTrace;
+    constexpr ULONG DefaultHttp11PipelineMethodMask = ::KernelHttp::engine::KhDefaultHttp11PipelineMethodMask;
 
     typedef NTSTATUS (*HeaderCallback)(
         void* context,
@@ -232,6 +243,9 @@ namespace khttp
         ULONG PoolCapacity = DefaultPoolCapacity;
         ULONG MaxConnsPerHost = DefaultMaxConnsPerHost;
         ULONG IdleTimeoutMs = DefaultIdleTimeoutMs;
+        bool EnableHttp11Pipeline = false;
+        ULONG Http11PipelineMaxDepth = DefaultHttp11PipelineMaxDepth;
+        ULONG Http11PipelineMethodMask = DefaultHttp11PipelineMethodMask;
         TlsConfig Tls = {};
         ProxyConfig Proxy = {};
     };

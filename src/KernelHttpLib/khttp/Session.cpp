@@ -16,6 +16,11 @@ namespace
         apiOptions.ConnectionPoolCapacity = config != nullptr ? config->PoolCapacity : DefaultPoolCapacity;
         apiOptions.MaxConnectionsPerHost = config != nullptr ? config->MaxConnsPerHost : DefaultMaxConnsPerHost;
         apiOptions.IdleTimeoutMilliseconds = config != nullptr ? config->IdleTimeoutMs : DefaultIdleTimeoutMs;
+        apiOptions.EnableHttp11Pipeline = config != nullptr ? config->EnableHttp11Pipeline : false;
+        apiOptions.Http11PipelineMaxDepth =
+            config != nullptr ? config->Http11PipelineMaxDepth : DefaultHttp11PipelineMaxDepth;
+        apiOptions.Http11PipelineMethodMask =
+            config != nullptr ? config->Http11PipelineMethodMask : DefaultHttp11PipelineMethodMask;
 
         TlsConfig tls = {};
         if (config != nullptr) {

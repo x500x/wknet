@@ -746,6 +746,71 @@ namespace engine
 
     bool RequestUsesExpectContinue(
         _In_ const KhHttpSendOptions& options,
+        _In_ const KhRequest& request) noexcept;
+
+    ULONG Http11PipelineMethodBit(KhHttpMethod method) noexcept
+    {
+        switch (method) {
+        case KhHttpMethod::Get:
+            return KhHttp11PipelineMethodGet;
+        case KhHttpMethod::Post:
+            return KhHttp11PipelineMethodPost;
+        case KhHttpMethod::Put:
+            return KhHttp11PipelineMethodPut;
+        case KhHttpMethod::Patch:
+            return KhHttp11PipelineMethodPatch;
+        case KhHttpMethod::Delete:
+            return KhHttp11PipelineMethodDelete;
+        case KhHttpMethod::Head:
+            return KhHttp11PipelineMethodHead;
+        case KhHttpMethod::Options:
+            return KhHttp11PipelineMethodOptions;
+        case KhHttpMethod::Connect:
+            return KhHttp11PipelineMethodConnect;
+        case KhHttpMethod::Trace:
+            return KhHttp11PipelineMethodTrace;
+        default:
+            return 0;
+        }
+    }
+
+    bool IsHttp11PipelineTlsModeEligible(_In_ const KhRequest& request) noexcept
+    {
+        if (!IsHttpsRequest(request)) {
+            return true;
+        }
+
+        if (request.Tls.Alpn != nullptr && request.Tls.AlpnLength != 0) {
+            return TextEqualsLiteral(request.Tls.Alpn, request.Tls.AlpnLength, "http/1.1");
+        }
+
+        return !request.Tls.PreferHttp2;
+    }
+
+    bool IsHttp11PipelineCandidate(
+        _In_ const KhSession& session,
+        _In_ const KhRequest& request,
+        _In_ const KhHttpSendOptions& options,
+        KhHttp2CleartextMode http2CleartextMode) noexcept
+    {
+        if (!session.Options.EnableHttp11Pipeline ||
+            request.ConnectionPolicy != KhConnectionPolicy::ReuseOrCreate ||
+            http2CleartextMode != KhHttp2CleartextMode::Disabled ||
+            RequestUsesExpectContinue(options, request) ||
+            !IsHttp11PipelineTlsModeEligible(request) ||
+            request.HasBody ||
+            request.BodyLength != 0 ||
+            request.BodySourceCallback != nullptr ||
+            request.TrailerCount != 0) {
+            return false;
+        }
+
+        const ULONG methodBit = Http11PipelineMethodBit(request.Method);
+        return methodBit != 0 && (session.Options.Http11PipelineMethodMask & methodBit) != 0;
+    }
+
+    bool RequestUsesExpectContinue(
+        _In_ const KhHttpSendOptions& options,
         _In_ const KhRequest& request) noexcept
     {
         return ((options.Flags & KhHttpSendFlagExpectContinue) != 0) && request.HasBody;
@@ -1424,6 +1489,82 @@ namespace engine
         }
 
         return parsed.MinorVersion == 1;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS LoadHttp1PipelineBufferedBytes(
+        _Inout_ KhConnectionPool* connectionPool,
+        _Inout_ KhPooledConnection* pooledConnection,
+        _Inout_ KhWorkspace& workspace) noexcept
+    {
+        if (connectionPool == nullptr || pooledConnection == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        workspace.ResponseLength = 0;
+        SIZE_T bufferedLength = 0;
+        NTSTATUS status = KhConnectionPoolHttp1PipelineBufferedLength(
+            connectionPool,
+            pooledConnection,
+            &bufferedLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        if (bufferedLength == 0) {
+            return STATUS_SUCCESS;
+        }
+
+        status = KhWorkspaceEnsureResponseCapacity(&workspace, bufferedLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        SIZE_T copied = 0;
+        status = KhConnectionPoolTakeHttp1PipelineBufferedBytes(
+            connectionPool,
+            pooledConnection,
+            workspace.Response.Data,
+            workspace.Response.Length,
+            &copied);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        workspace.ResponseLength = copied;
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS PreserveHttp1PipelineTrailingBytes(
+        _Inout_ KhConnectionPool* connectionPool,
+        _Inout_ KhPooledConnection* pooledConnection,
+        _Inout_ KhWorkspace& workspace,
+        _In_ const http::HttpResponse& parsed,
+        _Out_ SIZE_T* rawResponseLength) noexcept
+    {
+        if (connectionPool == nullptr ||
+            pooledConnection == nullptr ||
+            rawResponseLength == nullptr ||
+            parsed.BytesConsumed > workspace.ResponseLength) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const SIZE_T consumed = parsed.BytesConsumed;
+        const SIZE_T trailingLength = workspace.ResponseLength - consumed;
+        if (trailingLength != 0) {
+            NTSTATUS status = KhConnectionPoolStoreHttp1PipelineBufferedBytes(
+                connectionPool,
+                pooledConnection,
+                workspace.Response.Data + consumed,
+                trailingLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        workspace.ResponseLength = consumed;
+        *rawResponseLength = consumed;
+        return STATUS_SUCCESS;
     }
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
@@ -2535,6 +2676,133 @@ namespace engine
             requestBytes + bodyOffset,
             requestLength - bodyOffset);
     }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+    _Must_inspect_result_
+    NTSTATUS ReadHttpResponseFromSocket(
+        _Inout_ core::ITransport& transport,
+        _Inout_ KhWorkspace& workspace,
+        bool responseBodyForbidden,
+        _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
+        _Out_ http::HttpResponse* parsed,
+        _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
+        SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http::HttpHeader* responseTrailers,
+        SIZE_T trailerCapacity,
+        _Out_ SIZE_T* rawResponseLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS SendHttp1PipelineRequestBuffer(
+        _Inout_ KhConnectionPool* connectionPool,
+        _Inout_ KhPooledConnection* pooledConnection,
+        _Inout_ core::ITransport& transport,
+        _Inout_ KhWorkspace& workspace,
+        _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
+        SIZE_T requestLength,
+        bool responseBodyForbidden,
+        _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
+        _Out_ http::HttpResponse* parsed,
+        _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
+        SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http::HttpHeader* responseTrailers,
+        SIZE_T trailerCapacity,
+        _Out_ SIZE_T* rawResponseLength,
+        _Out_ bool* connectionReusable) noexcept
+    {
+        if (rawResponseLength != nullptr) {
+            *rawResponseLength = 0;
+        }
+        if (connectionReusable != nullptr) {
+            *connectionReusable = false;
+        }
+        if (connectionPool == nullptr ||
+            pooledConnection == nullptr ||
+            parsed == nullptr ||
+            responseHeaders == nullptr ||
+            responseTrailers == nullptr ||
+            rawResponseLength == nullptr ||
+            connectionReusable == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ULONG sequence = 0;
+        NTSTATUS status = KhConnectionPoolBeginHttp1PipelineSend(
+            connectionPool,
+            pooledConnection,
+            &sequence);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = SendHttp1RequestBuffer(transport, requestBytes, requestLength);
+        KhConnectionPoolEndHttp1PipelineSend(pooledConnection);
+        if (!NT_SUCCESS(status)) {
+            KhConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
+            return status;
+        }
+
+        status = KhConnectionPoolWaitHttp1PipelineReceiveTurn(
+            connectionPool,
+            pooledConnection,
+            sequence);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = LoadHttp1PipelineBufferedBytes(connectionPool, pooledConnection, workspace);
+        if (!NT_SUCCESS(status)) {
+            KhConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
+            return status;
+        }
+
+        status = ReadHttpResponseFromSocket(
+            transport,
+            workspace,
+            responseBodyForbidden,
+            acceptPolicy,
+            parsed,
+            responseHeaders,
+            headerCapacity,
+            responseTrailers,
+            trailerCapacity,
+            rawResponseLength);
+        if (!NT_SUCCESS(status)) {
+            KhConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
+            return status;
+        }
+
+        status = PreserveHttp1PipelineTrailingBytes(
+            connectionPool,
+            pooledConnection,
+            workspace,
+            *parsed,
+            rawResponseLength);
+        if (!NT_SUCCESS(status)) {
+            KhConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
+            return status;
+        }
+
+        const bool reusable =
+            IsHttpConnectionReusable(*parsed, *rawResponseLength) &&
+            parsed->MajorVersion == 1 &&
+            parsed->MinorVersion == 1;
+        if (reusable) {
+            KhConnectionPoolCompleteHttp1PipelineReceive(
+                connectionPool,
+                pooledConnection,
+                sequence);
+        }
+        else {
+            KhConnectionPoolFailHttp1Pipeline(
+                connectionPool,
+                pooledConnection,
+                STATUS_CONNECTION_DISCONNECTED);
+        }
+
+        *connectionReusable = reusable;
+        return STATUS_SUCCESS;
+    }
+#endif
 
     _Must_inspect_result_
     bool FormatChunkPrefix(
@@ -4123,7 +4391,10 @@ namespace engine
         bool expectContinueBodySent,
         _Out_ KhTestHttpTransportRequest* testRequest,
         KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled,
-        bool usedHttp2 = false) noexcept
+        bool usedHttp2 = false,
+        bool http11PipelineEnabled = false,
+        bool http11PipelineLease = false,
+        ULONG http11PipelineSequence = 0) noexcept
     {
         if (testRequest == nullptr) {
             return;
@@ -4166,6 +4437,9 @@ namespace engine
         testRequest->PoolableConnection = request.ConnectionPolicy != KhConnectionPolicy::NoPool;
         testRequest->ReusedConnection = reusedConnection;
         testRequest->ConnectionId = pooledConnection != nullptr ? pooledConnection->Id : 0;
+        testRequest->Http11PipelineEnabled = http11PipelineEnabled;
+        testRequest->Http11PipelineLease = http11PipelineLease;
+        testRequest->Http11PipelineSequence = http11PipelineSequence;
         testRequest->Http2CleartextMode = http2CleartextMode;
         testRequest->UsedHttp2 = usedHttp2;
     }
@@ -4179,6 +4453,8 @@ namespace engine
         KhWorkspace& workspace,
         KhPooledConnection* pooledConnection,
         bool reusedConnection,
+        bool allowHttp11Pipeline,
+        ULONG http11PipelineMaxDepth,
         SIZE_T builtRequestLength,
         _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
@@ -4189,6 +4465,7 @@ namespace engine
         SIZE_T trailerCapacity,
         _Out_ SIZE_T* rawResponseLength,
         _Out_ bool* connectionReusable,
+        _Out_opt_ bool* usedHttp11Pipeline,
         _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
     {
         if (rawResponseLength != nullptr) {
@@ -4196,6 +4473,9 @@ namespace engine
         }
         if (connectionReusable != nullptr) {
             *connectionReusable = false;
+        }
+        if (usedHttp11Pipeline != nullptr) {
+            *usedHttp11Pipeline = false;
         }
 
         if (session == nullptr ||
@@ -4245,6 +4525,13 @@ namespace engine
             (request.HasBody || request.BodySourceCallback != nullptr || request.TrailerCount != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
+
+        const bool h2ExplicitlyRequestedForTest =
+            request.Tls.Alpn != nullptr &&
+            request.Tls.AlpnLength != 0 &&
+            TextEqualsLiteral(request.Tls.Alpn, request.Tls.AlpnLength, "h2");
+        bool testHttp11PipelineLease = false;
+        ULONG testHttp11PipelineSequence = 0;
 
         KhTestHttpTransportResponse testResponse = {};
         status = STATUS_SUCCESS;
@@ -4307,6 +4594,34 @@ namespace engine
                     return status;
                 }
             }
+            const bool canUseTestHttp11Pipeline =
+                allowHttp11Pipeline &&
+                pooledConnection != nullptr &&
+                !useHttp2Cleartext &&
+                !h2ExplicitlyRequestedForTest;
+            if (canUseTestHttp11Pipeline) {
+                if (!KhConnectionPoolHasHttp1PipelineLease(pooledConnection)) {
+                    status = KhConnectionPoolPromoteHttp1PipelineLease(
+                        &session->ConnectionPool,
+                        pooledConnection,
+                        http11PipelineMaxDepth);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                }
+
+                status = KhConnectionPoolBeginHttp1PipelineSend(
+                    &session->ConnectionPool,
+                    pooledConnection,
+                    &testHttp11PipelineSequence);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                testHttp11PipelineLease = true;
+                if (usedHttp11Pipeline != nullptr) {
+                    *usedHttp11Pipeline = true;
+                }
+            }
             PopulateTestHttpTransportRequest(
                 request,
                 *session,
@@ -4320,14 +4635,30 @@ namespace engine
                 false,
                 &testRequest,
                 http2CleartextMode,
-                useHttp2Cleartext);
+                useHttp2Cleartext,
+                allowHttp11Pipeline,
+                testHttp11PipelineLease,
+                testHttp11PipelineSequence);
             status = g_testHttpTransport(g_testHttpTransportContext, &testRequest, &testResponse);
+            if (testHttp11PipelineLease) {
+                KhConnectionPoolEndHttp1PipelineSend(pooledConnection);
+            }
         }
         if (!NT_SUCCESS(status)) {
+            if (testHttp11PipelineLease) {
+                KhConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
+            }
             return status;
         }
 
         if (useHttp2Cleartext) {
+            if (testHttp11PipelineLease) {
+                KhConnectionPoolFailHttp1Pipeline(
+                    &session->ConnectionPool,
+                    pooledConnection,
+                    STATUS_NOT_SUPPORTED);
+                return STATUS_NOT_SUPPORTED;
+            }
             parsed->MajorVersion = 2;
             parsed->MinorVersion = 0;
             parsed->StatusCode = 200;
@@ -4338,6 +4669,13 @@ namespace engine
         }
 
         if (TextEqualsLiteral(testResponse.NegotiatedAlpn, testResponse.NegotiatedAlpnLength, "h2")) {
+            if (testHttp11PipelineLease) {
+                KhConnectionPoolFailHttp1Pipeline(
+                    &session->ConnectionPool,
+                    pooledConnection,
+                    STATUS_NOT_SUPPORTED);
+                return STATUS_NOT_SUPPORTED;
+            }
             if (useExpectContinue) {
                 return STATUS_NOT_SUPPORTED;
             }
@@ -4358,11 +4696,30 @@ namespace engine
         }
 
         if (testResponse.RawResponse == nullptr || testResponse.RawResponseLength == 0) {
+            if (testHttp11PipelineLease) {
+                KhConnectionPoolFailHttp1Pipeline(
+                    &session->ConnectionPool,
+                    pooledConnection,
+                    STATUS_INVALID_NETWORK_RESPONSE);
+            }
             return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        if (testHttp11PipelineLease) {
+            status = KhConnectionPoolWaitHttp1PipelineReceiveTurn(
+                &session->ConnectionPool,
+                pooledConnection,
+                testHttp11PipelineSequence);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
         }
 
         status = KhWorkspaceEnsureResponseCapacity(&workspace, testResponse.RawResponseLength);
         if (!NT_SUCCESS(status)) {
+            if (testHttp11PipelineLease) {
+                KhConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
+            }
             return status;
         }
 
@@ -4381,13 +4738,48 @@ namespace engine
             responseTrailers,
             trailerCapacity);
         if (!NT_SUCCESS(status)) {
+            if (testHttp11PipelineLease) {
+                KhConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
+            }
             return status;
         }
 
-        *rawResponseLength = workspace.ResponseLength;
-        *connectionReusable =
-            testResponse.ConnectionReusable &&
-            IsHttpConnectionReusable(*parsed, *rawResponseLength);
+        if (testHttp11PipelineLease) {
+            status = PreserveHttp1PipelineTrailingBytes(
+                &session->ConnectionPool,
+                pooledConnection,
+                workspace,
+                *parsed,
+                rawResponseLength);
+            if (!NT_SUCCESS(status)) {
+                KhConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
+                return status;
+            }
+
+            *connectionReusable =
+                testResponse.ConnectionReusable &&
+                IsHttpConnectionReusable(*parsed, *rawResponseLength) &&
+                parsed->MajorVersion == 1 &&
+                parsed->MinorVersion == 1;
+            if (*connectionReusable) {
+                KhConnectionPoolCompleteHttp1PipelineReceive(
+                    &session->ConnectionPool,
+                    pooledConnection,
+                    testHttp11PipelineSequence);
+            }
+            else {
+                KhConnectionPoolFailHttp1Pipeline(
+                    &session->ConnectionPool,
+                    pooledConnection,
+                    STATUS_CONNECTION_DISCONNECTED);
+            }
+        }
+        else {
+            *rawResponseLength = workspace.ResponseLength;
+            *connectionReusable =
+                testResponse.ConnectionReusable &&
+                IsHttpConnectionReusable(*parsed, *rawResponseLength);
+        }
         return STATUS_SUCCESS;
 #else
         UNREFERENCED_PARAMETER(reusedConnection);
@@ -4577,6 +4969,39 @@ namespace engine
         }
 
         http::HttpAcceptEncodingPolicy acceptPolicy = AcceptEncodingPolicyFromOptions(sendOptions);
+        if (allowHttp11Pipeline) {
+            if (!KhConnectionPoolHasHttp1PipelineLease(pooledConnection)) {
+                status = KhConnectionPoolPromoteHttp1PipelineLease(
+                    &session->ConnectionPool,
+                    pooledConnection,
+                    http11PipelineMaxDepth);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
+            if (usedHttp11Pipeline != nullptr) {
+                *usedHttp11Pipeline = true;
+            }
+
+            return SendHttp1PipelineRequestBuffer(
+                &session->ConnectionPool,
+                pooledConnection,
+                *pooledConnection->Transport,
+                workspace,
+                workspace.Request.Data,
+                builtRequestLength,
+                request.Method == KhHttpMethod::Head,
+                &acceptPolicy,
+                parsed,
+                responseHeaders,
+                headerCapacity,
+                responseTrailers,
+                trailerCapacity,
+                rawResponseLength,
+                connectionReusable);
+        }
+
         if (useExpectContinue) {
             if (request.BodySourceCallback != nullptr) {
                 status = SendHttp1RequestSourceWithExpect(
@@ -5440,19 +5865,33 @@ namespace engine
             return status;
         }
 
+        const bool allowHttp11Pipeline =
+            IsHttp11PipelineCandidate(*session, request, sendOptions, http2CleartextMode);
         KhPooledConnection* pooledConnection = nullptr;
         bool reusedConnection = false;
-        status = KhConnectionPoolAcquire(
-            &session->ConnectionPool,
-            *poolKey.Get(),
-            request.ConnectionPolicy,
-            &pooledConnection,
-            &reusedConnection);
+        if (allowHttp11Pipeline) {
+            status = KhConnectionPoolAcquireHttp1Pipeline(
+                &session->ConnectionPool,
+                *poolKey.Get(),
+                request.ConnectionPolicy,
+                session->Options.Http11PipelineMaxDepth,
+                &pooledConnection,
+                &reusedConnection);
+        }
+        else {
+            status = KhConnectionPoolAcquire(
+                &session->ConnectionPool,
+                *poolKey.Get(),
+                request.ConnectionPolicy,
+                &pooledConnection,
+                &reusedConnection);
+        }
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
         bool connectionReusable = false;
+        bool usedHttp11Pipeline = false;
         const SIZE_T responseHeaderCapacity = session->Options.MaxResponseHeaders;
         status = SendViaTransport(
             session,
@@ -5461,6 +5900,8 @@ namespace engine
             workspace,
             pooledConnection,
             reusedConnection,
+            allowHttp11Pipeline,
+            session->Options.Http11PipelineMaxDepth,
             builtRequestLength,
             headerScratch.RequestHeaders,
             requestHeaderCount,
@@ -5471,9 +5912,11 @@ namespace engine
             KhMaxTrailersPerResponse,
             rawResponseLength,
             &connectionReusable,
+            &usedHttp11Pipeline,
             cancellationOperation);
 
         const bool shouldRetryWithFreshConnection =
+            !usedHttp11Pipeline &&
             ShouldRetryWithFreshConnection(request, status, reusedConnection);
 
         if (shouldRetryWithFreshConnection) {
@@ -5526,6 +5969,8 @@ namespace engine
                     workspace,
                     retryConnection,
                     retryReused,
+                    false,
+                    session->Options.Http11PipelineMaxDepth,
                     builtRequestLength,
                     headerScratch.RequestHeaders,
                     requestHeaderCount,
@@ -5536,6 +5981,7 @@ namespace engine
                     KhMaxTrailersPerResponse,
                     rawResponseLength,
                     &connectionReusable,
+                    &usedHttp11Pipeline,
                     cancellationOperation);
 
                 if (!NT_SUCCESS(status)) {

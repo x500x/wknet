@@ -583,6 +583,18 @@ namespace
         return IsValidProxyHeaderValueText(options.AuthHeader, options.AuthHeaderLength);
     }
 
+    bool IsValidHttp11PipelineOptions(const KhSessionOptions& options) noexcept
+    {
+        if (options.Http11PipelineMaxDepth == 0 ||
+            options.Http11PipelineMaxDepth > KhMaxHttp11PipelineDepth ||
+            options.Http11PipelineMethodMask == 0 ||
+            (options.Http11PipelineMethodMask & ~KhHttp11PipelineKnownMethodMask) != 0) {
+            return false;
+        }
+
+        return true;
+    }
+
     bool IsValidSessionOptions(const KhSessionOptions& options) noexcept
     {
         if (options.RequestBufferBytes == 0) {
@@ -613,7 +625,9 @@ namespace
             return false;
         }
 
-        return IsValidTlsOptions(options.Tls) && IsValidProxyOptions(options.Proxy);
+        return IsValidHttp11PipelineOptions(options) &&
+            IsValidTlsOptions(options.Tls) &&
+            IsValidProxyOptions(options.Proxy);
     }
 
     bool IsValidAddressFamily(KhAddressFamily addressFamily) noexcept

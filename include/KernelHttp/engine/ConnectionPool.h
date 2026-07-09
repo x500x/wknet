@@ -66,9 +66,21 @@ namespace engine
         ULONGLONG LastUsedTime = 0;
         ULONG Http2StreamLeases = 0;
         ULONG Http2MaxStreamLeases = 0;
+        ULONG Http1PipelineLeases = 0;
+        ULONG Http1MaxPipelineLeases = 0;
+        ULONG Http1PipelineNextSequence = 1;
+        ULONG Http1PipelineNextReceiveSequence = 1;
+        NTSTATUS Http1PipelineFailureStatus = STATUS_SUCCESS;
+        UCHAR* Http1PipelineBufferedBytes = nullptr;
+        SIZE_T Http1PipelineBufferedLength = 0;
+        SIZE_T Http1PipelineBufferedCapacity = 0;
         bool CloseWhenIdle = false;
         bool ProxyTunnelEstablished = false;
         KhConnectionPoolKey Key = {};
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        KMUTEX Http1PipelineSendLock = {};
+        KEVENT Http1PipelineReceiveEvent = {};
+#endif
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         net::WskSocket* Socket = nullptr;
         core::WskTransport* RawTransport = nullptr;
@@ -118,6 +130,15 @@ namespace engine
         _Outptr_ KhPooledConnection** connection,
         _Out_ bool* reused) noexcept;
 
+    _Must_inspect_result_
+    NTSTATUS KhConnectionPoolAcquireHttp1Pipeline(
+        _Inout_ KhConnectionPool* pool,
+        _In_ const KhConnectionPoolKey& key,
+        KhConnectionPolicy policy,
+        ULONG maxPipelineLeases,
+        _Outptr_ KhPooledConnection** connection,
+        _Out_ bool* reused) noexcept;
+
     void KhConnectionPoolRelease(
         _Inout_ KhConnectionPool* pool,
         _Inout_opt_ KhPooledConnection* connection,
@@ -132,6 +153,62 @@ namespace engine
         _Inout_ KhConnectionPool* pool,
         _Inout_ KhPooledConnection* connection,
         ULONG maxConcurrentStreams) noexcept;
+
+    _Must_inspect_result_
+    bool KhConnectionPoolHasHttp1PipelineLease(
+        _In_opt_ const KhPooledConnection* connection) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhConnectionPoolPromoteHttp1PipelineLease(
+        _Inout_ KhConnectionPool* pool,
+        _Inout_ KhPooledConnection* connection,
+        ULONG maxPipelineLeases) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhConnectionPoolBeginHttp1PipelineSend(
+        _Inout_ KhConnectionPool* pool,
+        _Inout_ KhPooledConnection* connection,
+        _Out_ ULONG* sequence) noexcept;
+
+    void KhConnectionPoolEndHttp1PipelineSend(
+        _Inout_opt_ KhPooledConnection* connection) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhConnectionPoolWaitHttp1PipelineReceiveTurn(
+        _Inout_ KhConnectionPool* pool,
+        _Inout_ KhPooledConnection* connection,
+        ULONG sequence) noexcept;
+
+    void KhConnectionPoolCompleteHttp1PipelineReceive(
+        _Inout_ KhConnectionPool* pool,
+        _Inout_ KhPooledConnection* connection,
+        ULONG sequence) noexcept;
+
+    void KhConnectionPoolFailHttp1Pipeline(
+        _Inout_ KhConnectionPool* pool,
+        _Inout_opt_ KhPooledConnection* connection,
+        NTSTATUS status) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhConnectionPoolHttp1PipelineBufferedLength(
+        _Inout_ KhConnectionPool* pool,
+        _Inout_ KhPooledConnection* connection,
+        _Out_ SIZE_T* length) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhConnectionPoolTakeHttp1PipelineBufferedBytes(
+        _Inout_ KhConnectionPool* pool,
+        _Inout_ KhPooledConnection* connection,
+        _Out_writes_bytes_(destinationCapacity) UCHAR* destination,
+        SIZE_T destinationCapacity,
+        _Out_ SIZE_T* bytesCopied) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhConnectionPoolStoreHttp1PipelineBufferedBytes(
+        _Inout_ KhConnectionPool* pool,
+        _Inout_ KhPooledConnection* connection,
+        _In_reads_bytes_(length) const UCHAR* bytes,
+        SIZE_T length) noexcept;
 
     void KhConnectionPoolClose(
         _Inout_ KhConnectionPool* pool,

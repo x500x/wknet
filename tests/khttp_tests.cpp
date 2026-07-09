@@ -175,6 +175,9 @@ namespace
         KernelHttp::engine::KhHttp2CleartextMode Http2CleartextMode =
             KernelHttp::engine::KhHttp2CleartextMode::Disabled;
         bool UsedHttp2 = false;
+        bool Http11PipelineEnabled = false;
+        bool Http11PipelineLease = false;
+        ULONG Http11PipelineSequence = 0;
     };
 
     struct StreamingBodyContext
@@ -247,6 +250,18 @@ namespace
         bool SecondConnectionReusable = true;
         SIZE_T CallCount = 0;
         SIZE_T ReusedCallCount = 0;
+    };
+
+    struct Http11PipelineCapture
+    {
+        SIZE_T CallCount = 0;
+        bool LastPipelineEnabled = false;
+        bool LastPipelineLease = false;
+        bool LastReusedConnection = false;
+        ULONG LastPipelineSequence = 0;
+        const char* RawResponse = nullptr;
+        SIZE_T RawResponseLength = 0;
+        bool ConnectionReusable = true;
     };
 
     struct CompletionCapture
@@ -365,6 +380,9 @@ namespace
         captured->ProxyAuthHeader[captured->ProxyAuthHeaderLength] = '\0';
         captured->Http2CleartextMode = request->Http2CleartextMode;
         captured->UsedHttp2 = request->UsedHttp2;
+        captured->Http11PipelineEnabled = request->Http11PipelineEnabled;
+        captured->Http11PipelineLease = request->Http11PipelineLease;
+        captured->Http11PipelineSequence = request->Http11PipelineSequence;
 
         const char* bodyMarker = "\r\n\r\n";
         const SIZE_T markerLength = 4;
@@ -956,6 +974,28 @@ namespace
             response->RawResponseLength = capture->SecondResponseLength;
             response->ConnectionReusable = capture->SecondConnectionReusable;
         }
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS Http11PipelineTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<Http11PipelineCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->CallCount;
+        capture->LastPipelineEnabled = request->Http11PipelineEnabled;
+        capture->LastPipelineLease = request->Http11PipelineLease;
+        capture->LastPipelineSequence = request->Http11PipelineSequence;
+        capture->LastReusedConnection = request->ReusedConnection;
+
+        response->RawResponse = capture->RawResponse;
+        response->RawResponseLength = capture->RawResponseLength;
+        response->ConnectionReusable = capture->ConnectionReusable;
         return STATUS_SUCCESS;
     }
 
@@ -2253,6 +2293,107 @@ namespace
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
+    void TestHttp11PipelineDefaultDisabled() noexcept
+    {
+        static const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "ok";
+        Http11PipelineCapture capture = {};
+        capture.RawResponse = responseBytes;
+        capture.RawResponseLength = sizeof(responseBytes) - 1;
+        khttp::test::SetHttpTransport(Http11PipelineTransport, &capture);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for default HTTP/1.1 pipeline test");
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/pipeline-default";
+        status = khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "default HTTP/1.1 GET succeeds");
+        Expect(capture.CallCount == 1, "default pipeline test reaches transport once");
+        Expect(!capture.LastPipelineEnabled, "HTTP/1.1 pipeline is disabled by default");
+        Expect(!capture.LastPipelineLease, "default GET does not take a pipeline lease");
+        Expect(capture.LastPipelineSequence == 0, "default GET has no pipeline sequence");
+
+        khttp::ResponseRelease(resp);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttp11PipelineGetOptIn() noexcept
+    {
+        static const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "ok";
+        Http11PipelineCapture capture = {};
+        capture.RawResponse = responseBytes;
+        capture.RawResponseLength = sizeof(responseBytes) - 1;
+        khttp::test::SetHttpTransport(Http11PipelineTransport, &capture);
+
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.EnableHttp11Pipeline = true;
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for opt-in HTTP/1.1 pipeline test");
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/pipeline-get";
+        status = khttp::Get(session, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "opt-in HTTP/1.1 GET succeeds");
+        Expect(capture.CallCount == 1, "opt-in pipeline GET reaches transport once");
+        Expect(capture.LastPipelineEnabled, "opt-in GET marks HTTP/1.1 pipeline enabled");
+        Expect(capture.LastPipelineLease, "opt-in GET takes a pipeline lease");
+        Expect(capture.LastPipelineSequence == 1, "first opt-in pipeline GET uses sequence 1");
+
+        khttp::ResponseRelease(resp);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttp11PipelinePostDefaultRejected() noexcept
+    {
+        static const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "ok";
+        Http11PipelineCapture capture = {};
+        capture.RawResponse = responseBytes;
+        capture.RawResponseLength = sizeof(responseBytes) - 1;
+        khttp::test::SetHttpTransport(Http11PipelineTransport, &capture);
+
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.EnableHttp11Pipeline = true;
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for POST pipeline rejection test");
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/pipeline-post";
+        const char* body = "payload";
+        status = khttp::Post(
+            session,
+            url,
+            Length(url),
+            reinterpret_cast<const UCHAR*>(body),
+            Length(body),
+            &resp);
+        Expect(NT_SUCCESS(status), "opt-in POST succeeds outside HTTP/1.1 pipeline");
+        Expect(capture.CallCount == 1, "POST pipeline rejection test reaches transport once");
+        Expect(!capture.LastPipelineEnabled, "POST is not pipeline-eligible by default");
+        Expect(!capture.LastPipelineLease, "POST does not take a pipeline lease by default");
+        Expect(capture.LastPipelineSequence == 0, "POST has no pipeline sequence by default");
+
+        khttp::ResponseRelease(resp);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
     void TestConnectionPoolHonorsMaxConnectionsPerHost() noexcept
     {
         KernelHttp::engine::KhConnectionPool pool = {};
@@ -2305,6 +2446,178 @@ namespace
 
         KernelHttp::engine::KhConnectionPoolRelease(&pool, other, false);
         KernelHttp::engine::KhConnectionPoolRelease(&pool, first, false);
+        KernelHttp::engine::KhConnectionPoolShutdown(&pool);
+    }
+
+    void TestConnectionPoolSharesActiveHttp1PipelineLeases() noexcept
+    {
+        KernelHttp::engine::KhConnectionPool pool = {};
+        NTSTATUS status = KernelHttp::engine::KhConnectionPoolInitialize(&pool, 2, 1, 30000);
+        Expect(NT_SUCCESS(status), "connection pool initializes for HTTP/1.1 pipeline sharing");
+
+        KernelHttp::engine::KhConnectionPoolKey key = {};
+        memcpy(key.Scheme, "http", Length("http"));
+        key.SchemeLength = Length("http");
+        memcpy(key.Host, "example.com", Length("example.com"));
+        key.HostLength = Length("example.com");
+        key.Port = 80;
+
+        KernelHttp::engine::KhPooledConnection* first = nullptr;
+        bool reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquireHttp1Pipeline(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            2,
+            &first,
+            &reused);
+        Expect(NT_SUCCESS(status), "first HTTP/1.1 pipeline acquire succeeds");
+        Expect(first != nullptr && !reused, "first HTTP/1.1 pipeline acquire is fresh");
+
+        status = KernelHttp::engine::KhConnectionPoolPromoteHttp1PipelineLease(&pool, first, 2);
+        Expect(NT_SUCCESS(status), "first HTTP/1.1 lease promotes connection to pipeline mode");
+        Expect(
+            KernelHttp::engine::KhConnectionPoolHasHttp1PipelineLease(first),
+            "promoted connection reports HTTP/1.1 pipeline lease");
+
+        ULONG firstSequence = 0;
+        status = KernelHttp::engine::KhConnectionPoolBeginHttp1PipelineSend(&pool, first, &firstSequence);
+        Expect(NT_SUCCESS(status), "first HTTP/1.1 pipeline send begins");
+        Expect(firstSequence == 1, "first HTTP/1.1 pipeline sequence is 1");
+        KernelHttp::engine::KhConnectionPoolEndHttp1PipelineSend(first);
+
+        KernelHttp::engine::KhPooledConnection* second = nullptr;
+        reused = false;
+        status = KernelHttp::engine::KhConnectionPoolAcquireHttp1Pipeline(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            2,
+            &second,
+            &reused);
+        Expect(NT_SUCCESS(status), "second HTTP/1.1 pipeline acquire succeeds");
+        Expect(second == first && reused, "second HTTP/1.1 pipeline acquire shares active connection");
+
+        ULONG secondSequence = 0;
+        status = KernelHttp::engine::KhConnectionPoolBeginHttp1PipelineSend(&pool, second, &secondSequence);
+        Expect(NT_SUCCESS(status), "second HTTP/1.1 pipeline send begins");
+        Expect(secondSequence == 2, "second HTTP/1.1 pipeline sequence is 2");
+        KernelHttp::engine::KhConnectionPoolEndHttp1PipelineSend(second);
+
+        status = KernelHttp::engine::KhConnectionPoolWaitHttp1PipelineReceiveTurn(&pool, first, firstSequence);
+        Expect(NT_SUCCESS(status), "first HTTP/1.1 pipeline response turn is ready");
+
+        const UCHAR extra[] = { 'H', 'T', 'T', 'P' };
+        status = KernelHttp::engine::KhConnectionPoolStoreHttp1PipelineBufferedBytes(
+            &pool,
+            first,
+            extra,
+            sizeof(extra));
+        Expect(NT_SUCCESS(status), "HTTP/1.1 pipeline stores bytes for next response");
+
+        SIZE_T bufferedLength = 0;
+        status = KernelHttp::engine::KhConnectionPoolHttp1PipelineBufferedLength(
+            &pool,
+            second,
+            &bufferedLength);
+        Expect(NT_SUCCESS(status), "HTTP/1.1 pipeline reports buffered bytes");
+        Expect(bufferedLength == sizeof(extra), "HTTP/1.1 pipeline buffered byte count matches");
+
+        UCHAR copied[sizeof(extra)] = {};
+        SIZE_T copiedLength = 0;
+        status = KernelHttp::engine::KhConnectionPoolTakeHttp1PipelineBufferedBytes(
+            &pool,
+            second,
+            copied,
+            sizeof(copied),
+            &copiedLength);
+        Expect(NT_SUCCESS(status), "HTTP/1.1 pipeline takes buffered bytes");
+        Expect(copiedLength == sizeof(extra), "HTTP/1.1 pipeline copied byte count matches");
+        Expect(memcmp(copied, extra, sizeof(extra)) == 0, "HTTP/1.1 pipeline copied bytes match");
+
+        KernelHttp::engine::KhConnectionPoolCompleteHttp1PipelineReceive(&pool, first, firstSequence);
+        status = KernelHttp::engine::KhConnectionPoolWaitHttp1PipelineReceiveTurn(&pool, second, secondSequence);
+        Expect(NT_SUCCESS(status), "second HTTP/1.1 pipeline response waits for FIFO turn");
+        KernelHttp::engine::KhConnectionPoolCompleteHttp1PipelineReceive(&pool, second, secondSequence);
+
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, second, true);
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, first, true);
+        KernelHttp::engine::KhConnectionPoolShutdown(&pool);
+    }
+
+    void TestConnectionPoolHttp1PipelineFailureClosesLeases() noexcept
+    {
+        KernelHttp::engine::KhConnectionPool pool = {};
+        NTSTATUS status = KernelHttp::engine::KhConnectionPoolInitialize(&pool, 2, 1, 30000);
+        Expect(NT_SUCCESS(status), "connection pool initializes for HTTP/1.1 pipeline failure");
+
+        KernelHttp::engine::KhConnectionPoolKey key = {};
+        memcpy(key.Scheme, "http", Length("http"));
+        key.SchemeLength = Length("http");
+        memcpy(key.Host, "example.com", Length("example.com"));
+        key.HostLength = Length("example.com");
+        key.Port = 80;
+
+        KernelHttp::engine::KhPooledConnection* first = nullptr;
+        bool reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquireHttp1Pipeline(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            2,
+            &first,
+            &reused);
+        Expect(NT_SUCCESS(status), "first failure pipeline acquire succeeds");
+        status = KernelHttp::engine::KhConnectionPoolPromoteHttp1PipelineLease(&pool, first, 2);
+        Expect(NT_SUCCESS(status), "failure pipeline promote succeeds");
+
+        ULONG firstSequence = 0;
+        status = KernelHttp::engine::KhConnectionPoolBeginHttp1PipelineSend(&pool, first, &firstSequence);
+        Expect(NT_SUCCESS(status), "first failure pipeline send begins");
+        KernelHttp::engine::KhConnectionPoolEndHttp1PipelineSend(first);
+
+        KernelHttp::engine::KhPooledConnection* second = nullptr;
+        reused = false;
+        status = KernelHttp::engine::KhConnectionPoolAcquireHttp1Pipeline(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            2,
+            &second,
+            &reused);
+        Expect(NT_SUCCESS(status), "second failure pipeline acquire succeeds");
+        Expect(second == first && reused, "second failure pipeline acquire shares active connection");
+
+        ULONG secondSequence = 0;
+        status = KernelHttp::engine::KhConnectionPoolBeginHttp1PipelineSend(&pool, second, &secondSequence);
+        Expect(NT_SUCCESS(status), "second failure pipeline send begins before failure");
+        KernelHttp::engine::KhConnectionPoolEndHttp1PipelineSend(second);
+
+        KernelHttp::engine::KhConnectionPoolFailHttp1Pipeline(
+            &pool,
+            first,
+            STATUS_INVALID_NETWORK_RESPONSE);
+        status = KernelHttp::engine::KhConnectionPoolWaitHttp1PipelineReceiveTurn(
+            &pool,
+            second,
+            secondSequence);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "pipeline failure propagates to pending response");
+
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, second, false);
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, first, false);
+
+        KernelHttp::engine::KhPooledConnection* fresh = nullptr;
+        reused = true;
+        status = KernelHttp::engine::KhConnectionPoolAcquireHttp1Pipeline(
+            &pool,
+            key,
+            KernelHttp::engine::KhConnectionPolicy::ReuseOrCreate,
+            2,
+            &fresh,
+            &reused);
+        Expect(NT_SUCCESS(status), "pipeline acquire after failure creates usable connection");
+        Expect(fresh != nullptr && !reused, "failed pipeline connection is not reused");
+        KernelHttp::engine::KhConnectionPoolRelease(&pool, fresh, false);
         KernelHttp::engine::KhConnectionPoolShutdown(&pool);
     }
 
@@ -5635,9 +5948,14 @@ int main() noexcept
     TestReusedHeadTimeoutRetriesWithFreshConnection();
     TestReusedConnectionPostFailureDoesNotRetry();
     TestReusedConnectionPostRetrySignalDoesNotReplay();
+    TestHttp11PipelineDefaultDisabled();
+    TestHttp11PipelineGetOptIn();
+    TestHttp11PipelinePostDefaultRejected();
     TestFreshRetrySignalRetriesSafeMethodsOnly();
     TestHttp2CleartextExplicitEntry();
     TestConnectionPoolHonorsMaxConnectionsPerHost();
+    TestConnectionPoolSharesActiveHttp1PipelineLeases();
+    TestConnectionPoolHttp1PipelineFailureClosesLeases();
     TestConnectionPoolSharesActiveHttp2StreamLeases();
     TestConnectionPoolHostQuotaSeparatesTlsReuseIdentity();
     TestConnectionPoolKeyIncludesTlsIdentity();

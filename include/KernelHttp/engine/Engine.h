@@ -52,6 +52,31 @@ namespace engine
     constexpr ULONG KhDefaultMaxRedirects = 10;
     constexpr ULONG KhDefaultExpectContinueTimeoutMilliseconds = 1000;
     constexpr ULONG KhMaxExpectContinueTimeoutMilliseconds = WskOperationTimeoutMilliseconds;
+    constexpr ULONG KhDefaultHttp11PipelineMaxDepth = 4;
+    constexpr ULONG KhMaxHttp11PipelineDepth = 64;
+    constexpr ULONG KhHttp11PipelineMethodGet = 0x00000001;
+    constexpr ULONG KhHttp11PipelineMethodPost = 0x00000002;
+    constexpr ULONG KhHttp11PipelineMethodPut = 0x00000004;
+    constexpr ULONG KhHttp11PipelineMethodPatch = 0x00000008;
+    constexpr ULONG KhHttp11PipelineMethodDelete = 0x00000010;
+    constexpr ULONG KhHttp11PipelineMethodHead = 0x00000020;
+    constexpr ULONG KhHttp11PipelineMethodOptions = 0x00000040;
+    constexpr ULONG KhHttp11PipelineMethodConnect = 0x00000080;
+    constexpr ULONG KhHttp11PipelineMethodTrace = 0x00000100;
+    constexpr ULONG KhHttp11PipelineKnownMethodMask =
+        KhHttp11PipelineMethodGet |
+        KhHttp11PipelineMethodPost |
+        KhHttp11PipelineMethodPut |
+        KhHttp11PipelineMethodPatch |
+        KhHttp11PipelineMethodDelete |
+        KhHttp11PipelineMethodHead |
+        KhHttp11PipelineMethodOptions |
+        KhHttp11PipelineMethodConnect |
+        KhHttp11PipelineMethodTrace;
+    constexpr ULONG KhDefaultHttp11PipelineMethodMask =
+        KhHttp11PipelineMethodGet |
+        KhHttp11PipelineMethodHead |
+        KhHttp11PipelineMethodOptions;
 
     enum class KhPoolType : ULONG
     {
@@ -215,6 +240,9 @@ namespace engine
         ULONG ConnectionPoolCapacity = KhDefaultConnectionPoolCapacity;
         ULONG MaxConnectionsPerHost = KhDefaultConnectionsPerHost;
         ULONG IdleTimeoutMilliseconds = KhDefaultIdleTimeoutMilliseconds;
+        bool EnableHttp11Pipeline = false;
+        ULONG Http11PipelineMaxDepth = KhDefaultHttp11PipelineMaxDepth;
+        ULONG Http11PipelineMethodMask = KhDefaultHttp11PipelineMethodMask;
         KhTlsOptions Tls = {};
         KhProxyOptions Proxy = {};
     };
@@ -681,6 +709,9 @@ namespace engine
         bool PoolableConnection = false;
         bool ReusedConnection = false;
         ULONG ConnectionId = 0;
+        bool Http11PipelineEnabled = false;
+        bool Http11PipelineLease = false;
+        ULONG Http11PipelineSequence = 0;
         KhHttp2CleartextMode Http2CleartextMode = KhHttp2CleartextMode::Disabled;
         bool UsedHttp2 = false;
     };
