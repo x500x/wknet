@@ -57,6 +57,31 @@ namespace http2
                 d[i] = s[i];
             }
         }
+
+        NTSTATUS ValidatePriority(ULONG streamId, const Http2Priority& priority) noexcept
+        {
+            if (streamId == 0 ||
+                (streamId & 0x80000000u) != 0 ||
+                (priority.StreamDependency & 0x80000000u) != 0 ||
+                priority.StreamDependency == streamId ||
+                priority.Weight == 0 ||
+                priority.Weight > 256) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            return STATUS_SUCCESS;
+        }
+
+        void WritePriorityPayload(UCHAR* dest, const Http2Priority& priority) noexcept
+        {
+            ULONG dependency = priority.StreamDependency & 0x7fffffffu;
+            if (priority.Exclusive) {
+                dependency |= 0x80000000u;
+            }
+            WriteUint32BE(dest, dependency);
+            dest[4] = static_cast<UCHAR>(priority.Weight - 1);
+        }
+
         char Base64UrlChar(UCHAR value) noexcept
         {
             if (value < 26) return static_cast<char>('A' + value);
@@ -453,6 +478,56 @@ namespace http2
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS Http2FrameCodec::EncodePriority(
+        ULONG streamId,
+        const Http2Priority& priority,
+        UCHAR* dest,
+        SIZE_T capacity,
+        SIZE_T* bytesWritten) noexcept
+    {
+        if (dest == nullptr || bytesWritten == nullptr) return STATUS_INVALID_PARAMETER;
+        NTSTATUS status = ValidatePriority(streamId, priority);
+        if (!NT_SUCCESS(status)) return status;
+
+        constexpr SIZE_T PayloadLen = 5;
+        const SIZE_T totalLen = Http2FrameHeaderLength + PayloadLen;
+        if (capacity < totalLen) return STATUS_BUFFER_TOO_SMALL;
+
+        Http2FrameHeader hdr = {};
+        hdr.Length = PayloadLen;
+        hdr.Type = Http2FrameType::Priority;
+        hdr.Flags = 0;
+        hdr.StreamId = streamId;
+
+        SIZE_T headerWritten = 0;
+        status = EncodeFrameHeader(hdr, dest, capacity, &headerWritten);
+        if (!NT_SUCCESS(status)) return status;
+
+        WritePriorityPayload(dest + headerWritten, priority);
+        *bytesWritten = headerWritten + PayloadLen;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS Http2FrameCodec::DecodePriorityPayload(
+        ULONG streamId,
+        const UCHAR* payload,
+        SIZE_T payloadLen,
+        Http2Priority* priority) noexcept
+    {
+        if (payload == nullptr || priority == nullptr) return STATUS_INVALID_PARAMETER;
+        if (streamId == 0 || (streamId & 0x80000000u) != 0) return STATUS_INVALID_PARAMETER;
+        if (payloadLen != 5) return STATUS_INVALID_NETWORK_RESPONSE;
+
+        const ULONG dependency = ReadUint32BE(payload);
+        priority->Exclusive = (dependency & 0x80000000u) != 0;
+        priority->StreamDependency = dependency & 0x7fffffffu;
+        priority->Weight = static_cast<USHORT>(payload[4] + 1);
+        if (priority->StreamDependency == streamId) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS Http2FrameCodec::DecodeRstStreamPayload(
         const UCHAR* payload,
         SIZE_T payloadLen,
@@ -500,6 +575,49 @@ namespace http2
         }
 
         *bytesWritten = headerWritten + headerBlockLen;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS Http2FrameCodec::EncodeHeadersWithPriority(
+        ULONG streamId,
+        const UCHAR* headerBlock,
+        SIZE_T headerBlockLen,
+        const Http2Priority& priority,
+        bool endStream,
+        bool endHeaders,
+        UCHAR* dest,
+        SIZE_T capacity,
+        SIZE_T* bytesWritten) noexcept
+    {
+        if (dest == nullptr || bytesWritten == nullptr) return STATUS_INVALID_PARAMETER;
+        NTSTATUS status = ValidatePriority(streamId, priority);
+        if (!NT_SUCCESS(status)) return status;
+        if (headerBlock == nullptr && headerBlockLen > 0) return STATUS_INVALID_PARAMETER;
+        constexpr SIZE_T PriorityFieldLength = 5;
+        if (headerBlockLen > Http2MaxAllowedFrameSize - PriorityFieldLength) return STATUS_INVALID_PARAMETER;
+
+        const SIZE_T payloadLen = PriorityFieldLength + headerBlockLen;
+        const SIZE_T totalLen = Http2FrameHeaderLength + payloadLen;
+        if (capacity < totalLen) return STATUS_BUFFER_TOO_SMALL;
+
+        Http2FrameHeader hdr = {};
+        hdr.Length = static_cast<ULONG>(payloadLen);
+        hdr.Type = Http2FrameType::Headers;
+        hdr.Flags = Http2FrameFlags::Priority;
+        if (endStream) hdr.Flags |= Http2FrameFlags::EndStream;
+        if (endHeaders) hdr.Flags |= Http2FrameFlags::EndHeaders;
+        hdr.StreamId = streamId;
+
+        SIZE_T headerWritten = 0;
+        status = EncodeFrameHeader(hdr, dest, capacity, &headerWritten);
+        if (!NT_SUCCESS(status)) return status;
+
+        WritePriorityPayload(dest + headerWritten, priority);
+        if (headerBlockLen > 0) {
+            MemCopy(dest + headerWritten + PriorityFieldLength, headerBlock, headerBlockLen);
+        }
+
+        *bytesWritten = headerWritten + payloadLen;
         return STATUS_SUCCESS;
     }
 

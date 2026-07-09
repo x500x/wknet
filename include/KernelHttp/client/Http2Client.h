@@ -43,6 +43,7 @@ namespace client
         const http2::Http2RequestBodySource* BodySource = nullptr;
         const http::HttpHeader* Trailers = nullptr;
         SIZE_T TrailerCount = 0;
+        const http2::Http2Priority* Priority = nullptr;
         bool IncludeContentLength = false;
         const tls::CertificateStore* CertificateStore = nullptr;
         bool VerifyCertificate = true;

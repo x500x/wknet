@@ -18,6 +18,7 @@ using KernelHttp::http2::Http2ErrorCode;
 using KernelHttp::http2::Http2DefaultMaxFrameSize;
 using KernelHttp::http2::Http2MaxAllowedFrameSize;
 using KernelHttp::http2::Http2InitialWindowSize;
+using KernelHttp::http2::Http2Priority;
 using KernelHttp::http2::Http2Stream;
 using KernelHttp::http2::Http2StreamState;
 namespace Http2FrameFlags = KernelHttp::http2::Http2FrameFlags;
@@ -390,6 +391,57 @@ namespace
     }
 
     // ========================================================================
+    // PRIORITY frame
+    // ========================================================================
+
+    void TestEncodeDecodePriority()
+    {
+        Http2Priority priority = {};
+        priority.StreamDependency = 3;
+        priority.Weight = 220;
+        priority.Exclusive = true;
+
+        unsigned char buf[32] = {};
+        size_t written = 0;
+        NTSTATUS s = Http2FrameCodec::EncodePriority(5, priority, buf, sizeof(buf), &written);
+        Expect(NT_SUCCESS(s), "EncodePriority should succeed");
+        Expect(written == 14, "EncodePriority writes frame header plus 5-byte payload");
+
+        Http2FrameHeader hdr = {};
+        s = Http2FrameCodec::DecodeFrameHeader(buf, 9, &hdr);
+        Expect(NT_SUCCESS(s), "Decode PRIORITY header");
+        Expect(hdr.Type == Http2FrameType::Priority, "PRIORITY type");
+        Expect(hdr.Length == 5, "PRIORITY payload length");
+        Expect(hdr.StreamId == 5, "PRIORITY stream id");
+        Expect(buf[9] == 0x80 && buf[10] == 0 && buf[11] == 0 && buf[12] == 3, "PRIORITY exclusive dependency bytes");
+        Expect(buf[13] == 219, "PRIORITY wire weight is weight-1");
+
+        Http2Priority decoded = {};
+        s = Http2FrameCodec::DecodePriorityPayload(5, buf + 9, 5, &decoded);
+        Expect(NT_SUCCESS(s), "DecodePriorityPayload succeeds");
+        Expect(decoded.Exclusive, "decoded priority preserves exclusive bit");
+        Expect(decoded.StreamDependency == 3, "decoded priority dependency");
+        Expect(decoded.Weight == 220, "decoded priority weight");
+    }
+
+    void TestPriorityRejectsSelfDependency()
+    {
+        Http2Priority priority = {};
+        priority.StreamDependency = 7;
+        priority.Weight = 16;
+
+        unsigned char buf[32] = {};
+        size_t written = 0;
+        NTSTATUS s = Http2FrameCodec::EncodePriority(7, priority, buf, sizeof(buf), &written);
+        Expect(s == STATUS_INVALID_PARAMETER, "EncodePriority rejects self dependency");
+
+        const unsigned char payload[] = { 0, 0, 0, 7, 15 };
+        Http2Priority decoded = {};
+        s = Http2FrameCodec::DecodePriorityPayload(7, payload, sizeof(payload), &decoded);
+        Expect(s == STATUS_INVALID_NETWORK_RESPONSE, "DecodePriorityPayload rejects self dependency");
+    }
+
+    // ========================================================================
     // HEADERS frame
     // ========================================================================
 
@@ -414,6 +466,34 @@ namespace
         Expect((hdr.Flags & Http2FrameFlags::EndHeaders) != 0, "HEADERS EndHeaders set");
         Expect(BytesEqual(buf + 9, sizeof(headerBlock), headerBlock, sizeof(headerBlock)),
             "HEADERS payload matches");
+    }
+
+    void TestEncodeHeadersWithPriority()
+    {
+        const unsigned char headerBlock[] = { 0x82, 0x86 };
+        Http2Priority priority = {};
+        priority.StreamDependency = 1;
+        priority.Weight = 32;
+
+        unsigned char buf[64] = {};
+        size_t written = 0;
+        NTSTATUS s = Http2FrameCodec::EncodeHeadersWithPriority(
+            3, headerBlock, sizeof(headerBlock), priority, false, true,
+            buf, sizeof(buf), &written);
+        Expect(NT_SUCCESS(s), "EncodeHeadersWithPriority should succeed");
+        Expect(written == 9 + 5 + sizeof(headerBlock), "EncodeHeadersWithPriority total length");
+
+        Http2FrameHeader hdr = {};
+        s = Http2FrameCodec::DecodeFrameHeader(buf, 9, &hdr);
+        Expect(NT_SUCCESS(s), "Decode priority HEADERS header");
+        Expect(hdr.Type == Http2FrameType::Headers, "priority HEADERS type");
+        Expect(hdr.Length == 5 + sizeof(headerBlock), "priority HEADERS payload length");
+        Expect((hdr.Flags & Http2FrameFlags::Priority) != 0, "priority HEADERS flag set");
+        Expect((hdr.Flags & Http2FrameFlags::EndHeaders) != 0, "priority HEADERS EndHeaders set");
+        Expect(buf[9] == 0 && buf[10] == 0 && buf[11] == 0 && buf[12] == 1, "priority HEADERS dependency bytes");
+        Expect(buf[13] == 31, "priority HEADERS wire weight");
+        Expect(BytesEqual(buf + 14, sizeof(headerBlock), headerBlock, sizeof(headerBlock)),
+            "priority HEADERS header block follows priority field");
     }
 
     void TestEncodeHeadersNoEndStream()
@@ -767,7 +847,10 @@ int main()
     TestGoAwayWithError();
     TestEncodeDecodeRstStream();
     TestRstStreamZeroStreamId();
+    TestEncodeDecodePriority();
+    TestPriorityRejectsSelfDependency();
     TestEncodeHeaders();
+    TestEncodeHeadersWithPriority();
     TestEncodeHeadersNoEndStream();
     TestEncodeHeadersStreamIdZero();
     TestEncodeContinuation();

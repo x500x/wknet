@@ -2,6 +2,7 @@
 
 #include <KernelHttp/http/HttpContentEncoding.h>
 #include <KernelHttp/http/HttpTypes.h>
+#include <KernelHttp/http2/Http2Frame.h>
 #include <KernelHttp/KernelHttpLimits.h>
 #include <KernelHttp/net/WskClient.h>
 #include <KernelHttp/tls/TlsPolicy.h>
@@ -235,6 +236,7 @@ namespace engine
         KhHttp2CleartextMode Http2CleartextMode = KhHttp2CleartextMode::Disabled;
         const http::HttpAcceptEncodingPreference* AcceptEncodingPreferences = nullptr;
         SIZE_T AcceptEncodingPreferenceCount = 0;
+        const http2::Http2Priority* Http2Priority = nullptr;
     };
 
     struct KhNameValuePair final

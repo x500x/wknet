@@ -87,6 +87,13 @@ namespace http2
         ULONG StreamId = 0;          // 31 bits
     };
 
+    struct Http2Priority final
+    {
+        ULONG StreamDependency = 0;   // 31 bits; 0 means root dependency.
+        USHORT Weight = 16;           // RFC weight range: 1..256.
+        bool Exclusive = false;
+    };
+
     class Http2FrameCodec final
     {
     public:
@@ -193,6 +200,22 @@ namespace http2
             SIZE_T capacity,
             _Out_ SIZE_T* bytesWritten) noexcept;
 
+        // PRIORITY frame
+        _Must_inspect_result_
+        static NTSTATUS EncodePriority(
+            ULONG streamId,
+            _In_ const Http2Priority& priority,
+            _Out_writes_bytes_(capacity) UCHAR* dest,
+            SIZE_T capacity,
+            _Out_ SIZE_T* bytesWritten) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS DecodePriorityPayload(
+            ULONG streamId,
+            _In_reads_bytes_(payloadLen) const UCHAR* payload,
+            SIZE_T payloadLen,
+            _Out_ Http2Priority* priority) noexcept;
+
         _Must_inspect_result_
         static NTSTATUS DecodeRstStreamPayload(
             _In_reads_bytes_(payloadLen) const UCHAR* payload,
@@ -206,6 +229,18 @@ namespace http2
             ULONG streamId,
             _In_reads_bytes_(headerBlockLen) const UCHAR* headerBlock,
             SIZE_T headerBlockLen,
+            bool endStream,
+            bool endHeaders,
+            _Out_writes_bytes_(capacity) UCHAR* dest,
+            SIZE_T capacity,
+            _Out_ SIZE_T* bytesWritten) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS EncodeHeadersWithPriority(
+            ULONG streamId,
+            _In_reads_bytes_(headerBlockLen) const UCHAR* headerBlock,
+            SIZE_T headerBlockLen,
+            _In_ const Http2Priority& priority,
             bool endStream,
             bool endHeaders,
             _Out_writes_bytes_(capacity) UCHAR* dest,

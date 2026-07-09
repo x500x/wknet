@@ -56,7 +56,8 @@ SendOptions::SendOptions() noexcept :
     Family(AddressFamily::Any),
     Http2CleartextMode(::khttp::Http2CleartextMode::Disabled),
     AcceptEncodingPreferences(nullptr),
-    AcceptEncodingPreferenceCount(0)
+    AcceptEncodingPreferenceCount(0),
+    Http2Priority(nullptr)
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
     ,
     OnComplete(nullptr),

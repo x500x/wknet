@@ -104,6 +104,7 @@ namespace http2
         const Http2RequestBodySource* Source = nullptr;
         _In_reads_opt_(TrailerCount) const http::HttpHeader* Trailers = nullptr;
         SIZE_T TrailerCount = 0;
+        const Http2Priority* Priority = nullptr;
         bool HasBody = false;
     };
 

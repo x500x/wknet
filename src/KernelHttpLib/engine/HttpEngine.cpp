@@ -1645,6 +1645,7 @@ namespace engine
         if (!NT_SUCCESS(status)) {
             return status;
         }
+        h2Options.Priority = sendOptions.Http2Priority;
 
         SIZE_T h2HeaderCount = 0;
         status = client::BuildHttp2RequestHeaders(
@@ -1693,6 +1694,7 @@ namespace engine
         requestBody.Source = h2Options.BodySource;
         requestBody.Trailers = h2Options.Trailers;
         requestBody.TrailerCount = h2Options.TrailerCount;
+        requestBody.Priority = h2Options.Priority;
         requestBody.HasBody =
             request.HasBody ||
             h2Options.BodySource != nullptr ||

@@ -40,6 +40,7 @@ using KernelHttp::http2::Http2FrameCodec;
 using KernelHttp::http2::Http2FrameHeader;
 using KernelHttp::http2::Http2InitialWindowSize;
 using KernelHttp::http2::Http2MaxWindowSize;
+using KernelHttp::http2::Http2Priority;
 using KernelHttp::http2::Http2RequestBody;
 using KernelHttp::http2::Http2RequestBodySource;
 using KernelHttp::http2::Http2ResponseBodySink;
@@ -1260,6 +1261,108 @@ namespace
             *responseBodyLength = bodyLength;
         }
         return status;
+    }
+
+    void TestBeginRequestSendsPriorityInInitialHeaders()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 priority fixture settings builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(NT_SUCCESS(status), "HTTP/2 priority connection initializes");
+
+        const HttpHeader requestHeaders[] = {
+            { MakeText(":method"), MakeText("GET") },
+            { MakeText(":scheme"), MakeText("https") },
+            { MakeText(":path"), MakeText("/") },
+            { MakeText(":authority"), MakeText("example.com") }
+        };
+
+        Http2Priority priority = {};
+        priority.StreamDependency = 0;
+        priority.Weight = 200;
+        priority.Exclusive = true;
+
+        Http2RequestBody requestBody = {};
+        requestBody.Priority = &priority;
+
+        HttpHeader responseHeaders[4] = {};
+        SIZE_T responseHeaderCount = 0;
+        Http2ResponseBodySink sink = {};
+        sink.Append = IgnoreResponseBodyForTest;
+        SIZE_T responseBodyLength = 0;
+        USHORT statusCode = 0;
+        char nameValueBuffer[128] = {};
+        ULONG streamId = 0;
+
+        status = connection.BeginRequest(
+            transport,
+            requestHeaders,
+            sizeof(requestHeaders) / sizeof(requestHeaders[0]),
+            requestBody,
+            responseHeaders,
+            sizeof(responseHeaders) / sizeof(responseHeaders[0]),
+            &responseHeaderCount,
+            sink,
+            &responseBodyLength,
+            &statusCode,
+            nameValueBuffer,
+            sizeof(nameValueBuffer),
+            &streamId);
+        Expect(NT_SUCCESS(status), "HTTP/2 BeginRequest with priority succeeds");
+        Expect(streamId == 1, "HTTP/2 priority request uses stream 1");
+
+        Http2FrameHeader frameHeader = {};
+        const UCHAR* payload = nullptr;
+        Expect(FindSentFrame(
+                transport,
+                KernelHttp::http2::Http2FrameType::Headers,
+                1,
+                0,
+                &frameHeader,
+                &payload),
+            "HTTP/2 priority request sends HEADERS");
+        Expect((frameHeader.Flags & Http2FrameFlags::Priority) != 0,
+            "HTTP/2 priority request marks HEADERS priority flag");
+        Expect(frameHeader.Length > 5, "HTTP/2 priority HEADERS includes priority plus header block");
+        Expect(payload[0] == 0x80 && payload[1] == 0 && payload[2] == 0 && payload[3] == 0,
+            "HTTP/2 priority request encodes exclusive root dependency");
+        Expect(payload[4] == 199, "HTTP/2 priority request encodes wire weight");
+
+        const UCHAR* headerBlock = nullptr;
+        SIZE_T headerBlockLength = 0;
+        status = Http2FrameCodec::StripPriority(
+            frameHeader.Flags,
+            payload,
+            frameHeader.Length,
+            &headerBlock,
+            &headerBlockLength);
+        Expect(NT_SUCCESS(status), "HTTP/2 priority header block strips priority field");
+
+        HpackDecoder decoder;
+        status = decoder.Initialize(4096);
+        Expect(NT_SUCCESS(status), "HTTP/2 priority test decoder initializes");
+        HttpHeader decodedHeaders[8] = {};
+        SIZE_T decodedHeaderCount = 0;
+        char decodedNameValues[256] = {};
+        SIZE_T decodedNameValueUsed = 0;
+        status = decoder.Decode(
+            headerBlock,
+            headerBlockLength,
+            decodedHeaders,
+            sizeof(decodedHeaders) / sizeof(decodedHeaders[0]),
+            &decodedHeaderCount,
+            decodedNameValues,
+            sizeof(decodedNameValues),
+            &decodedNameValueUsed,
+            4096);
+        Expect(NT_SUCCESS(status), "HTTP/2 priority request header block decodes");
+        Expect(HeaderListContains(decodedHeaders, decodedHeaderCount, ":method", "GET"),
+            "HTTP/2 priority request preserves :method");
     }
 
     void TestPromotedAcceptEncodingIsNotDuplicated()
@@ -4466,6 +4569,7 @@ namespace
 
 int main()
 {
+    TestBeginRequestSendsPriorityInInitialHeaders();
     TestPromotedAcceptEncodingIsNotDuplicated();
     TestExtraAcceptEncodingRemainsWhenNotPromoted();
     TestRequestTeHeaderValidation();

@@ -803,6 +803,7 @@ namespace client
             requestBody.Source = options.BodySource;
             requestBody.Trailers = options.Trailers;
             requestBody.TrailerCount = options.TrailerCount;
+            requestBody.Priority = options.Priority;
             requestBody.HasBody =
                 options.IncludeContentLength ||
                 options.BodySource != nullptr ||

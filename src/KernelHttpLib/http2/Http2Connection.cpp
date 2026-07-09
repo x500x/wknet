@@ -424,6 +424,22 @@ namespace http2
             return STATUS_SUCCESS;
         }
 
+        NTSTATUS ValidateRequestPriority(ULONG streamId, const Http2Priority* priority) noexcept
+        {
+            if (priority == nullptr) {
+                return STATUS_SUCCESS;
+            }
+
+            if ((priority->StreamDependency & 0x80000000u) != 0 ||
+                priority->StreamDependency == streamId ||
+                priority->Weight == 0 ||
+                priority->Weight > 256) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            return STATUS_SUCCESS;
+        }
+
         NTSTATUS ValidateRequestTrailers(
             const http::HttpHeader* trailers,
             SIZE_T trailerCount) noexcept
@@ -948,6 +964,9 @@ namespace http2
             !responseFrameState.TunnelMode &&
             !RequestBodyHasData(requestBody) &&
             requestBody.TrailerCount == 0;
+        status = ValidateRequestPriority(streamId, requestBody.Priority);
+        if (!NT_SUCCESS(status)) return status;
+
         UCHAR* sendBuf = sendBuffer_;
         SIZE_T sendOffset = 0;
         SIZE_T blockOffset = 0;
@@ -956,11 +975,18 @@ namespace http2
 
         while (blockOffset < headerBlockLen) {
             SIZE_T chunkLen = headerBlockLen - blockOffset;
-            if (chunkLen > maxPayload) chunkLen = maxPayload;
+            ULONG framePayloadLimit = maxPayload;
+            if (firstFrame && requestBody.Priority != nullptr) {
+                constexpr ULONG PriorityFieldLength = 5;
+                if (framePayloadLimit <= PriorityFieldLength) return STATUS_BUFFER_TOO_SMALL;
+                framePayloadLimit -= PriorityFieldLength;
+            }
+            if (chunkLen > framePayloadLimit) chunkLen = framePayloadLimit;
             const bool lastChunk = (blockOffset + chunkLen >= headerBlockLen);
 
-            if (Http2FrameHeaderLength + chunkLen > SendBufferCapacity) return STATUS_BUFFER_TOO_SMALL;
-            if (sendOffset + Http2FrameHeaderLength + chunkLen > SendBufferCapacity) {
+            const SIZE_T priorityBytes = (firstFrame && requestBody.Priority != nullptr) ? 5 : 0;
+            if (Http2FrameHeaderLength + priorityBytes + chunkLen > SendBufferCapacity) return STATUS_BUFFER_TOO_SMALL;
+            if (sendOffset + Http2FrameHeaderLength + priorityBytes + chunkLen > SendBufferCapacity) {
                 status = SendRaw(transport, sendBuf, sendOffset);
                 if (!NT_SUCCESS(status)) return status;
                 sendOffset = 0;
@@ -969,15 +995,29 @@ namespace http2
             SIZE_T written = 0;
             const bool isFirstHeaderFrame = firstFrame;
             if (isFirstHeaderFrame) {
-                status = Http2FrameCodec::EncodeHeaders(
-                    streamId,
-                    headerBlock + blockOffset,
-                    chunkLen,
-                    endStream,
-                    lastChunk,
-                    sendBuf + sendOffset,
-                    SendBufferCapacity - sendOffset,
-                    &written);
+                if (requestBody.Priority != nullptr) {
+                    status = Http2FrameCodec::EncodeHeadersWithPriority(
+                        streamId,
+                        headerBlock + blockOffset,
+                        chunkLen,
+                        *requestBody.Priority,
+                        endStream,
+                        lastChunk,
+                        sendBuf + sendOffset,
+                        SendBufferCapacity - sendOffset,
+                        &written);
+                }
+                else {
+                    status = Http2FrameCodec::EncodeHeaders(
+                        streamId,
+                        headerBlock + blockOffset,
+                        chunkLen,
+                        endStream,
+                        lastChunk,
+                        sendBuf + sendOffset,
+                        SendBufferCapacity - sendOffset,
+                        &written);
+                }
                 firstFrame = false;
             }
             else {
@@ -2257,6 +2297,24 @@ namespace http2
         }
 
         switch (fh.Type) {
+        case Http2FrameType::Priority:
+        {
+            Http2Priority priority = {};
+            status = Http2FrameCodec::DecodePriorityPayload(fh.StreamId, fp, fpLen, &priority);
+            if (!NT_SUCCESS(status)) {
+                const NTSTATUS rstStatus = SendRstStream(
+                    transport,
+                    fh.StreamId,
+                    fpLen == 5
+                        ? static_cast<ULONG>(Http2ErrorCode::ProtocolError)
+                        : static_cast<ULONG>(Http2ErrorCode::FrameSizeError));
+                UNREFERENCED_PARAMETER(rstStatus);
+                return status;
+            }
+
+            return STATUS_SUCCESS;
+        }
+
         case Http2FrameType::Headers:
         case Http2FrameType::Continuation:
         {

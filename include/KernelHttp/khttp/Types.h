@@ -252,6 +252,7 @@ namespace khttp
         Http2CleartextMode Http2CleartextMode;
         const ::KernelHttp::http::HttpAcceptEncodingPreference* AcceptEncodingPreferences;
         SIZE_T AcceptEncodingPreferenceCount;
+        const ::KernelHttp::http2::Http2Priority* Http2Priority;
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         CompletionCallback OnComplete;
         void* CompletionContext;
