@@ -1,5 +1,6 @@
 #pragma once
 
+#include <KernelHttp/engine/Engine.h>
 #include <KernelHttp/http/HttpContentEncoding.h>
 #include <KernelHttp/http/HttpTypes.h>
 #include <KernelHttp/tls/TlsPolicy.h>
@@ -139,6 +140,14 @@ namespace khttp
     {
         ContentLength = 0,
         Chunked = 1
+    };
+
+    enum class WebSocketTransportMode : ULONG
+    {
+        LegacyBoolean = 0,
+        Http11Only = 1,
+        Auto = 2,
+        Http2Required = 3
     };
 
     enum SendFlags : ULONG
@@ -341,6 +350,10 @@ namespace kws
         SIZE_T ValueLength = 0;
     };
 
+    using HandshakeChallenge = ::KernelHttp::engine::KhWebSocketHandshakeChallenge;
+    using HandshakeRetryAction = ::KernelHttp::engine::KhWebSocketHandshakeRetryAction;
+    using HandshakeChallengeCallback = ::KernelHttp::engine::KhWebSocketHandshakeChallengeCallback;
+
     struct ConnectConfig final
     {
         const char* Url = nullptr;
@@ -354,6 +367,10 @@ namespace kws
         SIZE_T MaxMessageBytes = khttp::DefaultMaxWebSocketMessageBytes;
         bool AutoReplyPing = true;
         bool AllowWebSocketOverHttp2 = false;
+        khttp::WebSocketTransportMode TransportMode = khttp::WebSocketTransportMode::LegacyBoolean;
+        HandshakeChallengeCallback ChallengeCallback = nullptr;
+        void* ChallengeContext = nullptr;
+        ULONG MaxHandshakeRetries = 0;
     };
 
     struct SendOptions final

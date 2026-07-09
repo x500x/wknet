@@ -24,6 +24,7 @@ using KernelHttp::tls::CertificateChainView;
 using KernelHttp::tls::CertificatePin;
 using KernelHttp::tls::CertificateRevocationEntry;
 using KernelHttp::tls::CertificateRevocationMode;
+using KernelHttp::tls::CertificateRevocationProviderQuery;
 using KernelHttp::tls::CertificateRevocationSource;
 using KernelHttp::tls::CertificateRevocationStatus;
 using KernelHttp::tls::CertificateStore;
@@ -6022,6 +6023,120 @@ namespace
         ExpectStatus(status, STATUS_SUCCESS, "online-required revocation accepts fresh good CRL cache entry");
     }
 
+    struct RevocationProviderCapture
+    {
+        CertificateRevocationEntry Entry = {};
+        NTSTATUS Status = STATUS_SUCCESS;
+        SIZE_T Calls = 0;
+        CertificateRevocationSource LastSource = CertificateRevocationSource::Ocsp;
+    };
+
+    NTSTATUS TestRevocationProvider(
+        void* context,
+        const CertificateRevocationProviderQuery* query,
+        CertificateRevocationEntry* entry)
+    {
+        auto* capture = static_cast<RevocationProviderCapture*>(context);
+        if (capture == nullptr || query == nullptr || entry == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->Calls;
+        capture->LastSource = query->PreferredSource;
+        if (!NT_SUCCESS(capture->Status)) {
+            return capture->Status;
+        }
+
+        *entry = capture->Entry;
+        entry->Source = query->PreferredSource;
+        entry->IssuerName = query->IssuerName;
+        entry->IssuerNameLength = query->IssuerNameLength;
+        entry->SerialNumber = query->SerialNumber;
+        entry->SerialNumberLength = query->SerialNumberLength;
+        return STATUS_SUCCESS;
+    }
+
+    void TestCertificateValidationUsesRevocationProvider()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost certificate fixture loads for revocation provider test");
+        if (!loaded) {
+            return;
+        }
+
+        ParsedCertificate parsed = {};
+        NTSTATUS status = CertificateValidator::ParseCertificate(der, derLength, parsed);
+        ExpectStatus(status, STATUS_SUCCESS, "localhost certificate parses for revocation provider test");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateAuthorityBundle bundle = {};
+        bundle.Data = pem;
+        bundle.DataLength = pemLength;
+
+        RevocationProviderCapture provider = {};
+        provider.Entry.Status = CertificateRevocationStatus::Good;
+        provider.Entry.ThisUpdate = 20200101000000LL;
+        provider.Entry.NextUpdate = 20990101000000LL;
+
+        CertificateStoreOptions storeOptions = {};
+        storeOptions.AuthorityBundles = &bundle;
+        storeOptions.AuthorityBundleCount = 1;
+        storeOptions.RevocationProvider = TestRevocationProvider;
+        storeOptions.RevocationProviderContext = &provider;
+
+        CertificateStore store;
+        status = store.Initialize(storeOptions);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts revocation provider");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "localhost";
+        options.HostNameLength = strlen(options.HostName);
+        options.Store = &store;
+        options.RequireRevocationCheck = true;
+        options.RevocationMode = CertificateRevocationMode::StapledOnly;
+
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_SUCCESS, "stapled-only revocation accepts provider OCSP good status");
+        Expect(provider.Calls == 1, "revocation provider called once for OCSP");
+        Expect(provider.LastSource == CertificateRevocationSource::Ocsp, "revocation provider receives OCSP source");
+
+        provider.Entry.Status = CertificateRevocationStatus::Revoked;
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "revocation provider revoked status fails validation");
+
+        provider.Entry.Status = CertificateRevocationStatus::Good;
+        provider.Status = STATUS_NOT_FOUND;
+        options.RevocationMode = CertificateRevocationMode::OnlineRequired;
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "online-required revocation provider miss fails closed");
+    }
+
     void TestCertificateValidationRejectsIdnaHost()
     {
         UCHAR pem[TestMaxPemCertificateLength] = {};
@@ -6496,6 +6611,7 @@ int main()
     TestCertificateValidationMatchesIdnaName();
     TestCertificateValidationMatchesIpAddressSan();
     TestCertificateValidationUsesRevocationCache();
+    TestCertificateValidationUsesRevocationProvider();
     TestCertificateValidationRejectsIdnaHost();
     TestCertificateValidationRejectsNameConstraintsExtension();
     TestEncodeClientKeyExchange();

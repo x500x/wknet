@@ -77,7 +77,8 @@ namespace tls
             (options.TrustAnchorCount != 0 && options.TrustAnchors == nullptr) ||
             (options.AuthorityBundleCount != 0 && options.AuthorityBundles == nullptr) ||
             (options.PinCount != 0 && options.Pins == nullptr) ||
-            (options.RevocationEntryCount != 0 && options.RevocationEntries == nullptr)) {
+            (options.RevocationEntryCount != 0 && options.RevocationEntries == nullptr) ||
+            (options.RevocationProvider == nullptr && options.RevocationProviderContext != nullptr)) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -124,6 +125,8 @@ namespace tls
         pinCount_ = options.PinCount;
         revocationEntries_ = options.RevocationEntries;
         revocationEntryCount_ = options.RevocationEntryCount;
+        revocationProvider_ = options.RevocationProvider;
+        revocationProviderContext_ = options.RevocationProviderContext;
         return STATUS_SUCCESS;
     }
 
@@ -137,6 +140,8 @@ namespace tls
         pinCount_ = 0;
         revocationEntries_ = nullptr;
         revocationEntryCount_ = 0;
+        revocationProvider_ = nullptr;
+        revocationProviderContext_ = nullptr;
     }
 
     bool CertificateStore::IsTrustedAnchor(
@@ -252,6 +257,58 @@ namespace tls
         }
 
         return nullptr;
+    }
+
+    NTSTATUS CertificateStore::QueryRevocationProvider(
+        const UCHAR* issuerName,
+        SIZE_T issuerNameLength,
+        const UCHAR* serialNumber,
+        SIZE_T serialNumberLength,
+        CertificateRevocationSource source,
+        CertificateRevocationEntry* entry) const noexcept
+    {
+        if (entry != nullptr) {
+            *entry = {};
+        }
+        if (!IsValidBuffer(issuerName, issuerNameLength) ||
+            issuerNameLength == 0 ||
+            !IsValidBuffer(serialNumber, serialNumberLength) ||
+            serialNumberLength == 0 ||
+            !IsValidRevocationSource(source) ||
+            entry == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (revocationProvider_ == nullptr) {
+            return STATUS_NOT_FOUND;
+        }
+
+        CertificateRevocationProviderQuery query = {};
+        query.IssuerName = issuerName;
+        query.IssuerNameLength = issuerNameLength;
+        query.SerialNumber = serialNumber;
+        query.SerialNumberLength = serialNumberLength;
+        query.PreferredSource = source;
+
+        NTSTATUS status = revocationProvider_(revocationProviderContext_, &query, entry);
+        if (!NT_SUCCESS(status)) {
+            *entry = {};
+            return status;
+        }
+        if (entry->IssuerNameLength != issuerNameLength ||
+            entry->SerialNumberLength != serialNumberLength ||
+            !IsValidBuffer(entry->IssuerName, entry->IssuerNameLength) ||
+            !IsValidBuffer(entry->SerialNumber, entry->SerialNumberLength) ||
+            !IsValidRevocationSource(entry->Source) ||
+            !IsValidRevocationStatus(entry->Status) ||
+            entry->Source != source ||
+            !MemoryEquals(entry->IssuerName, issuerName, issuerNameLength) ||
+            !MemoryEquals(entry->SerialNumber, serialNumber, serialNumberLength) ||
+            (entry->NextUpdate != 0 && entry->ThisUpdate > entry->NextUpdate)) {
+            *entry = {};
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        return STATUS_SUCCESS;
     }
 }
 }

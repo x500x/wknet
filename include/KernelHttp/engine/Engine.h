@@ -119,6 +119,14 @@ namespace engine
         Chunked = 1
     };
 
+    enum class KhWebSocketTransportMode : ULONG
+    {
+        LegacyBoolean = 0,
+        Http11Only = 1,
+        Auto = 2,
+        Http2Required = 3
+    };
+
     enum KhHttpSendFlags : ULONG
     {
         KhHttpSendFlagNone = 0,
@@ -269,6 +277,28 @@ namespace engine
         SIZE_T ValueLength = 0;
     };
 
+    struct KhWebSocketHandshakeChallenge final
+    {
+        USHORT StatusCode = 0;
+        const http::HttpHeader* Headers = nullptr;
+        SIZE_T HeaderCount = 0;
+        bool Redirect = false;
+        bool AuthenticationChallenge = false;
+    };
+
+    struct KhWebSocketHandshakeRetryAction final
+    {
+        const char* RedirectPath = nullptr;
+        SIZE_T RedirectPathLength = 0;
+        const http::HttpHeader* Headers = nullptr;
+        SIZE_T HeaderCount = 0;
+    };
+
+    typedef NTSTATUS (*KhWebSocketHandshakeChallengeCallback)(
+        void* context,
+        const KhWebSocketHandshakeChallenge* challenge,
+        KhWebSocketHandshakeRetryAction* action);
+
     struct KhWebSocketConnectOptions final
     {
         const char* Url = nullptr;
@@ -282,6 +312,10 @@ namespace engine
         SIZE_T MaxMessageBytes = KhDefaultMaxWebSocketMessageBytes;
         bool AutoReplyPing = true;
         bool AllowWebSocketOverHttp2 = false;
+        KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::LegacyBoolean;
+        KhWebSocketHandshakeChallengeCallback ChallengeCallback = nullptr;
+        void* ChallengeContext = nullptr;
+        ULONG MaxHandshakeRetries = 0;
     };
 
     struct KhWebSocketSendOptions final
@@ -685,6 +719,7 @@ namespace engine
         SIZE_T MaxMessageBytes = 0;
         ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;
         bool AllowWebSocketOverHttp2 = false;
+        KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::LegacyBoolean;
     };
 
     struct KhTestWebSocketMessage final

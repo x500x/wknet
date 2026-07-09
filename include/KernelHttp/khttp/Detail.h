@@ -304,6 +304,22 @@ namespace detail
         }
     }
 
+    inline ::KernelHttp::engine::KhWebSocketTransportMode ToApiWebSocketTransportMode(
+        WebSocketTransportMode mode) noexcept
+    {
+        switch (mode) {
+        case WebSocketTransportMode::Http11Only:
+            return ::KernelHttp::engine::KhWebSocketTransportMode::Http11Only;
+        case WebSocketTransportMode::Auto:
+            return ::KernelHttp::engine::KhWebSocketTransportMode::Auto;
+        case WebSocketTransportMode::Http2Required:
+            return ::KernelHttp::engine::KhWebSocketTransportMode::Http2Required;
+        case WebSocketTransportMode::LegacyBoolean:
+        default:
+            return ::KernelHttp::engine::KhWebSocketTransportMode::LegacyBoolean;
+        }
+    }
+
     inline ::KernelHttp::engine::KhWebSocketMessageType ToApiWsMsgType(kws::MsgType t) noexcept
     {
         switch (t) {

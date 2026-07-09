@@ -17,6 +17,81 @@ namespace engine
     }
 #endif
 
+    bool WebSocketModeAllowsHttp2(const KhWebSocketConnectOptions& options) noexcept
+    {
+        switch (options.TransportMode) {
+        case KhWebSocketTransportMode::Http11Only:
+            return false;
+        case KhWebSocketTransportMode::Auto:
+        case KhWebSocketTransportMode::Http2Required:
+            return true;
+        case KhWebSocketTransportMode::LegacyBoolean:
+        default:
+            return options.AllowWebSocketOverHttp2;
+        }
+    }
+
+    bool WebSocketModeRequiresWss(const KhWebSocketConnectOptions& options) noexcept
+    {
+        return options.TransportMode == KhWebSocketTransportMode::Http2Required ||
+            (options.TransportMode == KhWebSocketTransportMode::LegacyBoolean &&
+                options.AllowWebSocketOverHttp2);
+    }
+
+    client::WebSocketTransportMode ToClientWebSocketTransportMode(KhWebSocketTransportMode mode) noexcept
+    {
+        switch (mode) {
+        case KhWebSocketTransportMode::Http11Only:
+            return client::WebSocketTransportMode::Http11Only;
+        case KhWebSocketTransportMode::Auto:
+            return client::WebSocketTransportMode::Auto;
+        case KhWebSocketTransportMode::Http2Required:
+            return client::WebSocketTransportMode::Http2Required;
+        case KhWebSocketTransportMode::LegacyBoolean:
+        default:
+            return client::WebSocketTransportMode::LegacyBoolean;
+        }
+    }
+
+    struct WebSocketChallengeBridgeContext final
+    {
+        KhWebSocketHandshakeChallengeCallback Callback = nullptr;
+        void* Context = nullptr;
+    };
+
+    NTSTATUS WebSocketChallengeBridge(
+        void* context,
+        const client::WebSocketHandshakeChallenge* challenge,
+        client::WebSocketHandshakeRetryAction* action) noexcept
+    {
+        auto* bridge = static_cast<WebSocketChallengeBridgeContext*>(context);
+        if (bridge == nullptr ||
+            bridge->Callback == nullptr ||
+            challenge == nullptr ||
+            action == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        KhWebSocketHandshakeChallenge apiChallenge = {};
+        apiChallenge.StatusCode = challenge->StatusCode;
+        apiChallenge.Headers = challenge->Headers;
+        apiChallenge.HeaderCount = challenge->HeaderCount;
+        apiChallenge.Redirect = challenge->Redirect;
+        apiChallenge.AuthenticationChallenge = challenge->AuthenticationChallenge;
+
+        KhWebSocketHandshakeRetryAction apiAction = {};
+        NTSTATUS status = bridge->Callback(bridge->Context, &apiChallenge, &apiAction);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        action->RedirectPath = apiAction.RedirectPath;
+        action->RedirectPathLength = apiAction.RedirectPathLength;
+        action->Headers = apiAction.Headers;
+        action->HeaderCount = apiAction.HeaderCount;
+        return STATUS_SUCCESS;
+    }
+
     _Must_inspect_result_
     NTSTATUS BuildWebSocketHandshakeRequest(
         const KhWebSocket& websocket,
@@ -687,7 +762,7 @@ namespace engine
             FreeHandle(newWebSocket);
             return status;
         }
-        if (options.AllowWebSocketOverHttp2 &&
+        if (WebSocketModeRequiresWss(options) &&
             !TextEqualsLiteralIgnoreCase(newWebSocket->Scheme, newWebSocket->SchemeLength, "wss")) {
             ReleaseWebSocketStorage(*newWebSocket);
             FreeHandle(newWebSocket);
@@ -781,6 +856,7 @@ namespace engine
         testRequest.AutoReplyPing = newWebSocket->AutoReplyPing;
         testRequest.MaxMessageBytes = newWebSocket->MaxMessageBytes;
         testRequest.AllowWebSocketOverHttp2 = options.AllowWebSocketOverHttp2;
+        testRequest.TransportMode = options.TransportMode;
 
         status = g_testWebSocketConnect(g_testWebSocketTransportContext, &testRequest);
         if (!NT_SUCCESS(status)) {
@@ -886,6 +962,15 @@ namespace engine
         connectOptions.UseTls = TextEqualsLiteralIgnoreCase(newWebSocket->Scheme, newWebSocket->SchemeLength, "wss");
         connectOptions.VerifyCertificate = effectiveTls.CertificatePolicy == KhCertificatePolicy::Verify;
         connectOptions.AllowWebSocketOverHttp2 = options.AllowWebSocketOverHttp2;
+        connectOptions.TransportMode = ToClientWebSocketTransportMode(options.TransportMode);
+        WebSocketChallengeBridgeContext challengeBridge = {};
+        if (options.ChallengeCallback != nullptr) {
+            challengeBridge.Callback = options.ChallengeCallback;
+            challengeBridge.Context = options.ChallengeContext;
+            connectOptions.ChallengeCallback = WebSocketChallengeBridge;
+            connectOptions.ChallengeContext = &challengeBridge;
+            connectOptions.MaxHandshakeRetries = options.MaxHandshakeRetries;
+        }
 
         if (NT_SUCCESS(status)) {
             status = newWebSocket->Client->Connect(*session->WskClient, connectOptions, buffers);

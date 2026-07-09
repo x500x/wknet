@@ -980,6 +980,8 @@ namespace
         UCHAR NextData[64] = {};
         SIZE_T NextLength = 0;
         bool LastAllowWebSocketOverHttp2 = false;
+        KernelHttp::engine::KhWebSocketTransportMode LastTransportMode =
+            KernelHttp::engine::KhWebSocketTransportMode::LegacyBoolean;
         NTSTATUS SendStatus = STATUS_SUCCESS;
         NTSTATUS ReceiveStatus = STATUS_SUCCESS;
     };
@@ -1011,6 +1013,7 @@ namespace
             capture->LastSubprotocol[capture->LastSubprotocolLength] = '\0';
         }
         capture->LastAllowWebSocketOverHttp2 = request->AllowWebSocketOverHttp2;
+        capture->LastTransportMode = request->TransportMode;
         return STATUS_SUCCESS;
     }
 
@@ -5182,6 +5185,9 @@ namespace
         Expect(capture.ConnectCount == 1, "connect called once");
         Expect(strcmp(capture.LastScheme, "ws") == 0, "scheme captured");
         Expect(strcmp(capture.LastHost, "example.com") == 0, "host captured");
+        Expect(
+            capture.LastTransportMode == KernelHttp::engine::KhWebSocketTransportMode::Auto,
+            "default websocket connect config uses Auto transport mode");
 
         const char* hello = "hello";
         status = kws::SendText(ws, hello, Length(hello));
@@ -5226,9 +5232,13 @@ namespace
         wsConfig.Url = url;
         wsConfig.UrlLength = Length(url);
         wsConfig.AllowWebSocketOverHttp2 = true;
+        wsConfig.TransportMode = khttp::WebSocketTransportMode::LegacyBoolean;
         status = kws::Connect(session, &wsConfig, &ws);
         Expect(NT_SUCCESS(status), "wss websocket h2 opt-in connect succeeds through test transport");
         Expect(capture.LastAllowWebSocketOverHttp2, "wss websocket h2 opt-in propagates to engine");
+        Expect(
+            capture.LastTransportMode == KernelHttp::engine::KhWebSocketTransportMode::LegacyBoolean,
+            "legacy websocket h2 opt-in keeps legacy transport mode");
 
         status = kws::Close(ws);
         Expect(NT_SUCCESS(status), "wss websocket h2 opt-in close succeeds");
@@ -5255,11 +5265,11 @@ namespace
         kws::ConnectConfig wsConfig = kws::DefaultConnectConfig();
         wsConfig.Url = url;
         wsConfig.UrlLength = Length(url);
-        wsConfig.AllowWebSocketOverHttp2 = true;
+        wsConfig.TransportMode = khttp::WebSocketTransportMode::Http2Required;
         status = kws::Connect(session, &wsConfig, &ws);
-        Expect(status == STATUS_NOT_SUPPORTED, "ws h2 opt-in rejects unsupported h2c path");
-        Expect(ws == nullptr, "ws h2 opt-in rejection leaves websocket null");
-        Expect(capture.ConnectCount == 0, "ws h2 opt-in rejection does not reach transport");
+        Expect(status == STATUS_NOT_SUPPORTED, "ws h2-required rejects unsupported h2c path");
+        Expect(ws == nullptr, "ws h2-required rejection leaves websocket null");
+        Expect(capture.ConnectCount == 0, "ws h2-required rejection does not reach transport");
 
         khttp::SessionClose(session);
         khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);

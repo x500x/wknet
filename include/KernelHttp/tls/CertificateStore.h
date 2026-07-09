@@ -66,6 +66,20 @@ namespace tls
         long long NextUpdate = 0;
     };
 
+    struct CertificateRevocationProviderQuery final
+    {
+        const UCHAR* IssuerName = nullptr;
+        SIZE_T IssuerNameLength = 0;
+        const UCHAR* SerialNumber = nullptr;
+        SIZE_T SerialNumberLength = 0;
+        CertificateRevocationSource PreferredSource = CertificateRevocationSource::Ocsp;
+    };
+
+    typedef NTSTATUS (*CertificateRevocationProviderCallback)(
+        _In_opt_ void* context,
+        _In_ const CertificateRevocationProviderQuery* query,
+        _Out_ CertificateRevocationEntry* entry);
+
     struct CertificateStoreOptions final
     {
         const CertificateTrustAnchor* TrustAnchors = nullptr;
@@ -76,6 +90,8 @@ namespace tls
         SIZE_T PinCount = 0;
         const CertificateRevocationEntry* RevocationEntries = nullptr;
         SIZE_T RevocationEntryCount = 0;
+        CertificateRevocationProviderCallback RevocationProvider = nullptr;
+        void* RevocationProviderContext = nullptr;
     };
 
     enum class TlsClientCredentialKeyAlgorithm : UCHAR
@@ -149,6 +165,15 @@ namespace tls
             SIZE_T serialNumberLength,
             CertificateRevocationSource source) const noexcept;
 
+        _Must_inspect_result_
+        NTSTATUS QueryRevocationProvider(
+            _In_reads_bytes_(issuerNameLength) const UCHAR* issuerName,
+            SIZE_T issuerNameLength,
+            _In_reads_bytes_(serialNumberLength) const UCHAR* serialNumber,
+            SIZE_T serialNumberLength,
+            CertificateRevocationSource source,
+            _Out_ CertificateRevocationEntry* entry) const noexcept;
+
     private:
         const CertificateTrustAnchor* trustAnchors_ = nullptr;
         SIZE_T trustAnchorCount_ = 0;
@@ -158,6 +183,8 @@ namespace tls
         SIZE_T pinCount_ = 0;
         const CertificateRevocationEntry* revocationEntries_ = nullptr;
         SIZE_T revocationEntryCount_ = 0;
+        CertificateRevocationProviderCallback revocationProvider_ = nullptr;
+        void* revocationProviderContext_ = nullptr;
     };
 }
 }

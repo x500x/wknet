@@ -9,6 +9,8 @@
 
 using KernelHttp::client::WebSocketClient;
 using KernelHttp::client::WebSocketConnectOptions;
+using KernelHttp::client::WebSocketHandshakeChallenge;
+using KernelHttp::client::WebSocketHandshakeRetryAction;
 using KernelHttp::client::WebSocketIoBuffers;
 using KernelHttp::http::HttpHeader;
 using KernelHttp::websocket::WebSocketCodec;
@@ -236,6 +238,9 @@ namespace
         size_t ResponseExtensionsLength = 0;
         unsigned int HandshakeStatusCode = 101;
         const char* HandshakeReason = "Switching Protocols";
+        const char* UpgradeWhenHeaderName = nullptr;
+        const char* UpgradeWhenHeaderValue = nullptr;
+        const char* UpgradeWhenPath = nullptr;
         bool EchoAfterPing = false;
         bool Connected = false;
         NTSTATUS DataSendStatus = STATUS_SUCCESS;
@@ -301,8 +306,27 @@ namespace
                     return status;
                 }
 
+                bool headerAllowsUpgrade = false;
+                if (UpgradeWhenHeaderName != nullptr && UpgradeWhenHeaderValue != nullptr) {
+                    size_t challengeHeaderLength = 0;
+                    const char* challengeHeader = FindHeaderValue(
+                        request,
+                        UpgradeWhenHeaderName,
+                        &challengeHeaderLength);
+                    headerAllowsUpgrade =
+                        challengeHeader != nullptr &&
+                        challengeHeaderLength == strlen(UpgradeWhenHeaderValue) &&
+                        memcmp(challengeHeader, UpgradeWhenHeaderValue, challengeHeaderLength) == 0;
+                }
+                const bool pathAllowsUpgrade =
+                    UpgradeWhenPath != nullptr &&
+                    dataLength >= 5 + strlen(UpgradeWhenPath) &&
+                    memcmp(text, "GET ", 4) == 0 &&
+                    memcmp(text + 4, UpgradeWhenPath, strlen(UpgradeWhenPath)) == 0 &&
+                    text[4 + strlen(UpgradeWhenPath)] == ' ';
+
                 char response[512] = {};
-                if (HandshakeStatusCode != 101) {
+                if (HandshakeStatusCode != 101 && !headerAllowsUpgrade && !pathAllowsUpgrade) {
                     const int written = snprintf(
                         response,
                         sizeof(response),
@@ -2750,6 +2774,149 @@ namespace
             "websocket opening handshake rejects non-upgrade success as invalid response");
     }
 
+    struct ChallengeCallbackCapture
+    {
+        SIZE_T Calls = 0;
+        USHORT LastStatusCode = 0;
+        HttpHeader Header = {};
+    };
+
+    NTSTATUS AddAuthorizationOnChallenge(
+        void* context,
+        const WebSocketHandshakeChallenge* challenge,
+        WebSocketHandshakeRetryAction* action)
+    {
+        auto* capture = static_cast<ChallengeCallbackCapture*>(context);
+        if (capture == nullptr || challenge == nullptr || action == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->Calls;
+        capture->LastStatusCode = challenge->StatusCode;
+        capture->Header = {
+            { "Authorization", strlen("Authorization") },
+            { "Basic dGVzdA==", strlen("Basic dGVzdA==") }
+        };
+        action->Headers = &capture->Header;
+        action->HeaderCount = 1;
+        return STATUS_SUCCESS;
+    }
+
+    void TestOpeningHandshakeAuthChallengeCallbackRetries()
+    {
+        FakeWebSocketServer server;
+        server.HandshakeStatusCode = 401;
+        server.HandshakeReason = "Unauthorized";
+        server.UpgradeWhenHeaderName = "Authorization";
+        server.UpgradeWhenHeaderValue = "Basic dGVzdA==";
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        ChallengeCallbackCapture capture = {};
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.ChallengeCallback = AddAuthorizationOnChallenge;
+        options.ChallengeContext = &capture;
+
+        USHORT observedStatusCode = 0;
+        NTSTATUS status = client.Connect(wskClient, options, buffers, &observedStatusCode);
+        Expect(NT_SUCCESS(status), "websocket auth challenge callback retries opening handshake");
+        Expect(capture.Calls == 1, "websocket auth challenge callback called once");
+        Expect(capture.LastStatusCode == 401, "websocket auth challenge callback receives 401");
+        Expect(observedStatusCode == 101, "websocket auth challenge retry observes final 101 status");
+
+        size_t authLength = 0;
+        const char* auth = FindHeaderValue(server.LastHandshakeRequest, "Authorization", &authLength);
+        Expect(auth != nullptr, "websocket retry sends Authorization header");
+        Expect(
+            auth != nullptr &&
+            authLength == strlen("Basic dGVzdA==") &&
+            memcmp(auth, "Basic dGVzdA==", authLength) == 0,
+            "websocket retry Authorization header matches callback value");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    NTSTATUS FollowRedirectPathOnChallenge(
+        void* context,
+        const WebSocketHandshakeChallenge* challenge,
+        WebSocketHandshakeRetryAction* action)
+    {
+        UNREFERENCED_PARAMETER(context);
+        if (challenge == nullptr || action == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (!challenge->Redirect || challenge->StatusCode != 302) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        action->RedirectPath = "/next";
+        action->RedirectPathLength = strlen(action->RedirectPath);
+        return STATUS_SUCCESS;
+    }
+
+    void TestOpeningHandshakeRedirectCallbackRetriesPath()
+    {
+        FakeWebSocketServer server;
+        server.HandshakeStatusCode = 302;
+        server.HandshakeReason = "Found";
+        server.UpgradeWhenPath = "/next";
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.ChallengeCallback = FollowRedirectPathOnChallenge;
+
+        USHORT observedStatusCode = 0;
+        NTSTATUS status = client.Connect(wskClient, options, buffers, &observedStatusCode);
+        Expect(NT_SUCCESS(status), "websocket redirect callback retries opening handshake");
+        Expect(observedStatusCode == 101, "websocket redirect retry observes final 101 status");
+        Expect(
+            memcmp(server.LastHandshakeRequest, "GET /next ", strlen("GET /next ")) == 0,
+            "websocket redirect retry uses callback path");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
     void TestTlsVersionRangeValidation()
     {
         FakeWebSocketServer server;
@@ -3026,6 +3193,8 @@ int main()
     TestCloseTreatsConnectionResetAsClosed();
     TestClosePropagatesNonTerminalErrors();
     TestOpeningHandshakePolicyFailuresAreVisible();
+    TestOpeningHandshakeAuthChallengeCallbackRetries();
+    TestOpeningHandshakeRedirectCallbackRetriesPath();
     TestTlsVersionRangeValidation();
     TestTlsSha1CompatibilityPolicyValidation();
 

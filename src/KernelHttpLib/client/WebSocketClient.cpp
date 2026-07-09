@@ -140,6 +140,9 @@ namespace client
         constexpr const char WebSocketHttp2Alpn[] = "h2";
         constexpr SIZE_T WebSocketHttp2AlpnLength = sizeof(WebSocketHttp2Alpn) - 1;
         constexpr SIZE_T WebSocketHttp2BaseHeaderCount = 6;
+        constexpr ULONG WebSocketDefaultHandshakeRetries = 3;
+        constexpr ULONG WebSocketMaxHandshakeRetries = 10;
+        constexpr SIZE_T WebSocketMaxChallengeHeaders = 8;
         constexpr USHORT WebSocketCloseProtocolError = 1002;
         constexpr USHORT WebSocketClosePolicyViolation = 1008;
         constexpr USHORT WebSocketCloseMessageTooBig = 1009;
@@ -169,6 +172,52 @@ namespace client
                 IsTlsProtocolAllowed(options.MinimumTlsProtocol, options.MaximumTlsProtocol, tls::TlsProtocol::Tls12) &&
                 IsTlsProtocolAllowed(options.MinimumTlsProtocol, options.MaximumTlsProtocol, tls::TlsProtocol::Tls13) &&
                 failureCanConfirmTls12;
+        }
+
+        _Must_inspect_result_
+        bool IsValidWebSocketTransportMode(WebSocketTransportMode mode) noexcept
+        {
+            return mode == WebSocketTransportMode::LegacyBoolean ||
+                mode == WebSocketTransportMode::Http11Only ||
+                mode == WebSocketTransportMode::Auto ||
+                mode == WebSocketTransportMode::Http2Required;
+        }
+
+        _Must_inspect_result_
+        bool WebSocketModeAllowsHttp2(const WebSocketConnectOptions& options) noexcept
+        {
+            switch (options.TransportMode) {
+            case WebSocketTransportMode::Http11Only:
+                return false;
+            case WebSocketTransportMode::Auto:
+            case WebSocketTransportMode::Http2Required:
+                return true;
+            case WebSocketTransportMode::LegacyBoolean:
+            default:
+                return options.AllowWebSocketOverHttp2;
+            }
+        }
+
+        _Must_inspect_result_
+        bool WebSocketModeRequiresHttp2(const WebSocketConnectOptions& options) noexcept
+        {
+            return options.TransportMode == WebSocketTransportMode::Http2Required;
+        }
+
+        _Must_inspect_result_
+        bool WebSocketModeCanRetryHttp11(const WebSocketConnectOptions& options, NTSTATUS status) noexcept
+        {
+            return options.TransportMode == WebSocketTransportMode::Auto &&
+                options.UseTls &&
+                status == STATUS_NOT_SUPPORTED;
+        }
+
+        _Must_inspect_result_
+        bool IsWebSocketHandshakeChallengeStatus(USHORT statusCode) noexcept
+        {
+            return (statusCode >= 300 && statusCode <= 399) ||
+                statusCode == 401 ||
+                statusCode == 407;
         }
 
         _Must_inspect_result_
@@ -889,6 +938,13 @@ namespace client
             return STATUS_INVALID_PARAMETER;
         }
 
+        if (!IsValidWebSocketTransportMode(options.TransportMode) ||
+            (WebSocketModeRequiresHttp2(options) && !options.UseTls) ||
+            (options.ChallengeCallback == nullptr && options.ChallengeContext != nullptr) ||
+            options.MaxHandshakeRetries > WebSocketMaxHandshakeRetries) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
         if (options.UseTls &&
             (options.TlsServerName == nullptr ||
                 options.TlsServerNameLength == 0 ||
@@ -961,6 +1017,38 @@ namespace client
             }
 
             lastStatus = status;
+            if (WebSocketModeCanRetryHttp11(options, status)) {
+                WebSocketConnectOptions http11Options = options;
+                http11Options.TransportMode = WebSocketTransportMode::Http11Only;
+                http11Options.AllowWebSocketOverHttp2 = false;
+                if (statusCode != nullptr) {
+                    *statusCode = 0;
+                }
+
+                bool ignoredConfirmationCandidate = false;
+                const NTSTATUS http11Status = ConnectAddress(
+                    wskClient,
+                    reinterpret_cast<const SOCKADDR*>(&remoteAddresses[addressIndex]),
+                    http11Options,
+                    buffers,
+                    clientKey.Get(),
+                    clientKeyLength,
+                    requestLength,
+                    statusCode,
+                    &ignoredConfirmationCandidate);
+                if (NT_SUCCESS(http11Status)) {
+                    kprintf(
+                        "WebSocketClient HTTP/1.1 retry succeeded after h2 unsupported index=%Iu\r\n",
+                        addressIndex);
+                    return STATUS_SUCCESS;
+                }
+                kprintf(
+                    "WebSocketClient HTTP/1.1 retry failed: 0x%08X original=0x%08X index=%Iu\r\n",
+                    static_cast<ULONG>(http11Status),
+                    static_cast<ULONG>(status),
+                    addressIndex);
+                lastStatus = http11Status;
+            }
             if (tls12ConfirmationCandidate) {
                 WebSocketConnectOptions tls12Options = options;
                 tls12Options.MaximumTlsProtocol = tls::TlsProtocol::Tls12;
@@ -1093,10 +1181,12 @@ namespace client
             }
 
             SIZE_T alpnProtocolCount = 0;
-            if (options.AllowWebSocketOverHttp2) {
+            if (WebSocketModeAllowsHttp2(options)) {
                 alpnProtocols[alpnProtocolCount++] = { WebSocketHttp2Alpn, WebSocketHttp2AlpnLength };
             }
-            alpnProtocols[alpnProtocolCount++] = { WebSocketHttp11Alpn, WebSocketHttp11AlpnLength };
+            if (!WebSocketModeRequiresHttp2(options)) {
+                alpnProtocols[alpnProtocolCount++] = { WebSocketHttp11Alpn, WebSocketHttp11AlpnLength };
+            }
             tlsOptions.AlpnProtocols = alpnProtocols.Get();
             tlsOptions.AlpnProtocolCount = alpnProtocolCount;
 
@@ -1117,7 +1207,7 @@ namespace client
 
             const char* negotiatedAlpn = tls_->NegotiatedAlpn();
             const SIZE_T negotiatedAlpnLength = tls_->NegotiatedAlpnLength();
-            if (options.AllowWebSocketOverHttp2 &&
+            if (WebSocketModeAllowsHttp2(options) &&
                 TextEqualsLiteral(negotiatedAlpn, negotiatedAlpnLength, WebSocketHttp2Alpn)) {
                 h2Transport_ = AllocateNonPagedObject<core::TlsTransport>(*rawTransport_, *tls_);
                 h2Connection_ = AllocateNonPagedObject<http2::Http2Connection>();
@@ -1237,6 +1327,11 @@ namespace client
                 rawTransport_->SetCancellation(nullptr);
                 return STATUS_SUCCESS;
             }
+            if (WebSocketModeRequiresHttp2(options)) {
+                const NTSTATUS closeStatus = CloseTransport();
+                UNREFERENCED_PARAMETER(closeStatus);
+                return STATUS_NOT_SUPPORTED;
+            }
             if (negotiatedAlpnLength != 0 &&
                 !TextEqualsLiteral(negotiatedAlpn, negotiatedAlpnLength, WebSocketHttp11Alpn)) {
                 kprintf("WebSocketClient unexpected ALPN: %.*s\r\n",
@@ -1248,32 +1343,104 @@ namespace client
             }
         }
 
-        SIZE_T sent = 0;
-        status = SendRaw(buffers.RequestBuffer, requestLength, &sent);
-        if (NT_SUCCESS(status) && sent != requestLength) {
-            status = STATUS_CONNECTION_DISCONNECTED;
-        }
+        WebSocketConnectOptions currentOptions = options;
+        ULONG retryLimit = options.ChallengeCallback != nullptr ?
+            (options.MaxHandshakeRetries != 0 ? options.MaxHandshakeRetries : WebSocketDefaultHandshakeRetries) :
+            0;
+        ULONG retryCount = 0;
+        for (;;) {
+            SIZE_T sent = 0;
+            status = SendRaw(buffers.RequestBuffer, requestLength, &sent);
+            if (NT_SUCCESS(status) && sent != requestLength) {
+                status = STATUS_CONNECTION_DISCONNECTED;
+            }
 
-        if (!NT_SUCCESS(status)) {
-            kprintf("WebSocketClient send handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            const NTSTATUS closeStatus = Close(buffers);
-            UNREFERENCED_PARAMETER(closeStatus);
-            return status;
-        }
+            if (!NT_SUCCESS(status)) {
+                kprintf("WebSocketClient send handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                const NTSTATUS closeStatus = Close(buffers);
+                UNREFERENCED_PARAMETER(closeStatus);
+                return status;
+            }
 
-        http::HttpResponse response = {};
-        status = ReadHandshakeResponse(
-            clientKey,
-            clientKeyLength,
-            options.Subprotocol,
-            options.SubprotocolLength,
-            buffers,
-            response);
-        if (statusCode != nullptr) {
-            *statusCode = response.StatusCode;
-        }
+            http::HttpResponse response = {};
+            status = ReadHandshakeResponse(
+                clientKey,
+                clientKeyLength,
+                currentOptions.Subprotocol,
+                currentOptions.SubprotocolLength,
+                buffers,
+                response);
+            if (statusCode != nullptr) {
+                *statusCode = response.StatusCode;
+            }
 
-        if (!NT_SUCCESS(status)) {
+            if (NT_SUCCESS(status)) {
+                break;
+            }
+
+            if (status == STATUS_NOT_SUPPORTED &&
+                options.ChallengeCallback != nullptr &&
+                IsWebSocketHandshakeChallengeStatus(response.StatusCode) &&
+                retryCount < retryLimit) {
+                WebSocketHandshakeChallenge challenge = {};
+                challenge.StatusCode = response.StatusCode;
+                challenge.Headers = response.Headers;
+                challenge.HeaderCount = response.HeaderCount;
+                challenge.Redirect = response.StatusCode >= 300 && response.StatusCode <= 399;
+                challenge.AuthenticationChallenge = response.StatusCode == 401 || response.StatusCode == 407;
+
+                WebSocketHandshakeRetryAction action = {};
+                status = options.ChallengeCallback(options.ChallengeContext, &challenge, &action);
+                if (!NT_SUCCESS(status)) {
+                    const NTSTATUS closeStatus = Close(buffers);
+                    UNREFERENCED_PARAMETER(closeStatus);
+                    return status;
+                }
+                if ((action.RedirectPath == nullptr && action.RedirectPathLength != 0) ||
+                    (action.RedirectPath != nullptr && action.RedirectPathLength == 0) ||
+                    (action.Headers == nullptr && action.HeaderCount != 0) ||
+                    action.HeaderCount > WebSocketMaxChallengeHeaders) {
+                    const NTSTATUS closeStatus = Close(buffers);
+                    UNREFERENCED_PARAMETER(closeStatus);
+                    return STATUS_INVALID_PARAMETER;
+                }
+
+                const SIZE_T combinedHeaderCount = options.ExtraHeaderCount + action.HeaderCount;
+                HeapArray<http::HttpHeader> combinedHeaders(combinedHeaderCount);
+                if (!combinedHeaders.IsValid() && combinedHeaderCount != 0) {
+                    const NTSTATUS closeStatus = Close(buffers);
+                    UNREFERENCED_PARAMETER(closeStatus);
+                    return STATUS_INSUFFICIENT_RESOURCES;
+                }
+                for (SIZE_T index = 0; index < options.ExtraHeaderCount; ++index) {
+                    combinedHeaders[index] = options.ExtraHeaders[index];
+                }
+                for (SIZE_T index = 0; index < action.HeaderCount; ++index) {
+                    combinedHeaders[options.ExtraHeaderCount + index] = action.Headers[index];
+                }
+
+                currentOptions.ExtraHeaders = combinedHeaderCount != 0 ? combinedHeaders.Get() : nullptr;
+                currentOptions.ExtraHeaderCount = combinedHeaderCount;
+                if (action.RedirectPath != nullptr) {
+                    currentOptions.Path = action.RedirectPath;
+                    currentOptions.PathLength = action.RedirectPathLength;
+                }
+                status = BuildHandshakeRequest(
+                    currentOptions,
+                    clientKey,
+                    clientKeyLength,
+                    buffers.RequestBuffer,
+                    buffers.RequestBufferLength,
+                    &requestLength);
+                if (!NT_SUCCESS(status)) {
+                    const NTSTATUS closeStatus = Close(buffers);
+                    UNREFERENCED_PARAMETER(closeStatus);
+                    return status;
+                }
+                ++retryCount;
+                continue;
+            }
+
             kprintf("WebSocketClient handshake failed: 0x%08X status=%u\r\n",
                 static_cast<ULONG>(status),
                 response.StatusCode);

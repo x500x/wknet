@@ -158,6 +158,8 @@ namespace kws
 {
 ConnectConfig DefaultConnectConfig() noexcept
 {
-    return ConnectConfig{};
+    ConnectConfig config = {};
+    config.TransportMode = khttp::WebSocketTransportMode::Auto;
+    return config;
 }
 }

@@ -3456,6 +3456,40 @@ namespace tls
         }
 
         _Must_inspect_result_
+        NTSTATUS QueryAndValidateRevocationProvider(
+            _In_ const CertificateStore& store,
+            _In_ const ParsedCertificate& certificate,
+            CertificateRevocationSource source,
+            long long now,
+            _Out_ bool* found) noexcept
+        {
+            if (found != nullptr) {
+                *found = false;
+            }
+            if (found == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            CertificateRevocationEntry providerEntry = {};
+            NTSTATUS status = store.QueryRevocationProvider(
+                certificate.Issuer,
+                certificate.IssuerLength,
+                certificate.SerialNumber,
+                certificate.SerialNumberLength,
+                source,
+                &providerEntry);
+            if (status == STATUS_NOT_FOUND) {
+                return STATUS_SUCCESS;
+            }
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            *found = true;
+            return ValidateRevocationEntry(providerEntry, now);
+        }
+
+        _Must_inspect_result_
         NTSTATUS ValidateCertificateRevocation(
             _In_reads_(certificateCount) const ParsedCertificate* certificates,
             SIZE_T certificateCount,
@@ -3493,6 +3527,20 @@ namespace tls
                     continue;
                 }
 
+                bool providerFound = false;
+                NTSTATUS providerStatus = QueryAndValidateRevocationProvider(
+                    *options.Store,
+                    certificate,
+                    CertificateRevocationSource::Ocsp,
+                    now,
+                    &providerFound);
+                if (!NT_SUCCESS(providerStatus)) {
+                    return providerStatus;
+                }
+                if (providerFound) {
+                    continue;
+                }
+
                 if (mode == CertificateRevocationMode::OnlineRequired) {
                     entry = options.Store->FindRevocationEntry(
                         certificate.Issuer,
@@ -3505,6 +3553,19 @@ namespace tls
                         if (!NT_SUCCESS(status)) {
                             return status;
                         }
+                        continue;
+                    }
+
+                    providerStatus = QueryAndValidateRevocationProvider(
+                        *options.Store,
+                        certificate,
+                        CertificateRevocationSource::Crl,
+                        now,
+                        &providerFound);
+                    if (!NT_SUCCESS(providerStatus)) {
+                        return providerStatus;
+                    }
+                    if (providerFound) {
                         continue;
                     }
                 }

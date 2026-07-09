@@ -29,6 +29,36 @@ namespace crypto
 
 namespace client
 {
+    enum class WebSocketTransportMode : ULONG
+    {
+        LegacyBoolean = 0,
+        Http11Only = 1,
+        Auto = 2,
+        Http2Required = 3
+    };
+
+    struct WebSocketHandshakeChallenge final
+    {
+        USHORT StatusCode = 0;
+        const http::HttpHeader* Headers = nullptr;
+        SIZE_T HeaderCount = 0;
+        bool Redirect = false;
+        bool AuthenticationChallenge = false;
+    };
+
+    struct WebSocketHandshakeRetryAction final
+    {
+        const char* RedirectPath = nullptr;
+        SIZE_T RedirectPathLength = 0;
+        const http::HttpHeader* Headers = nullptr;
+        SIZE_T HeaderCount = 0;
+    };
+
+    typedef NTSTATUS (*WebSocketHandshakeChallengeCallback)(
+        _In_opt_ void* context,
+        _In_ const WebSocketHandshakeChallenge* challenge,
+        _Out_ WebSocketHandshakeRetryAction* action);
+
     struct WebSocketConnectOptions final
     {
         const wchar_t* ServerName = nullptr;
@@ -57,6 +87,10 @@ namespace client
         bool UseTls = false;
         bool VerifyCertificate = true;
         bool AllowWebSocketOverHttp2 = false;
+        WebSocketTransportMode TransportMode = WebSocketTransportMode::LegacyBoolean;
+        WebSocketHandshakeChallengeCallback ChallengeCallback = nullptr;
+        void* ChallengeContext = nullptr;
+        ULONG MaxHandshakeRetries = 0;
     };
 
     struct WebSocketIoBuffers final

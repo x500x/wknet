@@ -630,6 +630,14 @@ namespace
             mode == KhHttp2CleartextMode::Upgrade;
     }
 
+    bool IsValidWebSocketTransportMode(KhWebSocketTransportMode mode) noexcept
+    {
+        return mode == KhWebSocketTransportMode::LegacyBoolean ||
+            mode == KhWebSocketTransportMode::Http11Only ||
+            mode == KhWebSocketTransportMode::Auto ||
+            mode == KhWebSocketTransportMode::Http2Required;
+    }
+
     net::WskAddressFamily ToWskAddressFamily(KhAddressFamily addressFamily) noexcept
     {
         switch (addressFamily) {
@@ -648,6 +656,8 @@ namespace
 
     bool IsValidWebSocketConnectOptions(const KhWebSocketConnectOptions& options) noexcept
     {
+        constexpr ULONG KhMaxWebSocketHandshakeRetries = 10;
+
         if (options.Url == nullptr || options.UrlLength == 0) {
             return false;
         }
@@ -665,7 +675,11 @@ namespace
             return false;
         }
 
-        return IsValidTlsOptions(options.Tls) && IsValidAddressFamily(options.AddressFamily);
+        return IsValidTlsOptions(options.Tls) &&
+            IsValidAddressFamily(options.AddressFamily) &&
+            IsValidWebSocketTransportMode(options.TransportMode) &&
+            !(options.ChallengeCallback == nullptr && options.ChallengeContext != nullptr) &&
+            options.MaxHandshakeRetries <= KhMaxWebSocketHandshakeRetries;
     }
 
     bool IsValidReceiveOptions(const KhWebSocketReceiveOptions& options) noexcept
