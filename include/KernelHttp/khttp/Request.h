@@ -17,6 +17,18 @@ namespace khttp
     _Must_inspect_result_
     NTSTATUS RequestSetHeader(_In_ Request* request, _In_reads_bytes_(nameLength) const char* name, SIZE_T nameLength, _In_reads_bytes_(valueLength) const char* value, SIZE_T valueLength) noexcept;
     _Must_inspect_result_
+    NTSTATUS RequestSetRangeBytes(_In_ Request* request, ULONGLONG firstByte, ULONGLONG lastByte, bool hasLastByte) noexcept;
+    _Must_inspect_result_
+    NTSTATUS RequestSetRangeSuffix(_In_ Request* request, ULONGLONG suffixLength) noexcept;
+    _Must_inspect_result_
+    NTSTATUS RequestSetIfMatch(_In_ Request* request, _In_reads_bytes_(valueLength) const char* value, SIZE_T valueLength) noexcept;
+    _Must_inspect_result_
+    NTSTATUS RequestSetIfNoneMatch(_In_ Request* request, _In_reads_bytes_(valueLength) const char* value, SIZE_T valueLength) noexcept;
+    _Must_inspect_result_
+    NTSTATUS RequestSetIfModifiedSince(_In_ Request* request, _In_reads_bytes_(valueLength) const char* value, SIZE_T valueLength) noexcept;
+    _Must_inspect_result_
+    NTSTATUS RequestSetIfUnmodifiedSince(_In_ Request* request, _In_reads_bytes_(valueLength) const char* value, SIZE_T valueLength) noexcept;
+    _Must_inspect_result_
     NTSTATUS RequestSetBody(_In_ Request* request, _In_reads_bytes_opt_(dataLength) const UCHAR* data, SIZE_T dataLength) noexcept;
     _Must_inspect_result_
     NTSTATUS RequestSetBodyMode(_In_ Request* request, RequestBodyMode mode) noexcept;

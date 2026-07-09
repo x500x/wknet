@@ -1201,6 +1201,311 @@ namespace
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
 
+    void TestAcceptEncodingQValueOptions() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for Accept-Encoding qvalue options");
+
+        KernelHttp::http::HttpAcceptEncodingPreference preferences[] = {
+            { KernelHttp::http::HttpAcceptCoding::Brotli, 800 },
+            { KernelHttp::http::HttpAcceptCoding::Identity, 0 },
+            { KernelHttp::http::HttpAcceptCoding::Any, 0 }
+        };
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.AcceptEncodingPreferences = preferences;
+        options.AcceptEncodingPreferenceCount = sizeof(preferences) / sizeof(preferences[0]);
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/qvalue";
+        status = khttp::GetEx(session, url, Length(url), nullptr, &options, &resp);
+        Expect(NT_SUCCESS(status), "GetEx succeeds with custom Accept-Encoding qvalues");
+        Expect(
+            BufferContainsLiteral(
+                captured.BuiltRequest,
+                captured.BuiltRequestLength,
+                "Accept-Encoding: br;q=0.8, identity;q=0, *;q=0\r\n"),
+            "custom Accept-Encoding qvalues are emitted");
+
+        khttp::ResponseRelease(resp);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestAcceptEncodingRejectsInvalidPreferences() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for invalid Accept-Encoding options");
+
+        KernelHttp::http::HttpAcceptEncodingPreference preferences[] = {
+            { KernelHttp::http::HttpAcceptCoding::Gzip, 1000 },
+            { KernelHttp::http::HttpAcceptCoding::Gzip, 500 }
+        };
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.AcceptEncodingPreferences = preferences;
+        options.AcceptEncodingPreferenceCount = sizeof(preferences) / sizeof(preferences[0]);
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/qvalue";
+        status = khttp::GetEx(session, url, Length(url), nullptr, &options, &resp);
+        Expect(status == STATUS_INVALID_PARAMETER, "duplicate Accept-Encoding preference is rejected");
+        Expect(captured.CallCount == 0, "invalid Accept-Encoding options do not reach transport");
+        Expect(resp == nullptr, "invalid Accept-Encoding options do not allocate response");
+
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestAcceptEncodingQZeroResponseFailsClosed() noexcept
+    {
+        char response[256] = {};
+        const int headerLength = snprintf(
+            response,
+            sizeof(response),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Encoding: gzip\r\n"
+            "Content-Length: %zu\r\n"
+            "\r\n",
+            sizeof(GzipBody));
+        Expect(headerLength > 0, "gzip content-encoding fixture header builds");
+        SIZE_T responseLength = static_cast<SIZE_T>(headerLength);
+        Expect(responseLength + sizeof(GzipBody) <= sizeof(response), "gzip content-encoding fixture fits");
+        if (responseLength + sizeof(GzipBody) <= sizeof(response)) {
+            memcpy(response + responseLength, GzipBody, sizeof(GzipBody));
+            responseLength += sizeof(GzipBody);
+        }
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = responseLength;
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for Accept-Encoding fail-closed");
+
+        KernelHttp::http::HttpAcceptEncodingPreference preferences[] = {
+            { KernelHttp::http::HttpAcceptCoding::Gzip, 0 },
+            { KernelHttp::http::HttpAcceptCoding::Identity, 1000 }
+        };
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.AcceptEncodingPreferences = preferences;
+        options.AcceptEncodingPreferenceCount = sizeof(preferences) / sizeof(preferences[0]);
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/qzero";
+        status = khttp::GetEx(session, url, Length(url), nullptr, &options, &resp);
+        Expect(status == STATUS_NOT_SUPPORTED, "q=0 content coding response fails closed");
+        Expect(captured.CallCount == 1, "q=0 response is rejected after transport response");
+        Expect(resp == nullptr, "q=0 response does not allocate response");
+
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestTraceRequiresExplicitOptIn() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for TRACE test");
+
+        khttp::Response* resp = nullptr;
+        const char* url = "http://example.com/debug";
+        status = khttp::Trace(session, url, Length(url), &resp);
+        Expect(status == STATUS_NOT_SUPPORTED, "TRACE without opt-in is rejected");
+        Expect(captured.CallCount == 0, "TRACE without opt-in does not reach transport");
+
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.Flags = khttp::SendFlagAllowTrace;
+        status = khttp::TraceEx(session, url, Length(url), nullptr, &options, &resp);
+        Expect(NT_SUCCESS(status), "TRACE with opt-in succeeds");
+        Expect(captured.CallCount == 1, "TRACE with opt-in reaches transport once");
+        Expect(
+            BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "TRACE /debug HTTP/1.1\r\n"),
+            "TRACE request line is emitted");
+        Expect(
+            !BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "Content-Length:"),
+            "TRACE request has no body framing");
+
+        khttp::ResponseRelease(resp);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestTypedRangeAndConditionHeaders() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 206 Partial Content\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for Range helpers");
+
+        khttp::Request* request = nullptr;
+        status = khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for Range helpers");
+
+        const char* url = "http://example.com/file";
+        status = khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for Range helpers");
+
+        status = khttp::RequestSetRangeBytes(request, 100, 50, true);
+        Expect(status == STATUS_INVALID_PARAMETER, "Range helper rejects inverted byte range");
+
+        status = khttp::RequestSetRangeBytes(request, 5, 9, true);
+        Expect(NT_SUCCESS(status), "Range helper accepts byte range");
+
+        const char* etag = "\"abc\"";
+        status = khttp::RequestSetIfNoneMatch(request, etag, Length(etag));
+        Expect(NT_SUCCESS(status), "If-None-Match helper accepts ETag");
+
+        khttp::Response* resp = nullptr;
+        status = khttp::Send(session, request, &resp);
+        Expect(NT_SUCCESS(status), "Range helper request sends");
+        Expect(
+            BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "Range: bytes=5-9\r\n"),
+            "Range helper emits byte range header");
+        Expect(
+            BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "If-None-Match: \"abc\"\r\n"),
+            "condition helper emits If-None-Match header");
+
+        khttp::ResponseRelease(resp);
+        khttp::RequestRelease(request);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestTypedSuffixRangeHeader() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 206 Partial Content\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for suffix Range helper");
+
+        khttp::Request* request = nullptr;
+        status = khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for suffix Range helper");
+
+        const char* url = "http://example.com/file";
+        status = khttp::RequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "RequestSetUrl succeeds for suffix Range helper");
+
+        status = khttp::RequestSetRangeSuffix(request, 0);
+        Expect(status == STATUS_INVALID_PARAMETER, "suffix Range helper rejects zero length");
+
+        status = khttp::RequestSetRangeSuffix(request, 128);
+        Expect(NT_SUCCESS(status), "suffix Range helper accepts length");
+
+        khttp::Response* resp = nullptr;
+        status = khttp::Send(session, request, &resp);
+        Expect(NT_SUCCESS(status), "suffix Range helper request sends");
+        Expect(
+            BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "Range: bytes=-128\r\n"),
+            "suffix Range helper emits header");
+
+        khttp::ResponseRelease(resp);
+        khttp::RequestRelease(request);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestEngineTypedRangeAndConditionHeaders() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 206 Partial Content\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        KernelHttp::engine::KH_SESSION session = nullptr;
+        NTSTATUS status = KernelHttp::engine::KhSessionCreate(
+            reinterpret_cast<KernelHttp::net::WskClient*>(0x1),
+            nullptr,
+            &session);
+        Expect(NT_SUCCESS(status), "engine SessionCreate succeeds for typed Range helpers");
+
+        KernelHttp::engine::KH_REQUEST request = nullptr;
+        status = KernelHttp::engine::KhHttpRequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "engine RequestCreate succeeds for typed Range helpers");
+
+        const char* url = "http://example.com/file";
+        status = KernelHttp::engine::KhHttpRequestSetUrl(request, url, Length(url));
+        Expect(NT_SUCCESS(status), "engine RequestSetUrl succeeds for typed Range helpers");
+
+        status = KernelHttp::engine::KhHttpRequestSetRangeSuffix(request, 256);
+        Expect(NT_SUCCESS(status), "engine suffix Range helper accepts length");
+
+        const char* etag = "\"engine\"";
+        status = KernelHttp::engine::KhHttpRequestSetIfMatch(request, etag, Length(etag));
+        Expect(NT_SUCCESS(status), "engine If-Match helper accepts ETag");
+
+        KernelHttp::engine::KH_RESPONSE resp = nullptr;
+        status = KernelHttp::engine::KhHttpSendSync(session, request, nullptr, &resp);
+        Expect(NT_SUCCESS(status), "engine typed Range helper request sends");
+        Expect(
+            BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "Range: bytes=-256\r\n"),
+            "engine Range helper emits suffix header");
+        Expect(
+            BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "If-Match: \"engine\"\r\n"),
+            "engine condition helper emits If-Match header");
+
+        KernelHttp::engine::KhResponseRelease(resp);
+        KernelHttp::engine::KhHttpRequestRelease(request);
+        KernelHttp::engine::KhSessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
     void TestResponseDuplicateHeaderSemantics() noexcept
     {
         const char* response =
@@ -5299,6 +5604,13 @@ int main() noexcept
     TestSessionCreateAndClose();
     TestDestroyIsUnconditionalHighLevelDrain();
     TestSimpleGet();
+    TestAcceptEncodingQValueOptions();
+    TestAcceptEncodingRejectsInvalidPreferences();
+    TestAcceptEncodingQZeroResponseFailsClosed();
+    TestTraceRequiresExplicitOptIn();
+    TestTypedRangeAndConditionHeaders();
+    TestTypedSuffixRangeHeader();
+    TestEngineTypedRangeAndConditionHeaders();
     TestResponseDuplicateHeaderSemantics();
     TestResponseTransferEncodingDecoded();
     TestTransferCodingCloseDelimitedHonorsTestTransportEof();

@@ -21,6 +21,7 @@ namespace client
             case http::HttpMethod::Head: return "HEAD";
             case http::HttpMethod::Options: return "OPTIONS";
             case http::HttpMethod::Connect: return "CONNECT";
+            case http::HttpMethod::Trace: return "TRACE";
             default: return "GET";
             }
         }

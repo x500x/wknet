@@ -40,7 +40,7 @@ KernelHttp 的公开能力按类别列账，避免把“没有实现”“默认
 
 | 协议 | 当前可用能力 |
 |------|--------------|
-| HTTP/1.1 | `Content-Length`、库生成 chunked、`BodyCreateStream`/`KhHttpRequestSetBodySource` 真流式请求体、请求 trailer（chunked 路径）、`Expect: 100-continue`、响应 `Transfer-Encoding` 链（`chunked`/`gzip`/`deflate`/`compress`）、close-delimited 响应、HEAD/101/无 body 状态码、中间 1xx 跳过、chunked trailer 校验与只读 API、`206`/`Content-Range` 只读解析、RFC 3986 相对 redirect、CONNECT 方法构建、HTTPS CONNECT 代理、明文 HTTP over proxy absolute-form |
+| HTTP/1.1 | `Content-Length`、库生成 chunked、`BodyCreateStream`/`KhHttpRequestSetBodySource` 真流式请求体、请求 trailer（chunked 路径）、`Expect: 100-continue`、TRACE 显式 opt-in、Range/条件请求 typed helper、响应 `Transfer-Encoding` 链（`chunked`/`gzip`/`deflate`/`compress`）、close-delimited 响应、HEAD/101/无 body 状态码、中间 1xx 跳过、chunked trailer 校验与只读 API、`206`/`Content-Range` 只读解析、RFC 3986 相对 redirect、CONNECT 方法构建、HTTPS CONNECT 代理、明文 HTTP over proxy absolute-form |
 | HTTP/2 | TLS ALPN、h2c prior knowledge / Upgrade、SETTINGS（含 `ENABLE_CONNECT_PROTOCOL`）、HEADERS/CONTINUATION、DATA body source、请求/响应 trailers、显式 `SendPing`、GOAWAY/RST 可重试语义、WINDOW_UPDATE、HPACK、header block 语义校验、HPACK header-list/table-size 限制、活动 stream 表、`BeginRequest`/`ReceiveResponse(streamId)` 两阶段接口、RFC 8441 extended CONNECT DATA tunnel、高层连接池 HTTP/2 多活动流复用 |
 | WebSocket | ws/wss 握手、Accept 常量时间校验、自定义 opening handshake headers、文本/二进制发送、空消息、分片发送（`kws::SendContinuation`）、接收分片回调（`ReceiveOptions.OnMessage`）、控制帧校验、自动 Pong、Ping/Pong/CloseEx、selected subprotocol 查询、跨片 UTF-8 校验、默认聚合完整消息、显式 opt-in RFC 8441 WebSocket over HTTP/2 |
 | TLS 与证书 | TLS 1.2/1.3、TLS 1.3 标准 cipher suite、TLS 1.2 ECDHE/DHE 与兼容档 RSA key exchange、AES-GCM/AES-CBC/ChaCha20-Poly1305、X25519/X448/NIST P curves/FFDHE、RSA-PSS/RSA-PKCS1/ECDSA/Ed25519/Ed448 signature scheme、SNI、ALPN、PSK/session ticket、0-RTT、被动 KeyUpdate、record padding、客户端证书（mTLS）、OCSP stapling 解析、证书链重排和校验、Name Constraints、certificatePolicies、IDNA、OCSP/CRL 撤销缓存、SPKI pin |
@@ -52,6 +52,7 @@ KernelHttp 的公开能力按类别列账，避免把“没有实现”“默认
 | 能力 | 开启方式 / 说明 |
 |------|-----------------|
 | `Expect: 100-continue` | 通过 `SendFlagExpectContinue` 显式开启 |
+| TRACE 方法 | 通过 `SendFlagAllowTrace` 显式开启；body、trailer 与敏感头仍拒绝 |
 | h2c prior knowledge / Upgrade | 通过 `SendOptions.Http2CleartextMode` 显式开启；默认不走明文 HTTP/2 |
 | WebSocket over HTTP/2 | 通过 `AllowWebSocketOverHttp2=true` 显式开启；默认 HTTP/1.1 Upgrade |
 | TLS 1.2 RSA key exchange / CBC / SHA-1 签名 | 已实现但默认关闭；必须使用 `CompatibilityExplicit` policy 并分别开启对应兼容开关 |
@@ -82,9 +83,9 @@ KernelHttp 的公开能力按类别列账，避免把“没有实现”“默认
 | 能力 | 当前结论 |
 |------|----------|
 | HTTP 入站 request parser / server role | 非目标；当前项目定位为客户端协议栈 |
-| TRACE / HTTP 管线化 | 非目标 |
+| HTTP 管线化 | 非目标 |
 | RFC 9111 cache | 不提供内核缓存 API |
-| `Range` / 条件请求语义处理 | 仅普通 header 透传；不合并、不验证语义；响应 `Content-Range` 只读解析 |
+| `Range` / 条件请求完整缓存语义 | 已提供 typed helper 与响应 `Content-Range` 只读解析；不做分片合并、缓存合并或 RFC9111 cache |
 | 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
 | HTTP/2 priority 公共调度能力 | 不作为公共能力 |
 | HTTP/2 后台自动 PING 保活 | 不提供；调用方可显式 `SendPing` |

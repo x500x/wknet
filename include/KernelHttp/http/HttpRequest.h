@@ -16,6 +16,7 @@ namespace http
         Options,
         Patch,
         Connect,
+        Trace,
         Custom
     };
 
@@ -56,6 +57,8 @@ namespace http
         // Library-controlled opt-in for emitting Expect: 100-continue.
         // Callers that pass the header without this flag are rejected.
         bool AllowExpectContinue = false;
+        // TRACE is disabled unless the higher layer explicitly opts in.
+        bool AllowTrace = false;
     };
 
     class HttpRequestBuilder final

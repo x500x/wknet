@@ -54,7 +54,9 @@ SendOptions::SendOptions() noexcept :
     HasTlsOverride(false),
     ConnectionPolicy(ConnPolicy::ReuseOrCreate),
     Family(AddressFamily::Any),
-    Http2CleartextMode(::khttp::Http2CleartextMode::Disabled)
+    Http2CleartextMode(::khttp::Http2CleartextMode::Disabled),
+    AcceptEncodingPreferences(nullptr),
+    AcceptEncodingPreferenceCount(0)
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
     ,
     OnComplete(nullptr),

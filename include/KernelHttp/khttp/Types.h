@@ -1,5 +1,6 @@
 #pragma once
 
+#include <KernelHttp/http/HttpContentEncoding.h>
 #include <KernelHttp/http/HttpTypes.h>
 #include <KernelHttp/tls/TlsPolicy.h>
 
@@ -82,7 +83,8 @@ namespace khttp
         Delete = 4,
         Head = 5,
         Options = 6,
-        Connect = 7
+        Connect = 7,
+        Trace = 8
     };
 
     enum class PoolType : ULONG
@@ -144,7 +146,8 @@ namespace khttp
         SendFlagNone = 0,
         SendFlagAggregateWithCallbacks = 0x00000001,
         SendFlagDisableAutoRedirect = 0x00000002,
-        SendFlagExpectContinue = 0x00000004
+        SendFlagExpectContinue = 0x00000004,
+        SendFlagAllowTrace = 0x00000008
     };
 
     constexpr SIZE_T DefaultRequestBufferBytes = 16 * 1024;
@@ -238,6 +241,8 @@ namespace khttp
         ConnPolicy ConnectionPolicy;
         AddressFamily Family;
         Http2CleartextMode Http2CleartextMode;
+        const ::KernelHttp::http::HttpAcceptEncodingPreference* AcceptEncodingPreferences;
+        SIZE_T AcceptEncodingPreferenceCount;
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         CompletionCallback OnComplete;
         void* CompletionContext;

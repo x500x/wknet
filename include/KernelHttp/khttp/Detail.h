@@ -285,6 +285,7 @@ namespace detail
         case Method::Head: return ::KernelHttp::engine::KhHttpMethod::Head;
         case Method::Options: return ::KernelHttp::engine::KhHttpMethod::Options;
         case Method::Connect: return ::KernelHttp::engine::KhHttpMethod::Connect;
+        case Method::Trace: return ::KernelHttp::engine::KhHttpMethod::Trace;
         case Method::Get:
         default: return ::KernelHttp::engine::KhHttpMethod::Get;
         }

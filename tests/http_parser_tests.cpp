@@ -326,6 +326,86 @@ namespace
         Expect(memcmp(buffer, expected, strlen(expected)) == 0, "CONNECT request bytes match expected output");
     }
 
+    void TestBuildTraceRequestRequiresExplicitOptIn()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Trace;
+        options.Path = MakeText("/debug");
+        options.Host = MakeText("example.com");
+
+        NTSTATUS status = HttpRequestBuilder::Build(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+        Expect(status == STATUS_NOT_SUPPORTED, "TRACE request requires explicit opt-in");
+
+        options.AllowTrace = true;
+        status = HttpRequestBuilder::Build(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+
+        const char expected[] =
+            "TRACE /debug HTTP/1.1\r\n"
+            "Host: example.com\r\n"
+            "\r\n";
+
+        Expect(status == STATUS_SUCCESS, "TRACE request builds when explicitly enabled");
+        Expect(written == strlen(expected), "TRACE request reports exact byte count");
+        Expect(memcmp(buffer, expected, strlen(expected)) == 0, "TRACE request bytes match expected output");
+    }
+
+    void TestTraceRequestRejectsUnsafeInputs()
+    {
+        char buffer[512] = {};
+        size_t written = 0;
+        const char body[] = "unsafe";
+
+        HttpRequestBuildOptions options = {};
+        options.Method = HttpMethod::Trace;
+        options.Path = MakeText("/debug");
+        options.Host = MakeText("example.com");
+        options.AllowTrace = true;
+        options.Body = body;
+        options.BodyLength = strlen(body);
+        options.IncludeContentLength = true;
+
+        NTSTATUS status = HttpRequestBuilder::Build(
+            options,
+            buffer,
+            sizeof(buffer),
+            &written);
+        Expect(status == STATUS_INVALID_PARAMETER, "TRACE request rejects body");
+
+        const HttpHeader sensitiveHeaders[] = {
+            { MakeText("Authorization"), MakeText("Bearer token") },
+            { MakeText("Cookie"), MakeText("a=b") },
+            { MakeText("Proxy-Authorization"), MakeText("Basic token") }
+        };
+
+        for (SIZE_T index = 0; index < sizeof(sensitiveHeaders) / sizeof(sensitiveHeaders[0]); ++index) {
+            options = {};
+            options.Method = HttpMethod::Trace;
+            options.Path = MakeText("/debug");
+            options.Host = MakeText("example.com");
+            options.AllowTrace = true;
+            options.ExtraHeaders = &sensitiveHeaders[index];
+            options.ExtraHeaderCount = 1;
+
+            status = HttpRequestBuilder::Build(
+                options,
+                buffer,
+                sizeof(buffer),
+                &written);
+            Expect(status == STATUS_NOT_SUPPORTED, "TRACE request rejects sensitive headers");
+        }
+    }
+
     void TestBuildPostRequest()
     {
         char buffer[512] = {};
@@ -2593,6 +2673,8 @@ int main()
 {
     TestBuildGetRequest();
     TestBuildConnectRequest();
+    TestBuildTraceRequestRequiresExplicitOptIn();
+    TestTraceRequestRejectsUnsafeInputs();
     TestBuildPostRequest();
     TestBuildPostRequestHeadersOnly();
     TestBuildContentLengthRequestBodyOnly();

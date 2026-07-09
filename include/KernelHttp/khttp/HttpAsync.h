@@ -44,6 +44,10 @@ namespace khttp
     NTSTATUS AsyncOptionsRequest(_In_ Session* session, _In_z_ const char* url, _Out_ AsyncOp** operation) noexcept;
     _Must_inspect_result_
     NTSTATUS AsyncOptionsRequestEx(_In_ Session* session, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncTrace(_In_ Session* session, _In_z_ const char* url, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncTraceEx(_In_ Session* session, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
 
     _Must_inspect_result_
     NTSTATUS AsyncGet(_In_ Request* request, _In_z_ const char* url, _Out_ AsyncOp** operation) noexcept;
@@ -73,6 +77,10 @@ namespace khttp
     NTSTATUS AsyncOptionsRequest(_In_ Request* request, _In_z_ const char* url, _Out_ AsyncOp** operation) noexcept;
     _Must_inspect_result_
     NTSTATUS AsyncOptionsRequestEx(_In_ Request* request, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncTrace(_In_ Request* request, _In_z_ const char* url, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncTraceEx(_In_ Request* request, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
     _Must_inspect_result_

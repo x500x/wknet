@@ -1,5 +1,6 @@
 #pragma once
 
+#include <KernelHttp/http/HttpContentEncoding.h>
 #include <KernelHttp/http/HttpTypes.h>
 #include <KernelHttp/KernelHttpLimits.h>
 #include <KernelHttp/net/WskClient.h>
@@ -68,7 +69,8 @@ namespace engine
         Delete = 4,
         Head = 5,
         Options = 6,
-        Connect = 7
+        Connect = 7,
+        Trace = 8
     };
 
     enum class KhTlsVersion : ULONG
@@ -122,7 +124,8 @@ namespace engine
         KhHttpSendFlagNone = 0,
         KhHttpSendFlagAggregateWithCallbacks = 0x00000001,
         KhHttpSendFlagDisableAutoRedirect = 0x00000002,
-        KhHttpSendFlagExpectContinue = 0x00000004
+        KhHttpSendFlagExpectContinue = 0x00000004,
+        KhHttpSendFlagAllowTrace = 0x00000008
     };
 
     enum class KhWebSocketMessageType : ULONG
@@ -222,6 +225,8 @@ namespace engine
         KhAsyncCompletionCallback CompletionCallback = nullptr;
         void* CompletionContext = nullptr;
         KhHttp2CleartextMode Http2CleartextMode = KhHttp2CleartextMode::Disabled;
+        const http::HttpAcceptEncodingPreference* AcceptEncodingPreferences = nullptr;
+        SIZE_T AcceptEncodingPreferenceCount = 0;
     };
 
     struct KhNameValuePair final
@@ -332,6 +337,42 @@ namespace engine
         _In_ KH_REQUEST request,
         _In_reads_bytes_(nameLength) const char* name,
         SIZE_T nameLength,
+        _In_reads_bytes_(valueLength) const char* value,
+        SIZE_T valueLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetRangeBytes(
+        _In_ KH_REQUEST request,
+        ULONGLONG firstByte,
+        ULONGLONG lastByte,
+        bool hasLastByte) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetRangeSuffix(
+        _In_ KH_REQUEST request,
+        ULONGLONG suffixLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetIfMatch(
+        _In_ KH_REQUEST request,
+        _In_reads_bytes_(valueLength) const char* value,
+        SIZE_T valueLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetIfNoneMatch(
+        _In_ KH_REQUEST request,
+        _In_reads_bytes_(valueLength) const char* value,
+        SIZE_T valueLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetIfModifiedSince(
+        _In_ KH_REQUEST request,
+        _In_reads_bytes_(valueLength) const char* value,
+        SIZE_T valueLength) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpRequestSetIfUnmodifiedSince(
+        _In_ KH_REQUEST request,
         _In_reads_bytes_(valueLength) const char* value,
         SIZE_T valueLength) noexcept;
 

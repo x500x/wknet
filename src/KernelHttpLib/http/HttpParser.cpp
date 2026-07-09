@@ -679,7 +679,8 @@ namespace http
                 body,
                 bodyLength,
                 buffers,
-                decoded);
+                decoded,
+                options.AcceptEncodingPolicy);
             if (!NT_SUCCESS(status)) {
                 return status;
             }

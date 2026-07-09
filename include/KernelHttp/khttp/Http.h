@@ -77,6 +77,10 @@ namespace khttp
     NTSTATUS Options(_In_ Session* session, _In_z_ const char* url, _Out_ Response** response) noexcept;
     _Must_inspect_result_
     NTSTATUS OptionsEx(_In_ Session* session, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const SendOptions* options, _Out_ Response** response) noexcept;
+    _Must_inspect_result_
+    NTSTATUS Trace(_In_ Session* session, _In_z_ const char* url, _Out_ Response** response) noexcept;
+    _Must_inspect_result_
+    NTSTATUS TraceEx(_In_ Session* session, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const SendOptions* options, _Out_ Response** response) noexcept;
 
     _Must_inspect_result_
     NTSTATUS Get(_In_ Session* session, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _Out_ Response** response) noexcept;
@@ -92,6 +96,8 @@ namespace khttp
     NTSTATUS Head(_In_ Session* session, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _Out_ Response** response) noexcept;
     _Must_inspect_result_
     NTSTATUS Options(_In_ Session* session, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _Out_ Response** response) noexcept;
+    _Must_inspect_result_
+    NTSTATUS Trace(_In_ Session* session, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _Out_ Response** response) noexcept;
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
     _Must_inspect_result_
@@ -130,4 +136,8 @@ namespace khttp
     NTSTATUS Options(_In_ Request* request, _In_z_ const char* url, _Out_ Response** response) noexcept;
     _Must_inspect_result_
     NTSTATUS OptionsEx(_In_ Request* request, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const SendOptions* options, _Out_ Response** response) noexcept;
+    _Must_inspect_result_
+    NTSTATUS Trace(_In_ Request* request, _In_z_ const char* url, _Out_ Response** response) noexcept;
+    _Must_inspect_result_
+    NTSTATUS TraceEx(_In_ Request* request, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const SendOptions* options, _Out_ Response** response) noexcept;
 }

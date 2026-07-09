@@ -256,11 +256,26 @@ namespace http
                 return MakeText("PATCH");
             case HttpMethod::Connect:
                 return MakeText("CONNECT");
+            case HttpMethod::Trace:
+                return MakeText("TRACE");
             case HttpMethod::Custom:
                 return options.CustomMethod;
             default:
                 return {};
             }
+        }
+
+        bool IsTraceMethod(const HttpRequestBuildOptions& options) noexcept
+        {
+            const HttpText method = MethodText(options);
+            return TextEqualsIgnoreCase(method, MakeText("TRACE"));
+        }
+
+        bool IsTraceSensitiveHeader(HttpText name) noexcept
+        {
+            return TextEqualsIgnoreCase(name, MakeText("Authorization")) ||
+                TextEqualsIgnoreCase(name, MakeText("Proxy-Authorization")) ||
+                TextEqualsIgnoreCase(name, MakeText("Cookie"));
         }
 
         bool HeaderNameEquals(const HttpHeader& header, HttpText name) noexcept
@@ -290,6 +305,7 @@ namespace http
         {
             const bool hasBody = options.BodyLength != 0 || options.IncludeContentLength;
             const bool chunkedFraming = RequestEmitsChunkedFraming(options);
+            const bool traceMethod = IsTraceMethod(options);
 
             for (SIZE_T index = 0; index < options.ExtraHeaderCount; ++index) {
                 const HttpHeader& header = options.ExtraHeaders[index];
@@ -318,6 +334,10 @@ namespace http
                     HeaderNameEquals(header, MakeText("Content-Length")) ||
                     HeaderNameEquals(header, MakeText("Connection"))) {
                     return STATUS_INVALID_PARAMETER;
+                }
+
+                if (traceMethod && IsTraceSensitiveHeader(header.Name)) {
+                    return STATUS_NOT_SUPPORTED;
                 }
             }
 
@@ -439,6 +459,18 @@ namespace http
             }
 
             if (options.ExtraHeaderCount > 0 && options.ExtraHeaders == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            const bool traceMethod = IsTraceMethod(options);
+            if (traceMethod && !options.AllowTrace) {
+                return STATUS_NOT_SUPPORTED;
+            }
+
+            if (traceMethod &&
+                (options.BodyLength != 0 ||
+                    options.IncludeContentLength ||
+                    options.TrailerCount != 0)) {
                 return STATUS_INVALID_PARAMETER;
             }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <KernelHttp/http/HttpContentEncoding.h>
 #include <KernelHttp/http/HttpResponse.h>
 
 namespace KernelHttp
@@ -18,6 +19,7 @@ namespace http
         SIZE_T ScratchBodyCapacity = 0;
         bool MessageCompleteOnConnectionClose = false;
         bool ResponseBodyForbidden = false;
+        const HttpAcceptEncodingPolicy* AcceptEncodingPolicy = nullptr;
     };
 
     class HttpParser final

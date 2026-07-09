@@ -104,6 +104,43 @@ namespace engine
                 KhDeflateUnavailableAcceptEncoding);
     }
 
+    _Must_inspect_result_
+    NTSTATUS BuildEffectiveAcceptEncoding(
+        _In_ const KhHttpSendOptions& sendOptions,
+        _Inout_ KhWorkspace& workspace,
+        _Out_ http::HttpText* value) noexcept
+    {
+        if (value != nullptr) {
+            *value = {};
+        }
+        if (value == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (sendOptions.AcceptEncodingPreferenceCount == 0) {
+            *value = DefaultAcceptEncoding();
+            return STATUS_SUCCESS;
+        }
+        if (workspace.DecodedBody.Data == nullptr || workspace.DecodedBody.Length == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        return http::HttpContentEncoding::BuildAcceptEncodingHeader(
+            sendOptions.AcceptEncodingPreferences,
+            sendOptions.AcceptEncodingPreferenceCount,
+            reinterpret_cast<char*>(workspace.DecodedBody.Data),
+            workspace.DecodedBody.Length,
+            value);
+    }
+
+    http::HttpAcceptEncodingPolicy AcceptEncodingPolicyFromOptions(
+        _In_ const KhHttpSendOptions& sendOptions) noexcept
+    {
+        http::HttpAcceptEncodingPolicy policy = {};
+        policy.Preferences = sendOptions.AcceptEncodingPreferences;
+        policy.PreferenceCount = sendOptions.AcceptEncodingPreferenceCount;
+        return policy;
+    }
+
     _Ret_maybenull_
     KhWorkspace* ExchangeSessionWorkspace(_In_ KH_SESSION session, _In_opt_ KhWorkspace* workspace) noexcept
     {
@@ -472,6 +509,8 @@ namespace engine
             return http::HttpMethod::Options;
         case KhHttpMethod::Connect:
             return http::HttpMethod::Connect;
+        case KhHttpMethod::Trace:
+            return http::HttpMethod::Trace;
         case KhHttpMethod::Get:
         default:
             return http::HttpMethod::Get;
@@ -679,6 +718,13 @@ namespace engine
             method == KhHttpMethod::Options;
     }
 
+    bool IsTraceSensitiveHeader(const KhStoredHeader& header) noexcept
+    {
+        return HeaderNameEquals(header, "Authorization") ||
+            HeaderNameEquals(header, "Proxy-Authorization") ||
+            HeaderNameEquals(header, "Cookie");
+    }
+
     bool IsFreshConnectionRetryStatus(NTSTATUS status) noexcept
     {
         return IsConnectionCloseStatus(status) ||
@@ -759,8 +805,10 @@ namespace engine
     NTSTATUS BuildHttpRequestOptions(
         const KhRequest& request,
         bool addExpectContinue,
+        bool allowTrace,
         bool useProxyAbsoluteForm,
         const KhProxyOptions& proxy,
+        http::HttpText acceptEncoding,
         _Out_writes_bytes_(hostCapacity) char* host,
         SIZE_T hostCapacity,
         _Out_writes_bytes_(requestTargetCapacity) char* requestTarget,
@@ -804,6 +852,27 @@ namespace engine
         SIZE_T extraHeaderCount = 0;
         bool hasAcceptEncoding = false;
         const bool chunkedRequest = request.BodyMode == KhRequestBodyMode::Chunked;
+        const bool traceMethod = request.Method == KhHttpMethod::Trace;
+
+        if (traceMethod && !allowTrace) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        if (traceMethod &&
+            (request.HasBody ||
+                request.BodyLength != 0 ||
+                request.BodySourceCallback != nullptr ||
+                request.TrailerCount != 0)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (traceMethod &&
+            proxy.Enabled &&
+            proxy.AuthHeader != nullptr &&
+            proxy.AuthHeaderLength != 0) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
         for (SIZE_T index = 0; index < request.HeaderCount; ++index) {
             const KhStoredHeader& header = request.Headers[index];
             if (HeaderNameEquals(header, "Transfer-Encoding")) {
@@ -838,6 +907,10 @@ namespace engine
                 hasAcceptEncoding = true;
             }
 
+            if (traceMethod && IsTraceSensitiveHeader(header)) {
+                return STATUS_NOT_SUPPORTED;
+            }
+
             if (extraHeaderCount >= headerCapacity) {
                 return STATUS_BUFFER_TOO_SMALL;
             }
@@ -854,7 +927,7 @@ namespace engine
             }
 
             headers[extraHeaderCount].Name = http::MakeText("Accept-Encoding");
-            headers[extraHeaderCount].Value = DefaultAcceptEncoding();
+            headers[extraHeaderCount].Value = acceptEncoding;
             ++extraHeaderCount;
         }
 
@@ -908,6 +981,7 @@ namespace engine
             http::HttpRequestBodyMode::Chunked :
             http::HttpRequestBodyMode::ContentLength;
         options->AllowExpectContinue = emitExpectContinue;
+        options->AllowTrace = allowTrace;
 
         if (request.TrailerCount != 0) {
             for (SIZE_T index = 0; index < request.TrailerCount; ++index) {
@@ -1272,6 +1346,7 @@ namespace engine
         KhWorkspace& workspace,
         SIZE_T responseLength,
         bool messageCompleteOnConnectionClose,
+        _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* headers,
         SIZE_T headerCapacity,
@@ -1292,6 +1367,7 @@ namespace engine
         parseOptions.ScratchBody = reinterpret_cast<char*>(workspace.Request.Data);
         parseOptions.ScratchBodyCapacity = workspace.Request.Length;
         parseOptions.MessageCompleteOnConnectionClose = messageCompleteOnConnectionClose;
+        parseOptions.AcceptEncodingPolicy = acceptPolicy;
 
         SIZE_T parseLength = responseLength;
         for (;;) {
@@ -1459,6 +1535,7 @@ namespace engine
         _In_reads_bytes_(responseBodyLength) const char* responseBody,
         SIZE_T responseBodyLength,
         _Inout_ KhWorkspace& workspace,
+        _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
         _Out_ http::HttpContentDecodeResult* decoded) noexcept
     {
         if (decoded == nullptr) {
@@ -1480,7 +1557,8 @@ namespace engine
                 responseBody,
                 responseBodyLength,
                 decodeBuffers,
-                *decoded);
+                *decoded,
+                acceptPolicy);
             if (status != STATUS_BUFFER_TOO_SMALL) {
                 if (NT_SUCCESS(status) &&
                     workspace.MaxResponseBytes != 0 &&
@@ -1503,6 +1581,7 @@ namespace engine
     NTSTATUS SendHttp2ViaTransport(
         const KhRequest& request,
         KhWorkspace& workspace,
+        _In_ const KhHttpSendOptions& sendOptions,
         _Inout_ KhConnectionPool* connectionPool,
         _Inout_ KhPooledConnection& pooledConnection,
         SIZE_T maxHeaderBlockBytes,
@@ -1668,12 +1747,14 @@ namespace engine
         }
 
         http::HttpContentDecodeResult decoded = {};
+        http::HttpAcceptEncodingPolicy acceptPolicy = AcceptEncodingPolicyFromOptions(sendOptions);
         status = DecodeContentWithWorkspace(
             responseHeaders,
             responseHeaderCount,
             reinterpret_cast<const char*>(workspace.Response.Data),
             responseBodyLength,
             workspace,
+            &acceptPolicy,
             &decoded);
         if (!NT_SUCCESS(status)) {
             kprintf("High-level HTTP/2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
@@ -1809,6 +1890,8 @@ namespace engine
             return http::MakeText("OPTIONS");
         case KhHttpMethod::Connect:
             return http::MakeText("CONNECT");
+        case KhHttpMethod::Trace:
+            return http::MakeText("TRACE");
         case KhHttpMethod::Get:
         default:
             return http::MakeText("GET");
@@ -2106,6 +2189,7 @@ namespace engine
         const KhRequest& request,
         KhWorkspace& workspace,
         _Inout_ KhPooledConnection& pooledConnection,
+        _In_ const KhHttpSendOptions& sendOptions,
         SIZE_T maxHeaderBlockBytes,
         _In_reads_(requestHeaderCount) const http::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
@@ -2239,12 +2323,14 @@ namespace engine
         }
 
         http::HttpContentDecodeResult decoded = {};
+        http::HttpAcceptEncodingPolicy acceptPolicy = AcceptEncodingPolicyFromOptions(sendOptions);
         status = DecodeContentWithWorkspace(
             responseHeaders,
             responseHeaderCount,
             reinterpret_cast<const char*>(workspace.Response.Data),
             responseBodyLength,
             workspace,
+            &acceptPolicy,
             &decoded);
         if (!NT_SUCCESS(status)) {
             kprintf("High-level h2c Upgrade content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
@@ -2298,9 +2384,11 @@ namespace engine
     NTSTATUS BuildRequestBytes(
         const KhRequest& request,
         bool addExpectContinue,
+        bool allowTrace,
         bool useProxyAbsoluteForm,
         const KhProxyOptions& proxy,
         _Inout_ KhWorkspace& workspace,
+        _In_ const KhHttpSendOptions& sendOptions,
         _Out_writes_bytes_(hostHeaderCapacity) char* hostHeader,
         SIZE_T hostHeaderCapacity,
         _Out_writes_bytes_(requestTargetCapacity) char* requestTarget,
@@ -2326,12 +2414,20 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
+        http::HttpText acceptEncoding = {};
+        NTSTATUS status = BuildEffectiveAcceptEncoding(sendOptions, workspace, &acceptEncoding);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         http::HttpRequestBuildOptions buildOptions = {};
-        NTSTATUS status = BuildHttpRequestOptions(
+        status = BuildHttpRequestOptions(
             request,
             addExpectContinue,
+            allowTrace,
             useProxyAbsoluteForm,
             proxy,
+            acceptEncoding,
             hostHeader,
             hostHeaderCapacity,
             requestTarget,
@@ -2794,6 +2890,7 @@ namespace engine
         bool responseBodyForbidden,
         bool preserveInformationalResponses,
         ULONG readTimeoutMilliseconds,
+        _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -2823,6 +2920,7 @@ namespace engine
             parseOptions.ScratchBody = reinterpret_cast<char*>(workspace.Request.Data);
             parseOptions.ScratchBodyCapacity = workspace.Request.Length;
             parseOptions.ResponseBodyForbidden = responseBodyForbidden;
+            parseOptions.AcceptEncodingPolicy = acceptPolicy;
 
             NTSTATUS status = http::HttpParser::ParseResponse(
                 reinterpret_cast<const char*>(workspace.Response.Data),
@@ -3004,6 +3102,7 @@ namespace engine
         _Inout_ core::ITransport& transport,
         _Inout_ KhWorkspace& workspace,
         bool responseBodyForbidden,
+        _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -3017,6 +3116,7 @@ namespace engine
             responseBodyForbidden,
             false,
             WskOperationTimeoutMilliseconds,
+            acceptPolicy,
             parsed,
             responseHeaders,
             headerCapacity,
@@ -3033,6 +3133,7 @@ namespace engine
         SIZE_T requestLength,
         ULONG expectContinueTimeoutMilliseconds,
         bool responseBodyForbidden,
+        _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -3059,6 +3160,7 @@ namespace engine
                 responseBodyForbidden,
                 true,
                 expectContinueTimeoutMilliseconds,
+                acceptPolicy,
                 parsed,
                 responseHeaders,
                 headerCapacity,
@@ -3124,6 +3226,7 @@ namespace engine
                     transport,
                     workspace,
                     responseBodyForbidden,
+                    acceptPolicy,
                     parsed,
                     responseHeaders,
                     headerCapacity,
@@ -3153,6 +3256,7 @@ namespace engine
             transport,
             workspace,
             responseBodyForbidden,
+            acceptPolicy,
             parsed,
             responseHeaders,
             headerCapacity,
@@ -3170,6 +3274,7 @@ namespace engine
         SIZE_T requestLength,
         ULONG expectContinueTimeoutMilliseconds,
         bool responseBodyForbidden,
+        _In_opt_ const http::HttpAcceptEncodingPolicy* acceptPolicy,
         _Out_ http::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
@@ -3191,6 +3296,7 @@ namespace engine
                 responseBodyForbidden,
                 true,
                 expectContinueTimeoutMilliseconds,
+                acceptPolicy,
                 parsed,
                 responseHeaders,
                 headerCapacity,
@@ -3253,6 +3359,7 @@ namespace engine
                     transport,
                     workspace,
                     responseBodyForbidden,
+                    acceptPolicy,
                     parsed,
                     responseHeaders,
                     headerCapacity,
@@ -3279,6 +3386,7 @@ namespace engine
             transport,
             workspace,
             responseBodyForbidden,
+            acceptPolicy,
             parsed,
             responseHeaders,
             headerCapacity,
@@ -3628,6 +3736,7 @@ namespace engine
             *connection.RawTransport,
             workspace,
             true,
+            nullptr,
             &proxyResponse,
             responseHeaders,
             headerCapacity,
@@ -4258,10 +4367,12 @@ namespace engine
         RtlCopyMemory(workspace.Response.Data, testResponse.RawResponse, testResponse.RawResponseLength);
         workspace.ResponseLength = testResponse.RawResponseLength;
 
+        http::HttpAcceptEncodingPolicy acceptPolicy = AcceptEncodingPolicyFromOptions(sendOptions);
         status = ParseResponseBytes(
             workspace,
             workspace.ResponseLength,
             !testResponse.ConnectionReusable,
+            &acceptPolicy,
             parsed,
             responseHeaders,
             headerCapacity,
@@ -4373,6 +4484,7 @@ namespace engine
                     request,
                     workspace,
                     *pooledConnection,
+                    sendOptions,
                     session->Options.Http2MaxHeaderBlockBytes,
                     requestHeaders,
                     requestHeaderCount,
@@ -4385,6 +4497,7 @@ namespace engine
                 status = SendHttp2ViaTransport(
                     request,
                     workspace,
+                    sendOptions,
                     &session->ConnectionPool,
                     *pooledConnection,
                     session->Options.Http2MaxHeaderBlockBytes,
@@ -4437,6 +4550,7 @@ namespace engine
             status = SendHttp2ViaTransport(
                 request,
                 workspace,
+                sendOptions,
                 &session->ConnectionPool,
                 *pooledConnection,
                 session->Options.Http2MaxHeaderBlockBytes,
@@ -4460,6 +4574,7 @@ namespace engine
             return STATUS_INVALID_DEVICE_STATE;
         }
 
+        http::HttpAcceptEncodingPolicy acceptPolicy = AcceptEncodingPolicyFromOptions(sendOptions);
         if (useExpectContinue) {
             if (request.BodySourceCallback != nullptr) {
                 status = SendHttp1RequestSourceWithExpect(
@@ -4470,6 +4585,7 @@ namespace engine
                     builtRequestLength,
                     EffectiveExpectContinueTimeoutMilliseconds(sendOptions),
                     request.Method == KhHttpMethod::Head,
+                    &acceptPolicy,
                     parsed,
                     responseHeaders,
                     headerCapacity,
@@ -4485,6 +4601,7 @@ namespace engine
                     builtRequestLength,
                     EffectiveExpectContinueTimeoutMilliseconds(sendOptions),
                     request.Method == KhHttpMethod::Head,
+                    &acceptPolicy,
                     parsed,
                     responseHeaders,
                     headerCapacity,
@@ -4515,6 +4632,7 @@ namespace engine
                 *pooledConnection->Transport,
                 workspace,
                 request.Method == KhHttpMethod::Head,
+                &acceptPolicy,
                 parsed,
                 responseHeaders,
                 headerCapacity,
@@ -5280,13 +5398,16 @@ namespace engine
         SIZE_T builtRequestLength = 0;
         SIZE_T requestHeaderCount = 0;
         const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
+        const bool allowTrace = (sendOptions.Flags & KhHttpSendFlagAllowTrace) != 0;
         const bool useProxyAbsoluteForm = session->Options.Proxy.Enabled && !IsHttpsRequest(request);
         status = BuildRequestBytes(
             request,
             useExpectContinue,
+            allowTrace,
             useProxyAbsoluteForm,
             session->Options.Proxy,
             workspace,
+            sendOptions,
             headerScratch.HostHeader,
             headerScratch.HostHeaderCapacity,
             headerScratch.RequestTarget,
@@ -5372,9 +5493,11 @@ namespace engine
                     retryStatus = BuildRequestBytes(
                         request,
                         useExpectContinue,
+                        allowTrace,
                         useProxyAbsoluteForm,
                         session->Options.Proxy,
                         workspace,
+                        sendOptions,
                         headerScratch.HostHeader,
                         headerScratch.HostHeaderCapacity,
                         headerScratch.RequestTarget,
@@ -5437,6 +5560,7 @@ namespace engine
         KH_SESSION Session = nullptr;
         KH_REQUEST Request = nullptr;
         KhHttpSendOptions Options = {};
+        http::HttpAcceptEncodingPreference AcceptEncodingPreferences[http::HttpMaxAcceptEncodingPreferences] = {};
         KH_RESPONSE Response = nullptr;
         volatile LONG SessionOperationEnded = 0;
     };
@@ -5775,6 +5899,13 @@ namespace engine
 
         context->Session = session;
         context->Options = effectiveOptions;
+        if (effectiveOptions.AcceptEncodingPreferenceCount != 0) {
+            RtlCopyMemory(
+                context->AcceptEncodingPreferences,
+                effectiveOptions.AcceptEncodingPreferences,
+                sizeof(context->AcceptEncodingPreferences[0]) * effectiveOptions.AcceptEncodingPreferenceCount);
+            context->Options.AcceptEncodingPreferences = context->AcceptEncodingPreferences;
+        }
         context->Response = nullptr;
         context->SessionOperationEnded = 0;
 

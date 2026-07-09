@@ -54,6 +54,59 @@ namespace
         }
         return SendOptionsCreate(&request->BuilderOptions);
     }
+
+    NTSTATUS AppendGeneratedByte(
+        char* destination,
+        SIZE_T capacity,
+        SIZE_T* offset,
+        char value) noexcept
+    {
+        if (destination == nullptr || offset == nullptr || *offset >= capacity) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        destination[*offset] = value;
+        ++(*offset);
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS AppendGeneratedLiteral(
+        char* destination,
+        SIZE_T capacity,
+        SIZE_T* offset,
+        const char* literal) noexcept
+    {
+        if (literal == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        for (SIZE_T index = 0; literal[index] != '\0'; ++index) {
+            NTSTATUS status = AppendGeneratedByte(destination, capacity, offset, literal[index]);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS AppendGeneratedUnsigned(
+        char* destination,
+        SIZE_T capacity,
+        SIZE_T* offset,
+        ULONGLONG value) noexcept
+    {
+        ULONGLONG divisor = 1;
+        while ((value / divisor) >= 10) {
+            divisor *= 10;
+        }
+        do {
+            const char digit = static_cast<char>('0' + ((value / divisor) % 10));
+            NTSTATUS status = AppendGeneratedByte(destination, capacity, offset, digit);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            divisor /= 10;
+        } while (divisor != 0);
+        return STATUS_SUCCESS;
+    }
 }
 #endif
 
@@ -153,6 +206,7 @@ NTSTATUS RequestSetMethod(Request* request, Method method) noexcept
     case Method::Head:
     case Method::Options:
     case Method::Connect:
+    case Method::Trace:
         request->BuilderMethod = method;
         return STATUS_SUCCESS;
     default:
@@ -204,6 +258,78 @@ NTSTATUS RequestSetHeader(Request* request, const char* name, SIZE_T nameLength,
     header.Value = valueCopy;
     header.ValueLength = valueLength;
     return STATUS_SUCCESS;
+}
+
+NTSTATUS RequestSetRangeBytes(Request* request, ULONGLONG firstByte, ULONGLONG lastByte, bool hasLastByte) noexcept
+{
+    if (!IsValidRequestBuilder(request) || (hasLastByte && lastByte < firstByte)) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    KernelHttp::HeapArray<char> value(64);
+    if (!value.IsValid()) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    SIZE_T offset = 0;
+    NTSTATUS status = AppendGeneratedLiteral(value.Get(), value.Count(), &offset, "bytes=");
+    if (NT_SUCCESS(status)) {
+        status = AppendGeneratedUnsigned(value.Get(), value.Count(), &offset, firstByte);
+    }
+    if (NT_SUCCESS(status)) {
+        status = AppendGeneratedByte(value.Get(), value.Count(), &offset, '-');
+    }
+    if (NT_SUCCESS(status) && hasLastByte) {
+        status = AppendGeneratedUnsigned(value.Get(), value.Count(), &offset, lastByte);
+    }
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    return RequestSetHeader(request, "Range", 5, value.Get(), offset);
+}
+
+NTSTATUS RequestSetRangeSuffix(Request* request, ULONGLONG suffixLength) noexcept
+{
+    if (!IsValidRequestBuilder(request) || suffixLength == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    KernelHttp::HeapArray<char> value(64);
+    if (!value.IsValid()) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    SIZE_T offset = 0;
+    NTSTATUS status = AppendGeneratedLiteral(value.Get(), value.Count(), &offset, "bytes=-");
+    if (NT_SUCCESS(status)) {
+        status = AppendGeneratedUnsigned(value.Get(), value.Count(), &offset, suffixLength);
+    }
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    return RequestSetHeader(request, "Range", 5, value.Get(), offset);
+}
+
+NTSTATUS RequestSetIfMatch(Request* request, const char* value, SIZE_T valueLength) noexcept
+{
+    return RequestSetHeader(request, "If-Match", 8, value, valueLength);
+}
+
+NTSTATUS RequestSetIfNoneMatch(Request* request, const char* value, SIZE_T valueLength) noexcept
+{
+    return RequestSetHeader(request, "If-None-Match", 13, value, valueLength);
+}
+
+NTSTATUS RequestSetIfModifiedSince(Request* request, const char* value, SIZE_T valueLength) noexcept
+{
+    return RequestSetHeader(request, "If-Modified-Since", 17, value, valueLength);
+}
+
+NTSTATUS RequestSetIfUnmodifiedSince(Request* request, const char* value, SIZE_T valueLength) noexcept
+{
+    return RequestSetHeader(request, "If-Unmodified-Since", 19, value, valueLength);
 }
 
 NTSTATUS RequestSetBody(Request* request, const UCHAR* data, SIZE_T dataLength) noexcept

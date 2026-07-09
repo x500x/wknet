@@ -40,7 +40,7 @@ KernelHttp separates implemented behavior, default-off capabilities, security re
 
 | Protocol | Current usable behavior |
 |----------|-------------------------|
-| HTTP/1.1 | `Content-Length`, library-generated chunked, true streaming request bodies (`BodyCreateStream` / `KhHttpRequestSetBodySource`), request trailers on the chunked path, `Expect: 100-continue`, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer validation and read-only API exposure, read-only `206` / `Content-Range` parsing, RFC 3986 relative redirects, CONNECT request construction, HTTPS CONNECT proxy, plaintext HTTP proxy absolute-form |
+| HTTP/1.1 | `Content-Length`, library-generated chunked, true streaming request bodies (`BodyCreateStream` / `KhHttpRequestSetBodySource`), request trailers on the chunked path, `Expect: 100-continue`, explicit opt-in TRACE, typed Range/conditional request helpers, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer validation and read-only API exposure, read-only `206` / `Content-Range` parsing, RFC 3986 relative redirects, CONNECT request construction, HTTPS CONNECT proxy, plaintext HTTP proxy absolute-form |
 | HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS including `ENABLE_CONNECT_PROTOCOL`, HEADERS/CONTINUATION, DATA body sources, request/response trailers, explicit `SendPing`, GOAWAY/RST retry semantics, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits, active-stream table, two-stage `BeginRequest` / `ReceiveResponse(streamId)`, RFC 8441 extended CONNECT DATA tunnel, high-level pooled multi-stream reuse |
 | WebSocket | ws/wss handshake, constant-time accept check, caller-supplied opening handshake headers, text/binary send, empty messages, fragment send (`kws::SendContinuation`), receive-fragment callback (`ReceiveOptions.DeliverFragments` / `OnMessage`), control-frame validation, auto-Pong, public Ping/Pong/CloseEx, selected subprotocol query, cross-fragment UTF-8 validation, complete-message aggregation by default, explicit opt-in RFC 8441 WebSocket over HTTP/2 |
 | TLS and certificates | TLS 1.2/1.3, standard TLS 1.3 cipher suites, TLS 1.2 ECDHE/DHE plus compatibility-profile RSA key exchange, AES-GCM/AES-CBC/ChaCha20-Poly1305, X25519/X448/NIST P curves/FFDHE, RSA-PSS/RSA-PKCS1/ECDSA/Ed25519/Ed448 signature schemes, SNI, ALPN, PSK/session ticket, 0-RTT, reactive KeyUpdate, record padding, client certificates (mTLS), OCSP stapling parse, certificate chain reordering and validation, Name Constraints, certificatePolicies, IDNA, OCSP/CRL revocation cache, SPKI pin |
@@ -52,6 +52,7 @@ These capabilities are implemented but not enabled by default; they are not miss
 | Capability | How it is enabled |
 |------------|-------------------|
 | `Expect: 100-continue` | `SendFlagExpectContinue` |
+| TRACE method | `SendFlagAllowTrace`; bodies, trailers, and sensitive headers remain rejected |
 | h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode`; plaintext HTTP/2 is off by default |
 | WebSocket over HTTP/2 | `AllowWebSocketOverHttp2=true`; default remains HTTP/1.1 Upgrade |
 | TLS 1.2 RSA key exchange / CBC / SHA-1 signatures | `CompatibilityExplicit` policy plus the matching compatibility switches |
@@ -82,9 +83,9 @@ These capabilities are not provided today; some are explicit non-goals, while ot
 | Capability | Current conclusion |
 |------------|--------------------|
 | HTTP inbound request parser / server role | Non-goal; this project is a client protocol stack |
-| TRACE / HTTP pipelining | Non-goal |
+| HTTP pipelining | Non-goal |
 | RFC 9111 cache | No kernel cache API is provided |
-| `Range` / conditional request semantics | Pass-through headers only; no semantic merge or validation; response `Content-Range` is read-only |
+| Full `Range` / conditional cache semantics | Typed helpers and read-only response `Content-Range` parsing are provided; no range merge, cache merge, or RFC9111 cache |
 | Full `Accept-Encoding` qvalue/content negotiation | Not provided; default header only describes the implemented decoder subset and callers may override it |
 | HTTP/2 priority as public scheduling | Not exposed as a public capability |
 | HTTP/2 background automatic PING keepalive | Not provided; callers can use explicit `SendPing` |

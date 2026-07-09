@@ -51,6 +51,7 @@ namespace
         case Method::Head:
         case Method::Options:
         case Method::Connect:
+        case Method::Trace:
             return true;
         default:
             return false;
@@ -99,6 +100,8 @@ namespace
         dst.BodyCallback = reinterpret_cast<::KernelHttp::engine::KhBodyCallback>(src.OnBody);
         dst.CallbackContext = src.CallbackContext;
         dst.Http2CleartextMode = detail::ToApiHttp2CleartextMode(src.Http2CleartextMode);
+        dst.AcceptEncodingPreferences = src.AcceptEncodingPreferences;
+        dst.AcceptEncodingPreferenceCount = src.AcceptEncodingPreferenceCount;
     }
 
     NTSTATUS ApplyOptionsToRequest(
@@ -447,6 +450,8 @@ NTSTATUS Head(Session* session, const char* url, Response** response) noexcept {
 NTSTATUS HeadEx(Session* session, const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(session, Method::Head, url, urlLength, headers, nullptr, options, response); }
 NTSTATUS Options(Session* session, const char* url, Response** response) noexcept { return OptionsEx(session, url, StringLength(url), nullptr, nullptr, response); }
 NTSTATUS OptionsEx(Session* session, const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(session, Method::Options, url, urlLength, headers, nullptr, options, response); }
+NTSTATUS Trace(Session* session, const char* url, Response** response) noexcept { return TraceEx(session, url, StringLength(url), nullptr, nullptr, response); }
+NTSTATUS TraceEx(Session* session, const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(session, Method::Trace, url, urlLength, headers, nullptr, options, response); }
 NTSTATUS Get(Session* session, const char* url, SIZE_T urlLength, Response** response) noexcept { return GetEx(session, url, urlLength, nullptr, nullptr, response); }
 NTSTATUS Post(Session* session, const char* url, SIZE_T urlLength, const UCHAR* data, SIZE_T dataLength, Response** response) noexcept
 {
@@ -484,6 +489,7 @@ NTSTATUS Patch(Session* session, const char* url, SIZE_T urlLength, const UCHAR*
 NTSTATUS Delete(Session* session, const char* url, SIZE_T urlLength, Response** response) noexcept { return DeleteEx(session, url, urlLength, nullptr, nullptr, response); }
 NTSTATUS Head(Session* session, const char* url, SIZE_T urlLength, Response** response) noexcept { return HeadEx(session, url, urlLength, nullptr, nullptr, response); }
 NTSTATUS Options(Session* session, const char* url, SIZE_T urlLength, Response** response) noexcept { return OptionsEx(session, url, urlLength, nullptr, nullptr, response); }
+NTSTATUS Trace(Session* session, const char* url, SIZE_T urlLength, Response** response) noexcept { return TraceEx(session, url, urlLength, nullptr, nullptr, response); }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 NTSTATUS Send(Session* session, Request* request, Response** response) noexcept
@@ -529,6 +535,8 @@ NTSTATUS SendEx(Session* session, Request* request, const SendOptions* options, 
         }
         mergedOptions.ConnectionPolicy = request->BuilderOptions->ConnectionPolicy;
         mergedOptions.Family = request->BuilderOptions->Family;
+        mergedOptions.AcceptEncodingPreferences = request->BuilderOptions->AcceptEncodingPreferences;
+        mergedOptions.AcceptEncodingPreferenceCount = request->BuilderOptions->AcceptEncodingPreferenceCount;
         effectiveOptions = &mergedOptions;
     }
     else if (options != nullptr) {
@@ -560,4 +568,6 @@ NTSTATUS Head(Request* request, const char* url, Response** response) noexcept {
 NTSTATUS HeadEx(Request* request, const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(request, Method::Head, url, urlLength, headers, nullptr, options, response); }
 NTSTATUS Options(Request* request, const char* url, Response** response) noexcept { return OptionsEx(request, url, StringLength(url), nullptr, nullptr, response); }
 NTSTATUS OptionsEx(Request* request, const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(request, Method::Options, url, urlLength, headers, nullptr, options, response); }
+NTSTATUS Trace(Request* request, const char* url, Response** response) noexcept { return TraceEx(request, url, StringLength(url), nullptr, nullptr, response); }
+NTSTATUS TraceEx(Request* request, const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(request, Method::Trace, url, urlLength, headers, nullptr, options, response); }
 }

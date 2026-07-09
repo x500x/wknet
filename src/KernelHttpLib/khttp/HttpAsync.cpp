@@ -104,6 +104,8 @@ NTSTATUS AsyncHead(Session* session, const char* url, AsyncOp** operation) noexc
 NTSTATUS AsyncHeadEx(Session* session, const char* url, SIZE_T urlLength, const Headers* headers, const AsyncOptions* options, AsyncOp** operation) noexcept { return AsyncSendEx(session, Method::Head, url, urlLength, headers, nullptr, options, operation); }
 NTSTATUS AsyncOptionsRequest(Session* session, const char* url, AsyncOp** operation) noexcept { return AsyncOptionsRequestEx(session, url, StringLength(url), nullptr, nullptr, operation); }
 NTSTATUS AsyncOptionsRequestEx(Session* session, const char* url, SIZE_T urlLength, const Headers* headers, const AsyncOptions* options, AsyncOp** operation) noexcept { return AsyncSendEx(session, Method::Options, url, urlLength, headers, nullptr, options, operation); }
+NTSTATUS AsyncTrace(Session* session, const char* url, AsyncOp** operation) noexcept { return AsyncTraceEx(session, url, StringLength(url), nullptr, nullptr, operation); }
+NTSTATUS AsyncTraceEx(Session* session, const char* url, SIZE_T urlLength, const Headers* headers, const AsyncOptions* options, AsyncOp** operation) noexcept { return AsyncSendEx(session, Method::Trace, url, urlLength, headers, nullptr, options, operation); }
 
 NTSTATUS AsyncGet(Request* request, const char* url, AsyncOp** operation) noexcept { return AsyncGetEx(request, url, StringLength(url), nullptr, nullptr, operation); }
 NTSTATUS AsyncGetEx(Request* request, const char* url, SIZE_T urlLength, const Headers* headers, const AsyncOptions* options, AsyncOp** operation) noexcept { return AsyncSendEx(request, Method::Get, url, urlLength, headers, nullptr, options, operation); }
@@ -119,6 +121,8 @@ NTSTATUS AsyncHead(Request* request, const char* url, AsyncOp** operation) noexc
 NTSTATUS AsyncHeadEx(Request* request, const char* url, SIZE_T urlLength, const Headers* headers, const AsyncOptions* options, AsyncOp** operation) noexcept { return AsyncSendEx(request, Method::Head, url, urlLength, headers, nullptr, options, operation); }
 NTSTATUS AsyncOptionsRequest(Request* request, const char* url, AsyncOp** operation) noexcept { return AsyncOptionsRequestEx(request, url, StringLength(url), nullptr, nullptr, operation); }
 NTSTATUS AsyncOptionsRequestEx(Request* request, const char* url, SIZE_T urlLength, const Headers* headers, const AsyncOptions* options, AsyncOp** operation) noexcept { return AsyncSendEx(request, Method::Options, url, urlLength, headers, nullptr, options, operation); }
+NTSTATUS AsyncTrace(Request* request, const char* url, AsyncOp** operation) noexcept { return AsyncTraceEx(request, url, StringLength(url), nullptr, nullptr, operation); }
+NTSTATUS AsyncTraceEx(Request* request, const char* url, SIZE_T urlLength, const Headers* headers, const AsyncOptions* options, AsyncOp** operation) noexcept { return AsyncSendEx(request, Method::Trace, url, urlLength, headers, nullptr, options, operation); }
 
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
 NTSTATUS GetAsync(Session* session, const char* url, SIZE_T urlLength, AsyncOp** operation) noexcept
@@ -174,6 +178,8 @@ NTSTATUS SendAsyncEx(Session* session, Request* request, const SendOptions* opti
             }
             asyncOptions->Send.ConnectionPolicy = request->BuilderOptions->ConnectionPolicy;
             asyncOptions->Send.Family = request->BuilderOptions->Family;
+            asyncOptions->Send.AcceptEncodingPreferences = request->BuilderOptions->AcceptEncodingPreferences;
+            asyncOptions->Send.AcceptEncodingPreferenceCount = request->BuilderOptions->AcceptEncodingPreferenceCount;
         }
         const SendOptions* completionOptions = options != nullptr ? options : request->BuilderOptions;
         asyncOptions->OnComplete = completionOptions->OnComplete;

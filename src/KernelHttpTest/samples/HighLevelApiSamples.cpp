@@ -298,6 +298,7 @@ namespace
         case khttp::Method::Head: return "HEAD";
         case khttp::Method::Options: return "OPTIONS";
         case khttp::Method::Connect: return "CONNECT";
+        case khttp::Method::Trace: return "TRACE";
         default: return "UNKNOWN";
         }
     }

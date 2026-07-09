@@ -877,7 +877,8 @@ namespace
         constexpr ULONG knownFlags =
             KhHttpSendFlagAggregateWithCallbacks |
             KhHttpSendFlagDisableAutoRedirect |
-            KhHttpSendFlagExpectContinue;
+            KhHttpSendFlagExpectContinue |
+            KhHttpSendFlagAllowTrace;
 
         if (!IsValidMaxResponseBytes(options.MaxResponseBytes)) {
             return false;
@@ -892,6 +893,12 @@ namespace
         }
 
         if (!IsValidHttp2CleartextMode(options.Http2CleartextMode)) {
+            return false;
+        }
+
+        if (!NT_SUCCESS(http::HttpContentEncoding::ValidateAcceptEncodingPreferences(
+            options.AcceptEncodingPreferences,
+            options.AcceptEncodingPreferenceCount))) {
             return false;
         }
 
@@ -2521,6 +2528,7 @@ namespace
         case KhHttpMethod::Head:
         case KhHttpMethod::Options:
         case KhHttpMethod::Connect:
+        case KhHttpMethod::Trace:
             request->Method = method;
             return STATUS_SUCCESS;
         default:
@@ -2552,6 +2560,181 @@ namespace
         }
 
         return AddStoredHeader(*request, name, nameLength, value, valueLength);
+    }
+
+    SIZE_T HeaderLiteralLength(const char* text) noexcept
+    {
+        SIZE_T length = 0;
+        if (text == nullptr) {
+            return 0;
+        }
+        while (text[length] != '\0') {
+            ++length;
+        }
+        return length;
+    }
+
+    NTSTATUS AppendGeneratedByte(
+        _Out_writes_(capacity) char* destination,
+        SIZE_T capacity,
+        _Inout_ SIZE_T* offset,
+        char value) noexcept
+    {
+        if (destination == nullptr || offset == nullptr || *offset >= capacity) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        destination[*offset] = value;
+        ++(*offset);
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS AppendGeneratedLiteral(
+        _Out_writes_(capacity) char* destination,
+        SIZE_T capacity,
+        _Inout_ SIZE_T* offset,
+        const char* literal) noexcept
+    {
+        if (literal == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        for (SIZE_T index = 0; literal[index] != '\0'; ++index) {
+            NTSTATUS status = AppendGeneratedByte(destination, capacity, offset, literal[index]);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS AppendGeneratedUnsigned(
+        _Out_writes_(capacity) char* destination,
+        SIZE_T capacity,
+        _Inout_ SIZE_T* offset,
+        ULONGLONG value) noexcept
+    {
+        ULONGLONG divisor = 1;
+        while ((value / divisor) >= 10) {
+            divisor *= 10;
+        }
+
+        do {
+            const char digit = static_cast<char>('0' + ((value / divisor) % 10));
+            NTSTATUS status = AppendGeneratedByte(destination, capacity, offset, digit);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            divisor /= 10;
+        } while (divisor != 0);
+
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS StoreGeneratedHeader(
+        KH_REQUEST request,
+        const char* name,
+        const char* value,
+        SIZE_T valueLength) noexcept
+    {
+        return KhHttpRequestSetHeader(
+            request,
+            name,
+            HeaderLiteralLength(name),
+            value,
+            valueLength);
+    }
+
+    NTSTATUS KhHttpRequestSetRangeBytes(
+        KH_REQUEST request,
+        ULONGLONG firstByte,
+        ULONGLONG lastByte,
+        bool hasLastByte) noexcept
+    {
+        NTSTATUS status = CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (!IsRequestHandle(request) || (hasLastByte && lastByte < firstByte)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        HeapArray<char> value(64);
+        if (!value.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        SIZE_T offset = 0;
+        status = AppendGeneratedLiteral(value.Get(), value.Count(), &offset, "bytes=");
+        if (NT_SUCCESS(status)) {
+            status = AppendGeneratedUnsigned(value.Get(), value.Count(), &offset, firstByte);
+        }
+        if (NT_SUCCESS(status)) {
+            status = AppendGeneratedByte(value.Get(), value.Count(), &offset, '-');
+        }
+        if (NT_SUCCESS(status) && hasLastByte) {
+            status = AppendGeneratedUnsigned(value.Get(), value.Count(), &offset, lastByte);
+        }
+        if (NT_SUCCESS(status) && offset < value.Count()) {
+            value[offset] = '\0';
+        }
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        return StoreGeneratedHeader(request, "Range", value.Get(), offset);
+    }
+
+    NTSTATUS KhHttpRequestSetRangeSuffix(KH_REQUEST request, ULONGLONG suffixLength) noexcept
+    {
+        NTSTATUS status = CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (!IsRequestHandle(request) || suffixLength == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        HeapArray<char> value(64);
+        if (!value.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        SIZE_T offset = 0;
+        status = AppendGeneratedLiteral(value.Get(), value.Count(), &offset, "bytes=-");
+        if (NT_SUCCESS(status)) {
+            status = AppendGeneratedUnsigned(value.Get(), value.Count(), &offset, suffixLength);
+        }
+        if (NT_SUCCESS(status) && offset < value.Count()) {
+            value[offset] = '\0';
+        }
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        return StoreGeneratedHeader(request, "Range", value.Get(), offset);
+    }
+
+    NTSTATUS KhHttpRequestSetIfMatch(KH_REQUEST request, const char* value, SIZE_T valueLength) noexcept
+    {
+        return StoreGeneratedHeader(request, "If-Match", value, valueLength);
+    }
+
+    NTSTATUS KhHttpRequestSetIfNoneMatch(KH_REQUEST request, const char* value, SIZE_T valueLength) noexcept
+    {
+        return StoreGeneratedHeader(request, "If-None-Match", value, valueLength);
+    }
+
+    NTSTATUS KhHttpRequestSetIfModifiedSince(KH_REQUEST request, const char* value, SIZE_T valueLength) noexcept
+    {
+        return StoreGeneratedHeader(request, "If-Modified-Since", value, valueLength);
+    }
+
+    NTSTATUS KhHttpRequestSetIfUnmodifiedSince(KH_REQUEST request, const char* value, SIZE_T valueLength) noexcept
+    {
+        return StoreGeneratedHeader(request, "If-Unmodified-Since", value, valueLength);
     }
 
     NTSTATUS KhHttpRequestSetBody(KH_REQUEST request, const UCHAR* body, SIZE_T bodyLength) noexcept
