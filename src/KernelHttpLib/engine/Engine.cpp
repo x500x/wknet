@@ -27,6 +27,12 @@ namespace KernelHttp
 namespace engine
 {
     constexpr ULONG KhMaxConnectionPoolCapacity = 1024;
+    static_assert(
+        KhDefaultMaxTls12Renegotiations == tls::Tls12DefaultMaxRenegotiations,
+        "engine TLS 1.2 renegotiation default must match tls");
+    static_assert(
+        KhHardMaxTls12Renegotiations == tls::Tls12HardMaxRenegotiations,
+        "engine TLS 1.2 renegotiation hard limit must match tls");
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
     volatile LONG g_activeHandleTableLock = 0;
 #else
@@ -520,6 +526,10 @@ namespace
         }
 
         if (options.HandshakeReceiveTimeoutMilliseconds == 0) {
+            return false;
+        }
+
+        if (options.MaxTls12Renegotiations > KhHardMaxTls12Renegotiations) {
             return false;
         }
 

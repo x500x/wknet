@@ -25,6 +25,14 @@ namespace crypto
             UCHAR CcmCounter[AesBlockLength] = {};
             UCHAR CcmStream[AesBlockLength] = {};
             UCHAR CcmMac[AeadMaxTagLength] = {};
+            UCHAR GcmHashSubkey[AesBlockLength] = {};
+            UCHAR GcmState[AesBlockLength] = {};
+            UCHAR GcmBlock[AesBlockLength] = {};
+            UCHAR GcmCounter[AesBlockLength] = {};
+            UCHAR GcmJ0[AesBlockLength] = {};
+            UCHAR GcmStream[AesBlockLength] = {};
+            UCHAR GcmProduct[AesBlockLength] = {};
+            UCHAR GcmExpectedTag[AeadMaxTagLength] = {};
             ULONG ChaChaState[16] = {};
             ULONG ChaChaWorking[16] = {};
             UCHAR ChaChaBlock[ChaChaBlockLength] = {};
@@ -163,6 +171,154 @@ namespace crypto
                 data[index] = static_cast<UCHAR>((value >> shift) & 0xff);
             }
         }
+
+        void Aes128EncryptBlock(
+            _In_ const Aes128Context& context,
+            _Inout_ AeadScratch& scratch,
+            _In_reads_bytes_(AesBlockLength) const UCHAR* input,
+            _Out_writes_bytes_(AesBlockLength) UCHAR* output) noexcept;
+
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        void IncrementGcmCounter(_Inout_updates_(AesBlockLength) UCHAR* counter) noexcept
+        {
+            for (SIZE_T index = AesBlockLength; index > AesBlockLength - sizeof(ULONG); --index) {
+                ++counter[index - 1];
+                if (counter[index - 1] != 0) {
+                    break;
+                }
+            }
+        }
+
+        void ShiftRightBlock(_Inout_updates_(AesBlockLength) UCHAR* block) noexcept
+        {
+            UCHAR carry = 0;
+            for (SIZE_T index = 0; index < AesBlockLength; ++index) {
+                const UCHAR nextCarry = static_cast<UCHAR>(block[index] & 1U);
+                block[index] = static_cast<UCHAR>((block[index] >> 1) | (carry << 7));
+                carry = nextCarry;
+            }
+        }
+
+        void GcmMultiply(
+            _In_reads_bytes_(AesBlockLength) const UCHAR* left,
+            _In_reads_bytes_(AesBlockLength) const UCHAR* hashSubkey,
+            _Out_writes_bytes_(AesBlockLength) UCHAR* product,
+            _Out_writes_bytes_(AesBlockLength) UCHAR* scratch) noexcept
+        {
+            RtlZeroMemory(product, AesBlockLength);
+            RtlCopyMemory(scratch, hashSubkey, AesBlockLength);
+
+            for (SIZE_T bit = 0; bit < AesBlockLength * 8; ++bit) {
+                const SIZE_T byteIndex = bit / 8;
+                const UCHAR mask = static_cast<UCHAR>(0x80U >> (bit % 8));
+                if ((left[byteIndex] & mask) != 0) {
+                    for (SIZE_T index = 0; index < AesBlockLength; ++index) {
+                        product[index] = static_cast<UCHAR>(product[index] ^ scratch[index]);
+                    }
+                }
+
+                const bool carry = (scratch[AesBlockLength - 1] & 1U) != 0;
+                ShiftRightBlock(scratch);
+                if (carry) {
+                    scratch[0] = static_cast<UCHAR>(scratch[0] ^ 0xe1U);
+                }
+            }
+        }
+
+        void GcmHashBlock(
+            _In_reads_bytes_(AesBlockLength) const UCHAR* hashSubkey,
+            _In_reads_bytes_(AesBlockLength) const UCHAR* block,
+            _Inout_ AeadScratch& scratch) noexcept
+        {
+            for (SIZE_T index = 0; index < AesBlockLength; ++index) {
+                scratch.GcmBlock[index] = static_cast<UCHAR>(scratch.GcmState[index] ^ block[index]);
+            }
+
+            GcmMultiply(scratch.GcmBlock, hashSubkey, scratch.GcmState, scratch.GcmProduct);
+            RtlSecureZeroMemory(scratch.GcmBlock, sizeof(scratch.GcmBlock));
+            RtlSecureZeroMemory(scratch.GcmProduct, sizeof(scratch.GcmProduct));
+        }
+
+        void GcmHashBytes(
+            _In_reads_bytes_(AesBlockLength) const UCHAR* hashSubkey,
+            _In_reads_bytes_opt_(dataLength) const UCHAR* data,
+            SIZE_T dataLength,
+            _Inout_ AeadScratch& scratch) noexcept
+        {
+            SIZE_T offset = 0;
+            while (offset < dataLength) {
+                RtlZeroMemory(scratch.GcmBlock, sizeof(scratch.GcmBlock));
+                const SIZE_T chunk = dataLength - offset < AesBlockLength ? dataLength - offset : AesBlockLength;
+                RtlCopyMemory(scratch.GcmBlock, data + offset, chunk);
+                GcmHashBlock(hashSubkey, scratch.GcmBlock, scratch);
+                offset += chunk;
+            }
+        }
+
+        NTSTATUS GcmComputeTag(
+            _In_ const Aes128Context& context,
+            _In_reads_bytes_(AesBlockLength) const UCHAR* hashSubkey,
+            _In_reads_bytes_(AesBlockLength) const UCHAR* j0,
+            _In_ const AeadParameters& parameters,
+            _In_reads_bytes_opt_(ciphertextLength) const UCHAR* ciphertext,
+            SIZE_T ciphertextLength,
+            _Out_writes_bytes_(tagLength) UCHAR* tag,
+            SIZE_T tagLength,
+            _Inout_ AeadScratch& scratch) noexcept
+        {
+            if (tag == nullptr || tagLength != AeadMaxTagLength) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            RtlZeroMemory(scratch.GcmState, sizeof(scratch.GcmState));
+            GcmHashBytes(hashSubkey, parameters.Aad.Data, parameters.Aad.Length, scratch);
+            GcmHashBytes(hashSubkey, ciphertext, ciphertextLength, scratch);
+
+            RtlZeroMemory(scratch.GcmBlock, sizeof(scratch.GcmBlock));
+            WriteBigEndianLength(static_cast<ULONGLONG>(parameters.Aad.Length) * 8ULL, scratch.GcmBlock, sizeof(ULONGLONG));
+            WriteBigEndianLength(
+                static_cast<ULONGLONG>(ciphertextLength) * 8ULL,
+                scratch.GcmBlock + sizeof(ULONGLONG),
+                sizeof(ULONGLONG));
+            GcmHashBlock(hashSubkey, scratch.GcmBlock, scratch);
+
+            Aes128EncryptBlock(context, scratch, j0, scratch.GcmStream);
+            for (SIZE_T index = 0; index < tagLength; ++index) {
+                tag[index] = static_cast<UCHAR>(scratch.GcmStream[index] ^ scratch.GcmState[index]);
+            }
+
+            RtlSecureZeroMemory(scratch.GcmState, sizeof(scratch.GcmState));
+            RtlSecureZeroMemory(scratch.GcmBlock, sizeof(scratch.GcmBlock));
+            RtlSecureZeroMemory(scratch.GcmStream, sizeof(scratch.GcmStream));
+            return STATUS_SUCCESS;
+        }
+
+        NTSTATUS ValidateAes128GcmSoftware(
+            _In_ const AeadKey& key,
+            _In_ const AeadParameters& parameters,
+            _In_reads_bytes_opt_(inputLength) const UCHAR* input,
+            SIZE_T inputLength,
+            _Out_writes_bytes_(outputLength) UCHAR* output,
+            SIZE_T outputLength,
+            _In_reads_bytes_opt_(tagLength) const UCHAR* tag,
+            SIZE_T tagLength) noexcept
+        {
+            if (key.Key == nullptr ||
+                key.KeyLength != Aes128KeyLength ||
+                parameters.Nonce.Data == nullptr ||
+                parameters.Nonce.Length != 12 ||
+                (parameters.Aad.Data == nullptr && parameters.Aad.Length != 0) ||
+                (input == nullptr && inputLength != 0) ||
+                output == nullptr ||
+                outputLength < inputLength ||
+                (tag == nullptr && tagLength != 0) ||
+                tagLength != AeadMaxTagLength) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            return STATUS_SUCCESS;
+        }
+#endif
 
         _Must_inspect_result_
         UCHAR AesGfMul2(UCHAR value) noexcept
@@ -1155,6 +1311,185 @@ namespace crypto
             return status;
         }
 
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+        NTSTATUS Aes128GcmEncryptSoftware(
+            _In_ const AeadKey& key,
+            _In_ const AeadParameters& parameters,
+            _In_reads_bytes_opt_(plaintextLength) const UCHAR* plaintext,
+            SIZE_T plaintextLength,
+            _Out_writes_bytes_(ciphertextLength) UCHAR* ciphertext,
+            SIZE_T ciphertextLength,
+            _Out_writes_bytes_(tagLength) UCHAR* tag,
+            SIZE_T tagLength,
+            _Out_opt_ SIZE_T* bytesWritten) noexcept
+        {
+            if (bytesWritten != nullptr) {
+                *bytesWritten = 0;
+            }
+
+            NTSTATUS status = ValidateAes128GcmSoftware(
+                key,
+                parameters,
+                plaintext,
+                plaintextLength,
+                ciphertext,
+                ciphertextLength,
+                tag,
+                tagLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (plaintextLength != 0 && plaintext == ciphertext) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            AeadScratchGuard scratchGuard;
+            HeapObject<Aes128Context> context;
+            if (!scratchGuard.IsValid() || !context.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            AeadScratch& scratch = scratchGuard.Get();
+            status = Aes128Initialize(key, scratch, *context.Get());
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            RtlZeroMemory(scratch.GcmBlock, sizeof(scratch.GcmBlock));
+            Aes128EncryptBlock(*context.Get(), scratch, scratch.GcmBlock, scratch.GcmHashSubkey);
+
+            RtlZeroMemory(scratch.GcmJ0, sizeof(scratch.GcmJ0));
+            RtlCopyMemory(scratch.GcmJ0, parameters.Nonce.Data, parameters.Nonce.Length);
+            scratch.GcmJ0[AesBlockLength - 1] = 1;
+            RtlCopyMemory(scratch.GcmCounter, scratch.GcmJ0, sizeof(scratch.GcmCounter));
+
+            SIZE_T offset = 0;
+            while (offset < plaintextLength) {
+                IncrementGcmCounter(scratch.GcmCounter);
+                Aes128EncryptBlock(*context.Get(), scratch, scratch.GcmCounter, scratch.GcmStream);
+                const SIZE_T chunk = plaintextLength - offset < AesBlockLength ? plaintextLength - offset : AesBlockLength;
+                for (SIZE_T index = 0; index < chunk; ++index) {
+                    ciphertext[offset + index] = static_cast<UCHAR>(plaintext[offset + index] ^ scratch.GcmStream[index]);
+                }
+                offset += chunk;
+            }
+
+            status = GcmComputeTag(
+                *context.Get(),
+                scratch.GcmHashSubkey,
+                scratch.GcmJ0,
+                parameters,
+                ciphertext,
+                plaintextLength,
+                tag,
+                tagLength,
+                scratch);
+            if (NT_SUCCESS(status) && bytesWritten != nullptr) {
+                *bytesWritten = plaintextLength;
+            }
+
+            RtlSecureZeroMemory(scratch.GcmHashSubkey, sizeof(scratch.GcmHashSubkey));
+            RtlSecureZeroMemory(scratch.GcmCounter, sizeof(scratch.GcmCounter));
+            RtlSecureZeroMemory(scratch.GcmJ0, sizeof(scratch.GcmJ0));
+            RtlSecureZeroMemory(scratch.GcmStream, sizeof(scratch.GcmStream));
+            RtlSecureZeroMemory(context->RoundKeys, sizeof(context->RoundKeys));
+            return status;
+        }
+
+        NTSTATUS Aes128GcmDecryptSoftware(
+            _In_ const AeadKey& key,
+            _In_ const AeadParameters& parameters,
+            _In_reads_bytes_opt_(ciphertextLength) const UCHAR* ciphertext,
+            SIZE_T ciphertextLength,
+            _Out_writes_bytes_(plaintextLength) UCHAR* plaintext,
+            SIZE_T plaintextLength,
+            _Out_opt_ SIZE_T* bytesWritten) noexcept
+        {
+            if (bytesWritten != nullptr) {
+                *bytesWritten = 0;
+            }
+
+            NTSTATUS status = ValidateAes128GcmSoftware(
+                key,
+                parameters,
+                ciphertext,
+                ciphertextLength,
+                plaintext,
+                plaintextLength,
+                parameters.Tag.Data,
+                parameters.Tag.Length);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (ciphertextLength != 0 && ciphertext == plaintext) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            AeadScratchGuard scratchGuard;
+            HeapObject<Aes128Context> context;
+            if (!scratchGuard.IsValid() || !context.IsValid()) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            AeadScratch& scratch = scratchGuard.Get();
+            status = Aes128Initialize(key, scratch, *context.Get());
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+
+            RtlZeroMemory(scratch.GcmBlock, sizeof(scratch.GcmBlock));
+            Aes128EncryptBlock(*context.Get(), scratch, scratch.GcmBlock, scratch.GcmHashSubkey);
+
+            RtlZeroMemory(scratch.GcmJ0, sizeof(scratch.GcmJ0));
+            RtlCopyMemory(scratch.GcmJ0, parameters.Nonce.Data, parameters.Nonce.Length);
+            scratch.GcmJ0[AesBlockLength - 1] = 1;
+
+            status = GcmComputeTag(
+                *context.Get(),
+                scratch.GcmHashSubkey,
+                scratch.GcmJ0,
+                parameters,
+                ciphertext,
+                ciphertextLength,
+                scratch.GcmExpectedTag,
+                sizeof(scratch.GcmExpectedTag),
+                scratch);
+            if (!NT_SUCCESS(status)) {
+                RtlSecureZeroMemory(context->RoundKeys, sizeof(context->RoundKeys));
+                return status;
+            }
+            if (!MemoryEquals(scratch.GcmExpectedTag, parameters.Tag.Data, parameters.Tag.Length)) {
+                RtlSecureZeroMemory(scratch.GcmExpectedTag, sizeof(scratch.GcmExpectedTag));
+                RtlSecureZeroMemory(context->RoundKeys, sizeof(context->RoundKeys));
+                return STATUS_INVALID_SIGNATURE;
+            }
+
+            RtlCopyMemory(scratch.GcmCounter, scratch.GcmJ0, sizeof(scratch.GcmCounter));
+            SIZE_T offset = 0;
+            while (offset < ciphertextLength) {
+                IncrementGcmCounter(scratch.GcmCounter);
+                Aes128EncryptBlock(*context.Get(), scratch, scratch.GcmCounter, scratch.GcmStream);
+                const SIZE_T chunk = ciphertextLength - offset < AesBlockLength ? ciphertextLength - offset : AesBlockLength;
+                for (SIZE_T index = 0; index < chunk; ++index) {
+                    plaintext[offset + index] = static_cast<UCHAR>(ciphertext[offset + index] ^ scratch.GcmStream[index]);
+                }
+                offset += chunk;
+            }
+
+            if (bytesWritten != nullptr) {
+                *bytesWritten = ciphertextLength;
+            }
+
+            RtlSecureZeroMemory(scratch.GcmHashSubkey, sizeof(scratch.GcmHashSubkey));
+            RtlSecureZeroMemory(scratch.GcmCounter, sizeof(scratch.GcmCounter));
+            RtlSecureZeroMemory(scratch.GcmJ0, sizeof(scratch.GcmJ0));
+            RtlSecureZeroMemory(scratch.GcmStream, sizeof(scratch.GcmStream));
+            RtlSecureZeroMemory(scratch.GcmExpectedTag, sizeof(scratch.GcmExpectedTag));
+            RtlSecureZeroMemory(context->RoundKeys, sizeof(context->RoundKeys));
+            return STATUS_SUCCESS;
+        }
+#endif
+
         _Must_inspect_result_
         NTSTATUS EncryptAesGcm(
             _In_opt_ const CngProviderCache* cache,
@@ -1168,6 +1503,20 @@ namespace crypto
             SIZE_T tagLength,
             _Out_opt_ SIZE_T* bytesWritten) noexcept
         {
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+            if (key.KeyLength == Aes128KeyLength && parameters.Nonce.Length == 12 && tagLength == AeadMaxTagLength) {
+                return Aes128GcmEncryptSoftware(
+                    key,
+                    parameters,
+                    plaintext,
+                    plaintextLength,
+                    ciphertext,
+                    ciphertextLength,
+                    tag,
+                    tagLength,
+                    bytesWritten);
+            }
+#endif
             AesGcmKey aesKey = {};
             aesKey.Key = key.Key;
             aesKey.KeyLength = key.KeyLength;
@@ -1201,6 +1550,20 @@ namespace crypto
             SIZE_T plaintextLength,
             _Out_opt_ SIZE_T* bytesWritten) noexcept
         {
+#if defined(KERNEL_HTTP_USER_MODE_TEST)
+            if (key.KeyLength == Aes128KeyLength &&
+                parameters.Nonce.Length == 12 &&
+                parameters.Tag.Length == AeadMaxTagLength) {
+                return Aes128GcmDecryptSoftware(
+                    key,
+                    parameters,
+                    ciphertext,
+                    ciphertextLength,
+                    plaintext,
+                    plaintextLength,
+                    bytesWritten);
+            }
+#endif
             AesGcmKey aesKey = {};
             aesKey.Key = key.Key;
             aesKey.KeyLength = key.KeyLength;

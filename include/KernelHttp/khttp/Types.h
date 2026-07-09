@@ -167,6 +167,8 @@ namespace khttp
     constexpr ULONG DefaultMaxConnsPerHost = 2;
     constexpr ULONG DefaultIdleTimeoutMs = 30000;
     constexpr ULONG DefaultTlsHandshakeTimeoutMs = ::KernelHttp::TlsHandshakeReceiveTimeoutMilliseconds;
+    constexpr ULONG DefaultMaxTls12Renegotiations = ::KernelHttp::engine::KhDefaultMaxTls12Renegotiations;
+    constexpr ULONG HardMaxTls12Renegotiations = ::KernelHttp::engine::KhHardMaxTls12Renegotiations;
     constexpr ULONG DefaultMaxRedirects = 10;
     constexpr ULONG DefaultExpectContinueTimeoutMs = 1000;
     constexpr ULONG MaxExpectContinueTimeoutMs = ::KernelHttp::WskOperationTimeoutMilliseconds;
@@ -226,6 +228,7 @@ namespace khttp
         ::KernelHttp::tls::TlsPolicy Policy = {};
         const ::KernelHttp::tls::TlsClientCredential* ClientCredential = nullptr;
         ULONG HandshakeTimeoutMs = DefaultTlsHandshakeTimeoutMs;
+        ULONG MaxTls12Renegotiations = DefaultMaxTls12Renegotiations;
     };
 
     struct ProxyConfig final

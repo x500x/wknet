@@ -481,7 +481,7 @@ namespace
     void LogSessionConfig(const char* sampleName, const khttp::SessionConfig& config) noexcept
     {
         KHTTP_SAMPLE_LOG(
-            "[会话示例] %s：响应池=%s 请求缓冲=%Iu 最大响应=%Iu 连接池容量=%lu 每主机最大连接=%lu 空闲超时=%lums TLS=%s-%s 证书策略=%s TLS握手超时=%lums\r\n",
+            "[会话示例] %s：响应池=%s 请求缓冲=%Iu 最大响应=%Iu 连接池容量=%lu 每主机最大连接=%lu 空闲超时=%lums TLS=%s-%s 证书策略=%s TLS握手超时=%lums TLS1.2最大重协商=%lu\r\n",
             sampleName,
             PoolTypeName(config.ResponsePool),
             config.RequestBufferBytes,
@@ -492,7 +492,8 @@ namespace
             TlsVersionName(config.Tls.MinVersion),
             TlsVersionName(config.Tls.MaxVersion),
             CertPolicyName(config.Tls.Certificate),
-            config.Tls.HandshakeTimeoutMs);
+            config.Tls.HandshakeTimeoutMs,
+            config.Tls.MaxTls12Renegotiations);
     }
 
     void LogHttpRequest(
@@ -521,7 +522,7 @@ namespace
             alpnLength = LiteralLength(alpn);
         }
         KHTTP_SAMPLE_LOG(
-            "[HTTP请求] 示例=%s 入口=%s 方法=%s URL=%s 请求体=%s 长度=%Iu 证书策略=%s TLS ALPN=%.*s 地址族=%s 连接策略=%s\r\n",
+            "[HTTP请求] 示例=%s 入口=%s 方法=%s URL=%s 请求体=%s 长度=%Iu 证书策略=%s TLS ALPN=%.*s TLS1.2最大重协商=%lu 地址族=%s 连接策略=%s\r\n",
             sampleName,
             entryName,
             MethodName(method),
@@ -531,6 +532,7 @@ namespace
             certPolicy,
             PrintLength(alpnLength),
             alpn,
+            tlsConfig != nullptr ? tlsConfig->MaxTls12Renegotiations : khttp::DefaultMaxTls12Renegotiations,
             AddressFamilyName(family),
             ConnPolicyName(policy));
     }
@@ -1598,7 +1600,7 @@ namespace
         SIZE_T sendLength) noexcept
     {
         KHTTP_SAMPLE_LOG(
-            "[WebSocket请求] 示例=%s 入口=%s URL=%s 子协议=%.*s 发送=%s 发送长度=%Iu 地址族=%s 证书策略=%s 自动Ping响应=%s 最大消息=%Iu TLS策略=%s SHA1签名=%s\r\n",
+            "[WebSocket请求] 示例=%s 入口=%s URL=%s 子协议=%.*s 发送=%s 发送长度=%Iu 地址族=%s 证书策略=%s 自动Ping响应=%s 最大消息=%Iu TLS策略=%s SHA1签名=%s TLS1.2最大重协商=%lu\r\n",
             sampleName,
             WsConnectVariantName(connectVariant),
             config.Url != nullptr ? config.Url : "",
@@ -1611,7 +1613,8 @@ namespace
             BoolName(config.AutoReplyPing),
             config.MaxMessageBytes,
             config.Tls.Policy.Profile == tls::TlsSecurityProfile::CompatibilityExplicit ? "CompatibilityExplicit" : "ModernDefault",
-            config.Tls.Policy.EnableTls12Sha1Signatures ? "启用(endpoint兼容)" : "关闭");
+            config.Tls.Policy.EnableTls12Sha1Signatures ? "启用(endpoint兼容)" : "关闭",
+            config.Tls.MaxTls12Renegotiations);
     }
 
     void LogWebSocketResponse(

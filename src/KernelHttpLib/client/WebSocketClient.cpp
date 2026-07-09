@@ -1095,6 +1095,7 @@ namespace client
             (options.TlsServerName == nullptr ||
                 options.TlsServerNameLength == 0 ||
                 options.HandshakeReceiveTimeoutMilliseconds == 0 ||
+                options.MaxTls12Renegotiations > tls::Tls12HardMaxRenegotiations ||
                 (options.VerifyCertificate && options.CertificateStore == nullptr) ||
                 !NT_SUCCESS(tls::TlsValidatePolicy(options.Policy)) ||
                 static_cast<UCHAR>(options.MinimumTlsProtocol) > static_cast<UCHAR>(options.MaximumTlsProtocol))) {
@@ -1316,6 +1317,7 @@ namespace client
             tlsOptions.Policy = options.Policy;
             tlsOptions.ClientCredential = options.ClientCredential;
             tlsOptions.HandshakeReceiveTimeoutMilliseconds = options.HandshakeReceiveTimeoutMilliseconds;
+            tlsOptions.MaxTls12Renegotiations = options.MaxTls12Renegotiations;
 
             HeapArray<tls::TlsAlpnProtocol> alpnProtocols(2);
             if (!alpnProtocols.IsValid()) {

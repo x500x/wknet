@@ -257,6 +257,7 @@ namespace client
             buffers.HeaderCapacity == 0 ||
             (options.AlpnProtocols == nullptr && options.AlpnProtocolCount != 0) ||
             (options.AlpnProtocols != nullptr && options.AlpnProtocolCount == 0) ||
+            options.MaxTls12Renegotiations > tls::Tls12HardMaxRenegotiations ||
             !IsValidProxyTunnelOptions(options)) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -404,6 +405,7 @@ namespace client
         tlsOptions.CertificateScratchAllocator = certificateScratch;
         tlsOptions.ProviderCache = options.ProviderCache;
         tlsOptions.EnableSessionResumption = options.EnableSessionResumption;
+        tlsOptions.MaxTls12Renegotiations = options.MaxTls12Renegotiations;
         tlsOptions.EnableEarlyData = options.EnableEarlyData;
         tlsOptions.EarlyDataReplaySafe = options.EarlyDataReplaySafe;
         tlsOptions.EarlyDataBytesSent = options.EarlyDataBytesSent;

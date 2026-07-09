@@ -699,16 +699,30 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS BuildRenegotiationInfoExtension(
+            _In_ const TlsClientHelloOptions& options,
             _Out_writes_bytes_(capacity) UCHAR* destination,
             SIZE_T capacity,
             _Inout_ SIZE_T* offset) noexcept
         {
+            if (!IsValidBuffer(options.RenegotiationInfo, options.RenegotiationInfoLength) ||
+                options.RenegotiationInfoLength > 255) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
             NTSTATUS status = WriteUint16(ExtensionRenegotiationInfo, destination, capacity, offset);
             if (NT_SUCCESS(status)) {
-                status = WriteUint16(1, destination, capacity, offset);
+                status = WriteUint16(static_cast<USHORT>(1 + options.RenegotiationInfoLength), destination, capacity, offset);
             }
             if (NT_SUCCESS(status)) {
-                status = WriteByte(0, destination, capacity, offset);
+                status = WriteByte(static_cast<UCHAR>(options.RenegotiationInfoLength), destination, capacity, offset);
+            }
+            if (NT_SUCCESS(status)) {
+                status = WriteBytes(
+                    options.RenegotiationInfo,
+                    options.RenegotiationInfoLength,
+                    destination,
+                    capacity,
+                    offset);
             }
             return status;
         }
@@ -769,10 +783,16 @@ namespace tls
                     serverHello.HasExtendedMasterSecret = true;
                 }
                 else if (extensionType == ExtensionRenegotiationInfo) {
-                    if (extensionLength != 1 || serverHello.Extensions[offset] != 0) {
+                    if (extensionLength == 0) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    const SIZE_T renegotiationInfoLength = serverHello.Extensions[offset];
+                    if (renegotiationInfoLength + 1 != extensionLength) {
                         return STATUS_INVALID_NETWORK_RESPONSE;
                     }
                     serverHello.HasSecureRenegotiation = true;
+                    serverHello.SecureRenegotiationData = serverHello.Extensions + offset + 1;
+                    serverHello.SecureRenegotiationDataLength = renegotiationInfoLength;
                 }
                 else if (extensionType == ExtensionEncryptThenMac) {
                     if (extensionLength != 0) {
@@ -1028,7 +1048,9 @@ namespace tls
             signatureSchemeCount > 0x7fff ||
             options.SessionIdLength > Tls12MaxSessionIdLength ||
             !IsValidBuffer(options.SessionId, options.SessionIdLength) ||
-            !IsValidBuffer(options.SessionTicket, options.SessionTicketLength)) {
+            !IsValidBuffer(options.SessionTicket, options.SessionTicketLength) ||
+            !IsValidBuffer(options.RenegotiationInfo, options.RenegotiationInfoLength) ||
+            options.RenegotiationInfoLength > 255) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -1145,7 +1167,7 @@ namespace tls
             return status;
         }
 
-        status = BuildRenegotiationInfoExtension(extensions.Get(), extensions.Count(), &extensionOffset);
+        status = BuildRenegotiationInfoExtension(options, extensions.Get(), extensions.Count(), &extensionOffset);
         if (!NT_SUCCESS(status)) {
             return status;
         }

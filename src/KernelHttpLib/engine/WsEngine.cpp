@@ -896,7 +896,8 @@ namespace engine
             !options.Tls.Policy.EnableTls12Sha1Signatures &&
             !options.Tls.Policy.EnablePostHandshakeClientAuth &&
             !options.Tls.Policy.RequireRevocationCheck &&
-            options.Tls.HandshakeReceiveTimeoutMilliseconds == KhDefaultTlsHandshakeReceiveTimeoutMilliseconds) {
+            options.Tls.HandshakeReceiveTimeoutMilliseconds == KhDefaultTlsHandshakeReceiveTimeoutMilliseconds &&
+            options.Tls.MaxTls12Renegotiations == KhDefaultMaxTls12Renegotiations) {
             effectiveTls = session->Options.Tls;
         }
         if (effectiveTls.ServerName == nullptr &&
@@ -946,6 +947,7 @@ namespace engine
         testRequest.MaxTlsVersion = effectiveTls.MaxVersion;
         testRequest.Policy = effectiveTls.Policy;
         testRequest.HandshakeReceiveTimeoutMilliseconds = effectiveTls.HandshakeReceiveTimeoutMilliseconds;
+        testRequest.MaxTls12Renegotiations = effectiveTls.MaxTls12Renegotiations;
         testRequest.AddressFamily = options.AddressFamily;
         testRequest.AutoReplyPing = newWebSocket->AutoReplyPing;
         testRequest.MaxMessageBytes = newWebSocket->MaxMessageBytes;
@@ -1048,6 +1050,7 @@ namespace engine
         connectOptions.MaximumTlsProtocol = ToTlsProtocol(effectiveTls.MaxVersion);
         connectOptions.Policy = effectiveTls.Policy;
         connectOptions.HandshakeReceiveTimeoutMilliseconds = effectiveTls.HandshakeReceiveTimeoutMilliseconds;
+        connectOptions.MaxTls12Renegotiations = effectiveTls.MaxTls12Renegotiations;
         net::WskCancellationToken cancellation = {};
         if (cancellationOperation != nullptr) {
             cancellation.IsCancellationRequested = IsWebSocketAsyncCancellationRequested;

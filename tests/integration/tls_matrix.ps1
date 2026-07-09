@@ -340,6 +340,42 @@ function Test-OpenSslScenarioUnsupported {
     return $Text -match 'unknown option|no cipher match|no shared cipher|no suitable key share|group .* cannot be set|bad value|unsupported protocol|wrong curve|unable to set|no ciphers available'
 }
 
+function Test-OpenSslRenegotiationUnsupported {
+    param([string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $false
+    }
+
+    return $Text -match 'no renegotiation|renegotiation disabled|unsafe legacy renegotiation disabled|disabled renegotiation|not accepting renegotiation'
+}
+
+function Resolve-OpenSslRuntimeDlls {
+    param([string]$OpenSsl)
+
+    $opensslDir = Split-Path -Parent $OpenSsl
+    if ([string]::IsNullOrWhiteSpace($opensslDir) -or -not (Test-Path -LiteralPath $opensslDir)) {
+        return $null
+    }
+
+    $crypto = Get-ChildItem -LiteralPath $opensslDir -Filter 'libcrypto*.dll' -File -ErrorAction SilentlyContinue |
+        Sort-Object Name |
+        Select-Object -First 1
+    $ssl = Get-ChildItem -LiteralPath $opensslDir -Filter 'libssl*.dll' -File -ErrorAction SilentlyContinue |
+        Sort-Object Name |
+        Select-Object -First 1
+
+    if ($null -eq $crypto -or $null -eq $ssl) {
+        return $null
+    }
+
+    return [pscustomobject]@{
+        Directory = $opensslDir
+        Crypto = $crypto.FullName
+        Ssl = $ssl.FullName
+    }
+}
+
 function Invoke-OpenSslScenario {
     param(
         [string]$OpenSsl,
@@ -426,6 +462,117 @@ function Invoke-OpenSslScenario {
         }
 
         Add-Pass $Scenario.Name
+    }
+    finally {
+        if ($null -ne $server -and -not $server.HasExited) {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Invoke-KernelHttpRenegotiationScenario {
+    param(
+        [string]$OpenSsl,
+        [pscustomobject]$RsaFixture
+    )
+
+    $scenarioName = 'tls12-kernelhttp-renegotiation'
+    if ($null -eq $RsaFixture -or
+        -not (Test-Path -LiteralPath $RsaFixture.Cert) -or
+        -not (Test-Path -LiteralPath $RsaFixture.Key)) {
+        Add-Skip $scenarioName 'tests\testdata\localhost cert/key fixtures are missing'
+        return
+    }
+
+    $client = Join-Path $script:BinDir 'tls_renegotiation_client.exe'
+    if (-not (Test-Path -LiteralPath $client)) {
+        Add-Skip $scenarioName 'KernelHttp renegotiation client test binary was not built'
+        return
+    }
+
+    $serverBinary = Join-Path $script:BinDir 'tls_renegotiation_server.exe'
+    if (-not (Test-Path -LiteralPath $serverBinary)) {
+        Add-Skip $scenarioName 'OpenSSL renegotiation server test binary was not built'
+        return
+    }
+
+    $runtime = Resolve-OpenSslRuntimeDlls -OpenSsl $OpenSsl
+    if ($null -eq $runtime) {
+        Add-Skip $scenarioName 'OpenSSL runtime DLLs were not found next to openssl.exe'
+        return
+    }
+
+    $port = Get-FreeTcpPort
+    $safeName = $scenarioName -replace '[^A-Za-z0-9_.-]', '_'
+    $serverOut = Join-Path $script:LogDir "$safeName.server.out.txt"
+    $serverErr = Join-Path $script:LogDir "$safeName.server.err.txt"
+    $serverArgs = @(
+        "$port",
+        $runtime.Crypto,
+        $runtime.Ssl,
+        $RsaFixture.Cert,
+        $RsaFixture.Key
+    )
+
+    $server = Start-Process `
+        -FilePath $serverBinary `
+        -ArgumentList $serverArgs `
+        -WorkingDirectory $runtime.Directory `
+        -RedirectStandardOutput $serverOut `
+        -RedirectStandardError $serverErr `
+        -WindowStyle Hidden `
+        -PassThru
+
+    try {
+        if (-not (Wait-TcpPort -Port $port -TimeoutMilliseconds 5000)) {
+            $errorText = ''
+            if (Test-Path -LiteralPath $serverOut) {
+                $errorText += Get-Content -LiteralPath $serverOut -Raw
+            }
+            if (Test-Path -LiteralPath $serverErr) {
+                $errorText += "`n"
+                $errorText += Get-Content -LiteralPath $serverErr -Raw
+            }
+            if ((Test-OpenSslScenarioUnsupported -Text $errorText) -or
+                (Test-OpenSslRenegotiationUnsupported -Text $errorText) -or
+                $errorText -match 'missing procedure|failed to load lib') {
+                Add-Skip $scenarioName 'local OpenSSL does not support this TLS 1.2 renegotiation server mode'
+                return
+            }
+            throw "OpenSSL server did not listen for $scenarioName. See $serverErr"
+        }
+
+        $clientResult = Invoke-NativeWithTimeout `
+            -FilePath $client `
+            -ArgumentList @("$port") `
+            -TimeoutMilliseconds 30000 `
+            -LogPrefix "$safeName.client"
+
+        $serverText = ''
+        if (Test-Path -LiteralPath $serverOut) {
+            $serverText += Get-Content -LiteralPath $serverOut -Raw
+        }
+        if (Test-Path -LiteralPath $serverErr) {
+            $serverText += "`n"
+            $serverText += Get-Content -LiteralPath $serverErr -Raw
+        }
+        $combinedOutput = "$($clientResult.StdOut)`n$($clientResult.StdErr)`n$serverText"
+        if ($clientResult.TimedOut) {
+            throw "KernelHttp renegotiation client timed out for $scenarioName"
+        }
+        if ($clientResult.ExitCode -ne 0) {
+            if (Test-OpenSslRenegotiationUnsupported -Text $combinedOutput) {
+                Add-Skip $scenarioName 'local OpenSSL build disabled TLS 1.2 renegotiation'
+                return
+            }
+            if ($combinedOutput -match 'missing procedure|failed to load lib') {
+                Add-Skip $scenarioName 'local OpenSSL runtime does not expose the renegotiation APIs used by this harness'
+                return
+            }
+            throw "KernelHttp renegotiation client failed for $scenarioName with exit code $($clientResult.ExitCode). See $script:LogDir"
+        }
+
+        Add-Pass $scenarioName
     }
     finally {
         if ($null -ne $server -and -not $server.HasExited) {
@@ -572,9 +719,12 @@ function Invoke-OpenSslWireMatrix {
             -EcdsaFixture $ecdsaFixture
     }
 
+    Invoke-KernelHttpRenegotiationScenario `
+        -OpenSsl $OpenSsl `
+        -RsaFixture $rsaFixture
+
     Add-Skip 'tls13-resumption-0rtt' 'project matrix binary covers PSK/0-RTT; this OpenSSL CLI harness does not use public endpoints or keep server state for early_data replay'
     Add-Skip 'tls13-keyupdate' 'project matrix binary covers KeyUpdate; OpenSSL s_client has no stable noninteractive KeyUpdate path in this harness'
-    Add-Skip 'tls12-renegotiation-policy' 'project matrix binary covers renegotiation policy; modern OpenSSL builds disable or restrict renegotiation by policy'
 }
 
 New-Item -ItemType Directory -Force $script:MatrixDir | Out-Null
@@ -603,6 +753,18 @@ elseif ($tool.Kind -ne 'OpenSSL') {
 }
 else {
     Write-Step "using OpenSSL at $($tool.Path)"
+    foreach ($testName in @('tls_renegotiation_client', 'tls_renegotiation_server')) {
+        Invoke-Checked `
+            -FilePath 'pwsh' `
+            -ArgumentList @(
+                '-NoLogo',
+                '-NoProfile',
+                '-File',
+                (Join-Path $script:Root 'tools\build-tests.ps1'),
+                '-Test',
+                $testName
+            )
+    }
     Invoke-OpenSslWireMatrix -OpenSsl $tool.Path
 }
 

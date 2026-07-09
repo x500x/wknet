@@ -46,6 +46,7 @@ namespace client
         engine::KhWorkspace* Workspace = nullptr;
         const crypto::CngProviderCache* ProviderCache = nullptr;
         bool EnableSessionResumption = true;
+        ULONG MaxTls12Renegotiations = tls::Tls12DefaultMaxRenegotiations;
         bool EnableEarlyData = false;
         bool EarlyDataReplaySafe = false;
         SIZE_T* EarlyDataBytesSent = nullptr;

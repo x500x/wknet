@@ -378,6 +378,7 @@ namespace detail
         dst.Policy = src.Policy;
         dst.ClientCredential = src.ClientCredential;
         dst.HandshakeReceiveTimeoutMilliseconds = src.HandshakeTimeoutMs;
+        dst.MaxTls12Renegotiations = src.MaxTls12Renegotiations;
     }
 
     void FillApiSendOptions(

@@ -5,6 +5,7 @@
 #include <KernelHttp/http2/Http2Connection.h>
 #include <KernelHttp/net/WskClient.h>
 #include <KernelHttp/tls/CertificateStore.h>
+#include <KernelHttp/tls/TlsConnection.h>
 #include <KernelHttp/tls/TlsPolicy.h>
 
 namespace KernelHttp
@@ -49,6 +50,7 @@ namespace client
         bool VerifyCertificate = true;
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
+        ULONG MaxTls12Renegotiations = tls::Tls12DefaultMaxRenegotiations;
     };
 
     _Must_inspect_result_

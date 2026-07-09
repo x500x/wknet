@@ -53,6 +53,8 @@ namespace engine
     constexpr ULONG KhDefaultMaxRedirects = 10;
     constexpr ULONG KhDefaultExpectContinueTimeoutMilliseconds = 1000;
     constexpr ULONG KhMaxExpectContinueTimeoutMilliseconds = WskOperationTimeoutMilliseconds;
+    constexpr ULONG KhDefaultMaxTls12Renegotiations = 1;
+    constexpr ULONG KhHardMaxTls12Renegotiations = 4;
     constexpr ULONG KhDefaultHttp2KeepAliveIdleMilliseconds = 30000;
     constexpr ULONG KhDefaultHttp2KeepAliveIntervalMilliseconds = 30000;
     constexpr ULONG KhDefaultHttp2KeepAliveAckTimeoutMilliseconds = 5000;
@@ -221,6 +223,7 @@ namespace engine
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
         ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;
+        ULONG MaxTls12Renegotiations = KhDefaultMaxTls12Renegotiations;
     };
 
     struct KhProxyOptions final
@@ -714,6 +717,7 @@ namespace engine
         SIZE_T OfferedAlpnLength = 0;
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
+        ULONG MaxTls12Renegotiations = KhDefaultMaxTls12Renegotiations;
         bool ProxyEnabled = false;
         SOCKADDR_STORAGE ProxyAddress = {};
         const char* ProxyAuthority = nullptr;
@@ -765,6 +769,7 @@ namespace engine
         bool AutoReplyPing = true;
         SIZE_T MaxMessageBytes = 0;
         ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;
+        ULONG MaxTls12Renegotiations = KhDefaultMaxTls12Renegotiations;
         bool AllowWebSocketOverHttp2 = false;
         KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::LegacyBoolean;
         websocket::PerMessageDeflateOptions PerMessageDeflate = {};

@@ -590,6 +590,7 @@ namespace client
             (options.ServerName == nullptr ||
                 options.ServerNameLength == 0 ||
                 (options.VerifyCertificate && options.CertificateStore == nullptr) ||
+                options.MaxTls12Renegotiations > tls::Tls12HardMaxRenegotiations ||
                 !NT_SUCCESS(tls::TlsValidatePolicy(options.Policy)))) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -657,6 +658,7 @@ namespace client
             tlsOptions.VerifyCertificate = options.VerifyCertificate;
             tlsOptions.Policy = options.Policy;
             tlsOptions.ClientCredential = options.ClientCredential;
+            tlsOptions.MaxTls12Renegotiations = options.MaxTls12Renegotiations;
             tlsOptions.AlpnProtocols = alpnProtocols;
             tlsOptions.AlpnProtocolCount = 2;
 

@@ -245,6 +245,77 @@ namespace
         Expect(keyPair.PublicKey[0] != 4, "X448 key share is not an uncompressed EC point");
     }
 
+    void TestAesGcmNistVector()
+    {
+        static const UCHAR key[16] = {};
+        static const UCHAR nonce[12] = {};
+        static const UCHAR plaintext[16] = {};
+        static const UCHAR expectedCiphertext[16] = {
+            0x03, 0x88, 0xda, 0xce, 0x60, 0xb6, 0xa3, 0x92,
+            0xf3, 0x28, 0xc2, 0xb9, 0x71, 0xb2, 0xfe, 0x78
+        };
+        static const UCHAR expectedTag[16] = {
+            0xab, 0x6e, 0x47, 0xd4, 0x2c, 0xec, 0x13, 0xbd,
+            0xf5, 0x3a, 0x67, 0xb2, 0x12, 0x57, 0xbd, 0xdf
+        };
+
+        UCHAR ciphertext[sizeof(plaintext)] = {};
+        UCHAR tag[sizeof(expectedTag)] = {};
+        SIZE_T written = 0;
+
+        AeadKey aeadKey = {};
+        aeadKey.Algorithm = AeadAlgorithm::Aes128Gcm;
+        aeadKey.Key = key;
+        aeadKey.KeyLength = sizeof(key);
+
+        AeadParameters parameters = {};
+        parameters.Nonce = { nonce, sizeof(nonce) };
+
+        NTSTATUS status = Aead::Encrypt(
+            nullptr,
+            aeadKey,
+            parameters,
+            plaintext,
+            sizeof(plaintext),
+            ciphertext,
+            sizeof(ciphertext),
+            tag,
+            sizeof(tag),
+            &written);
+        ExpectStatus(status, STATUS_SUCCESS, "AES-GCM encrypts NIST vector");
+        Expect(written == sizeof(plaintext), "AES-GCM encrypted length matches plaintext");
+        Expect(Equals(ciphertext, expectedCiphertext, sizeof(ciphertext)), "AES-GCM ciphertext matches NIST vector");
+        Expect(Equals(tag, expectedTag, sizeof(tag)), "AES-GCM tag matches NIST vector");
+
+        UCHAR decrypted[sizeof(plaintext)] = {};
+        parameters.Tag = { tag, sizeof(tag) };
+        status = Aead::Decrypt(
+            nullptr,
+            aeadKey,
+            parameters,
+            ciphertext,
+            sizeof(ciphertext),
+            decrypted,
+            sizeof(decrypted),
+            &written);
+        ExpectStatus(status, STATUS_SUCCESS, "AES-GCM decrypts NIST vector");
+        Expect(written == sizeof(plaintext), "AES-GCM decrypted length matches plaintext");
+        Expect(Equals(decrypted, plaintext, sizeof(plaintext)), "AES-GCM decrypts original plaintext");
+
+        tag[0] ^= 1;
+        parameters.Tag = { tag, sizeof(tag) };
+        status = Aead::Decrypt(
+            nullptr,
+            aeadKey,
+            parameters,
+            ciphertext,
+            sizeof(ciphertext),
+            decrypted,
+            sizeof(decrypted),
+            &written);
+        ExpectStatus(status, STATUS_INVALID_SIGNATURE, "AES-GCM rejects wrong tag");
+    }
+
     void TestFfdhe2048KeyAgreement()
     {
         KeyExchangeKeyPair alice;
@@ -661,6 +732,7 @@ int main()
     TestX25519GeneratedKeyPairUsesRawShare();
     TestX448Rfc7748Vectors();
     TestX448GeneratedKeyPairUsesRawShare();
+    TestAesGcmNistVector();
     TestFfdhe2048KeyAgreement();
     TestFfdhe2048ParameterRecognition();
     TestChaCha20Poly1305Rfc8439Vector();

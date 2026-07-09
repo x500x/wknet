@@ -664,6 +664,15 @@ namespace crypto
         }
 
         _Must_inspect_result_
+        SIZE_T ReadLittleEndianUint32(_In_reads_bytes_(sizeof(ULONG)) const UCHAR* data) noexcept
+        {
+            return static_cast<SIZE_T>(data[0]) |
+                (static_cast<SIZE_T>(data[1]) << 8) |
+                (static_cast<SIZE_T>(data[2]) << 16) |
+                (static_cast<SIZE_T>(data[3]) << 24);
+        }
+
+        _Must_inspect_result_
         NTSTATUS ExportNistPublicKey(
             _In_ const CngKey& privateKey,
             _Out_writes_bytes_(publicKeyCapacity) UCHAR* publicKey,
@@ -677,40 +686,64 @@ namespace crypto
                 return STATUS_INVALID_PARAMETER;
             }
 
-#if !defined(KERNEL_HTTP_USER_MODE_TEST)
-            HeapArray<UCHAR> publicBlob(sizeof(BCRYPT_ECCKEY_BLOB) + (66 * 2));
+            constexpr SIZE_T EccPublicBlobHeaderLength = sizeof(ULONG) * 2;
+            constexpr SIZE_T EccPublicBlobMaxCoordinateLength = 66;
+
+            HeapArray<UCHAR> publicBlob(EccPublicBlobHeaderLength + (EccPublicBlobMaxCoordinateLength * 2));
             if (!publicBlob.IsValid()) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
             SIZE_T publicBlobLength = 0;
             NTSTATUS status = privateKey.ExportPublicKey(
-                BCRYPT_ECCPUBLIC_BLOB,
+                L"ECCPUBLICBLOB",
                 publicBlob.Get(),
                 publicBlob.Count(),
                 &publicBlobLength);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
-            if (publicBlobLength < sizeof(BCRYPT_ECCKEY_BLOB)) {
+            if (publicBlobLength != 0 && publicBlob[0] == 4) {
+                if (publicBlobLength != 65 && publicBlobLength != 97 && publicBlobLength != 133) {
+                    RtlSecureZeroMemory(publicBlob.Get(), publicBlob.Count());
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                if (publicBlobLength > publicKeyCapacity) {
+                    RtlSecureZeroMemory(publicBlob.Get(), publicBlob.Count());
+                    *publicKeyLength = publicBlobLength;
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+
+                RtlCopyMemory(publicKey, publicBlob.Get(), publicBlobLength);
+                *publicKeyLength = publicBlobLength;
+                RtlSecureZeroMemory(publicBlob.Get(), publicBlob.Count());
+                return STATUS_SUCCESS;
+            }
+            if (publicBlobLength < EccPublicBlobHeaderLength) {
+                RtlSecureZeroMemory(publicBlob.Get(), publicBlob.Count());
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
-            const auto* header = reinterpret_cast<const BCRYPT_ECCKEY_BLOB*>(publicBlob.Get());
-            const SIZE_T pointLength = (static_cast<SIZE_T>(header->cbKey) * 2) + 1;
-            if (pointLength > publicKeyCapacity ||
-                publicBlobLength < sizeof(BCRYPT_ECCKEY_BLOB) + (static_cast<SIZE_T>(header->cbKey) * 2)) {
+            const SIZE_T keyBytes = ReadLittleEndianUint32(publicBlob.Get() + sizeof(ULONG));
+            const SIZE_T coordinatesLength = keyBytes * 2;
+            const SIZE_T pointLength = coordinatesLength + 1;
+            if (keyBytes == 0 ||
+                keyBytes > EccPublicBlobMaxCoordinateLength ||
+                coordinatesLength > publicBlobLength - EccPublicBlobHeaderLength) {
+                RtlSecureZeroMemory(publicBlob.Get(), publicBlob.Count());
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            if (pointLength > publicKeyCapacity) {
+                RtlSecureZeroMemory(publicBlob.Get(), publicBlob.Count());
+                *publicKeyLength = pointLength;
                 return STATUS_BUFFER_TOO_SMALL;
             }
 
             publicKey[0] = 4;
-            RtlCopyMemory(publicKey + 1, publicBlob.Get() + sizeof(BCRYPT_ECCKEY_BLOB), header->cbKey * 2);
+            RtlCopyMemory(publicKey + 1, publicBlob.Get() + EccPublicBlobHeaderLength, coordinatesLength);
             *publicKeyLength = pointLength;
             RtlSecureZeroMemory(publicBlob.Get(), publicBlob.Count());
             return STATUS_SUCCESS;
-#else
-            return privateKey.ExportPublicKey(L"ECCPUBLICBLOB", publicKey, publicKeyCapacity, publicKeyLength);
-#endif
         }
 
         _Must_inspect_result_

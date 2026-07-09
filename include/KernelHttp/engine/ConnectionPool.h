@@ -46,6 +46,7 @@ namespace engine
         const tls::CertificateStore* CertificateStore = nullptr;
         const tls::TlsClientCredential* ClientCredential = nullptr;
         tls::TlsPolicy Policy = {};
+        ULONG MaxTls12Renegotiations = KhDefaultMaxTls12Renegotiations;
         char TlsServerName[KhPoolMaxTlsServerNameLength + 1] = {};
         SIZE_T TlsServerNameLength = 0;
         char Alpn[KhPoolMaxAlpnLength + 1] = {};

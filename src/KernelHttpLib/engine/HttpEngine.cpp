@@ -1104,6 +1104,7 @@ namespace engine
         key->CertificateStore = request.Tls.CertificateStore;
         key->ClientCredential = request.Tls.ClientCredential;
         key->Policy = request.Tls.Policy;
+        key->MaxTls12Renegotiations = request.Tls.MaxTls12Renegotiations;
         key->AutomaticAlpn = IsAutomaticHttpAlpnMode(request);
         key->Http2CleartextMode = http2CleartextMode;
         const bool useTlsIdentity = IsHttpsRequest(request);
@@ -1613,6 +1614,7 @@ namespace engine
         options->VerifyCertificate = request.Tls.CertificatePolicy == KhCertificatePolicy::Verify;
         options->Policy = request.Tls.Policy;
         options->ClientCredential = request.Tls.ClientCredential;
+        options->MaxTls12Renegotiations = request.Tls.MaxTls12Renegotiations;
 
         SIZE_T extraHeaderCount = 0;
         for (SIZE_T index = 0; index < requestHeaderCount; ++index) {
@@ -4185,6 +4187,7 @@ namespace engine
         tlsOptions.Policy = request.Tls.Policy;
         tlsOptions.ClientCredential = request.Tls.ClientCredential;
         tlsOptions.HandshakeReceiveTimeoutMilliseconds = request.Tls.HandshakeReceiveTimeoutMilliseconds;
+        tlsOptions.MaxTls12Renegotiations = request.Tls.MaxTls12Renegotiations;
         tlsOptions.HandshakeScratchAllocator = handshakeScratch;
         tlsOptions.CertificateScratchAllocator = certificateScratch;
         tlsOptions.ProviderCache = session->ProviderCache;
@@ -4428,6 +4431,7 @@ namespace engine
             testRequest->OfferedAlpnLength = request.Tls.AlpnLength;
         }
         testRequest->Policy = request.Tls.Policy;
+        testRequest->MaxTls12Renegotiations = request.Tls.MaxTls12Renegotiations;
         testRequest->ProxyEnabled = session.Options.Proxy.Enabled;
         testRequest->ProxyAddress = session.Options.Proxy.Address;
         testRequest->ProxyAuthority = session.Options.Proxy.Authority;

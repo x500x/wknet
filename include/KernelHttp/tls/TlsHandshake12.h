@@ -12,6 +12,7 @@ namespace tls
 
     enum class TlsHandshakeType : UCHAR
     {
+        HelloRequest = 0,
         ClientHello = 1,
         ServerHello = 2,
         NewSessionTicket = 4,
@@ -106,6 +107,8 @@ namespace tls
         SIZE_T SessionIdLength = 0;
         const UCHAR* SessionTicket = nullptr;
         SIZE_T SessionTicketLength = 0;
+        const UCHAR* RenegotiationInfo = nullptr;
+        SIZE_T RenegotiationInfoLength = 0;
         bool OfferEncryptThenMac = false;
         bool OfferStatusRequest = false;
     };
@@ -123,6 +126,8 @@ namespace tls
         SIZE_T ExtensionsLength = 0;
         bool HasExtendedMasterSecret = false;
         bool HasSecureRenegotiation = false;
+        const UCHAR* SecureRenegotiationData = nullptr;
+        SIZE_T SecureRenegotiationDataLength = 0;
         bool HasEncryptThenMac = false;
     };
 

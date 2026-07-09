@@ -2316,6 +2316,93 @@ namespace
         Expect(status == STATUS_SUCCESS, "TLS 1.2 strict ClientHello parses");
         Expect(ClientHelloHasExtension(parsed.Body, parsed.BodyLength, 23), "TLS 1.2 ClientHello advertises extended_master_secret");
         Expect(ClientHelloHasExtension(parsed.Body, parsed.BodyLength, 0xff01), "TLS 1.2 ClientHello advertises secure renegotiation");
+        const UCHAR emptyRenegotiationInfo[] = { 0 };
+        Expect(
+            ClientHelloExtensionPayloadEquals(
+                parsed.Body,
+                parsed.BodyLength,
+                0xff01,
+                emptyRenegotiationInfo,
+                sizeof(emptyRenegotiationInfo)),
+            "TLS 1.2 initial ClientHello sends empty renegotiation_info");
+    }
+
+    void TestTls12ClientHelloCarriesRenegotiationInfo()
+    {
+        TlsContext context;
+        NTSTATUS status = context.InitializeClient({ 3, 3 });
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 context initializes for renegotiation ClientHello");
+
+        UCHAR verifyData[TlsVerifyDataLength] = {};
+        for (SIZE_T index = 0; index < sizeof(verifyData); ++index) {
+            verifyData[index] = static_cast<UCHAR>(0x80 + index);
+        }
+
+        UCHAR message[512] = {};
+        SIZE_T written = 0;
+        TlsClientHelloOptions options = {};
+        options.ServerName = "example.com";
+        options.ServerNameLength = strlen(options.ServerName);
+        options.RenegotiationInfo = verifyData;
+        options.RenegotiationInfoLength = sizeof(verifyData);
+
+        status = TlsHandshake12::EncodeClientHello(
+            context,
+            options,
+            message,
+            sizeof(message),
+            &written);
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 renegotiation ClientHello encodes");
+
+        TlsHandshakeMessageView parsed = {};
+        status = TlsHandshake12::ParseMessage(message, written, parsed);
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 renegotiation ClientHello parses");
+
+        UCHAR expectedPayload[1 + TlsVerifyDataLength] = {};
+        expectedPayload[0] = static_cast<UCHAR>(sizeof(verifyData));
+        memcpy(expectedPayload + 1, verifyData, sizeof(verifyData));
+        Expect(
+            ClientHelloExtensionPayloadEquals(
+                parsed.Body,
+                parsed.BodyLength,
+                0xff01,
+                expectedPayload,
+                sizeof(expectedPayload)),
+            "TLS 1.2 renegotiation ClientHello carries previous client verify_data");
+
+        options.RenegotiationInfo = nullptr;
+        options.RenegotiationInfoLength = 1;
+        written = 0;
+        status = TlsHandshake12::EncodeClientHello(
+            context,
+            options,
+            message,
+            sizeof(message),
+            &written);
+        ExpectStatus(status, STATUS_INVALID_PARAMETER, "TLS 1.2 ClientHello rejects malformed renegotiation_info input");
+    }
+
+    void TestParseTls12HelloRequest()
+    {
+        const UCHAR helloRequest[] = {
+            static_cast<UCHAR>(TlsHandshakeType::HelloRequest), 0, 0, 0
+        };
+
+        TlsHandshakeMessageView parsed = {};
+        NTSTATUS status = TlsHandshake12::ParseMessage(helloRequest, sizeof(helloRequest), parsed);
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 HelloRequest parses generically");
+        Expect(parsed.Type == TlsHandshakeType::HelloRequest, "TLS 1.2 HelloRequest type is exposed");
+        Expect(parsed.BodyLength == 0, "TLS 1.2 HelloRequest body is empty");
+        Expect(parsed.BytesConsumed == sizeof(helloRequest), "TLS 1.2 HelloRequest consumes its full header");
+
+        const UCHAR nonEmptyHelloRequest[] = {
+            static_cast<UCHAR>(TlsHandshakeType::HelloRequest), 0, 0, 1, 0
+        };
+        parsed = {};
+        status = TlsHandshake12::ParseMessage(nonEmptyHelloRequest, sizeof(nonEmptyHelloRequest), parsed);
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 non-empty HelloRequest parses as malformed generic view");
+        Expect(parsed.Type == TlsHandshakeType::HelloRequest, "TLS 1.2 non-empty HelloRequest keeps type");
+        Expect(parsed.BodyLength == 1, "TLS 1.2 non-empty HelloRequest body length is visible to connection policy");
     }
 
     void TestTls12ConnectionClientHelloFollowsCompatibilityPolicy()
@@ -4317,6 +4404,96 @@ namespace
         Expect(status == STATUS_SUCCESS, "TLS 1.2 ServerHello strict extensions parse");
         Expect(serverHello.HasExtendedMasterSecret, "TLS 1.2 ServerHello reports extended_master_secret");
         Expect(serverHello.HasSecureRenegotiation, "TLS 1.2 ServerHello reports secure renegotiation");
+        Expect(serverHello.SecureRenegotiationDataLength == 0, "TLS 1.2 initial ServerHello reports empty renegotiation_info");
+
+        UCHAR renegotiationData[TlsVerifyDataLength * 2] = {};
+        for (SIZE_T index = 0; index < sizeof(renegotiationData); ++index) {
+            renegotiationData[index] = static_cast<UCHAR>(0xa0 + index);
+        }
+
+        UCHAR renegotiationExtensions[4 + 4 + 1 + sizeof(renegotiationData)] = {};
+        SIZE_T renegotiationExtensionOffset = 0;
+        WriteUint16ForTest(renegotiationExtensions, &renegotiationExtensionOffset, 23);
+        WriteUint16ForTest(renegotiationExtensions, &renegotiationExtensionOffset, 0);
+        WriteUint16ForTest(renegotiationExtensions, &renegotiationExtensionOffset, 0xff01);
+        WriteUint16ForTest(
+            renegotiationExtensions,
+            &renegotiationExtensionOffset,
+            static_cast<USHORT>(1 + sizeof(renegotiationData)));
+        renegotiationExtensions[renegotiationExtensionOffset++] = static_cast<UCHAR>(sizeof(renegotiationData));
+        memcpy(renegotiationExtensions + renegotiationExtensionOffset, renegotiationData, sizeof(renegotiationData));
+        renegotiationExtensionOffset += sizeof(renegotiationData);
+
+        UCHAR renegotiationBody[128] = {};
+        SIZE_T renegotiationOffset = 0;
+        renegotiationBody[renegotiationOffset++] = 3;
+        renegotiationBody[renegotiationOffset++] = 3;
+        for (SIZE_T index = 0; index < 32; ++index) {
+            renegotiationBody[renegotiationOffset++] = static_cast<UCHAR>(0x60 + index);
+        }
+        renegotiationBody[renegotiationOffset++] = 0;
+        WriteUint16ForTest(
+            renegotiationBody,
+            &renegotiationOffset,
+            static_cast<USHORT>(TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256));
+        renegotiationBody[renegotiationOffset++] = 0;
+        WriteUint16ForTest(
+            renegotiationBody,
+            &renegotiationOffset,
+            static_cast<USHORT>(renegotiationExtensionOffset));
+        memcpy(renegotiationBody + renegotiationOffset, renegotiationExtensions, renegotiationExtensionOffset);
+        renegotiationOffset += renegotiationExtensionOffset;
+
+        message = {};
+        message.Type = TlsHandshakeType::ServerHello;
+        message.Body = renegotiationBody;
+        message.BodyLength = renegotiationOffset;
+
+        status = context.InitializeClient({ 3, 3 });
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 context reinitializes for renegotiation_info ServerHello test");
+        serverHello = {};
+        status = TlsHandshake12::ParseServerHello(context, message, serverHello);
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 renegotiation ServerHello parses secure renegotiation payload");
+        Expect(serverHello.HasSecureRenegotiation, "TLS 1.2 renegotiation ServerHello reports secure renegotiation");
+        Expect(
+            serverHello.SecureRenegotiationDataLength == sizeof(renegotiationData),
+            "TLS 1.2 renegotiation ServerHello exposes verify_data pair length");
+        Expect(
+            serverHello.SecureRenegotiationData != nullptr &&
+                memcmp(serverHello.SecureRenegotiationData, renegotiationData, sizeof(renegotiationData)) == 0,
+            "TLS 1.2 renegotiation ServerHello exposes verify_data pair bytes");
+
+        const UCHAR malformedRenegotiationExtensions[] = {
+            0, 23, 0, 0,
+            0xff, 0x01, 0, 2, 2
+        };
+        UCHAR malformedBody[128] = {};
+        SIZE_T malformedOffset = 0;
+        malformedBody[malformedOffset++] = 3;
+        malformedBody[malformedOffset++] = 3;
+        for (SIZE_T index = 0; index < 32; ++index) {
+            malformedBody[malformedOffset++] = static_cast<UCHAR>(0x70 + index);
+        }
+        malformedBody[malformedOffset++] = 0;
+        WriteUint16ForTest(
+            malformedBody,
+            &malformedOffset,
+            static_cast<USHORT>(TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256));
+        malformedBody[malformedOffset++] = 0;
+        WriteUint16ForTest(malformedBody, &malformedOffset, static_cast<USHORT>(sizeof(malformedRenegotiationExtensions)));
+        memcpy(malformedBody + malformedOffset, malformedRenegotiationExtensions, sizeof(malformedRenegotiationExtensions));
+        malformedOffset += sizeof(malformedRenegotiationExtensions);
+
+        message = {};
+        message.Type = TlsHandshakeType::ServerHello;
+        message.Body = malformedBody;
+        message.BodyLength = malformedOffset;
+
+        status = context.InitializeClient({ 3, 3 });
+        Expect(status == STATUS_SUCCESS, "TLS 1.2 context reinitializes for malformed renegotiation_info test");
+        serverHello = {};
+        status = TlsHandshake12::ParseServerHello(context, message, serverHello);
+        ExpectStatus(status, STATUS_INVALID_NETWORK_RESPONSE, "TLS 1.2 ServerHello rejects malformed renegotiation_info length");
 
         const UCHAR duplicateExtensions[] = {
             0, 23, 0, 0,
@@ -6543,6 +6720,8 @@ int main()
     TestTls13AesGcmRejectsSequenceNumberExhaustion();
     TestClientHello();
     TestTls12ClientHelloAdvertisesStrictExtensions();
+    TestTls12ClientHelloCarriesRenegotiationInfo();
+    TestParseTls12HelloRequest();
     TestTls12ConnectionClientHelloFollowsCompatibilityPolicy();
     TestClientHelloRejectsInvalidSniNames();
     TestClientHelloAdvertisesSessionTicket();

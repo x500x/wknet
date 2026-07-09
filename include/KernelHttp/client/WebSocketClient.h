@@ -83,6 +83,7 @@ namespace client
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
         ULONG HandshakeReceiveTimeoutMilliseconds = TlsHandshakeReceiveTimeoutMilliseconds;
+        ULONG MaxTls12Renegotiations = tls::Tls12DefaultMaxRenegotiations;
         const net::WskCancellationToken* Cancellation = nullptr;
         bool UseTls = false;
         bool VerifyCertificate = true;

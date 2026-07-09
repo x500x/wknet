@@ -22,6 +22,8 @@ namespace tls
     constexpr ULONG TlsApplicationMaxEmptyRecords = 16;
     constexpr ULONG TlsApplicationMaxPostHandshakeRecords = 16;
     constexpr ULONG TlsHandshakeMaxRecords = 64;
+    constexpr ULONG Tls12DefaultMaxRenegotiations = 1;
+    constexpr ULONG Tls12HardMaxRenegotiations = 4;
 
     struct TlsReceiveDeadline final
     {
@@ -77,6 +79,7 @@ namespace tls
         bool EnableEarlyData = false;
         bool EarlyDataReplaySafe = false;
         SIZE_T Tls13RecordPaddingLength = 0;
+        ULONG MaxTls12Renegotiations = Tls12DefaultMaxRenegotiations;
     };
 
     class TlsConnection final
@@ -242,6 +245,19 @@ namespace tls
             SIZE_T fragmentLength) noexcept;
 
         _Must_inspect_result_
+        NTSTATUS ConsumeTls12PostHandshakeRecord(
+            _Inout_ core::ITransport& transport,
+            _In_reads_bytes_(fragmentLength) const UCHAR* fragment,
+            SIZE_T fragmentLength) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS RenegotiateTls12(
+            _Inout_ core::ITransport& transport) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS FinishTls12RenegotiationAttempt(NTSTATUS status) noexcept;
+
+        _Must_inspect_result_
         NTSTATUS ConsumeTls13PostHandshakeRecord(
             _Inout_ core::ITransport& transport,
             _In_reads_bytes_(fragmentLength) const UCHAR* fragment,
@@ -289,6 +305,8 @@ namespace tls
         TlsContext context_ = {};
         TlsAeadCipherState clientWriteState_ = {};
         TlsAeadCipherState serverWriteState_ = {};
+        TlsAeadCipherState tls12PendingClientWriteState_ = {};
+        TlsAeadCipherState tls12PendingServerWriteState_ = {};
         TlsTranscriptHash transcript_ = {};
         core::IScratchAllocator* handshakeScratchAllocator_ = nullptr;
         core::IScratchAllocator* certificateScratchAllocator_ = nullptr;
@@ -321,8 +339,16 @@ namespace tls
         const TlsClientCredential* clientCredential_ = nullptr;
         Tls12SessionCache* tls12SessionCache_ = nullptr;
         Tls13SessionCache* tls13ExternalSessionCache_ = nullptr;
+        TlsClientConnectionOptions tls12RenegotiationOptions_ = {};
         TlsPolicy tlsPolicy_ = {};
         ULONG tlsPolicyIdentity_ = 0;
+        ULONG tls12MaxRenegotiations_ = Tls12DefaultMaxRenegotiations;
+        ULONG tls12RenegotiationCount_ = 0;
+        bool tls12Renegotiating_ = false;
+        UCHAR tls12LastClientVerifyData_[TlsVerifyDataLength] = {};
+        SIZE_T tls12LastClientVerifyDataLength_ = 0;
+        UCHAR tls12LastServerVerifyData_[TlsVerifyDataLength] = {};
+        SIZE_T tls12LastServerVerifyDataLength_ = 0;
         CertificatePublicKeyAlgorithm serverCertificatePublicKeyAlgorithm_ = CertificatePublicKeyAlgorithm::Unknown;
         UCHAR serverEd25519PublicKey_[32] = {};
         SIZE_T serverEd25519PublicKeyLength_ = 0;

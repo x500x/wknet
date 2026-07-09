@@ -260,6 +260,7 @@ namespace
         bool Http11PipelineEnabled = false;
         bool Http11PipelineLease = false;
         ULONG Http11PipelineSequence = 0;
+        ULONG MaxTls12Renegotiations = 0;
     };
 
     struct StreamingBodyContext
@@ -465,6 +466,7 @@ namespace
         captured->Http11PipelineEnabled = request->Http11PipelineEnabled;
         captured->Http11PipelineLease = request->Http11PipelineLease;
         captured->Http11PipelineSequence = request->Http11PipelineSequence;
+        captured->MaxTls12Renegotiations = request->MaxTls12Renegotiations;
 
         const char* bodyMarker = "\r\n\r\n";
         const SIZE_T markerLength = 4;
@@ -1105,6 +1107,7 @@ namespace
         KernelHttp::engine::KhWebSocketTransportMode LastTransportMode =
             KernelHttp::engine::KhWebSocketTransportMode::LegacyBoolean;
         KernelHttp::websocket::PerMessageDeflateOptions LastPerMessageDeflate = {};
+        ULONG LastMaxTls12Renegotiations = 0;
         NTSTATUS SendStatus = STATUS_SUCCESS;
         NTSTATUS ReceiveStatus = STATUS_SUCCESS;
     };
@@ -1138,6 +1141,7 @@ namespace
         capture->LastAllowWebSocketOverHttp2 = request->AllowWebSocketOverHttp2;
         capture->LastTransportMode = request->TransportMode;
         capture->LastPerMessageDeflate = request->PerMessageDeflate;
+        capture->LastMaxTls12Renegotiations = request->MaxTls12Renegotiations;
         return STATUS_SUCCESS;
     }
 
@@ -1324,6 +1328,60 @@ namespace
         Expect(!NT_SUCCESS(status), "out-of-range response header is rejected");
 
         khttp::ResponseRelease(resp);
+        khttp::SessionClose(session);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestTls12RenegotiationLimitConfigPropagates() noexcept
+    {
+        khttp::SessionConfig invalidConfig = khttp::DefaultSessionConfig();
+        invalidConfig.Tls.MaxTls12Renegotiations = khttp::HardMaxTls12Renegotiations + 1;
+        khttp::Session* invalidSession = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&invalidConfig, &invalidSession);
+        Expect(status == STATUS_INVALID_PARAMETER, "SessionCreate rejects TLS 1.2 renegotiation limit above hard maximum");
+        Expect(invalidSession == nullptr, "invalid TLS renegotiation limit leaves session null");
+
+        const char* response =
+            "HTTP/1.1 204 No Content\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        khttp::test::SetHttpTransport(TestTransport, &captured);
+
+        khttp::Session* session = nullptr;
+        status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for TLS renegotiation config propagation");
+
+        khttp::Request* request = nullptr;
+        status = khttp::RequestCreate(session, &request);
+        Expect(NT_SUCCESS(status), "RequestCreate succeeds for TLS renegotiation config propagation");
+
+        const char* url = "https://example.com/renegotiation-limit";
+        if (NT_SUCCESS(status)) {
+            status = khttp::RequestSetUrl(request, url, Length(url));
+        }
+
+        khttp::TlsConfig tls = khttp::DefaultTlsConfig();
+        tls.Policy.Profile = KernelHttp::tls::TlsSecurityProfile::CompatibilityExplicit;
+        tls.Policy.EnableTls12Renegotiation = true;
+        tls.MaxTls12Renegotiations = 2;
+        if (NT_SUCCESS(status)) {
+            status = khttp::RequestSetTls(request, &tls);
+        }
+
+        khttp::Response* resp = nullptr;
+        if (NT_SUCCESS(status)) {
+            status = khttp::Send(session, request, &resp);
+        }
+
+        Expect(NT_SUCCESS(status), "HTTPS request with TLS renegotiation limit succeeds through test transport");
+        Expect(captured.MaxTls12Renegotiations == 2, "TLS 1.2 renegotiation limit propagates to HTTP transport");
+
+        khttp::ResponseRelease(resp);
+        khttp::RequestRelease(request);
         khttp::SessionClose(session);
         khttp::test::SetHttpTransport(nullptr, nullptr);
     }
@@ -3081,6 +3139,12 @@ namespace
         Expect(
             !KernelHttp::engine::KhConnectionPoolKeysEqual(base, differentStore),
             "connection pool key includes certificate store identity");
+
+        KernelHttp::engine::KhConnectionPoolKey differentRenegotiationLimit = base;
+        differentRenegotiationLimit.MaxTls12Renegotiations = 2;
+        Expect(
+            !KernelHttp::engine::KhConnectionPoolKeysEqual(base, differentRenegotiationLimit),
+            "connection pool key includes TLS 1.2 renegotiation limit");
 
         KernelHttp::engine::KhConnectionPoolKey proxyKey = base;
         proxyKey.ProxyEnabled = true;
@@ -5916,12 +5980,16 @@ namespace
         wsConfig.UrlLength = Length(url);
         wsConfig.AllowWebSocketOverHttp2 = true;
         wsConfig.TransportMode = khttp::WebSocketTransportMode::LegacyBoolean;
+        wsConfig.Tls.MaxTls12Renegotiations = 2;
         status = kws::Connect(session, &wsConfig, &ws);
         Expect(NT_SUCCESS(status), "wss websocket h2 opt-in connect succeeds through test transport");
         Expect(capture.LastAllowWebSocketOverHttp2, "wss websocket h2 opt-in propagates to engine");
         Expect(
             capture.LastTransportMode == KernelHttp::engine::KhWebSocketTransportMode::LegacyBoolean,
             "legacy websocket h2 opt-in keeps legacy transport mode");
+        Expect(
+            capture.LastMaxTls12Renegotiations == 2,
+            "wss websocket TLS 1.2 renegotiation limit propagates to engine");
 
         status = kws::Close(ws);
         Expect(NT_SUCCESS(status), "wss websocket h2 opt-in close succeeds");
@@ -6307,6 +6375,7 @@ int main() noexcept
     TestSessionCreateAndClose();
     TestDestroyIsUnconditionalHighLevelDrain();
     TestSimpleGet();
+    TestTls12RenegotiationLimitConfigPropagates();
     TestAcceptEncodingQValueOptions();
     TestAcceptEncodingRejectsInvalidPreferences();
     TestAcceptEncodingQZeroResponseFailsClosed();
