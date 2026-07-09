@@ -16,6 +16,7 @@ namespace tls
     constexpr SIZE_T CertificateMaxChainLength = 8;
     constexpr SIZE_T CertificateMaxNameConstraints = 8;
     constexpr SIZE_T CertificateMaxCertificatePolicies = 8;
+    constexpr SIZE_T CertificateMaxRevocationUriLength = 255;
 
     enum class CertificatePublicKeyAlgorithm : UCHAR
     {
@@ -87,8 +88,10 @@ namespace tls
         bool AllowsDigitalSignature = false;
         bool AllowsKeyEncipherment = false;
         bool AllowsKeyCertSign = false;
+        bool AllowsCrlSign = false;
         bool HasExtendedKeyUsage = false;
         bool AllowsServerAuth = false;
+        bool AllowsOcspSigning = false;
         bool HasNameConstraints = false;
         const char* PermittedDnsSubtrees[CertificateMaxNameConstraints] = {};
         SIZE_T PermittedDnsSubtreeLengths[CertificateMaxNameConstraints] = {};
@@ -121,6 +124,12 @@ namespace tls
         ULONG InhibitPolicyMappingSkipCerts = 0;
         bool HasInhibitAnyPolicy = false;
         ULONG InhibitAnyPolicySkipCerts = 0;
+        const char* OcspUris[CertificateMaxRevocationUris] = {};
+        SIZE_T OcspUriLengths[CertificateMaxRevocationUris] = {};
+        SIZE_T OcspUriCount = 0;
+        const char* CrlDistributionPointUris[CertificateMaxRevocationUris] = {};
+        SIZE_T CrlDistributionPointUriLengths[CertificateMaxRevocationUris] = {};
+        SIZE_T CrlDistributionPointUriCount = 0;
     };
 
     struct CertificateChainView final
@@ -142,6 +151,8 @@ namespace tls
         bool RequireRevocationCheck = false;
         CertificateRevocationMode RevocationMode = CertificateRevocationMode::Off;
         bool EnableIdna = true;
+        const UCHAR* StapledOcspResponse = nullptr;
+        SIZE_T StapledOcspResponseLength = 0;
     };
 
     struct CertificateValidationResult final

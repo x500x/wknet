@@ -22,6 +22,7 @@ using KernelHttp::HeapArray;
 using KernelHttp::tls::CertificateAuthorityBundle;
 using KernelHttp::tls::CertificateChainView;
 using KernelHttp::tls::CertificatePin;
+using KernelHttp::tls::CertificateSha1ThumbprintLength;
 using KernelHttp::tls::CertificateRevocationEntry;
 using KernelHttp::tls::CertificateRevocationMode;
 using KernelHttp::tls::CertificateRevocationProviderQuery;
@@ -98,8 +99,15 @@ namespace
 {
     constexpr SIZE_T TestMaxPemCertificateLength = 4096;
     constexpr SIZE_T TestMaxDerCertificateLength = 2048;
+    constexpr SIZE_T TestMaxRevocationEvidenceLength = 4096;
     constexpr SIZE_T TestMaxCertificateListLength = (TestMaxDerCertificateLength + 3) * 4;
     const char LocalhostCertificatePath[] = "tests\\testdata\\localhost.cert.pem";
+    const char LocalhostOcspGoodPath[] = "tests\\testdata\\revocation\\localhost-ocsp-good.der";
+    const char LocalhostOcspRevokedPath[] = "tests\\testdata\\revocation\\localhost-ocsp-revoked.der";
+    const char RevocationCaCertificatePath[] = "tests\\testdata\\revocation\\ca.cert.pem";
+    const char RevocationLeafCertificatePath[] = "tests\\testdata\\revocation\\leaf.cert.pem";
+    const char RevocationCrlGoodPath[] = "tests\\testdata\\revocation\\crl-good.der";
+    const char RevocationCrlRevokedPath[] = "tests\\testdata\\revocation\\crl-revoked.der";
     const char PkiRootCertificatePath[] = "tests\\testdata\\pki\\root.cert.pem";
     const char PkiIntermediateCertificatePath[] = "tests\\testdata\\pki\\intermediate.cert.pem";
     const char PkiLeafCertificatePath[] = "tests\\testdata\\pki\\leaf.cert.pem";
@@ -6150,15 +6158,42 @@ namespace
         bundle.Data = pem;
         bundle.DataLength = pemLength;
 
+        UCHAR ocspGood[TestMaxRevocationEvidenceLength] = {};
+        UCHAR ocspRevoked[TestMaxRevocationEvidenceLength] = {};
+        UCHAR ocspTampered[TestMaxRevocationEvidenceLength] = {};
+        SIZE_T ocspGoodLength = 0;
+        SIZE_T ocspRevokedLength = 0;
+        SIZE_T ocspTamperedLength = 0;
+        Expect(
+            ReadFileBytes(LocalhostOcspGoodPath, ocspGood, sizeof(ocspGood), &ocspGoodLength),
+            "good localhost OCSP response fixture loads");
+        Expect(
+            ReadFileBytes(LocalhostOcspRevokedPath, ocspRevoked, sizeof(ocspRevoked), &ocspRevokedLength),
+            "revoked localhost OCSP response fixture loads");
+        if (ocspGoodLength == 0 || ocspRevokedLength == 0) {
+            return;
+        }
+        memcpy(ocspTampered, ocspGood, ocspGoodLength);
+        ocspTamperedLength = ocspGoodLength;
+        SIZE_T ocspSerialOffset = 0;
+        if (FindBytes(
+                ocspTampered,
+                ocspTamperedLength,
+                parsed.SerialNumber,
+                parsed.SerialNumberLength,
+                0,
+                &ocspSerialOffset)) {
+            ocspTampered[ocspSerialOffset] ^= 0x01;
+        }
+
         CertificateRevocationEntry entry = {};
         entry.IssuerName = parsed.Issuer;
         entry.IssuerNameLength = parsed.IssuerLength;
         entry.SerialNumber = parsed.SerialNumber;
         entry.SerialNumberLength = parsed.SerialNumberLength;
         entry.Source = CertificateRevocationSource::Ocsp;
-        entry.Status = CertificateRevocationStatus::Good;
-        entry.ThisUpdate = 20200101000000LL;
-        entry.NextUpdate = 20990101000000LL;
+        entry.EvidenceDer = ocspGood;
+        entry.EvidenceDerLength = ocspGoodLength;
 
         CertificateStoreOptions storeOptions = {};
         storeOptions.AuthorityBundles = &bundle;
@@ -6186,32 +6221,33 @@ namespace
         options.RevocationMode = CertificateRevocationMode::StapledOnly;
 
         status = CertificateValidator::ValidateChain(chain, options);
-        ExpectStatus(status, STATUS_SUCCESS, "certificate validation accepts fresh good OCSP cache entry");
+        ExpectStatus(status, STATUS_SUCCESS, "certificate validation accepts signed good OCSP cache evidence");
 
-        entry.Status = CertificateRevocationStatus::Revoked;
+        entry.EvidenceDer = ocspRevoked;
+        entry.EvidenceDerLength = ocspRevokedLength;
         status = store.Initialize(storeOptions);
-        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts revoked OCSP cache entry");
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts revoked OCSP cache evidence");
         status = CertificateValidator::ValidateChain(chain, options);
-        ExpectStatus(status, STATUS_TRUST_FAILURE, "certificate validation rejects revoked OCSP cache entry");
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "certificate validation rejects revoked OCSP cache evidence");
 
-        entry.Status = CertificateRevocationStatus::Good;
-        entry.NextUpdate = 20210101000000LL;
+        entry.EvidenceDer = ocspTampered;
+        entry.EvidenceDerLength = ocspTamperedLength;
         status = store.Initialize(storeOptions);
-        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts expired OCSP cache entry");
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts tampered OCSP cache evidence");
         status = CertificateValidator::ValidateChain(chain, options);
-        ExpectStatus(status, STATUS_TRUST_FAILURE, "certificate validation rejects expired OCSP cache entry");
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "certificate validation rejects tampered OCSP cache evidence");
 
         entry.Source = CertificateRevocationSource::Crl;
-        entry.Status = CertificateRevocationStatus::Good;
-        entry.NextUpdate = 20990101000000LL;
+        entry.EvidenceDer = ocspGood;
+        entry.EvidenceDerLength = ocspGoodLength;
         status = store.Initialize(storeOptions);
-        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts CRL revocation cache entry");
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts CRL source cache evidence");
         status = CertificateValidator::ValidateChain(chain, options);
         ExpectStatus(status, STATUS_TRUST_FAILURE, "stapled-only revocation does not accept CRL cache entries");
 
         options.RevocationMode = CertificateRevocationMode::OnlineRequired;
         status = CertificateValidator::ValidateChain(chain, options);
-        ExpectStatus(status, STATUS_SUCCESS, "online-required revocation accepts fresh good CRL cache entry");
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "online-required revocation rejects non-CRL DER in CRL cache entry");
     }
 
     struct RevocationProviderCapture
@@ -6220,6 +6256,10 @@ namespace
         NTSTATUS Status = STATUS_SUCCESS;
         SIZE_T Calls = 0;
         CertificateRevocationSource LastSource = CertificateRevocationSource::Ocsp;
+        SIZE_T LastOcspRequestLength = 0;
+        SIZE_T LastIssuerCertificateLength = 0;
+        bool SawIssuerNameHash = false;
+        bool SawIssuerKeyHash = false;
     };
 
     NTSTATUS TestRevocationProvider(
@@ -6234,6 +6274,14 @@ namespace
 
         ++capture->Calls;
         capture->LastSource = query->PreferredSource;
+        capture->LastOcspRequestLength = query->OcspRequestDerLength;
+        capture->LastIssuerCertificateLength = query->IssuerCertificateDerLength;
+        capture->SawIssuerNameHash = false;
+        capture->SawIssuerKeyHash = false;
+        for (SIZE_T index = 0; index < CertificateSha1ThumbprintLength; ++index) {
+            capture->SawIssuerNameHash = capture->SawIssuerNameHash || query->OcspIssuerNameSha1[index] != 0;
+            capture->SawIssuerKeyHash = capture->SawIssuerKeyHash || query->OcspIssuerKeySha1[index] != 0;
+        }
         if (!NT_SUCCESS(capture->Status)) {
             return capture->Status;
         }
@@ -6282,10 +6330,23 @@ namespace
         bundle.Data = pem;
         bundle.DataLength = pemLength;
 
+        UCHAR ocspGood[TestMaxRevocationEvidenceLength] = {};
+        UCHAR ocspRevoked[TestMaxRevocationEvidenceLength] = {};
+        SIZE_T ocspGoodLength = 0;
+        SIZE_T ocspRevokedLength = 0;
+        Expect(
+            ReadFileBytes(LocalhostOcspGoodPath, ocspGood, sizeof(ocspGood), &ocspGoodLength),
+            "good localhost OCSP response fixture loads for provider test");
+        Expect(
+            ReadFileBytes(LocalhostOcspRevokedPath, ocspRevoked, sizeof(ocspRevoked), &ocspRevokedLength),
+            "revoked localhost OCSP response fixture loads for provider test");
+        if (ocspGoodLength == 0 || ocspRevokedLength == 0) {
+            return;
+        }
+
         RevocationProviderCapture provider = {};
-        provider.Entry.Status = CertificateRevocationStatus::Good;
-        provider.Entry.ThisUpdate = 20200101000000LL;
-        provider.Entry.NextUpdate = 20990101000000LL;
+        provider.Entry.EvidenceDer = ocspGood;
+        provider.Entry.EvidenceDerLength = ocspGoodLength;
 
         CertificateStoreOptions storeOptions = {};
         storeOptions.AuthorityBundles = &bundle;
@@ -6313,19 +6374,249 @@ namespace
         options.RevocationMode = CertificateRevocationMode::StapledOnly;
 
         status = CertificateValidator::ValidateChain(chain, options);
-        ExpectStatus(status, STATUS_SUCCESS, "stapled-only revocation accepts provider OCSP good status");
+        ExpectStatus(status, STATUS_SUCCESS, "stapled-only revocation accepts provider OCSP DER evidence");
         Expect(provider.Calls == 1, "revocation provider called once for OCSP");
         Expect(provider.LastSource == CertificateRevocationSource::Ocsp, "revocation provider receives OCSP source");
+        Expect(provider.LastOcspRequestLength != 0, "revocation provider receives OCSP request DER");
+        Expect(provider.LastIssuerCertificateLength == derLength, "revocation provider receives issuer certificate DER");
+        Expect(provider.SawIssuerNameHash, "revocation provider receives OCSP issuer name hash");
+        Expect(provider.SawIssuerKeyHash, "revocation provider receives OCSP issuer key hash");
 
-        provider.Entry.Status = CertificateRevocationStatus::Revoked;
+        provider.Entry.EvidenceDer = ocspRevoked;
+        provider.Entry.EvidenceDerLength = ocspRevokedLength;
         status = CertificateValidator::ValidateChain(chain, options);
-        ExpectStatus(status, STATUS_TRUST_FAILURE, "revocation provider revoked status fails validation");
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "revocation provider revoked OCSP DER fails validation");
 
-        provider.Entry.Status = CertificateRevocationStatus::Good;
+        provider.Entry.EvidenceDer = ocspGood;
+        provider.Entry.EvidenceDerLength = ocspGoodLength;
         provider.Status = STATUS_NOT_FOUND;
         options.RevocationMode = CertificateRevocationMode::OnlineRequired;
         status = CertificateValidator::ValidateChain(chain, options);
         ExpectStatus(status, STATUS_TRUST_FAILURE, "online-required revocation provider miss fails closed");
+    }
+
+    void TestCertificateParserParsesRevocationEndpoints()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+
+        const bool loaded = LoadPemCertificate(
+            RevocationLeafCertificatePath,
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength);
+        Expect(loaded, "revocation leaf certificate fixture loads for AIA/CDP test");
+        if (!loaded) {
+            return;
+        }
+
+        ParsedCertificate parsed = {};
+        NTSTATUS status = CertificateValidator::ParseCertificate(der, derLength, parsed);
+        ExpectStatus(status, STATUS_SUCCESS, "revocation leaf parses for AIA/CDP test");
+        Expect(parsed.OcspUriCount == 1, "AIA OCSP URI count parses");
+        Expect(parsed.CrlDistributionPointUriCount == 1, "CDP URI count parses");
+
+        const char expectedOcsp[] = "http://ocsp.revocation.test/ocsp";
+        const char expectedCrl[] = "http://crl.revocation.test/root.crl";
+        Expect(
+            parsed.OcspUriCount == 1 &&
+                parsed.OcspUriLengths[0] == sizeof(expectedOcsp) - 1 &&
+                memcmp(parsed.OcspUris[0], expectedOcsp, sizeof(expectedOcsp) - 1) == 0,
+            "AIA OCSP URI bytes parse");
+        Expect(
+            parsed.CrlDistributionPointUriCount == 1 &&
+                parsed.CrlDistributionPointUriLengths[0] == sizeof(expectedCrl) - 1 &&
+                memcmp(parsed.CrlDistributionPointUris[0], expectedCrl, sizeof(expectedCrl) - 1) == 0,
+            "CDP URI bytes parse");
+    }
+
+    void TestCertificateValidationUsesCrlEvidence()
+    {
+        UCHAR caPem[TestMaxPemCertificateLength] = {};
+        UCHAR leafPem[TestMaxPemCertificateLength] = {};
+        UCHAR caDer[TestMaxDerCertificateLength] = {};
+        UCHAR leafDer[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        UCHAR crlGood[TestMaxRevocationEvidenceLength] = {};
+        UCHAR crlRevoked[TestMaxRevocationEvidenceLength] = {};
+        SIZE_T caPemLength = 0;
+        SIZE_T leafPemLength = 0;
+        SIZE_T caDerLength = 0;
+        SIZE_T leafDerLength = 0;
+        SIZE_T certificateListLength = 0;
+        SIZE_T crlGoodLength = 0;
+        SIZE_T crlRevokedLength = 0;
+
+        bool loaded = LoadPemCertificate(
+            RevocationCaCertificatePath,
+            caPem,
+            sizeof(caPem),
+            &caPemLength,
+            caDer,
+            sizeof(caDer),
+            &caDerLength);
+        Expect(loaded, "revocation CA certificate fixture loads for CRL test");
+        loaded = LoadPemCertificate(
+            RevocationLeafCertificatePath,
+            leafPem,
+            sizeof(leafPem),
+            &leafPemLength,
+            leafDer,
+            sizeof(leafDer),
+            &leafDerLength);
+        Expect(loaded, "revocation leaf certificate fixture loads for CRL test");
+        Expect(ReadFileBytes(RevocationCrlGoodPath, crlGood, sizeof(crlGood), &crlGoodLength), "good CRL fixture loads");
+        Expect(
+            ReadFileBytes(RevocationCrlRevokedPath, crlRevoked, sizeof(crlRevoked), &crlRevokedLength),
+            "revoked CRL fixture loads");
+        if (caDerLength == 0 || leafDerLength == 0 || crlGoodLength == 0 || crlRevokedLength == 0) {
+            return;
+        }
+
+        bool rebuilt = RebuildCertificateList(
+            leafDer,
+            leafDerLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        rebuilt = rebuilt && AppendCertificateToList(
+            caDer,
+            caDerLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(rebuilt, "revocation leaf+CA certificate list builds for CRL test");
+        if (!rebuilt) {
+            return;
+        }
+
+        ParsedCertificate leaf = {};
+        ParsedCertificate ca = {};
+        NTSTATUS status = CertificateValidator::ParseCertificate(leafDer, leafDerLength, leaf);
+        ExpectStatus(status, STATUS_SUCCESS, "revocation leaf parses for CRL test");
+        status = CertificateValidator::ParseCertificate(caDer, caDerLength, ca);
+        ExpectStatus(status, STATUS_SUCCESS, "revocation CA parses for CRL test");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateRevocationEntry entries[2] = {};
+        entries[0].IssuerName = leaf.Issuer;
+        entries[0].IssuerNameLength = leaf.IssuerLength;
+        entries[0].SerialNumber = leaf.SerialNumber;
+        entries[0].SerialNumberLength = leaf.SerialNumberLength;
+        entries[0].Source = CertificateRevocationSource::Crl;
+        entries[0].EvidenceDer = crlGood;
+        entries[0].EvidenceDerLength = crlGoodLength;
+
+        entries[1].IssuerName = ca.Issuer;
+        entries[1].IssuerNameLength = ca.IssuerLength;
+        entries[1].SerialNumber = ca.SerialNumber;
+        entries[1].SerialNumberLength = ca.SerialNumberLength;
+        entries[1].Source = CertificateRevocationSource::Crl;
+        entries[1].EvidenceDer = crlGood;
+        entries[1].EvidenceDerLength = crlGoodLength;
+
+        CertificateAuthorityBundle bundle = {};
+        bundle.Data = caPem;
+        bundle.DataLength = caPemLength;
+
+        CertificateStoreOptions storeOptions = {};
+        storeOptions.AuthorityBundles = &bundle;
+        storeOptions.AuthorityBundleCount = 1;
+        storeOptions.RevocationEntries = entries;
+        storeOptions.RevocationEntryCount = 2;
+
+        CertificateStore store;
+        status = store.Initialize(storeOptions);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts CRL DER evidence entries");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 2;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "revocation.local";
+        options.HostNameLength = strlen(options.HostName);
+        options.Store = &store;
+        options.RequireRevocationCheck = true;
+        options.RevocationMode = CertificateRevocationMode::OnlineRequired;
+
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_SUCCESS, "online-required revocation accepts signed fresh CRL evidence");
+
+        entries[0].EvidenceDer = crlRevoked;
+        entries[0].EvidenceDerLength = crlRevokedLength;
+        status = store.Initialize(storeOptions);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts revoked CRL DER evidence entry");
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "online-required revocation rejects CRL containing target serial");
+
+        UCHAR localhostPem[TestMaxPemCertificateLength] = {};
+        UCHAR localhostDer[TestMaxDerCertificateLength] = {};
+        UCHAR localhostList[TestMaxCertificateListLength] = {};
+        SIZE_T localhostPemLength = 0;
+        SIZE_T localhostDerLength = 0;
+        SIZE_T localhostListLength = 0;
+        loaded = LoadLocalhostCertificate(
+            localhostPem,
+            sizeof(localhostPem),
+            &localhostPemLength,
+            localhostDer,
+            sizeof(localhostDer),
+            &localhostDerLength,
+            localhostList,
+            sizeof(localhostList),
+            &localhostListLength);
+        Expect(loaded, "localhost certificate fixture loads for CRL keyUsage rejection");
+        if (!loaded) {
+            return;
+        }
+
+        ParsedCertificate localhost = {};
+        status = CertificateValidator::ParseCertificate(localhostDer, localhostDerLength, localhost);
+        ExpectStatus(status, STATUS_SUCCESS, "localhost parses for CRL keyUsage rejection");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateRevocationEntry missingCrlSign = {};
+        missingCrlSign.IssuerName = localhost.Issuer;
+        missingCrlSign.IssuerNameLength = localhost.IssuerLength;
+        missingCrlSign.SerialNumber = localhost.SerialNumber;
+        missingCrlSign.SerialNumberLength = localhost.SerialNumberLength;
+        missingCrlSign.Source = CertificateRevocationSource::Crl;
+        missingCrlSign.EvidenceDer = crlGood;
+        missingCrlSign.EvidenceDerLength = crlGoodLength;
+
+        CertificateAuthorityBundle localhostBundle = {};
+        localhostBundle.Data = localhostPem;
+        localhostBundle.DataLength = localhostPemLength;
+        storeOptions = {};
+        storeOptions.AuthorityBundles = &localhostBundle;
+        storeOptions.AuthorityBundleCount = 1;
+        storeOptions.RevocationEntries = &missingCrlSign;
+        storeOptions.RevocationEntryCount = 1;
+        status = store.Initialize(storeOptions);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts CRL entry for missing cRLSign test");
+
+        chain.Certificates = localhostList;
+        chain.CertificatesLength = localhostListLength;
+        chain.CertificateCount = 1;
+        options.HostName = "localhost";
+        options.HostNameLength = strlen(options.HostName);
+        options.Store = &store;
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "CRL validation rejects issuer without cRLSign");
     }
 
     void TestCertificateValidationRejectsIdnaHost()
@@ -6806,6 +7097,8 @@ int main()
     TestCertificateValidationMatchesIpAddressSan();
     TestCertificateValidationUsesRevocationCache();
     TestCertificateValidationUsesRevocationProvider();
+    TestCertificateParserParsesRevocationEndpoints();
+    TestCertificateValidationUsesCrlEvidence();
     TestCertificateValidationRejectsIdnaHost();
     TestCertificateValidationRejectsNameConstraintsExtension();
     TestEncodeClientKeyExchange();

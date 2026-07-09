@@ -2411,6 +2411,36 @@ namespace tls
             certificates.CertificateCount,
             certificates.CertificatesLength);
 
+        const UCHAR* stapledOcspResponse = nullptr;
+        SIZE_T stapledOcspResponseLength = 0;
+        status = ReadHandshakeMessage(transport, handshake, true);
+        if (!NT_SUCCESS(status)) {
+            kprintf("TlsConnection read post-Certificate handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            return status;
+        }
+
+        if (handshake.Type == TlsHandshakeType::CertificateStatus) {
+            Tls12CertificateStatusView certificateStatus = {};
+            status = TlsHandshake12::ParseCertificateStatus(handshake, certificateStatus);
+            if (!NT_SUCCESS(status)) {
+                kprintf("TlsConnection parse CertificateStatus failed: 0x%08X body=%Iu\r\n",
+                    static_cast<ULONG>(status),
+                    handshake.BodyLength);
+                return status;
+            }
+
+            stapledOcspResponse = certificateStatus.OcspResponse;
+            stapledOcspResponseLength = certificateStatus.OcspResponseLength;
+            kprintf("TlsConnection CertificateStatus OCSP bytes=%Iu\r\n",
+                stapledOcspResponseLength);
+
+            status = ReadHandshakeMessage(transport, handshake, true);
+            if (!NT_SUCCESS(status)) {
+                kprintf("TlsConnection read post-CertificateStatus handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                return status;
+            }
+        }
+
         CertificateValidationOptions validation = {};
         validation.HostName = options.ServerName;
         validation.HostNameLength = options.ServerNameLength;
@@ -2419,6 +2449,8 @@ namespace tls
         validation.ProviderCache = options.ProviderCache;
         validation.VerifyCertificate = options.VerifyCertificate;
         validation.RequireRevocationCheck = options.Policy.RequireRevocationCheck;
+        validation.StapledOcspResponse = stapledOcspResponse;
+        validation.StapledOcspResponseLength = stapledOcspResponseLength;
 
         HeapObject<CertificateValidationResult> validationResult;
         if (!validationResult.IsValid()) {
@@ -2501,32 +2533,6 @@ namespace tls
         }
 
         bool needsCngPeerKey = false;
-        status = ReadHandshakeMessage(transport, handshake, true);
-        if (!NT_SUCCESS(status)) {
-            kprintf("TlsConnection read post-Certificate handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            return status;
-        }
-
-        if (handshake.Type == TlsHandshakeType::CertificateStatus) {
-            Tls12CertificateStatusView certificateStatus = {};
-            status = TlsHandshake12::ParseCertificateStatus(handshake, certificateStatus);
-            if (!NT_SUCCESS(status)) {
-                kprintf("TlsConnection parse CertificateStatus failed: 0x%08X body=%Iu\r\n",
-                    static_cast<ULONG>(status),
-                    handshake.BodyLength);
-                return status;
-            }
-
-            kprintf("TlsConnection CertificateStatus OCSP bytes=%Iu\r\n",
-                certificateStatus.OcspResponseLength);
-
-            status = ReadHandshakeMessage(transport, handshake, true);
-            if (!NT_SUCCESS(status)) {
-                kprintf("TlsConnection read post-CertificateStatus handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
-                return status;
-            }
-        }
-
         if (serverKeyExchangeKind != Tls12KeyExchangeKind::Rsa) {
             status = TlsHandshake12::ParseServerKeyExchange(context_, handshake, keyExchange);
             if (!NT_SUCCESS(status)) {
@@ -5053,6 +5059,27 @@ namespace tls
             return FinishTls12RenegotiationAttempt(status);
         }
 
+        const UCHAR* stapledOcspResponse = nullptr;
+        SIZE_T stapledOcspResponseLength = 0;
+        status = ReadHandshakeMessage(transport, handshake, true);
+        if (!NT_SUCCESS(status)) {
+            return FinishTls12RenegotiationAttempt(status);
+        }
+
+        if (handshake.Type == TlsHandshakeType::CertificateStatus) {
+            Tls12CertificateStatusView certificateStatus = {};
+            status = TlsHandshake12::ParseCertificateStatus(handshake, certificateStatus);
+            if (!NT_SUCCESS(status)) {
+                return FinishTls12RenegotiationAttempt(status);
+            }
+            stapledOcspResponse = certificateStatus.OcspResponse;
+            stapledOcspResponseLength = certificateStatus.OcspResponseLength;
+            status = ReadHandshakeMessage(transport, handshake, true);
+            if (!NT_SUCCESS(status)) {
+                return FinishTls12RenegotiationAttempt(status);
+            }
+        }
+
         CertificateValidationOptions validation = {};
         validation.HostName = options.ServerName;
         validation.HostNameLength = options.ServerNameLength;
@@ -5061,6 +5088,8 @@ namespace tls
         validation.ProviderCache = options.ProviderCache;
         validation.VerifyCertificate = options.VerifyCertificate;
         validation.RequireRevocationCheck = options.Policy.RequireRevocationCheck;
+        validation.StapledOcspResponse = stapledOcspResponse;
+        validation.StapledOcspResponseLength = stapledOcspResponseLength;
 
         HeapObject<CertificateValidationResult> validationResult;
         if (!validationResult.IsValid()) {
@@ -5138,23 +5167,6 @@ namespace tls
         }
 
         bool needsCngPeerKey = false;
-        status = ReadHandshakeMessage(transport, handshake, true);
-        if (!NT_SUCCESS(status)) {
-            return FinishTls12RenegotiationAttempt(status);
-        }
-
-        if (handshake.Type == TlsHandshakeType::CertificateStatus) {
-            Tls12CertificateStatusView certificateStatus = {};
-            status = TlsHandshake12::ParseCertificateStatus(handshake, certificateStatus);
-            if (!NT_SUCCESS(status)) {
-                return FinishTls12RenegotiationAttempt(status);
-            }
-            status = ReadHandshakeMessage(transport, handshake, true);
-            if (!NT_SUCCESS(status)) {
-                return FinishTls12RenegotiationAttempt(status);
-            }
-        }
-
         if (serverKeyExchangeKind != Tls12KeyExchangeKind::Rsa) {
             status = TlsHandshake12::ParseServerKeyExchange(context_, handshake, keyExchange);
             if (!NT_SUCCESS(status)) {

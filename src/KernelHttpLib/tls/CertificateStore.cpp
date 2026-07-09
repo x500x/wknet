@@ -110,6 +110,8 @@ namespace tls
                 entry.IssuerNameLength == 0 ||
                 !IsValidBuffer(entry.SerialNumber, entry.SerialNumberLength) ||
                 entry.SerialNumberLength == 0 ||
+                !IsValidBuffer(entry.EvidenceDer, entry.EvidenceDerLength) ||
+                entry.EvidenceDerLength == 0 ||
                 !IsValidRevocationSource(entry.Source) ||
                 !IsValidRevocationStatus(entry.Status) ||
                 (entry.NextUpdate != 0 && entry.ThisUpdate > entry.NextUpdate)) {
@@ -260,49 +262,63 @@ namespace tls
     }
 
     NTSTATUS CertificateStore::QueryRevocationProvider(
-        const UCHAR* issuerName,
-        SIZE_T issuerNameLength,
-        const UCHAR* serialNumber,
-        SIZE_T serialNumberLength,
-        CertificateRevocationSource source,
+        const CertificateRevocationProviderQuery& query,
         CertificateRevocationEntry* entry) const noexcept
     {
         if (entry != nullptr) {
             *entry = {};
         }
-        if (!IsValidBuffer(issuerName, issuerNameLength) ||
-            issuerNameLength == 0 ||
-            !IsValidBuffer(serialNumber, serialNumberLength) ||
-            serialNumberLength == 0 ||
-            !IsValidRevocationSource(source) ||
+        if (!IsValidBuffer(query.CertificateDer, query.CertificateDerLength) ||
+            query.CertificateDerLength == 0 ||
+            !IsValidBuffer(query.IssuerCertificateDer, query.IssuerCertificateDerLength) ||
+            query.IssuerCertificateDerLength == 0 ||
+            !IsValidBuffer(query.IssuerName, query.IssuerNameLength) ||
+            query.IssuerNameLength == 0 ||
+            !IsValidBuffer(query.SerialNumber, query.SerialNumberLength) ||
+            query.SerialNumberLength == 0 ||
+            !IsValidBuffer(query.IssuerSubjectPublicKeyInfo, query.IssuerSubjectPublicKeyInfoLength) ||
+            query.IssuerSubjectPublicKeyInfoLength == 0 ||
+            !IsValidBuffer(query.OcspRequestDer, query.OcspRequestDerLength) ||
+            (query.PreferredSource == CertificateRevocationSource::Ocsp && query.OcspRequestDerLength == 0) ||
+            !IsValidRevocationSource(query.PreferredSource) ||
             entry == nullptr) {
             return STATUS_INVALID_PARAMETER;
+        }
+        if (query.OcspUriCount > CertificateMaxRevocationUris ||
+            query.CrlDistributionPointUriCount > CertificateMaxRevocationUris) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        for (SIZE_T index = 0; index < query.OcspUriCount; ++index) {
+            if (query.OcspUris[index] == nullptr || query.OcspUriLengths[index] == 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+        }
+        for (SIZE_T index = 0; index < query.CrlDistributionPointUriCount; ++index) {
+            if (query.CrlDistributionPointUris[index] == nullptr ||
+                query.CrlDistributionPointUriLengths[index] == 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
         }
         if (revocationProvider_ == nullptr) {
             return STATUS_NOT_FOUND;
         }
-
-        CertificateRevocationProviderQuery query = {};
-        query.IssuerName = issuerName;
-        query.IssuerNameLength = issuerNameLength;
-        query.SerialNumber = serialNumber;
-        query.SerialNumberLength = serialNumberLength;
-        query.PreferredSource = source;
 
         NTSTATUS status = revocationProvider_(revocationProviderContext_, &query, entry);
         if (!NT_SUCCESS(status)) {
             *entry = {};
             return status;
         }
-        if (entry->IssuerNameLength != issuerNameLength ||
-            entry->SerialNumberLength != serialNumberLength ||
+        if (entry->IssuerNameLength != query.IssuerNameLength ||
+            entry->SerialNumberLength != query.SerialNumberLength ||
             !IsValidBuffer(entry->IssuerName, entry->IssuerNameLength) ||
             !IsValidBuffer(entry->SerialNumber, entry->SerialNumberLength) ||
+            !IsValidBuffer(entry->EvidenceDer, entry->EvidenceDerLength) ||
+            entry->EvidenceDerLength == 0 ||
             !IsValidRevocationSource(entry->Source) ||
             !IsValidRevocationStatus(entry->Status) ||
-            entry->Source != source ||
-            !MemoryEquals(entry->IssuerName, issuerName, issuerNameLength) ||
-            !MemoryEquals(entry->SerialNumber, serialNumber, serialNumberLength) ||
+            entry->Source != query.PreferredSource ||
+            !MemoryEquals(entry->IssuerName, query.IssuerName, query.IssuerNameLength) ||
+            !MemoryEquals(entry->SerialNumber, query.SerialNumber, query.SerialNumberLength) ||
             (entry->NextUpdate != 0 && entry->ThisUpdate > entry->NextUpdate)) {
             *entry = {};
             return STATUS_INVALID_NETWORK_RESPONSE;

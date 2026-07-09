@@ -8,9 +8,11 @@ namespace KernelHttp
 namespace tls
 {
     constexpr SIZE_T CertificateSha256ThumbprintLength = 32;
+    constexpr SIZE_T CertificateSha1ThumbprintLength = 20;
     constexpr SIZE_T CertificateMaxTrustAnchors = 16;
     constexpr SIZE_T CertificateMaxAuthorityBundles = 8;
     constexpr SIZE_T CertificateMaxRevocationEntries = 32;
+    constexpr SIZE_T CertificateMaxRevocationUris = 4;
 
     struct CertificateTrustAnchor final
     {
@@ -64,14 +66,32 @@ namespace tls
         CertificateRevocationStatus Status = CertificateRevocationStatus::Unknown;
         long long ThisUpdate = 0;
         long long NextUpdate = 0;
+        const UCHAR* EvidenceDer = nullptr;
+        SIZE_T EvidenceDerLength = 0;
     };
 
     struct CertificateRevocationProviderQuery final
     {
+        const UCHAR* CertificateDer = nullptr;
+        SIZE_T CertificateDerLength = 0;
+        const UCHAR* IssuerCertificateDer = nullptr;
+        SIZE_T IssuerCertificateDerLength = 0;
         const UCHAR* IssuerName = nullptr;
         SIZE_T IssuerNameLength = 0;
         const UCHAR* SerialNumber = nullptr;
         SIZE_T SerialNumberLength = 0;
+        const UCHAR* IssuerSubjectPublicKeyInfo = nullptr;
+        SIZE_T IssuerSubjectPublicKeyInfoLength = 0;
+        UCHAR OcspIssuerNameSha1[CertificateSha1ThumbprintLength] = {};
+        UCHAR OcspIssuerKeySha1[CertificateSha1ThumbprintLength] = {};
+        const UCHAR* OcspRequestDer = nullptr;
+        SIZE_T OcspRequestDerLength = 0;
+        const char* OcspUris[CertificateMaxRevocationUris] = {};
+        SIZE_T OcspUriLengths[CertificateMaxRevocationUris] = {};
+        SIZE_T OcspUriCount = 0;
+        const char* CrlDistributionPointUris[CertificateMaxRevocationUris] = {};
+        SIZE_T CrlDistributionPointUriLengths[CertificateMaxRevocationUris] = {};
+        SIZE_T CrlDistributionPointUriCount = 0;
         CertificateRevocationSource PreferredSource = CertificateRevocationSource::Ocsp;
     };
 
@@ -167,11 +187,7 @@ namespace tls
 
         _Must_inspect_result_
         NTSTATUS QueryRevocationProvider(
-            _In_reads_bytes_(issuerNameLength) const UCHAR* issuerName,
-            SIZE_T issuerNameLength,
-            _In_reads_bytes_(serialNumberLength) const UCHAR* serialNumber,
-            SIZE_T serialNumberLength,
-            CertificateRevocationSource source,
+            _In_ const CertificateRevocationProviderQuery& query,
             _Out_ CertificateRevocationEntry* entry) const noexcept;
 
     private:

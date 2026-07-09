@@ -819,6 +819,7 @@ namespace
     {
         static const UCHAR issuerName[] = { 0x30, 0x03, 0x31, 0x01, 0x00 };
         static const UCHAR serialNumber[] = { 0x01, 0x23, 0x45 };
+        static const UCHAR evidenceDer[] = { 0x30, 0x00 };
 
         CertificateRevocationEntry entry = {};
         entry.IssuerName = issuerName;
@@ -826,9 +827,8 @@ namespace
         entry.SerialNumber = serialNumber;
         entry.SerialNumberLength = sizeof(serialNumber);
         entry.Source = CertificateRevocationSource::Ocsp;
-        entry.Status = CertificateRevocationStatus::Good;
-        entry.ThisUpdate = 100;
-        entry.NextUpdate = 200;
+        entry.EvidenceDer = evidenceDer;
+        entry.EvidenceDerLength = sizeof(evidenceDer);
 
         CertificateStoreOptions storeOptions = {};
         storeOptions.RevocationEntries = &entry;
