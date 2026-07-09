@@ -73,6 +73,7 @@
     <ClCompile Include="tls\TlsHandshake13.cpp" />
     <ClCompile Include="tls\TlsPolicy.cpp" />
     <ClCompile Include="tls\TlsRecord.cpp" />
+    <ClCompile Include="websocket\WebSocketDeflate.cpp" />
     <ClCompile Include="websocket\WebSocketFrame.cpp" />
     <ClCompile Include="..\..\third_party\brotli\c\common\constants.c">
       <CompileAs>CompileAsC</CompileAs>
@@ -194,6 +195,7 @@
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsHandshake13.h" />
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsPolicy.h" />
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsRecord.h" />
+    <ClInclude Include="..\..\include\KernelHttp\websocket\WebSocketDeflate.h" />
     <ClInclude Include="..\..\include\KernelHttp\websocket\WebSocketFrame.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

@@ -721,6 +721,7 @@ namespace
         return IsValidTlsOptions(options.Tls) &&
             IsValidAddressFamily(options.AddressFamily) &&
             IsValidWebSocketTransportMode(options.TransportMode) &&
+            websocket::IsValidPerMessageDeflateOptions(options.PerMessageDeflate) &&
             !(options.ChallengeCallback == nullptr && options.ChallengeContext != nullptr) &&
             options.MaxHandshakeRetries <= KhMaxWebSocketHandshakeRetries;
     }

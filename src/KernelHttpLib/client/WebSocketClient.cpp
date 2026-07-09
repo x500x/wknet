@@ -184,6 +184,13 @@ namespace client
         }
 
         _Must_inspect_result_
+        bool IsValidWebSocketConnectOptions(const WebSocketConnectOptions& options) noexcept
+        {
+            return IsValidWebSocketTransportMode(options.TransportMode) &&
+                websocket::IsValidPerMessageDeflateOptions(options.PerMessageDeflate);
+        }
+
+        _Must_inspect_result_
         bool WebSocketModeAllowsHttp2(const WebSocketConnectOptions& options) noexcept
         {
             switch (options.TransportMode) {
@@ -237,6 +244,85 @@ namespace client
             }
 
             return false;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS AppendLiteral(
+            _In_z_ const char* literal,
+            _Out_writes_bytes_(destinationCapacity) char* destination,
+            SIZE_T destinationCapacity,
+            _Inout_ SIZE_T* length) noexcept
+        {
+            if (literal == nullptr || destination == nullptr || length == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            const http::HttpText text = http::MakeText(literal);
+            if (text.Length > destinationCapacity - *length) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            RtlCopyMemory(destination + *length, text.Data, text.Length);
+            *length += text.Length;
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS AppendWindowBits(
+            UCHAR value,
+            _Out_writes_bytes_(destinationCapacity) char* destination,
+            SIZE_T destinationCapacity,
+            _Inout_ SIZE_T* length) noexcept
+        {
+            if (value < websocket::WebSocketDeflateMinWindowBits ||
+                value > websocket::WebSocketDeflateMaxWindowBits ||
+                destination == nullptr ||
+                length == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (destinationCapacity - *length < 2) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            if (value >= 10) {
+                destination[(*length)++] = static_cast<char>('0' + (value / 10));
+            }
+            destination[(*length)++] = static_cast<char>('0' + (value % 10));
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS BuildPerMessageDeflateOffer(
+            const websocket::PerMessageDeflateOptions& options,
+            _Out_writes_bytes_(destinationCapacity) char* destination,
+            SIZE_T destinationCapacity,
+            _Out_ SIZE_T* length) noexcept
+        {
+            if (length != nullptr) {
+                *length = 0;
+            }
+            if (destination == nullptr || length == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (!websocket::IsValidPerMessageDeflateOptions(options) || !options.Enable) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            NTSTATUS status = AppendLiteral("permessage-deflate; client_max_window_bits=", destination, destinationCapacity, length);
+            if (NT_SUCCESS(status)) {
+                status = AppendWindowBits(options.ClientMaxWindowBits, destination, destinationCapacity, length);
+            }
+            if (NT_SUCCESS(status)) {
+                status = AppendLiteral("; server_max_window_bits=", destination, destinationCapacity, length);
+            }
+            if (NT_SUCCESS(status)) {
+                status = AppendWindowBits(options.ServerMaxWindowBits, destination, destinationCapacity, length);
+            }
+            if (NT_SUCCESS(status) && options.ClientNoContextTakeover) {
+                status = AppendLiteral("; client_no_context_takeover", destination, destinationCapacity, length);
+            }
+            if (NT_SUCCESS(status) && options.ServerNoContextTakeover) {
+                status = AppendLiteral("; server_no_context_takeover", destination, destinationCapacity, length);
+            }
+            return status;
         }
 
         _Must_inspect_result_
@@ -526,8 +612,27 @@ namespace client
                 return status;
             }
 
+            const SIZE_T extensionHeaderCount = options.PerMessageDeflate.Enable ? 1 : 0;
+            HeapArray<char> extensionOffer;
+            SIZE_T extensionOfferLength = 0;
+            if (options.PerMessageDeflate.Enable) {
+                status = extensionOffer.Allocate(160);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                status = BuildPerMessageDeflateOffer(
+                    options.PerMessageDeflate,
+                    extensionOffer.Get(),
+                    extensionOffer.Count(),
+                    &extensionOfferLength);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+
             const SIZE_T baseHeaderCount =
-                options.Subprotocol != nullptr && options.SubprotocolLength != 0 ? 4 : 3;
+                (options.Subprotocol != nullptr && options.SubprotocolLength != 0 ? 4 : 3) +
+                extensionHeaderCount;
             const SIZE_T headerCount = baseHeaderCount + options.ExtraHeaderCount;
             HeapArray<http::HttpHeader> headers(headerCount);
             if (!headers.IsValid()) {
@@ -542,6 +647,12 @@ namespace client
                 headers[nextHeader++] = {
                     http::MakeText("Sec-WebSocket-Protocol"),
                     { options.Subprotocol, options.SubprotocolLength }
+                };
+            }
+            if (options.PerMessageDeflate.Enable) {
+                headers[nextHeader++] = {
+                    http::MakeText("Sec-WebSocket-Extensions"),
+                    { extensionOffer.Get(), extensionOfferLength }
                 };
             }
 
@@ -568,6 +679,8 @@ namespace client
         _Must_inspect_result_
         NTSTATUS BuildHttp2WebSocketHeaders(
             _In_ const WebSocketConnectOptions& options,
+            _In_reads_bytes_opt_(extensionOfferLength) const char* extensionOffer,
+            SIZE_T extensionOfferLength,
             _Out_writes_(headerCapacity) http::HttpHeader* headers,
             SIZE_T headerCapacity,
             _Out_writes_bytes_(authorityCapacity) char* authority,
@@ -604,8 +717,16 @@ namespace client
 
             const SIZE_T subprotocolHeaderCount =
                 options.Subprotocol != nullptr && options.SubprotocolLength != 0 ? 1 : 0;
+            const SIZE_T extensionHeaderCount = options.PerMessageDeflate.Enable ? 1 : 0;
+            if (options.PerMessageDeflate.Enable &&
+                (extensionOffer == nullptr || extensionOfferLength == 0)) {
+                return STATUS_INVALID_PARAMETER;
+            }
             const SIZE_T requiredHeaders =
-                WebSocketHttp2BaseHeaderCount + subprotocolHeaderCount + options.ExtraHeaderCount;
+                WebSocketHttp2BaseHeaderCount +
+                subprotocolHeaderCount +
+                extensionHeaderCount +
+                options.ExtraHeaderCount;
             if (headerCapacity < requiredHeaders) {
                 return STATUS_BUFFER_TOO_SMALL;
             }
@@ -622,6 +743,12 @@ namespace client
                 headers[nextHeader++] = {
                     http::MakeText("sec-websocket-protocol"),
                     { options.Subprotocol, options.SubprotocolLength }
+                };
+            }
+            if (options.PerMessageDeflate.Enable) {
+                headers[nextHeader++] = {
+                    http::MakeText("sec-websocket-extensions"),
+                    { extensionOffer, extensionOfferLength }
                 };
             }
 
@@ -677,15 +804,30 @@ namespace client
             SIZE_T headerCount,
             _In_reads_bytes_opt_(requestedSubprotocolLength) const char* requestedSubprotocol,
             SIZE_T requestedSubprotocolLength,
-            _Out_ http::HttpText* selectedSubprotocol) noexcept
+            _Out_ http::HttpText* selectedSubprotocol,
+            _In_opt_ const websocket::PerMessageDeflateOptions* perMessageDeflate,
+            _Out_opt_ websocket::PerMessageDeflateNegotiation* negotiatedDeflate) noexcept
         {
             if (selectedSubprotocol != nullptr) {
                 *selectedSubprotocol = {};
+            }
+            if (negotiatedDeflate != nullptr) {
+                *negotiatedDeflate = {};
             }
             if (statusCode != 200 ||
                 selectedSubprotocol == nullptr ||
                 (headers == nullptr && headerCount != 0)) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            NTSTATUS status = websocket::WebSocketCodec::ValidatePerMessageDeflateExtensions(
+                headers,
+                headerCount,
+                http::MakeText("sec-websocket-extensions"),
+                perMessageDeflate,
+                negotiatedDeflate);
+            if (!NT_SUCCESS(status)) {
+                return status;
             }
 
             bool selectedPresent = false;
@@ -917,6 +1059,10 @@ namespace client
         }
         selectedSubprotocol_.Reset();
         selectedSubprotocolLength_ = 0;
+        perMessageDeflate_ = {};
+        receiveDeflate_.Release();
+        sendCompressedMessage_ = false;
+        receiveCompressedMessage_ = false;
 
         if (connected_) {
             return STATUS_INVALID_DEVICE_STATE;
@@ -938,7 +1084,7 @@ namespace client
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (!IsValidWebSocketTransportMode(options.TransportMode) ||
+        if (!IsValidWebSocketConnectOptions(options) ||
             (WebSocketModeRequiresHttp2(options) && !options.UseTls) ||
             (options.ChallengeCallback == nullptr && options.ChallengeContext != nullptr) ||
             options.MaxHandshakeRetries > WebSocketMaxHandshakeRetries) {
@@ -1242,8 +1388,29 @@ namespace client
 
                 const SIZE_T subprotocolHeaderCount =
                     options.Subprotocol != nullptr && options.SubprotocolLength != 0 ? 1 : 0;
+                const SIZE_T extensionHeaderCount = options.PerMessageDeflate.Enable ? 1 : 0;
+                HeapArray<char> extensionOffer;
+                SIZE_T extensionOfferLength = 0;
+                if (options.PerMessageDeflate.Enable) {
+                    status = extensionOffer.Allocate(160);
+                    if (NT_SUCCESS(status)) {
+                        status = BuildPerMessageDeflateOffer(
+                            options.PerMessageDeflate,
+                            extensionOffer.Get(),
+                            extensionOffer.Count(),
+                            &extensionOfferLength);
+                    }
+                    if (!NT_SUCCESS(status)) {
+                        const NTSTATUS closeStatus = CloseTransport();
+                        UNREFERENCED_PARAMETER(closeStatus);
+                        return status;
+                    }
+                }
                 HeapArray<http::HttpHeader> requestHeaders(
-                    WebSocketHttp2BaseHeaderCount + subprotocolHeaderCount + options.ExtraHeaderCount);
+                    WebSocketHttp2BaseHeaderCount +
+                    subprotocolHeaderCount +
+                    extensionHeaderCount +
+                    options.ExtraHeaderCount);
                 HeapArray<char> authority(options.HostLength + 9);
                 HeapArray<char> lowerHeaderNames;
                 if (lowerHeaderNameBytes != 0) {
@@ -1261,6 +1428,8 @@ namespace client
                 SIZE_T requestHeaderCount = 0;
                 status = BuildHttp2WebSocketHeaders(
                     options,
+                    options.PerMessageDeflate.Enable ? extensionOffer.Get() : nullptr,
+                    extensionOfferLength,
                     requestHeaders.Get(),
                     requestHeaders.Count(),
                     authority.Get(),
@@ -1313,9 +1482,14 @@ namespace client
                     responseHeaderCount,
                     options.Subprotocol,
                     options.SubprotocolLength,
-                    &selectedSubprotocol);
+                    &selectedSubprotocol,
+                    &options.PerMessageDeflate,
+                    &perMessageDeflate_);
                 if (NT_SUCCESS(status)) {
                     status = StoreSelectedSubprotocol(selectedSubprotocol);
+                }
+                if (NT_SUCCESS(status) && perMessageDeflate_.Enabled) {
+                    status = receiveDeflate_.Initialize(perMessageDeflate_.ServerMaxWindowBits);
                 }
                 if (!NT_SUCCESS(status)) {
                     const NTSTATUS closeStatus = CloseTransport();
@@ -1368,6 +1542,7 @@ namespace client
                 clientKeyLength,
                 currentOptions.Subprotocol,
                 currentOptions.SubprotocolLength,
+                currentOptions.PerMessageDeflate,
                 buffers,
                 response);
             if (statusCode != nullptr) {
@@ -1642,7 +1817,7 @@ namespace client
                 sentAnyFrame ? websocket::WebSocketOpcode::Continuation : opcode;
             const UCHAR* chunk = chunkLength != 0 ? message + offset : nullptr;
 
-            const NTSTATUS status = EncodeAndSendFrame(
+            const NTSTATUS status = EncodeAndSendMessageFrame(
                 frameOpcode,
                 chunk,
                 chunkLength,
@@ -1770,6 +1945,19 @@ namespace client
                     const bool dataFrame =
                         header.Opcode == websocket::WebSocketOpcode::Text ||
                         header.Opcode == websocket::WebSocketOpcode::Binary;
+                    const bool controlFrame =
+                        header.Opcode == websocket::WebSocketOpcode::Ping ||
+                        header.Opcode == websocket::WebSocketOpcode::Pong ||
+                        header.Opcode == websocket::WebSocketOpcode::Close;
+                    if (header.Rsv1 &&
+                        (controlFrame ||
+                            header.Opcode == websocket::WebSocketOpcode::Continuation ||
+                            !perMessageDeflate_.Enabled)) {
+                        return FailConnectionWithClose(
+                            WebSocketCloseProtocolError,
+                            buffers,
+                            STATUS_INVALID_NETWORK_RESPONSE);
+                    }
                     if (dataFrame && receiveFragmentOpen_) {
                         return FailConnectionWithClose(
                             WebSocketCloseProtocolError,
@@ -1985,6 +2173,13 @@ namespace client
             const bool dataFrame =
                 header.Opcode == websocket::WebSocketOpcode::Text ||
                 header.Opcode == websocket::WebSocketOpcode::Binary;
+            if (header.Rsv1 &&
+                (!dataFrame || receiveFragmentOpen_ || !perMessageDeflate_.Enabled)) {
+                return FailConnectionWithClose(
+                    WebSocketCloseProtocolError,
+                    buffers,
+                    STATUS_INVALID_NETWORK_RESPONSE);
+            }
             if (dataFrame && receiveFragmentOpen_) {
                 return FailConnectionWithClose(
                     WebSocketCloseProtocolError,
@@ -2038,6 +2233,7 @@ namespace client
 
             if (!receiveFragmentOpen_) {
                 receiveFragmentOpcode_ = header.Opcode;
+                receiveCompressedMessage_ = header.Rsv1;
                 receiveTextUtf8CodePoint_ = 0;
                 receiveTextUtf8Remaining_ = 0;
                 receiveTextUtf8Expected_ = 0;
@@ -2046,7 +2242,7 @@ namespace client
 
             const bool textFragment =
                 receiveFragmentOpcode_ == websocket::WebSocketOpcode::Text;
-            if (textFragment) {
+            if (textFragment && !receiveCompressedMessage_) {
                 status = AdvanceUtf8State(
                     output + outputOffset,
                     fragmentBytes,
@@ -2069,7 +2265,7 @@ namespace client
 
             if (!header.Fin) {
                 receiveFragmentOpen_ = true;
-                if (deliverFragments) {
+                if (deliverFragments && !receiveCompressedMessage_) {
                     *opcode = header.Opcode;
                     *bytesReceived = fragmentBytes;
                     if (finalFragment != nullptr) {
@@ -2078,6 +2274,42 @@ namespace client
                     return STATUS_SUCCESS;
                 }
                 continue;
+            }
+
+            if (receiveCompressedMessage_) {
+                HeapArray<UCHAR> compressedCopy(receiveFragmentLength_ != 0 ? receiveFragmentLength_ : 1);
+                if (!compressedCopy.IsValid()) {
+                    return STATUS_INSUFFICIENT_RESOURCES;
+                }
+                if (receiveFragmentLength_ != 0) {
+                    RtlCopyMemory(compressedCopy.Get(), output, receiveFragmentLength_);
+                }
+
+                SIZE_T inflatedLength = 0;
+                status = receiveDeflate_.InflateMessage(
+                    compressedCopy.Get(),
+                    receiveFragmentLength_,
+                    output,
+                    outputCapacity,
+                    &inflatedLength);
+                if (!NT_SUCCESS(status)) {
+                    return FailConnectionWithClose(
+                        status == STATUS_BUFFER_TOO_SMALL ? WebSocketCloseMessageTooBig : WebSocketCloseProtocolError,
+                        buffers,
+                        status);
+                }
+                receiveFragmentLength_ = inflatedLength;
+                if (perMessageDeflate_.ServerNoContextTakeover) {
+                    receiveDeflate_.ResetHistory();
+                }
+                if (receiveFragmentOpcode_ == websocket::WebSocketOpcode::Text) {
+                    if (!IsValidUtf8(output, receiveFragmentLength_)) {
+                        return FailConnectionWithClose(
+                            WebSocketCloseInvalidPayload,
+                            buffers,
+                            STATUS_INVALID_NETWORK_RESPONSE);
+                    }
+                }
             }
 
             if (!deliverFragments &&
@@ -2164,7 +2396,7 @@ namespace client
                 continue;
             }
 
-            if (header.Masked) {
+            if (header.Masked || header.Rsv1) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
@@ -2310,6 +2542,10 @@ namespace client
         const NTSTATUS closeStatus = CloseTransport();
         selectedSubprotocol_.Reset();
         selectedSubprotocolLength_ = 0;
+        perMessageDeflate_ = {};
+        receiveDeflate_.Release();
+        sendCompressedMessage_ = false;
+        receiveCompressedMessage_ = false;
         if (NT_SUCCESS(closeStatus) &&
             !NT_SUCCESS(waitStatus) &&
             !IsConnectionTerminalStatus(waitStatus) &&
@@ -2416,6 +2652,7 @@ namespace client
     void WebSocketClient::ResetReceiveFragment() noexcept
     {
         receiveFragmentOpen_ = false;
+        receiveCompressedMessage_ = false;
         receiveFragmentOpcode_ = websocket::WebSocketOpcode::Continuation;
         receiveFragmentLength_ = 0;
         receiveTextUtf8CodePoint_ = 0;
@@ -2426,6 +2663,7 @@ namespace client
     void WebSocketClient::ResetSendFragment() noexcept
     {
         sendFragmentOpen_ = false;
+        sendCompressedMessage_ = false;
         sendFragmentOpcode_ = websocket::WebSocketOpcode::Continuation;
         sendTextUtf8CodePoint_ = 0;
         sendTextUtf8Remaining_ = 0;
@@ -2467,13 +2705,15 @@ namespace client
         const UCHAR* payload,
         SIZE_T payloadLength,
         const WebSocketIoBuffers& buffers,
-        bool finalFragment) noexcept
+        bool finalFragment,
+        bool rsv1) noexcept
     {
         if (h2Connection_ != nullptr && h2Transport_ != nullptr && h2StreamId_ != 0) {
             SIZE_T frameLength = 0;
             NTSTATUS status = websocket::WebSocketCodec::EncodeClientFrameForHttp2(
                 opcode,
                 finalFragment,
+                rsv1,
                 payload,
                 payloadLength,
                 buffers.FrameBuffer,
@@ -2505,6 +2745,7 @@ namespace client
             status = websocket::WebSocketCodec::EncodeClientFrame(
                 opcode,
                 finalFragment,
+                rsv1,
                 payload,
                 payloadLength,
                 maskingKey.Get(),
@@ -2526,6 +2767,71 @@ namespace client
             closeReceived_ = true;
             const NTSTATUS closeStatus = CloseTransport();
             UNREFERENCED_PARAMETER(closeStatus);
+        }
+        return status;
+    }
+
+    NTSTATUS WebSocketClient::EncodeAndSendMessageFrame(
+        websocket::WebSocketOpcode opcode,
+        const UCHAR* payload,
+        SIZE_T payloadLength,
+        const WebSocketIoBuffers& buffers,
+        bool finalFragment) noexcept
+    {
+        const bool dataFrame =
+            opcode == websocket::WebSocketOpcode::Text ||
+            opcode == websocket::WebSocketOpcode::Binary;
+        const bool continuation = opcode == websocket::WebSocketOpcode::Continuation;
+        const bool compressed =
+            perMessageDeflate_.Enabled &&
+            (dataFrame || (continuation && sendCompressedMessage_));
+
+        if (!compressed) {
+            return EncodeAndSendFrame(opcode, payload, payloadLength, buffers, finalFragment);
+        }
+
+        const SIZE_T required = websocket::WebSocketDeflateContext::MaxStoredDeflateBytes(
+            payloadLength,
+            finalFragment);
+        if (required == static_cast<SIZE_T>(-1)) {
+            return STATUS_INTEGER_OVERFLOW;
+        }
+
+        HeapArray<UCHAR> compressedPayload(required != 0 ? required : 1);
+        if (!compressedPayload.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        SIZE_T compressedLength = 0;
+        NTSTATUS status = websocket::WebSocketDeflateContext::DeflateMessage(
+            payload,
+            payloadLength,
+            finalFragment,
+            compressedPayload.Get(),
+            compressedPayload.Count(),
+            &compressedLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        const bool rsv1 = dataFrame && !sendCompressedMessage_;
+        status = EncodeAndSendFrame(
+            opcode,
+            compressedLength != 0 ? compressedPayload.Get() : nullptr,
+            compressedLength,
+            buffers,
+            finalFragment,
+            rsv1);
+        if (NT_SUCCESS(status)) {
+            if (finalFragment) {
+                sendCompressedMessage_ = false;
+            }
+            else if (dataFrame) {
+                sendCompressedMessage_ = true;
+            }
+        }
+        if (perMessageDeflate_.ClientNoContextTakeover && finalFragment) {
+            sendCompressedMessage_ = false;
         }
         return status;
     }
@@ -2711,6 +3017,7 @@ namespace client
         SIZE_T clientKeyLength,
         const char* requestedSubprotocol,
         SIZE_T requestedSubprotocolLength,
+        const websocket::PerMessageDeflateOptions& perMessageDeflate,
         const WebSocketIoBuffers& buffers,
         http::HttpResponse& response) noexcept
     {
@@ -2744,12 +3051,17 @@ namespace client
                     clientKeyLength,
                     requestedSubprotocol,
                     requestedSubprotocolLength,
-                    &selectedSubprotocol);
+                    &selectedSubprotocol,
+                    &perMessageDeflate,
+                    &perMessageDeflate_);
                 if (!NT_SUCCESS(status)) {
                     return status;
                 }
 
                 status = StoreSelectedSubprotocol(selectedSubprotocol);
+                if (NT_SUCCESS(status) && perMessageDeflate_.Enabled) {
+                    status = receiveDeflate_.Initialize(perMessageDeflate_.ServerMaxWindowBits);
+                }
                 if (!NT_SUCCESS(status)) {
                     response = {};
                     return status;

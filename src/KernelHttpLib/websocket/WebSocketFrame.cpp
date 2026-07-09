@@ -264,6 +264,185 @@ namespace websocket
         }
 
         _Must_inspect_result_
+        bool ParseWindowBits(http::HttpText text, UCHAR* windowBits) noexcept
+        {
+            if (windowBits == nullptr) {
+                return false;
+            }
+            text = TrimOptionalWhitespace(text);
+            if (text.Length == 0 || text.Length > 2 || text.Data == nullptr) {
+                return false;
+            }
+
+            ULONG value = 0;
+            for (SIZE_T index = 0; index < text.Length; ++index) {
+                const char ch = text.Data[index];
+                if (ch < '0' || ch > '9') {
+                    return false;
+                }
+                value = (value * 10) + static_cast<ULONG>(ch - '0');
+            }
+
+            if (value < WebSocketDeflateMinWindowBits ||
+                value > WebSocketDeflateMaxWindowBits) {
+                return false;
+            }
+            *windowBits = static_cast<UCHAR>(value);
+            return true;
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ParsePerMessageDeflateResponse(
+            _In_ http::HttpText value,
+            _In_ const PerMessageDeflateOptions& requested,
+            _Out_ PerMessageDeflateNegotiation& negotiated) noexcept
+        {
+            negotiated = {};
+            negotiated.ClientMaxWindowBits = WebSocketDeflateMaxWindowBits;
+            negotiated.ServerMaxWindowBits = WebSocketDeflateMaxWindowBits;
+
+            bool extensionSeen = false;
+            bool clientNoContextSeen = false;
+            bool serverNoContextSeen = false;
+            bool clientWindowSeen = false;
+            bool serverWindowSeen = false;
+
+            SIZE_T cursor = 0;
+            while (cursor <= value.Length) {
+                const SIZE_T itemStart = cursor;
+                while (cursor < value.Length && value.Data[cursor] != ',') {
+                    ++cursor;
+                }
+
+                http::HttpText item = { value.Data + itemStart, cursor - itemStart };
+                item = TrimOptionalWhitespace(item);
+                if (item.Length == 0) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+
+                SIZE_T partCursor = 0;
+                const SIZE_T extensionStart = partCursor;
+                while (partCursor < item.Length && item.Data[partCursor] != ';') {
+                    ++partCursor;
+                }
+                http::HttpText extension = {
+                    item.Data + extensionStart,
+                    partCursor - extensionStart
+                };
+                extension = TrimOptionalWhitespace(extension);
+
+                if (!http::TextEqualsIgnoreCase(extension, http::MakeText("permessage-deflate"))) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                if (extensionSeen) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                extensionSeen = true;
+
+                while (partCursor < item.Length) {
+                    if (item.Data[partCursor] != ';') {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    ++partCursor;
+                    const SIZE_T paramStart = partCursor;
+                    while (partCursor < item.Length && item.Data[partCursor] != ';') {
+                        ++partCursor;
+                    }
+
+                    http::HttpText parameter = {
+                        item.Data + paramStart,
+                        partCursor - paramStart
+                    };
+                    parameter = TrimOptionalWhitespace(parameter);
+                    if (parameter.Length == 0) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+
+                    SIZE_T equals = 0;
+                    while (equals < parameter.Length && parameter.Data[equals] != '=') {
+                        ++equals;
+                    }
+                    http::HttpText name = { parameter.Data, equals };
+                    name = TrimOptionalWhitespace(name);
+                    http::HttpText parameterValue = {};
+                    if (equals < parameter.Length) {
+                        parameterValue = {
+                            parameter.Data + equals + 1,
+                            parameter.Length - equals - 1
+                        };
+                        parameterValue = TrimOptionalWhitespace(parameterValue);
+                    }
+
+                    if (http::TextEqualsIgnoreCase(name, http::MakeText("client_no_context_takeover"))) {
+                        if (clientNoContextSeen || parameterValue.Length != 0) {
+                            return STATUS_INVALID_NETWORK_RESPONSE;
+                        }
+                        clientNoContextSeen = true;
+                        negotiated.ClientNoContextTakeover = true;
+                    }
+                    else if (http::TextEqualsIgnoreCase(name, http::MakeText("server_no_context_takeover"))) {
+                        if (serverNoContextSeen || parameterValue.Length != 0) {
+                            return STATUS_INVALID_NETWORK_RESPONSE;
+                        }
+                        serverNoContextSeen = true;
+                        negotiated.ServerNoContextTakeover = true;
+                    }
+                    else if (http::TextEqualsIgnoreCase(name, http::MakeText("client_max_window_bits"))) {
+                        if (clientWindowSeen || parameterValue.Length == 0) {
+                            return STATUS_INVALID_NETWORK_RESPONSE;
+                        }
+                        UCHAR bits = 0;
+                        if (!ParseWindowBits(parameterValue, &bits) ||
+                            bits > requested.ClientMaxWindowBits) {
+                            return STATUS_INVALID_NETWORK_RESPONSE;
+                        }
+                        clientWindowSeen = true;
+                        negotiated.ClientMaxWindowBits = bits;
+                    }
+                    else if (http::TextEqualsIgnoreCase(name, http::MakeText("server_max_window_bits"))) {
+                        if (serverWindowSeen || parameterValue.Length == 0) {
+                            return STATUS_INVALID_NETWORK_RESPONSE;
+                        }
+                        UCHAR bits = 0;
+                        if (!ParseWindowBits(parameterValue, &bits) ||
+                            bits > requested.ServerMaxWindowBits) {
+                            return STATUS_INVALID_NETWORK_RESPONSE;
+                        }
+                        serverWindowSeen = true;
+                        negotiated.ServerMaxWindowBits = bits;
+                    }
+                    else {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                }
+
+                if (cursor == value.Length) {
+                    break;
+                }
+                ++cursor;
+            }
+
+            if (!extensionSeen) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            negotiated.Enabled = true;
+            if (!clientWindowSeen) {
+                negotiated.ClientMaxWindowBits = requested.ClientMaxWindowBits;
+            }
+            if (!serverWindowSeen) {
+                negotiated.ServerMaxWindowBits = requested.ServerMaxWindowBits;
+            }
+            if (requested.ClientNoContextTakeover) {
+                negotiated.ClientNoContextTakeover = true;
+            }
+            if (requested.ServerNoContextTakeover) {
+                negotiated.ServerNoContextTakeover = true;
+            }
+            return STATUS_SUCCESS;
+        }
+
+        _Must_inspect_result_
         NTSTATUS ValidateSelectedSubprotocol(
             _In_ http::HttpText selected,
             _In_ http::HttpText requested) noexcept
@@ -352,6 +531,7 @@ namespace websocket
         NTSTATUS EncodeFrame(
             WebSocketOpcode opcode,
             bool fin,
+            bool rsv1,
             const UCHAR* payload,
             SIZE_T payloadLength,
             const UCHAR* maskingKey,
@@ -375,6 +555,9 @@ namespace websocket
             }
 
             if (IsControlOpcode(opcode) && (!fin || payloadLength > WebSocketMaxControlPayloadLength)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (rsv1 && (opcode == WebSocketOpcode::Continuation || IsControlOpcode(opcode))) {
                 return STATUS_INVALID_PARAMETER;
             }
 
@@ -403,7 +586,10 @@ namespace websocket
             }
 
             SIZE_T cursor = 0;
-            destination[cursor++] = static_cast<UCHAR>((fin ? 0x80 : 0x00) | static_cast<UCHAR>(opcode));
+            destination[cursor++] = static_cast<UCHAR>(
+                (fin ? 0x80 : 0x00) |
+                (rsv1 ? 0x40 : 0x00) |
+                static_cast<UCHAR>(opcode));
 
             NTSTATUS status = WritePayloadLength(payloadLength, masked, destination, destinationCapacity, &cursor);
             if (!NT_SUCCESS(status)) {
@@ -554,13 +740,63 @@ namespace websocket
         return status;
     }
 
+    NTSTATUS WebSocketCodec::ValidatePerMessageDeflateExtensions(
+        const http::HttpHeader* headers,
+        SIZE_T headerCount,
+        http::HttpText headerName,
+        const PerMessageDeflateOptions* perMessageDeflate,
+        PerMessageDeflateNegotiation* negotiatedDeflate) noexcept
+    {
+        if (negotiatedDeflate != nullptr) {
+            *negotiatedDeflate = {};
+        }
+
+        if (headers == nullptr && headerCount != 0) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        const http::HttpHeader* extension = nullptr;
+        SIZE_T extensionHeaderCount = 0;
+        for (SIZE_T index = 0; index < headerCount; ++index) {
+            if (!http::TextEqualsIgnoreCase(headers[index].Name, headerName)) {
+                continue;
+            }
+            ++extensionHeaderCount;
+            extension = &headers[index];
+        }
+        if (extensionHeaderCount > 1) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (extensionHeaderCount == 1) {
+            if (perMessageDeflate == nullptr ||
+                !perMessageDeflate->Enable ||
+                !IsValidPerMessageDeflateOptions(*perMessageDeflate) ||
+                negotiatedDeflate == nullptr ||
+                extension == nullptr) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+
+            NTSTATUS extensionStatus = ParsePerMessageDeflateResponse(
+                extension->Value,
+                *perMessageDeflate,
+                *negotiatedDeflate);
+            if (!NT_SUCCESS(extensionStatus)) {
+                return extensionStatus;
+            }
+        }
+
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS WebSocketCodec::ValidateServerHandshake(
         const http::HttpResponse& response,
         const char* clientKey,
         SIZE_T clientKeyLength,
         const char* requestedSubprotocol,
         SIZE_T requestedSubprotocolLength,
-        http::HttpText* selectedSubprotocol) noexcept
+        http::HttpText* selectedSubprotocol,
+        const PerMessageDeflateOptions* perMessageDeflate,
+        PerMessageDeflateNegotiation* negotiatedDeflate) noexcept
     {
         if (selectedSubprotocol != nullptr) {
             *selectedSubprotocol = {};
@@ -581,9 +817,14 @@ namespace websocket
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
-        const http::HttpHeader* extensions = nullptr;
-        if (response.FindHeader(http::MakeText("Sec-WebSocket-Extensions"), &extensions)) {
-            return STATUS_INVALID_NETWORK_RESPONSE;
+        NTSTATUS status = ValidatePerMessageDeflateExtensions(
+            response.Headers,
+            response.HeaderCount,
+            http::MakeText("Sec-WebSocket-Extensions"),
+            perMessageDeflate,
+            negotiatedDeflate);
+        if (!NT_SUCCESS(status)) {
+            return status;
         }
 
         HeapArray<char> expected(WebSocketAcceptValueLength);
@@ -592,7 +833,7 @@ namespace websocket
         }
 
         SIZE_T expectedLength = 0;
-        NTSTATUS status = ComputeAcceptValue(
+        status = ComputeAcceptValue(
             clientKey,
             clientKeyLength,
             expected.Get(),
@@ -639,9 +880,33 @@ namespace websocket
         SIZE_T destinationCapacity,
         SIZE_T* bytesWritten) noexcept
     {
+        return EncodeClientFrame(
+            opcode,
+            fin,
+            false,
+            payload,
+            payloadLength,
+            maskingKey,
+            destination,
+            destinationCapacity,
+            bytesWritten);
+    }
+
+    NTSTATUS WebSocketCodec::EncodeClientFrame(
+        WebSocketOpcode opcode,
+        bool fin,
+        bool rsv1,
+        const UCHAR* payload,
+        SIZE_T payloadLength,
+        const UCHAR* maskingKey,
+        UCHAR* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* bytesWritten) noexcept
+    {
         return EncodeFrame(
             opcode,
             fin,
+            rsv1,
             payload,
             payloadLength,
             maskingKey,
@@ -660,9 +925,31 @@ namespace websocket
         SIZE_T destinationCapacity,
         SIZE_T* bytesWritten) noexcept
     {
+        return EncodeClientFrameForHttp2(
+            opcode,
+            fin,
+            false,
+            payload,
+            payloadLength,
+            destination,
+            destinationCapacity,
+            bytesWritten);
+    }
+
+    NTSTATUS WebSocketCodec::EncodeClientFrameForHttp2(
+        WebSocketOpcode opcode,
+        bool fin,
+        bool rsv1,
+        const UCHAR* payload,
+        SIZE_T payloadLength,
+        UCHAR* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* bytesWritten) noexcept
+    {
         return EncodeFrame(
             opcode,
             fin,
+            rsv1,
             payload,
             payloadLength,
             nullptr,
@@ -691,7 +978,7 @@ namespace websocket
 
         const UCHAR first = data[0];
         const UCHAR second = data[1];
-        if ((first & 0x70) != 0) {
+        if ((first & 0x30) != 0) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
@@ -723,6 +1010,7 @@ namespace websocket
         }
 
         header->Fin = (first & 0x80) != 0;
+        header->Rsv1 = (first & 0x40) != 0;
         header->Masked = masked;
         header->Opcode = opcode;
         header->PayloadLength = payloadLength;

@@ -236,6 +236,9 @@
     <ClCompile Include="tls\TlsRecord.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
+    <ClCompile Include="websocket\WebSocketDeflate.cpp">
+      <Filter>Source Files\websocket</Filter>
+    </ClCompile>
     <ClCompile Include="websocket\WebSocketFrame.cpp">
       <Filter>Source Files\websocket</Filter>
     </ClCompile>
@@ -480,6 +483,9 @@
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\tls\TlsRecord.h">
       <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\KernelHttp\websocket\WebSocketDeflate.h">
+      <Filter>Header Files\websocket</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\websocket\WebSocketFrame.h">
       <Filter>Header Files\websocket</Filter>

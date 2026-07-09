@@ -2,6 +2,7 @@
 
 #include <KernelHttp/crypto/CngProvider.h>
 #include <KernelHttp/http/HttpResponse.h>
+#include <KernelHttp/websocket/WebSocketDeflate.h>
 
 namespace KernelHttp
 {
@@ -27,6 +28,7 @@ namespace websocket
     struct WebSocketFrameHeader final
     {
         bool Fin = false;
+        bool Rsv1 = false;
         bool Masked = false;
         WebSocketOpcode Opcode = WebSocketOpcode::Continuation;
         ULONGLONG PayloadLength = 0;
@@ -60,7 +62,17 @@ namespace websocket
             SIZE_T clientKeyLength,
             _In_reads_bytes_opt_(requestedSubprotocolLength) const char* requestedSubprotocol = nullptr,
             SIZE_T requestedSubprotocolLength = 0,
-            _Out_opt_ http::HttpText* selectedSubprotocol = nullptr) noexcept;
+            _Out_opt_ http::HttpText* selectedSubprotocol = nullptr,
+            _In_opt_ const PerMessageDeflateOptions* perMessageDeflate = nullptr,
+            _Out_opt_ PerMessageDeflateNegotiation* negotiatedDeflate = nullptr) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS ValidatePerMessageDeflateExtensions(
+            _In_reads_opt_(headerCount) const http::HttpHeader* headers,
+            SIZE_T headerCount,
+            _In_ http::HttpText headerName,
+            _In_opt_ const PerMessageDeflateOptions* perMessageDeflate,
+            _Out_opt_ PerMessageDeflateNegotiation* negotiatedDeflate) noexcept;
 
         _Must_inspect_result_
         static NTSTATUS EncodeClientFrame(
@@ -74,9 +86,32 @@ namespace websocket
             _Out_opt_ SIZE_T* bytesWritten = nullptr) noexcept;
 
         _Must_inspect_result_
+        static NTSTATUS EncodeClientFrame(
+            WebSocketOpcode opcode,
+            bool fin,
+            bool rsv1,
+            _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
+            SIZE_T payloadLength,
+            _In_reads_bytes_(WebSocketMaskingKeyLength) const UCHAR* maskingKey,
+            _Out_writes_bytes_(destinationCapacity) UCHAR* destination,
+            SIZE_T destinationCapacity,
+            _Out_opt_ SIZE_T* bytesWritten = nullptr) noexcept;
+
+        _Must_inspect_result_
         static NTSTATUS EncodeClientFrameForHttp2(
             WebSocketOpcode opcode,
             bool fin,
+            _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
+            SIZE_T payloadLength,
+            _Out_writes_bytes_(destinationCapacity) UCHAR* destination,
+            SIZE_T destinationCapacity,
+            _Out_opt_ SIZE_T* bytesWritten = nullptr) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS EncodeClientFrameForHttp2(
+            WebSocketOpcode opcode,
+            bool fin,
+            bool rsv1,
             _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
             SIZE_T payloadLength,
             _Out_writes_bytes_(destinationCapacity) UCHAR* destination,

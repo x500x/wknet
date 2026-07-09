@@ -23,6 +23,7 @@ namespace
         dst.AutoReplyPing = src.AutoReplyPing;
         dst.AllowWebSocketOverHttp2 = src.AllowWebSocketOverHttp2;
         dst.TransportMode = khttp::detail::ToApiWebSocketTransportMode(src.TransportMode);
+        dst.PerMessageDeflate = src.PerMessageDeflate;
         dst.ChallengeCallback = src.ChallengeCallback;
         dst.ChallengeContext = src.ChallengeContext;
         dst.MaxHandshakeRetries = src.MaxHandshakeRetries;

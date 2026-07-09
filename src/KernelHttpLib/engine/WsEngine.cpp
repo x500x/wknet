@@ -92,6 +92,77 @@ namespace engine
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS AppendWebSocketLiteral(
+        const char* literal,
+        char* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* length) noexcept
+    {
+        if (literal == nullptr || destination == nullptr || length == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        const http::HttpText text = http::MakeText(literal);
+        if (text.Length > destinationCapacity - *length) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        RtlCopyMemory(destination + *length, text.Data, text.Length);
+        *length += text.Length;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS AppendWebSocketWindowBits(
+        UCHAR value,
+        char* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* length) noexcept
+    {
+        if (value < websocket::WebSocketDeflateMinWindowBits ||
+            value > websocket::WebSocketDeflateMaxWindowBits ||
+            destination == nullptr ||
+            length == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (destinationCapacity - *length < 2) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        if (value >= 10) {
+            destination[(*length)++] = static_cast<char>('0' + (value / 10));
+        }
+        destination[(*length)++] = static_cast<char>('0' + (value % 10));
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS BuildWebSocketDeflateOffer(
+        const websocket::PerMessageDeflateOptions& options,
+        char* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* length) noexcept
+    {
+        if (length != nullptr) {
+            *length = 0;
+        }
+        if (destination == nullptr || length == nullptr || !options.Enable) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        NTSTATUS status = AppendWebSocketLiteral("permessage-deflate; client_max_window_bits=", destination, destinationCapacity, length);
+        if (NT_SUCCESS(status)) {
+            status = AppendWebSocketWindowBits(options.ClientMaxWindowBits, destination, destinationCapacity, length);
+        }
+        if (NT_SUCCESS(status)) {
+            status = AppendWebSocketLiteral("; server_max_window_bits=", destination, destinationCapacity, length);
+        }
+        if (NT_SUCCESS(status)) {
+            status = AppendWebSocketWindowBits(options.ServerMaxWindowBits, destination, destinationCapacity, length);
+        }
+        if (NT_SUCCESS(status) && options.ClientNoContextTakeover) {
+            status = AppendWebSocketLiteral("; client_no_context_takeover", destination, destinationCapacity, length);
+        }
+        if (NT_SUCCESS(status) && options.ServerNoContextTakeover) {
+            status = AppendWebSocketLiteral("; server_no_context_takeover", destination, destinationCapacity, length);
+        }
+        return status;
+    }
+
     _Must_inspect_result_
     NTSTATUS BuildWebSocketHandshakeRequest(
         const KhWebSocket& websocket,
@@ -141,7 +212,23 @@ namespace engine
             return status;
         }
 
-        HeapArray<http::HttpHeader> headers(4 + KhMaxHeadersPerRequest);
+        HeapArray<char> extensionOffer;
+        SIZE_T extensionOfferLength = 0;
+        if (websocket.PerMessageDeflate.Enable) {
+            status = extensionOffer.Allocate(160);
+            if (NT_SUCCESS(status)) {
+                status = BuildWebSocketDeflateOffer(
+                    websocket.PerMessageDeflate,
+                    extensionOffer.Get(),
+                    extensionOffer.Count(),
+                    &extensionOfferLength);
+            }
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        HeapArray<http::HttpHeader> headers(5 + KhMaxHeadersPerRequest);
         if (!headers.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -154,6 +241,12 @@ namespace engine
             headers[headerCount++] = {
                 http::MakeText("Sec-WebSocket-Protocol"),
                 { websocket.Subprotocol, websocket.SubprotocolLength }
+            };
+        }
+        if (websocket.PerMessageDeflate.Enable) {
+            headers[headerCount++] = {
+                http::MakeText("Sec-WebSocket-Extensions"),
+                { extensionOffer.Get(), extensionOfferLength }
             };
         }
 
@@ -715,6 +808,7 @@ namespace engine
         newWebSocket->UrlLength = options.UrlLength;
         newWebSocket->MaxMessageBytes = options.MaxMessageBytes;
         newWebSocket->AutoReplyPing = options.AutoReplyPing;
+        newWebSocket->PerMessageDeflate = options.PerMessageDeflate;
         newWebSocket->InFlight = 0;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         KeInitializeMutex(&newWebSocket->SendLock, 0);
@@ -857,6 +951,7 @@ namespace engine
         testRequest.MaxMessageBytes = newWebSocket->MaxMessageBytes;
         testRequest.AllowWebSocketOverHttp2 = options.AllowWebSocketOverHttp2;
         testRequest.TransportMode = options.TransportMode;
+        testRequest.PerMessageDeflate = options.PerMessageDeflate;
 
         status = g_testWebSocketConnect(g_testWebSocketTransportContext, &testRequest);
         if (!NT_SUCCESS(status)) {
@@ -963,6 +1058,7 @@ namespace engine
         connectOptions.VerifyCertificate = effectiveTls.CertificatePolicy == KhCertificatePolicy::Verify;
         connectOptions.AllowWebSocketOverHttp2 = options.AllowWebSocketOverHttp2;
         connectOptions.TransportMode = ToClientWebSocketTransportMode(options.TransportMode);
+        connectOptions.PerMessageDeflate = options.PerMessageDeflate;
         WebSocketChallengeBridgeContext challengeBridge = {};
         if (options.ChallengeCallback != nullptr) {
             challengeBridge.Callback = options.ChallengeCallback;

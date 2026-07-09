@@ -6,6 +6,7 @@
 #include <KernelHttp/KernelHttpLimits.h>
 #include <KernelHttp/net/WskClient.h>
 #include <KernelHttp/tls/TlsPolicy.h>
+#include <KernelHttp/websocket/WebSocketDeflate.h>
 
 namespace KernelHttp
 {
@@ -355,6 +356,7 @@ namespace engine
         bool AutoReplyPing = true;
         bool AllowWebSocketOverHttp2 = false;
         KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::LegacyBoolean;
+        websocket::PerMessageDeflateOptions PerMessageDeflate = {};
         KhWebSocketHandshakeChallengeCallback ChallengeCallback = nullptr;
         void* ChallengeContext = nullptr;
         ULONG MaxHandshakeRetries = 0;
@@ -765,6 +767,7 @@ namespace engine
         ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;
         bool AllowWebSocketOverHttp2 = false;
         KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::LegacyBoolean;
+        websocket::PerMessageDeflateOptions PerMessageDeflate = {};
     };
 
     struct KhTestWebSocketMessage final

@@ -88,6 +88,7 @@ namespace client
         bool VerifyCertificate = true;
         bool AllowWebSocketOverHttp2 = false;
         WebSocketTransportMode TransportMode = WebSocketTransportMode::LegacyBoolean;
+        websocket::PerMessageDeflateOptions PerMessageDeflate = {};
         WebSocketHandshakeChallengeCallback ChallengeCallback = nullptr;
         void* ChallengeContext = nullptr;
         ULONG MaxHandshakeRetries = 0;
@@ -247,6 +248,15 @@ namespace client
             _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
             SIZE_T payloadLength,
             _In_ const WebSocketIoBuffers& buffers,
+            bool finalFragment,
+            bool rsv1 = false) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS EncodeAndSendMessageFrame(
+            websocket::WebSocketOpcode opcode,
+            _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
+            SIZE_T payloadLength,
+            _In_ const WebSocketIoBuffers& buffers,
             bool finalFragment) noexcept;
 
         NTSTATUS FailConnectionWithClose(
@@ -280,6 +290,7 @@ namespace client
             SIZE_T clientKeyLength,
             _In_reads_bytes_opt_(requestedSubprotocolLength) const char* requestedSubprotocol,
             SIZE_T requestedSubprotocolLength,
+            _In_ const websocket::PerMessageDeflateOptions& perMessageDeflate,
             _In_ const WebSocketIoBuffers& buffers,
             _Out_ http::HttpResponse& response) noexcept;
 
@@ -306,6 +317,10 @@ namespace client
         bool closeSent_ = false;
         bool closeReceived_ = false;
         bool receiveFragmentOpen_ = false;
+        bool receiveCompressedMessage_ = false;
+        bool sendCompressedMessage_ = false;
+        websocket::PerMessageDeflateNegotiation perMessageDeflate_ = {};
+        websocket::WebSocketDeflateContext receiveDeflate_ = {};
         websocket::WebSocketOpcode receiveFragmentOpcode_ = websocket::WebSocketOpcode::Continuation;
         SIZE_T receiveFragmentLength_ = 0;
         ULONG receiveTextUtf8CodePoint_ = 0;

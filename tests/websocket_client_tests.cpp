@@ -14,6 +14,7 @@ using KernelHttp::client::WebSocketHandshakeRetryAction;
 using KernelHttp::client::WebSocketIoBuffers;
 using KernelHttp::http::HttpHeader;
 using KernelHttp::websocket::WebSocketCodec;
+using KernelHttp::websocket::WebSocketDeflateContext;
 using KernelHttp::websocket::WebSocketFrameHeader;
 using KernelHttp::websocket::WebSocketOpcode;
 
@@ -56,7 +57,8 @@ namespace
         WebSocketOpcode opcode,
         const unsigned char* payload,
         size_t payloadLength,
-        bool fin = true)
+        bool fin = true,
+        bool rsv1 = false)
     {
         if (destination == nullptr ||
             destinationLength == nullptr ||
@@ -81,7 +83,10 @@ namespace
         }
 
         unsigned char* cursor = destination + *destinationLength;
-        cursor[0] = static_cast<unsigned char>((fin ? 0x80 : 0x00) | static_cast<unsigned char>(opcode));
+        cursor[0] = static_cast<unsigned char>(
+            (fin ? 0x80 : 0x00) |
+            (rsv1 ? 0x40 : 0x00) |
+            static_cast<unsigned char>(opcode));
         size_t payloadOffset = 2;
         if (payloadLength <= 125) {
             cursor[1] = static_cast<unsigned char>(payloadLength);
@@ -111,6 +116,7 @@ namespace
         size_t dataLength,
         WebSocketOpcode* opcode,
         bool* fin,
+        bool* rsv1,
         unsigned char* payload,
         size_t payloadCapacity,
         size_t* payloadLength)
@@ -121,12 +127,16 @@ namespace
         if (fin != nullptr) {
             *fin = false;
         }
+        if (rsv1 != nullptr) {
+            *rsv1 = false;
+        }
         if (payloadLength != nullptr) {
             *payloadLength = 0;
         }
         if (data == nullptr ||
             opcode == nullptr ||
             fin == nullptr ||
+            rsv1 == nullptr ||
             payload == nullptr ||
             payloadLength == nullptr ||
             dataLength < 6) {
@@ -134,11 +144,12 @@ namespace
         }
 
         const unsigned char* bytes = static_cast<const unsigned char*>(data);
-        if ((bytes[0] & 0x70) != 0 || (bytes[1] & 0x80) == 0) {
+        if ((bytes[0] & 0x30) != 0 || (bytes[1] & 0x80) == 0) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
         *fin = (bytes[0] & 0x80) != 0;
+        *rsv1 = (bytes[0] & 0x40) != 0;
         *opcode = static_cast<WebSocketOpcode>(bytes[0] & 0x0f);
         size_t cursor = 2;
         size_t length = bytes[1] & 0x7f;
@@ -227,6 +238,7 @@ namespace
         size_t FragmentPayloadLength = 0;
         WebSocketOpcode FragmentOpcode = WebSocketOpcode::Continuation;
         bool LastClientFin = false;
+        bool LastClientRsv1 = false;
         bool FragmentOpen = false;
         size_t ClientFrameCount = 0;
         size_t PongCount = 0;
@@ -410,6 +422,7 @@ namespace
                 dataLength,
                 &opcode,
                 &LastClientFin,
+                &LastClientRsv1,
                 LastClientPayload,
                 sizeof(LastClientPayload),
                 &LastClientPayloadLength);
@@ -1504,6 +1517,265 @@ namespace
 
         const NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "websocket connect rejects unrequested extensions");
+        g_server = nullptr;
+    }
+
+    void TestConnectDefaultDoesNotOfferPerMessageDeflate()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        const NTSTATUS status = client.Connect(wskClient, MakeConnectOptions(), buffers);
+        Expect(NT_SUCCESS(status), "default websocket connect succeeds without permessage-deflate");
+
+        size_t extensionLength = 0;
+        const char* extension = FindHeaderValue(
+            server.LastHandshakeRequest,
+            "Sec-WebSocket-Extensions",
+            &extensionLength);
+        Expect(extension == nullptr, "default websocket connect does not offer permessage-deflate");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestConnectOffersPerMessageDeflateWhenEnabled()
+    {
+        FakeWebSocketServer server;
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.PerMessageDeflate.Enable = true;
+        options.PerMessageDeflate.ClientNoContextTakeover = true;
+        options.PerMessageDeflate.ServerNoContextTakeover = true;
+        options.PerMessageDeflate.ClientMaxWindowBits = 12;
+        options.PerMessageDeflate.ServerMaxWindowBits = 13;
+
+        const NTSTATUS status = client.Connect(wskClient, options, buffers);
+        Expect(NT_SUCCESS(status), "permessage-deflate websocket connect succeeds when server omits extension");
+
+        size_t extensionLength = 0;
+        const char* extension = FindHeaderValue(
+            server.LastHandshakeRequest,
+            "Sec-WebSocket-Extensions",
+            &extensionLength);
+        Expect(extension != nullptr, "enabled websocket connect offers permessage-deflate");
+        Expect(extension != nullptr &&
+            strstr(server.LastHandshakeRequest, "permessage-deflate") != nullptr &&
+            strstr(server.LastHandshakeRequest, "client_max_window_bits=12") != nullptr &&
+            strstr(server.LastHandshakeRequest, "server_max_window_bits=13") != nullptr &&
+            strstr(server.LastHandshakeRequest, "client_no_context_takeover") != nullptr &&
+            strstr(server.LastHandshakeRequest, "server_no_context_takeover") != nullptr,
+            "permessage-deflate offer includes requested parameters");
+
+        UNREFERENCED_PARAMETER(extensionLength);
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestConnectAcceptsNegotiatedPerMessageDeflate()
+    {
+        FakeWebSocketServer server;
+        server.ResponseExtensions =
+            "permessage-deflate; server_no_context_takeover; client_max_window_bits=12; server_max_window_bits=13";
+        server.ResponseExtensionsLength = strlen(server.ResponseExtensions);
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.PerMessageDeflate.Enable = true;
+        options.PerMessageDeflate.ClientMaxWindowBits = 15;
+        options.PerMessageDeflate.ServerMaxWindowBits = 15;
+
+        const NTSTATUS status = client.Connect(wskClient, options, buffers);
+        Expect(NT_SUCCESS(status), "websocket connect accepts negotiated permessage-deflate");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestSendCompressedTextSetsRsv1AndDeflatesPayload()
+    {
+        FakeWebSocketServer server;
+        server.ResponseExtensions = "permessage-deflate";
+        server.ResponseExtensionsLength = strlen(server.ResponseExtensions);
+        g_server = &server;
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[512] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.PerMessageDeflate.Enable = true;
+
+        NTSTATUS status = client.Connect(wskClient, options, buffers);
+        Expect(NT_SUCCESS(status), "websocket connect negotiates permessage-deflate for compressed send");
+
+        const char text[] = "kernel websocket compressed text";
+        status = client.SendText(text, sizeof(text) - 1, buffers);
+        Expect(NT_SUCCESS(status), "compressed text send succeeds");
+        Expect(server.LastClientOpcode == WebSocketOpcode::Text, "compressed text send uses text opcode");
+        Expect(server.LastClientFin, "compressed text send is final");
+        Expect(server.LastClientRsv1, "compressed text send sets RSV1");
+
+        WebSocketDeflateContext inflater;
+        status = inflater.Initialize(15);
+        Expect(NT_SUCCESS(status), "test inflate context initializes for compressed send");
+        size_t decodedLength = 0;
+        if (NT_SUCCESS(status)) {
+            status = inflater.InflateMessage(
+                server.LastClientPayload,
+                server.LastClientPayloadLength,
+                payload,
+                sizeof(payload),
+                &decodedLength);
+        }
+        Expect(NT_SUCCESS(status), "compressed client payload inflates");
+        Expect(decodedLength == sizeof(text) - 1, "compressed client payload decoded length matches");
+        Expect(memcmp(payload, text, sizeof(text) - 1) == 0, "compressed client payload decoded bytes match");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
+        g_server = nullptr;
+    }
+
+    void TestReceiveCompressedTextInflatesPayload()
+    {
+        FakeWebSocketServer server;
+        server.ResponseExtensions = "permessage-deflate";
+        server.ResponseExtensionsLength = strlen(server.ResponseExtensions);
+        g_server = &server;
+
+        const unsigned char text[] = "server compressed websocket text";
+        unsigned char compressed[256] = {};
+        size_t compressedLength = 0;
+        NTSTATUS status = WebSocketDeflateContext::DeflateMessage(
+            text,
+            sizeof(text) - 1,
+            true,
+            compressed,
+            sizeof(compressed),
+            &compressedLength);
+        Expect(NT_SUCCESS(status), "server compressed test payload deflates");
+        AppendServerFrame(
+            server.InitialFrames,
+            sizeof(server.InitialFrames),
+            &server.InitialFrameLength,
+            WebSocketOpcode::Text,
+            compressed,
+            compressedLength,
+            true,
+            true);
+
+        KernelHttp::net::WskClient wskClient;
+        WebSocketClient client;
+        char request[1024] = {};
+        char response[1024] = {};
+        unsigned char frame[1024] = {};
+        unsigned char payload[256] = {};
+        HttpHeader headers[8] = {};
+        WebSocketIoBuffers buffers = MakeBuffers(
+            request,
+            sizeof(request),
+            response,
+            sizeof(response),
+            frame,
+            sizeof(frame),
+            payload,
+            sizeof(payload),
+            headers,
+            sizeof(headers) / sizeof(headers[0]));
+
+        WebSocketConnectOptions options = MakeConnectOptions();
+        options.PerMessageDeflate.Enable = true;
+
+        status = client.Connect(wskClient, options, buffers);
+        Expect(NT_SUCCESS(status), "websocket connect negotiates permessage-deflate for compressed receive");
+
+        WebSocketOpcode opcode = WebSocketOpcode::Continuation;
+        size_t bytesReceived = 0;
+        status = client.ReceiveMessage(buffers, &opcode, payload, sizeof(payload), &bytesReceived);
+        Expect(NT_SUCCESS(status), "compressed server text receive succeeds");
+        Expect(opcode == WebSocketOpcode::Text, "compressed server text opcode is text");
+        Expect(bytesReceived == sizeof(text) - 1, "compressed server text decoded length matches");
+        Expect(memcmp(payload, text, sizeof(text) - 1) == 0, "compressed server text decoded bytes match");
+
+        const NTSTATUS closeStatus = client.Close(buffers);
+        UNREFERENCED_PARAMETER(closeStatus);
         g_server = nullptr;
     }
 
@@ -3170,6 +3442,11 @@ int main()
     TestConnectRejectsSubprotocolMismatch();
     TestConnectRejectsUnexpectedSubprotocol();
     TestConnectRejectsUnrequestedExtensions();
+    TestConnectDefaultDoesNotOfferPerMessageDeflate();
+    TestConnectOffersPerMessageDeflateWhenEnabled();
+    TestConnectAcceptsNegotiatedPerMessageDeflate();
+    TestSendCompressedTextSetsRsv1AndDeflatesPayload();
+    TestReceiveCompressedTextInflatesPayload();
     TestReceiveHonorsOutputCapacity();
     TestReceiveMessageLargerThanFrameScratch();
     TestReceiveOversizedTextFrameHeaderSendsClose1009();

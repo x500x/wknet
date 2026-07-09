@@ -155,6 +155,7 @@ namespace engine
         KhWebSocketMessageType LastMessageType = KhWebSocketMessageType::Binary;
         SIZE_T MaxMessageBytes = KhDefaultMaxWebSocketMessageBytes;
         bool AutoReplyPing = true;
+        websocket::PerMessageDeflateOptions PerMessageDeflate = {};
         bool Connected = false;
         bool TransportClosed = true;
         bool SendFragmentOpen = false;

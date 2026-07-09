@@ -11,8 +11,11 @@ using KernelHttp::http::HttpHeader;
 using KernelHttp::http::HttpResponse;
 using KernelHttp::http::MakeText;
 using KernelHttp::websocket::WebSocketCodec;
+using KernelHttp::websocket::WebSocketDeflateContext;
 using KernelHttp::websocket::WebSocketFrameHeader;
 using KernelHttp::websocket::WebSocketOpcode;
+using KernelHttp::websocket::PerMessageDeflateNegotiation;
+using KernelHttp::websocket::PerMessageDeflateOptions;
 
 namespace
 {
@@ -483,6 +486,251 @@ namespace
             &frameLength);
         Expect(status == STATUS_INVALID_PARAMETER, "oversized close frame is rejected");
     }
+
+    void TestRsv1RoundTripsForCompressedDataFrame()
+    {
+        const unsigned char payload[] = { 'z' };
+        const unsigned char mask[] = { 1, 2, 3, 4 };
+        unsigned char frame[32] = {};
+        size_t frameLength = 0;
+
+        NTSTATUS status = WebSocketCodec::EncodeClientFrame(
+            WebSocketOpcode::Text,
+            true,
+            true,
+            payload,
+            sizeof(payload),
+            mask,
+            frame,
+            sizeof(frame),
+            &frameLength);
+        Expect(NT_SUCCESS(status), "RSV1 client frame encodes");
+        Expect((frame[0] & 0x40) != 0, "RSV1 bit is set on encoded frame");
+
+        const unsigned char serverFrame[] = { 0xc1, 0x01, 'z' };
+        WebSocketFrameHeader header = {};
+        status = WebSocketCodec::DecodeFrameHeader(serverFrame, sizeof(serverFrame), &header);
+        Expect(NT_SUCCESS(status), "RSV1 server frame header decodes");
+        Expect(header.Rsv1, "RSV1 flag is reported by decoder");
+    }
+
+    void TestPerMessageDeflateNegotiation()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Connection"), MakeText("Upgrade") },
+            { MakeText("Upgrade"), MakeText("websocket") },
+            { MakeText("Sec-WebSocket-Accept"), MakeText("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") },
+            {
+                MakeText("Sec-WebSocket-Extensions"),
+                MakeText("permessage-deflate; server_no_context_takeover; client_max_window_bits=12; server_max_window_bits=13")
+            }
+        };
+
+        HttpResponse response = {};
+        response.StatusCode = 101;
+        response.MajorVersion = 1;
+        response.MinorVersion = 1;
+        response.Headers = headers;
+        response.HeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        PerMessageDeflateOptions options = {};
+        options.Enable = true;
+        options.ClientMaxWindowBits = 15;
+        options.ServerMaxWindowBits = 15;
+        PerMessageDeflateNegotiation negotiated = {};
+        const NTSTATUS status = WebSocketCodec::ValidateServerHandshake(
+            response,
+            "dGhlIHNhbXBsZSBub25jZQ==",
+            strlen("dGhlIHNhbXBsZSBub25jZQ=="),
+            nullptr,
+            0,
+            nullptr,
+            &options,
+            &negotiated);
+        Expect(NT_SUCCESS(status), "permessage-deflate extension is accepted when requested");
+        Expect(negotiated.Enabled, "permessage-deflate negotiation is enabled");
+        Expect(negotiated.ServerNoContextTakeover, "server no-context-takeover is recorded");
+        Expect(negotiated.ClientMaxWindowBits == 12, "client max window bits is negotiated");
+        Expect(negotiated.ServerMaxWindowBits == 13, "server max window bits is negotiated");
+    }
+
+    void TestPerMessageDeflateRejectsIllegalResponse()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Connection"), MakeText("Upgrade") },
+            { MakeText("Upgrade"), MakeText("websocket") },
+            { MakeText("Sec-WebSocket-Accept"), MakeText("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") },
+            { MakeText("Sec-WebSocket-Extensions"), MakeText("permessage-deflate; server_max_window_bits=7") }
+        };
+
+        HttpResponse response = {};
+        response.StatusCode = 101;
+        response.MajorVersion = 1;
+        response.MinorVersion = 1;
+        response.Headers = headers;
+        response.HeaderCount = sizeof(headers) / sizeof(headers[0]);
+
+        PerMessageDeflateOptions options = {};
+        options.Enable = true;
+        const NTSTATUS status = WebSocketCodec::ValidateServerHandshake(
+            response,
+            "dGhlIHNhbXBsZSBub25jZQ==",
+            strlen("dGhlIHNhbXBsZSBub25jZQ=="),
+            nullptr,
+            0,
+            nullptr,
+            &options,
+            nullptr);
+        Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "illegal permessage-deflate parameter is rejected");
+    }
+
+    void TestWebSocketDeflateStoredRoundTrip()
+    {
+        const unsigned char message[] = "kernel websocket permessage deflate";
+        unsigned char compressed[128] = {};
+        unsigned char decoded[128] = {};
+        size_t compressedLength = 0;
+        size_t decodedLength = 0;
+
+        NTSTATUS status = WebSocketDeflateContext::DeflateMessage(
+            message,
+            sizeof(message) - 1,
+            true,
+            compressed,
+            sizeof(compressed),
+            &compressedLength);
+        Expect(NT_SUCCESS(status), "stored deflate message encodes");
+        Expect(compressedLength != 0, "stored deflate emits bytes");
+
+        WebSocketDeflateContext context;
+        status = context.Initialize(15);
+        Expect(NT_SUCCESS(status), "deflate context initializes");
+        if (NT_SUCCESS(status)) {
+            status = context.InflateMessage(
+                compressed,
+                compressedLength,
+                decoded,
+                sizeof(decoded),
+                &decodedLength);
+        }
+        Expect(NT_SUCCESS(status), "stored deflate message inflates");
+        Expect(decodedLength == sizeof(message) - 1, "inflated length matches original");
+        Expect(BytesEqual(decoded, message, decodedLength), "inflated bytes match original");
+    }
+
+    void TestWebSocketDeflateInflatesFixedHuffman()
+    {
+        const unsigned char compressed[] = {
+            0x4a, 0xcb, 0xac, 0x48, 0x4d, 0x51, 0xc8, 0x28,
+            0x4d, 0x4b, 0xcb, 0x4d, 0xcc, 0x53, 0x28, 0x4f,
+            0x4d, 0x2a, 0xce, 0x4f, 0xce, 0x4e, 0x2d, 0x51,
+            0x28, 0x48, 0xac, 0xcc, 0xc9, 0x4f, 0x4c, 0x49,
+            0xc3, 0x2f, 0x0d, 0x00
+        };
+        const unsigned char expected[] =
+            "fixed huffman websocket payloadfixed huffman websocket payload";
+        unsigned char decoded[96] = {};
+        size_t decodedLength = 0;
+
+        WebSocketDeflateContext context;
+        NTSTATUS status = context.Initialize(15);
+        Expect(NT_SUCCESS(status), "fixed Huffman inflate context initializes");
+        if (NT_SUCCESS(status)) {
+            status = context.InflateMessage(
+                compressed,
+                sizeof(compressed),
+                decoded,
+                sizeof(decoded),
+                &decodedLength);
+        }
+
+        Expect(NT_SUCCESS(status), "fixed Huffman deflate payload inflates");
+        Expect(decodedLength == sizeof(expected) - 1, "fixed Huffman decoded length matches");
+        Expect(BytesEqual(decoded, expected, decodedLength), "fixed Huffman decoded bytes match");
+    }
+
+    void TestWebSocketDeflateInflatesDynamicHuffman()
+    {
+        const unsigned char compressed[] = {
+            0x04, 0xc1, 0x11, 0x00, 0x80, 0x30, 0x00, 0x00,
+            0xb0, 0x4b, 0x12, 0x25, 0x97, 0x28, 0x49, 0xa2,
+            0x24, 0x39, 0x25, 0x49, 0x74, 0x49, 0x4e, 0x97,
+            0x24, 0x4a, 0x92, 0xe8, 0x92, 0x44, 0x97, 0x24,
+            0xba, 0x5c, 0xa2, 0xcb, 0x25, 0x4a, 0x92, 0x28,
+            0xb9, 0x44, 0x49, 0x72, 0x4a, 0x92, 0x53, 0x1b,
+            0x88, 0xcb, 0x76, 0x5a, 0x6f, 0x2f, 0xc1, 0xdd,
+            0xbc, 0x3d, 0x7e, 0x5a, 0xf5, 0x62, 0xb7, 0x41,
+            0x46, 0x98, 0x3c, 0x5e, 0x88, 0xe8, 0xb0, 0x9c,
+            0x5f, 0x98, 0xd7, 0xa3, 0x32, 0x2e, 0x2a, 0x1a,
+            0xae, 0x2f, 0x10, 0x97, 0xed, 0xb4, 0xde, 0x5e,
+            0x82, 0xbb, 0x79, 0x7b, 0xfc, 0xb4, 0xea, 0xc5,
+            0x6e, 0x83, 0x8c, 0x30, 0x79, 0xbc, 0x10, 0xd1,
+            0x61, 0x39, 0xbf, 0x30, 0xaf, 0x47, 0x65, 0x5c,
+            0x54, 0x34, 0x5c, 0x5f, 0x20, 0x2e, 0xdb, 0x69,
+            0xbd, 0xbd, 0x04, 0x77, 0xf3, 0xf6, 0xf8, 0x69,
+            0xd5, 0x8b, 0xdd, 0x06, 0x19, 0x61, 0xf2, 0x78,
+            0x21, 0xa2, 0xc3, 0x72, 0x7e, 0x61, 0x5e, 0x8f,
+            0xca, 0xb8, 0xa8, 0x68, 0xb8, 0xbe, 0x40, 0x5c,
+            0xb6, 0xd3, 0x7a, 0x7b, 0x09, 0xee, 0xe6, 0xed,
+            0xf1, 0xd3, 0xaa, 0x17, 0xbb, 0x0d, 0x32, 0xc2,
+            0xe4, 0xf1, 0x42, 0x44, 0x87, 0xe5, 0xfc, 0xc2,
+            0xbc, 0x1e, 0x95, 0x71, 0x51, 0xd1, 0x70, 0x7d,
+            0xfd, 0x00
+        };
+        unsigned char expected[192] = {};
+        unsigned char decoded[192] = {};
+        for (size_t index = 0; index < sizeof(expected); ++index) {
+            expected[index] = static_cast<unsigned char>((index * 37 + index / 3) & 0xff);
+        }
+
+        WebSocketDeflateContext context;
+        NTSTATUS status = context.Initialize(15);
+        Expect(NT_SUCCESS(status), "dynamic Huffman inflate context initializes");
+        size_t decodedLength = 0;
+        if (NT_SUCCESS(status)) {
+            status = context.InflateMessage(
+                compressed,
+                sizeof(compressed),
+                decoded,
+                sizeof(decoded),
+                &decodedLength);
+        }
+
+        Expect(NT_SUCCESS(status), "dynamic Huffman deflate payload inflates");
+        Expect(decodedLength == sizeof(expected), "dynamic Huffman decoded length matches");
+        Expect(BytesEqual(decoded, expected, decodedLength), "dynamic Huffman decoded bytes match");
+    }
+
+    void TestWebSocketDeflateReportsOutputCapacity()
+    {
+        const unsigned char message[] = "capacity";
+        unsigned char compressed[32] = {};
+        size_t compressedLength = 0;
+        NTSTATUS status = WebSocketDeflateContext::DeflateMessage(
+            message,
+            sizeof(message) - 1,
+            true,
+            compressed,
+            sizeof(compressed),
+            &compressedLength);
+        Expect(NT_SUCCESS(status), "capacity test payload deflates");
+
+        WebSocketDeflateContext context;
+        status = context.Initialize(15);
+        Expect(NT_SUCCESS(status), "capacity inflate context initializes");
+        unsigned char decoded[4] = {};
+        size_t decodedLength = 0;
+        if (NT_SUCCESS(status)) {
+            status = context.InflateMessage(
+                compressed,
+                compressedLength,
+                decoded,
+                sizeof(decoded),
+                &decodedLength);
+        }
+
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "inflate reports output capacity exhaustion");
+    }
 }
 
 int main()
@@ -502,6 +750,13 @@ int main()
     TestControlFrameRejectsFragmented();
     TestDecodeRejectsMaskedServerFrame();
     TestEncodeCloseRejectsOversizedControlPayload();
+    TestRsv1RoundTripsForCompressedDataFrame();
+    TestPerMessageDeflateNegotiation();
+    TestPerMessageDeflateRejectsIllegalResponse();
+    TestWebSocketDeflateStoredRoundTrip();
+    TestWebSocketDeflateInflatesFixedHuffman();
+    TestWebSocketDeflateInflatesDynamicHuffman();
+    TestWebSocketDeflateReportsOutputCapacity();
 
     if (g_failed) {
         printf("WEBSOCKET FRAME TESTS FAILED\n");

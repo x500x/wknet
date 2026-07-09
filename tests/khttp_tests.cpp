@@ -1104,6 +1104,7 @@ namespace
         bool LastAllowWebSocketOverHttp2 = false;
         KernelHttp::engine::KhWebSocketTransportMode LastTransportMode =
             KernelHttp::engine::KhWebSocketTransportMode::LegacyBoolean;
+        KernelHttp::websocket::PerMessageDeflateOptions LastPerMessageDeflate = {};
         NTSTATUS SendStatus = STATUS_SUCCESS;
         NTSTATUS ReceiveStatus = STATUS_SUCCESS;
     };
@@ -1136,6 +1137,7 @@ namespace
         }
         capture->LastAllowWebSocketOverHttp2 = request->AllowWebSocketOverHttp2;
         capture->LastTransportMode = request->TransportMode;
+        capture->LastPerMessageDeflate = request->PerMessageDeflate;
         return STATUS_SUCCESS;
     }
 
@@ -5825,6 +5827,7 @@ namespace
         Expect(
             capture.LastTransportMode == KernelHttp::engine::KhWebSocketTransportMode::Auto,
             "default websocket connect config uses Auto transport mode");
+        Expect(!capture.LastPerMessageDeflate.Enable, "default websocket connect config leaves permessage-deflate disabled");
 
         const char* hello = "hello";
         status = kws::SendText(ws, hello, Length(hello));
@@ -5845,6 +5848,49 @@ namespace
         Expect(NT_SUCCESS(status), "WsClose succeeds");
         Expect(capture.CloseCount == 1, "close called once");
 
+        khttp::SessionClose(session);
+        khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
+    }
+
+    void TestWebSocketPerMessageDeflateOptInPropagates() noexcept
+    {
+        WsCapture capture = {};
+        khttp::test::SetWebSocketTransport(
+            WsConnectCallback,
+            WsSendCallback,
+            WsReceiveCallback,
+            WsCloseCallback,
+            &capture);
+
+        khttp::Session* session = nullptr;
+        NTSTATUS status = khttp::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for websocket permessage-deflate opt-in");
+
+        const char* url = "ws://example.com/socket";
+        kws::WebSocket* ws = nullptr;
+        kws::ConnectConfig wsConfig = kws::DefaultConnectConfig();
+        wsConfig.Url = url;
+        wsConfig.UrlLength = Length(url);
+        wsConfig.PerMessageDeflate.Enable = true;
+        wsConfig.PerMessageDeflate.ClientNoContextTakeover = true;
+        wsConfig.PerMessageDeflate.ServerNoContextTakeover = true;
+        wsConfig.PerMessageDeflate.ClientMaxWindowBits = 12;
+        wsConfig.PerMessageDeflate.ServerMaxWindowBits = 13;
+
+        status = kws::Connect(session, &wsConfig, &ws);
+        Expect(NT_SUCCESS(status), "websocket permessage-deflate opt-in connect succeeds through test transport");
+        Expect(capture.LastPerMessageDeflate.Enable, "permessage-deflate enable propagates to engine");
+        Expect(capture.LastPerMessageDeflate.ClientNoContextTakeover,
+            "permessage-deflate client_no_context_takeover propagates");
+        Expect(capture.LastPerMessageDeflate.ServerNoContextTakeover,
+            "permessage-deflate server_no_context_takeover propagates");
+        Expect(capture.LastPerMessageDeflate.ClientMaxWindowBits == 12,
+            "permessage-deflate client window bits propagates");
+        Expect(capture.LastPerMessageDeflate.ServerMaxWindowBits == 13,
+            "permessage-deflate server window bits propagates");
+
+        status = kws::Close(ws);
+        Expect(NT_SUCCESS(status), "websocket permessage-deflate opt-in close succeeds");
         khttp::SessionClose(session);
         khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
@@ -6109,6 +6155,16 @@ namespace
         Expect(ws == nullptr, "invalid subprotocol does not allocate websocket");
         Expect(capture.ConnectCount == 0, "invalid subprotocol does not reach test transport");
 
+        kws::ConnectConfig invalidDeflateConfig = kws::DefaultConnectConfig();
+        invalidDeflateConfig.Url = url;
+        invalidDeflateConfig.UrlLength = Length(url);
+        invalidDeflateConfig.PerMessageDeflate.Enable = true;
+        invalidDeflateConfig.PerMessageDeflate.ClientMaxWindowBits = 7;
+        status = kws::Connect(session, &invalidDeflateConfig, &ws);
+        Expect(status == STATUS_INVALID_PARAMETER, "WsConnect rejects invalid permessage-deflate window bits");
+        Expect(ws == nullptr, "invalid permessage-deflate options do not allocate websocket");
+        Expect(capture.ConnectCount == 0, "invalid permessage-deflate options do not reach test transport");
+
         kws::Header controlledHeader = {};
         controlledHeader.Name = "Sec-WebSocket-Key";
         controlledHeader.NameLength = Length(controlledHeader.Name);
@@ -6334,6 +6390,7 @@ int main() noexcept
     TestHttp2KeepAliveSessionConfigDefaultsAndValidation();
     TestIrqlCheck();
     TestWebSocketRoundTrip();
+    TestWebSocketPerMessageDeflateOptInPropagates();
     TestWebSocketHttp2OptInPropagates();
     TestWebSocketHttp2OptInRejectsCleartextWs();
     TestWebSocketControlFramesAndCloseEx();

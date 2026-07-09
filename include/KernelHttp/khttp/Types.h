@@ -4,6 +4,7 @@
 #include <KernelHttp/http/HttpContentEncoding.h>
 #include <KernelHttp/http/HttpTypes.h>
 #include <KernelHttp/tls/TlsPolicy.h>
+#include <KernelHttp/websocket/WebSocketDeflate.h>
 
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
 #include <ntddk.h>
@@ -395,6 +396,7 @@ namespace kws
         bool AutoReplyPing = true;
         bool AllowWebSocketOverHttp2 = false;
         khttp::WebSocketTransportMode TransportMode = khttp::WebSocketTransportMode::LegacyBoolean;
+        ::KernelHttp::websocket::PerMessageDeflateOptions PerMessageDeflate = {};
         HandshakeChallengeCallback ChallengeCallback = nullptr;
         void* ChallengeContext = nullptr;
         ULONG MaxHandshakeRetries = 0;
