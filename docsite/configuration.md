@@ -12,6 +12,10 @@
 | `PoolCapacity` | `ULONG` | 8 | 连接池总容量 |
 | `MaxConnsPerHost` | `ULONG` | 2 | 单主机最大连接 |
 | `IdleTimeoutMs` | `ULONG` | 30000 | 空闲回收时间 |
+| `EnableHttp11Pipeline` | `bool` | false | HTTP/1.1 pipeline 显式开关；默认关闭 |
+| `Http11PipelineMaxDepth` | `ULONG` | 4 | 单条 HTTP/1.1 pipeline 最大在途深度，硬上限 64 |
+| `Http11PipelineMethodMask` | `ULONG` | GET/HEAD/OPTIONS | pipeline 允许的方法 mask；默认仅安全方法 |
+| `Http2KeepAlive` | `Http2KeepAliveConfig` | disabled | HTTP/2 池化连接后台 PING 保活；`Enabled=true` 显式开启，`IdleMs`/`IntervalMs` 默认 30000，`AckTimeoutMs` 默认 5000 |
 | `Tls` | `TlsConfig` | 见下 | TLS 子配置 |
 | `Proxy` | `ProxyConfig` | disabled | 显式 HTTP 代理配置；HTTPS 使用 CONNECT，明文 HTTP 使用 absolute-form |
 
@@ -38,7 +42,7 @@
 |------|------|------|
 | `MaxResponseHeaders` | 64 | 响应头数量上限（可配置最大 200） |
 | `Http2MaxHeaderBlockBytes` | 32 KiB | HTTP/2 头块上限（最大 64 KiB） |
-| 其余字段名 | | 同高层语义（`ConnectionPoolCapacity`/`MaxConnectionsPerHost`/`IdleTimeoutMilliseconds`/`RequestBufferBytes`/`MaxResponseBytes`/`ResponsePoolType`/`Tls`/`Proxy`） |
+| 其余字段名 | | 同高层语义（`ConnectionPoolCapacity`/`MaxConnectionsPerHost`/`IdleTimeoutMilliseconds`/`RequestBufferBytes`/`MaxResponseBytes`/`ResponsePoolType`/`EnableHttp11Pipeline`/`Http11PipelineMaxDepth`/`Http11PipelineMethodMask`/`Http2KeepAlive`/`Tls`/`Proxy`） |
 
 ### 连接策略与地址族（单次发送）
 
@@ -54,7 +58,7 @@ khttp::SendOptionsRelease(options);
 
 ### 单次发送覆盖 `khttp::SendOptions`
 
-见 [高层 API](high-level-api.md)：`MaxResponseBytes`、`Flags`、`MaxRedirects`、`OnHeader`/`OnBody`（流式）、TLS 覆盖、连接策略和地址族。异步完成回调在 `AsyncOptions` 中。
+见 [高层 API](high-level-api.md)：`MaxResponseBytes`、`Flags`、`MaxRedirects`、`OnHeader`/`OnBody`（流式）、TLS 覆盖、连接策略、地址族、h2c 显式模式与 HTTP/2 per-request priority。HTTP/1.1 pipeline 是 session 级策略，不在单次发送选项中。异步完成回调在 `AsyncOptions` 中。
 
 ### 全局常量（`KernelHttpConfig.h`）
 
@@ -77,7 +81,7 @@ khttp::SendOptionsRelease(options);
 
 ### 引擎默认常量（`engine/Engine.h`）
 
-`KhDefaultRequestBufferBytes`=16 KiB、`KhDefaultMaxResponseBytes`=0（不限制，按需堆增长）、`KhDefaultMaxWebSocketMessageBytes`=1 MiB、`KhDefaultMaxResponseHeaders`=64、`KhMaxConfigurableResponseHeaders`=200、`KhDefaultHttp2MaxHeaderBlockBytes`=32 KiB、`KhMaxHttp2HeaderBlockBytes`=64 KiB、`KhDefaultConnectionPoolCapacity`=8、`KhMaxConnectionPoolCapacity`=1024、`KhDefaultConnectionsPerHost`=2、`KhDefaultIdleTimeoutMilliseconds`=30000、`KhDefaultMaxRedirects`=10。
+`KhDefaultRequestBufferBytes`=16 KiB、`KhDefaultMaxResponseBytes`=0（不限制，按需堆增长）、`KhDefaultMaxWebSocketMessageBytes`=1 MiB、`KhDefaultMaxResponseHeaders`=64、`KhMaxConfigurableResponseHeaders`=200、`KhDefaultHttp2MaxHeaderBlockBytes`=32 KiB、`KhMaxHttp2HeaderBlockBytes`=64 KiB、`KhDefaultConnectionPoolCapacity`=8、`KhMaxConnectionPoolCapacity`=1024、`KhDefaultConnectionsPerHost`=2、`KhDefaultIdleTimeoutMilliseconds`=30000、`KhDefaultHttp11PipelineMaxDepth`=4、`KhMaxHttp11PipelineDepth`=64、`KhDefaultHttp11PipelineMethodMask`=GET/HEAD/OPTIONS、`KhDefaultHttp2KeepAliveIdleMilliseconds`=30000、`KhDefaultHttp2KeepAliveIntervalMilliseconds`=30000、`KhDefaultHttp2KeepAliveAckTimeoutMilliseconds`=5000、`KhDefaultMaxRedirects`=10。
 
 ### 其它实测限制
 
@@ -92,6 +96,7 @@ khttp::SendOptionsRelease(options);
 config.PoolCapacity     = 32;            // 高并发增大池
 config.MaxConnsPerHost  = 8;
 config.IdleTimeoutMs    = 120000;        // 延长空闲超时减少重连
+config.EnableHttp11Pipeline = true;      // 显式开启 HTTP/1.1 pipeline
 config.MaxResponseBytes = 4*1024*1024;   // 大响应
 config.Proxy.Enabled    = true;          // HTTP 代理：HTTPS CONNECT，明文 HTTP absolute-form
 ```

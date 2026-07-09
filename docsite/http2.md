@@ -50,6 +50,12 @@ enum class Http2FrameType : UCHAR {
 - 请求 trailers 不使用 HTTP/1.1 chunked；body 结束后发送 trailing HEADERS + END_STREAM。
 - trailer 复用 HTTP/1.1 禁止字段规则，并额外拒绝任何 trailer 伪头。
 
+### PRIORITY
+
+- `Http2Priority` 使用 RFC 权重范围 1..256，支持 stream dependency 与 exclusive 标志；拒绝自依赖和非法权重。
+- 单次请求可通过 `Http2RequestBody.Priority`、`Http2RequestOptions.Priority`、`KhHttpSendOptions.Http2Priority` 或 `khttp::SendOptions.Http2Priority` 显式设置。
+- 首个 HEADERS 帧携带 priority 字段；底层也提供独立 PRIORITY frame 编解码。收到 peer PRIORITY 会校验长度和自依赖，不改变本地安全边界或调度策略。
+
 ### RFC 8441 extended CONNECT
 
 - 请求头构造支持 `Method=CONNECT` + `ConnectProtocol="websocket"`，编码为 `:method: CONNECT` 与 `:protocol: websocket`。
@@ -79,4 +85,4 @@ enum class Http2FrameType : UCHAR {
 
 ### 边界
 
-高层 `khttp` 已接入同源 H2 连接池多活动流复用，低层继续提供 RFC 8441 extended CONNECT tunnel；`kws` 对 RFC 8441 为显式 opt-in，默认不自动切换。不发 PRIORITY，不启用后台自动 PING 保活（低层提供显式 `SendPing`），不支持 server push；高层 h2c 是显式 opt-in，默认关闭。
+高层 `khttp` 已接入同源 H2 连接池多活动流复用，低层继续提供 RFC 8441 extended CONNECT tunnel；`kws` 对 RFC 8441 为显式 opt-in，默认不自动切换。PRIORITY 为显式 per-request 能力，不实现复杂本地树调度；后台 PING 保活默认关闭，可在 session 上显式开启，低层仍提供显式 `SendPing`；不支持 server push；高层 h2c 是显式 opt-in，默认关闭。

@@ -12,9 +12,9 @@ enum class WebSocketOpcode : UCHAR {
 `WebSocketCodec`（静态）：
 - `GenerateClientKey`：16 随机字节（CNG）→ base64，用后清零。
 - `ComputeAcceptValue`：SHA-1(`key + 258EAFA5-...`) → base64。
-- `ValidateServerHandshake`：要求 `101`、HTTP/1.1、`Connection: Upgrade`、`Upgrade: websocket`、**恰好一个** `Sec-WebSocket-Accept`（**常量时间**比对）；**任何 `Sec-WebSocket-Extensions` 一律拒绝**；子协议须为请求过的之一。
+- `ValidateServerHandshake`：要求 `101`、HTTP/1.1、`Connection: Upgrade`、`Upgrade: websocket`、**恰好一个** `Sec-WebSocket-Accept`（**常量时间**比对）；只接受已请求且参数合法的 `permessage-deflate`，未请求扩展、未知扩展、重复/非法参数一律拒绝；子协议须为请求过的之一。
 - `EncodeClientFrame`：客户端帧**必掩码**（payload XOR 4 字节键）；控制帧必须 FIN 且 ≤125。
-- `DecodeFrameHeader`：保留位 `0x70` 必须为 0；**被掩码的服务端帧 → `STATUS_INVALID_NETWORK_RESPONSE`**；扩展长度强制最短编码。
+- `DecodeFrameHeader`：RSV2/RSV3 必须为 0；RSV1 仅供已协商的 `permessage-deflate` 首个 Text/Binary 片使用；**被掩码的服务端帧 → `STATUS_INVALID_NETWORK_RESPONSE`**；扩展长度强制最短编码。
 
 ### 高层 API（`kws`，见 [高层 API](high-level-api.md)）
 
@@ -33,6 +33,7 @@ struct kws::ReceiveOptions { SIZE_T MaxMessageBytes; bool AutoAllocate=true; Mes
 struct kws::Header { const char* Name; SIZE_T NameLength; const char* Value; SIZE_T ValueLength; };
 struct kws::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subprotocol; SIZE_T SubprotocolLength;
                             const Header* Headers; SIZE_T HeaderCount;
+                            websocket::PerMessageDeflateOptions PerMessageDeflate;
                             khttp::TlsConfig Tls; khttp::AddressFamily Family; SIZE_T MaxMessageBytes; bool AutoReplyPing=true; };
 ```
 
@@ -42,6 +43,14 @@ struct kws::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subpr
 - 为防止握手被篡改，库受控头会被拒绝：`Host`、`Connection`、`Upgrade`、`Content-Length`、`Transfer-Encoding`、`Sec-WebSocket-Key`、`Sec-WebSocket-Version`、`Sec-WebSocket-Protocol`、`Sec-WebSocket-Extensions`。
 - 字段名/值走普通 HTTP header 文本校验，拒绝空名、超限长度、控制字符与 CRLF 注入。
 - 默认不跟随 opening-handshake 的 redirect、401/407 challenge：3xx/401/407 返回 `STATUS_NOT_SUPPORTED` 并保留握手状态码；其它非 101 响应返回 `STATUS_INVALID_NETWORK_RESPONSE`。跨源 redirect、认证重放等若未来支持，必须通过显式 opt-in 并沿用 HTTP redirect 安全规则。
+
+### permessage-deflate（显式 opt-in）
+
+- 默认关闭：`DefaultConnectConfig()` 不启用压缩，零初始化配置也不启用压缩；未请求时服务端返回任何扩展都会拒绝。
+- 启用方式：设置 `ConnectConfig.PerMessageDeflate.Enable=true`。可配置 `ClientNoContextTakeover`、`ServerNoContextTakeover`、`ClientMaxWindowBits`、`ServerMaxWindowBits`，window bits 只接受 `8..15`，非法配置返回 `STATUS_INVALID_PARAMETER`。
+- 握手：HTTP/1.1 Upgrade 与 RFC 8441 HTTP/2 Extended CONNECT 使用同一 offer 生成逻辑；调用方仍不能在 `Headers` 中手写 `Sec-WebSocket-Extensions`。
+- 数据路径：发送 Text/Binary 首片压缩并设置 RSV1，Continuation 不设置 RSV1；接收时只允许首片 Text/Binary 携带 RSV1，control frame、Continuation、未协商压缩时出现 RSV1 均按协议错误关闭。
+- 安全边界：解压受 `MaxMessageBytes`、输出容量与膨胀比限制约束；context takeover 按协商结果保留或在每条消息后重置。
 
 ### 分片（**已支持**）
 
@@ -59,7 +68,7 @@ struct kws::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subpr
 
 ### 边界 / 非目标
 
-高层 `kws` 默认仍是 HTTP/1.1 Upgrade；支持自定义 opening headers；不支持扩展协商（permessage-deflate 拒绝）；`wss` 设置 `ConnectConfig.AllowWebSocketOverHttp2=true` 后可通过 RFC 8441 extended CONNECT over HTTP/2 建立隧道，peer 未启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 时 fail-closed；`ws://` 不隐式走 h2c；不跟随握手 redirect/401/407。
+高层 `kws` 默认仍是 HTTP/1.1 Upgrade；支持自定义 opening headers；`permessage-deflate` 仅显式 opt-in，默认不协商；`wss` 设置 `ConnectConfig.AllowWebSocketOverHttp2=true` 后可通过 RFC 8441 extended CONNECT over HTTP/2 建立隧道，peer 未启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 时 fail-closed；`ws://` 不隐式走 h2c；不跟随握手 redirect/401/407。
 
 ### 示例
 

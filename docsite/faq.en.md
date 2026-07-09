@@ -10,7 +10,7 @@ A: Synchronous HTTP, WebSocket, TLS, and certificate validation require `PASSIVE
 A: Not supported — this is a client protocol stack.
 
 **Q: HTTP proxy / CONNECT / TRACE?**
-A: Yes. High-level `SessionConfig.Proxy` / low-level `KhSessionOptions.Proxy` configure proxy address, authority, and an opaque `Proxy-Authorization` value. HTTPS uses an HTTP/1.1 CONNECT tunnel; plaintext HTTP over proxy sends an absolute-form request target without CONNECT. TRACE is unsupported.
+A: Yes. High-level `SessionConfig.Proxy` / low-level `KhSessionOptions.Proxy` configure proxy address, authority, and an opaque `Proxy-Authorization` value. HTTPS uses an HTTP/1.1 CONNECT tunnel; plaintext HTTP over proxy sends an absolute-form request target without CONNECT. TRACE requires explicit `SendFlagAllowTrace`, and bodies, trailers, and sensitive headers are still rejected.
 
 **Q: Why is my 0-RTT ignored / returning `STATUS_NOT_SUPPORTED`?**
 A: TLS 1.3 0-RTT is off by default; even with early data enabled, the caller must mark the request replay-safe, otherwise it returns `STATUS_NOT_SUPPORTED` and sends no early data.
@@ -25,7 +25,7 @@ A: No. Only safe/idempotent `GET`/`HEAD`/`OPTIONS` get a fresh retry on reused s
 A: Auto-redirect rejects HTTPS→HTTP downgrade by default and strips `Authorization`/`Cookie`/`Proxy-Authorization` across scheme/host/port.
 
 **Q: WebSocket over HTTP/2 (RFC 8441)?**
-A: It is supported as an explicit opt-in. Set `ConnectConfig.AllowWebSocketOverHttp2=true` for `wss`; the client offers `h2,http/1.1` and uses RFC 8441 extended CONNECT when h2 is negotiated and the peer enables `SETTINGS_ENABLE_CONNECT_PROTOCOL`. The default remains HTTP/1.1 Upgrade, and `ws://` does not implicitly use h2c. Extensions like permessage-deflate are out of scope.
+A: It is supported as an explicit opt-in. Set `ConnectConfig.AllowWebSocketOverHttp2=true` for `wss`; the client offers `h2,http/1.1` and uses RFC 8441 extended CONNECT when h2 is negotiated and the peer enables `SETTINGS_ENABLE_CONNECT_PROTOCOL`. The default remains HTTP/1.1 Upgrade, and `ws://` does not implicitly use h2c. `permessage-deflate` is also explicit opt-in and remains off by default; unrequested or invalid extensions are rejected.
 
 **Q: Why no stack / new-delete in the library?**
 A: Kernel constraints. The library forbids stack buffers (use heap; hot buffers resident in Workspace) and raw `new/delete` (unless overloaded in the lib). Use `HeapObject<T>` / `HeapArray<T>`.

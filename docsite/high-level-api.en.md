@@ -119,7 +119,7 @@ Enum types define various options and modes used in the API:
 
 ```cpp
 enum class Method : ULONG {
-    Get, Post, Put, Patch, Delete, Head, Options, Connect
+    Get, Post, Put, Patch, Delete, Head, Options, Connect, Trace
 };
 
 enum class PoolType : ULONG {
@@ -179,7 +179,8 @@ enum SendFlags : ULONG {
     SendFlagNone = 0,
     SendFlagAggregateWithCallbacks = 0x00000001,
     SendFlagDisableAutoRedirect = 0x00000002,
-    SendFlagExpectContinue = 0x00000004
+    SendFlagExpectContinue = 0x00000004,
+    SendFlagAllowTrace = 0x00000008
 };
 ```
 
@@ -189,6 +190,7 @@ enum SendFlags : ULONG {
 | `SendFlagAggregateWithCallbacks` | Invoke header/body callbacks while retaining aggregated response |
 | `SendFlagDisableAutoRedirect` | Disable auto-redirect; return 3xx response directly |
 | `SendFlagExpectContinue` | Explicitly enable `Expect: 100-continue` for HTTP/1.1 requests with a body; default is off |
+| `SendFlagAllowTrace` | Explicitly allow TRACE; bodies, trailers, and sensitive headers are still rejected |
 
 #### Callback Types
 
@@ -247,6 +249,7 @@ struct TlsConfig final {
     KernelHttp::tls::TlsPolicy Policy;
     const KernelHttp::tls::TlsClientCredential* ClientCredential;
     ULONG HandshakeTimeoutMs;
+    ULONG MaxTls12Renegotiations;
 };
 ```
 
@@ -262,6 +265,7 @@ struct TlsConfig final {
 | `Policy` | `{}` | TLS security policy; see TLS documentation |
 | `ClientCredential` | `nullptr` | mTLS client credential |
 | `HandshakeTimeoutMs` | `DefaultTlsHandshakeTimeoutMs` | TLS handshake timeout |
+| `MaxTls12Renegotiations` | `DefaultMaxTls12Renegotiations` | TLS 1.2 full-renegotiation attempt limit; meaningful only when policy explicitly enables renegotiation |
 
 #### `ProxyConfig`
 
@@ -297,6 +301,10 @@ struct SessionConfig final {
     ULONG PoolCapacity;
     ULONG MaxConnsPerHost;
     ULONG IdleTimeoutMs;
+    bool EnableHttp11Pipeline;
+    ULONG Http11PipelineMaxDepth;
+    ULONG Http11PipelineMethodMask;
+    Http2KeepAliveConfig Http2KeepAlive;
     TlsConfig Tls;
     ProxyConfig Proxy;
 };
@@ -310,6 +318,10 @@ struct SessionConfig final {
 | `PoolCapacity` | `8` | Connection pool total capacity |
 | `MaxConnsPerHost` | `2` | Maximum connections per host |
 | `IdleTimeoutMs` | `30000` | Idle connection回收 time (ms) |
+| `EnableHttp11Pipeline` | `false` | Explicit HTTP/1.1 pipeline switch; off by default |
+| `Http11PipelineMaxDepth` | `DefaultHttp11PipelineMaxDepth` | Max in-flight depth for one HTTP/1.1 pipeline; default 4, hard max 64 |
+| `Http11PipelineMethodMask` | `DefaultHttp11PipelineMethodMask` | Allowed method mask for pipelining; defaults to `GET` / `HEAD` / `OPTIONS` |
+| `Http2KeepAlive` | disabled | HTTP/2 pooled-connection background PING keepalive; set `Enabled=true` and tune `IdleMs` / `IntervalMs` / `AckTimeoutMs` |
 | `Tls` | `DefaultTlsConfig()` | Session default TLS config |
 | `Proxy` | disabled | HTTP proxy config; HTTPS uses CONNECT, plaintext HTTP uses absolute-form |
 
@@ -331,6 +343,7 @@ struct SendOptions final {
     ConnPolicy ConnectionPolicy;
     AddressFamily Family;
     Http2CleartextMode Http2CleartextMode;
+    const ::KernelHttp::http2::Http2Priority* Http2Priority;
 };
 ```
 
@@ -348,6 +361,7 @@ struct SendOptions final {
 | `ConnectionPolicy` | `ReuseOrCreate` | Per-send connection policy |
 | `Family` | `Any` | Per-send address family |
 | `Http2CleartextMode` | `Disabled` | Explicit high-level h2c entry: `Disabled` / `PriorKnowledge` / `Upgrade`, only for `http://` |
+| `Http2Priority` | `nullptr` | HTTP/2 per-request priority; when non-null, the first HEADERS frame carries the priority field. Ignored on HTTP/1.1 paths |
 
 #### `AsyncOptions`
 

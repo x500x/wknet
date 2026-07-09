@@ -636,7 +636,7 @@ Synchronous HTTP send. Function blocks until request completes.
 | `STATUS_INSUFFICIENT_RESOURCES` | Out of memory or connection pool full |
 | Other `NTSTATUS` | Transport, TLS, parse, or callback error |
 
-NOTE: `KhHttpSendOptions` fields: `MaxResponseBytes`, `Flags`, `MaxRedirects`, `HeaderCallback`, `BodyCallback`, `CallbackContext`, `CompletionCallback`, `CompletionContext`.
+NOTE: `KhHttpSendOptions` fields: `MaxResponseBytes`, `Flags`, `MaxRedirects`, `HeaderCallback`, `BodyCallback`, `CallbackContext`, `CompletionCallback`, `CompletionContext`, `Http2CleartextMode`, `AcceptEncodingPreferences`, `Http2Priority`.
 
 #### `KhHttpSendAsync`
 

@@ -51,7 +51,7 @@ NTSTATUS SendTextAndReceiveEcho(..., WebSocketEchoResult&);   // 便捷：发文
 - **HttpsClient 代理 CONNECT**：设置 `ProxyAddress` 时先连代理、发送明文 `CONNECT <authority> HTTP/1.1`，2xx 后再对目标主机做 TLS；`ProxyHeaders` 可携带代理认证等额外头。
 - **TLS1.2 确认重连**：首次失败且失败被分类为 `VersionNegotiation`（或 ServerHello 前的非超时 `NetworkIo`）时，自动以 `MaximumTlsProtocol=Tls12` 重试一次；成功则成功，失败返回**原始**错误。WebSocketClient 对**每个解析地址**都做此重连。
 - **Http2Client / Http2Connection**：`TlsAlpn` 下协商不到 `h2` → `STATUS_NOT_SUPPORTED`；`H2cUpgrade` **禁止请求体**，发 `Upgrade: h2c` + base64url `HTTP2-Settings`，校验 `101` 响应，重放 101 后残留字节，再 `ReceiveResponse(stream 1)`。低层连接可用 `BeginRequest` / `ReceiveResponse(streamId)` 管理多活动流；RFC 8441 tunnel 需要对端 `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`。
-- **WebSocketClient**：默认握手 ALPN 为 `http/1.1`；设置 `AllowWebSocketOverHttp2` 后 `wss` 会 offer `h2,http/1.1`，协商到 h2 时走 RFC 8441 extended CONNECT，peer 未启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 则 fail-closed；可传 `ExtraHeaders`；控制帧每次接收上限 100；拒绝 `Sec-WebSocket-Extensions`；Accept 常量时间比对。
+- **WebSocketClient**：默认握手 ALPN 为 `http/1.1`；设置 `AllowWebSocketOverHttp2` 后 `wss` 会 offer `h2,http/1.1`，协商到 h2 时走 RFC 8441 extended CONNECT，peer 未启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 则 fail-closed；可传 `ExtraHeaders`，但 `Sec-WebSocket-Extensions` 仍由库生成；控制帧每次接收上限 100；`permessage-deflate` 通过 connect options 显式 opt-in；Accept 常量时间比对。
 
 ### 与高层 API 的关系
 

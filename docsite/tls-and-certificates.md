@@ -26,13 +26,13 @@ struct TlsPolicy {
     TlsSecurityProfile Profile = ModernDefault;   // 或 CompatibilityExplicit
     bool EnableTls12RsaKeyExchange     = false;
     bool EnableTls12Cbc                = false;
-    bool EnableTls12Renegotiation      = false;    // 仅信令，不真重协商
+    bool EnableTls12Renegotiation      = false;    // 显式兼容开启后允许 TLS 1.2 全量重协商
     bool EnableTls12Sha1Signatures     = false;
     bool EnablePostHandshakeClientAuth = false;
     bool RequireRevocationCheck        = false;
 };
 ```
-`ModernDefault` 下若置位前四个兼容开关 → `TlsValidatePolicy` 返回 `STATUS_INVALID_PARAMETER`。`EnableTls12RsaKeyExchange` 放行 RSA-kx 套件、`EnableTls12Cbc` 放行 CBC 套件并驱动是否 offer EtM、`EnableTls12Sha1Signatures` 放行 SHA-1 签名、`EnablePostHandshakeClientAuth` 放行接受 1.3 post-handshake CertificateRequest、`RequireRevocationCheck` 传入证书校验。policy 被哈希为 `PolicyIdentity` 用于会话恢复绑定。
+`ModernDefault` 下若置位前四个兼容开关 → `TlsValidatePolicy` 返回 `STATUS_INVALID_PARAMETER`。`EnableTls12RsaKeyExchange` 放行 RSA-kx 套件、`EnableTls12Cbc` 放行 CBC 套件并驱动是否 offer EtM、`EnableTls12Renegotiation` 放行 TLS 1.2 服务器 `HelloRequest` 触发或低层客户端主动发起的全量 secure renegotiation（次数由 `MaxTls12Renegotiations` 限制；不支持 abbreviated/session resumption；ALPN 按本次重协商结果更新）、`EnableTls12Sha1Signatures` 放行 SHA-1 签名、`EnablePostHandshakeClientAuth` 放行接受 1.3 post-handshake CertificateRequest、`RequireRevocationCheck` 传入证书校验。policy 被哈希为 `PolicyIdentity` 用于会话恢复绑定。
 
 ### TLS 1.2 强制加固
 
@@ -84,7 +84,7 @@ config.Tls.Store = &store;
 
 ### 撤销
 
-**纯离线、表驱动**。OCSP stapling 由调用方解析为 `CertificateRevocationEntry`（`Source=Ocsp`）入表；`OnlineRequired`（或 `RequireRevocationCheck`）时逐证查表，OCSP 缺失才回退 CRL；查不到 → **fail-closed**（`STATUS_TRUST_FAILURE`）。`StapledOnly` 无 CRL 回退。库**从不在线抓取**。
+**纯离线、证据驱动**。OCSP stapling、静态 `CertificateRevocationEntry` 与 `RevocationProvider` 回调都必须提供 OCSP/CRL DER evidence；校验链路会验证 evidence 的签名、issuer/serial 匹配、thisUpdate/nextUpdate 时间窗与 good/revoked/unknown 状态。`OnlineRequired`（或 `RequireRevocationCheck`）时逐证查询：优先 OCSP，缺失才回退 CRL；查不到或 evidence 无效 → **fail-closed**（`STATUS_TRUST_FAILURE`）。`StapledOnly` 无 CRL 回退。库**从不在线抓取**，provider 只负责把外部获取的 DER 证据交回库内验证。
 
 ### mTLS 客户端证书
 

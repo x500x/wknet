@@ -8,11 +8,12 @@
 - 响应解析：状态行仅接受 HTTP/1.0、1.1；头行 ≤8 KiB、头段 ≤64 KiB、头数 ≤200；**拒绝 obs-fold 折行**；多个 `Content-Length`、`TE`+`CL` 冲突 → `STATUS_INVALID_NETWORK_RESPONSE`。
 - body 框定：Content-Length / chunked / close-delimited；**无 body 状态**：1xx、204、**205**、304，及 HEAD 响应。
 - chunked：块数 ≤8192、chunk-size 行 ≤32、严格 chunk 扩展语法校验；trailer 校验并拒绝禁止字段（`Content-Length`/`Transfer-Encoding`/`Host`/`Authorization`/`Proxy-Authorization`/`Cookie`/`Set-Cookie`）。
-- `206 Partial Content` / `Content-Range` 提供只读解析（`HttpResponse::IsPartialContent` / `GetContentRange`），请求侧 `Range` 与条件请求仍按普通额外头透传。
+- `206 Partial Content` / `Content-Range` 提供只读解析（`HttpResponse::IsPartialContent` / `GetContentRange`）；请求侧提供 `Range` 与条件请求 typed helper，不做分片合并或缓存语义。
 - `Content-Encoding` 解码：`gzip`（校验 CRC32+ISIZE+头 CRC16）、`deflate`（自动识别 zlib 包装并校验 Adler-32，底层用内核 `RtlDecompressBufferEx`，带运行时探测）、`br`（内置 Brotli）、`compress`（完整 LZW `.Z`）、`identity`；最多 2 级链，反序解码。
 - **解压炸弹防护**：decoded aggregate 跟随响应/调用方容量，单级膨胀比 ≤64（`MaxDecodeExpansionRatio`）。
 - 中间 1xx（除 101）静默吞掉重解析；`SendFlagExpectContinue` 显式开启 `Expect: 100-continue`，覆盖 100 后发送 body、final/417 不发送 body、超时后发送 body 与断连错误；自动 redirect、keep-alive 连接池复用。
 - HTTP proxy：HTTPS 走 CONNECT 隧道；明文 HTTP over proxy 使用 absolute-form request target，`Proxy-Authorization` 只来自显式代理配置。
+- HTTP/1.1 pipeline：session `EnableHttp11Pipeline=true` 显式开启，默认关闭；连接池按 FIFO 绑定响应，默认仅允许 `GET`/`HEAD`/`OPTIONS`，深度和方法 mask 可配置；带 body、`Expect:100-continue`、redirect 重放/重排不进入 pipeline。
 
 **HTTP/2（RFC 9113 + HPACK RFC 7541）**
 - 连接前导 + SETTINGS 交换；客户端发 7 项 SETTINGS（含 `ENABLE_CONNECT_PROTOCOL`）、立即发 ACK 不阻塞等服务端 ACK。
@@ -26,12 +27,14 @@
 - RFC 8441 extended CONNECT：`CONNECT` + `:protocol: websocket` 需对端 `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`；低层 `SendStreamData` / `ReceiveStreamData` 可承载 WebSocket frame bytes，高层 `kws` 可在显式 opt-in 后走该路径。
 - 三模式：TLS-ALPN `h2`、显式 h2c prior knowledge、显式 h2c Upgrade（Upgrade 模式禁请求体、重放 101 后残留字节、用 stream 1）；高层通过 `SendOptions.Http2CleartextMode` opt-in，默认 HTTP/1.1。
 - HTTP/2 请求 body 由 body source 驱动，按连接/stream 流控和 peer `MAX_FRAME_SIZE` 切 DATA；请求 trailers 以 final HEADERS + END_STREAM 发送并拒绝 trailer 伪头。
+- 显式 per-request priority：`SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority` 可在首个 HEADERS 帧携带 priority 字段；底层支持独立 PRIORITY frame 编解码，收到 peer PRIORITY 只校验语义，不改变安全边界。
+- 后台 PING 保活：session 通过 `Http2KeepAlive.Enabled=true` 显式开启，默认关闭；只扫描 idle 且可复用的池化 H2 连接，ACK 超时或协议错误会关闭该 idle 连接。
 - GOAWAY/RST 高层重试语义：clean GOAWAY 或 `REFUSED_STREAM` 表示未处理 stream 时返回 `STATUS_RETRY`，高层只对安全方法 fresh retry 一次，非幂等请求不自动重放。
 
 **HPACK**：整数续字节 ≤5、Huffman（拒绝 >30 bit 码/EOS/非法 padding）、动态表大小更新仅限块首且 ≤协商值、header-list 大小按 `name+value+32` 计；**编码端对 `authorization`/`cookie`/`proxy-authorization` 强制 Never-Indexed**。
 
 **WebSocket（RFC 6455）**
-- ws/wss 握手；`Sec-WebSocket-Accept` **常量时间**比对；**拒绝任何 `Sec-WebSocket-Extensions`**；子协议协商。
+- ws/wss 握手；`Sec-WebSocket-Accept` **常量时间**比对；`permessage-deflate` 显式 opt-in（默认关闭），未请求/未知/非法扩展拒绝；子协议协商。
 - 支持调用方提供 opening-handshake headers（如 `Origin`、`Authorization`、`Cookie`），拒绝库受控头（`Host`、`Connection`、`Upgrade`、`Sec-WebSocket-*` 等）和非法头文本。
 - HTTP/1.1 Upgrade 路径客户端帧**始终掩码**（每帧新随机键）；RFC 8441 over HTTP/2 路径按规范发送无掩码帧；收到**被掩码的服务端帧**→协议错误 1002。
 - `wss` 可通过 `AllowWebSocketOverHttp2` 显式 opt-in RFC 8441；默认仍保持 HTTP/1.1 Upgrade，`ws://` 不隐式走 h2c。
@@ -52,7 +55,7 @@
 - 链 ≤8；有界候选路径搜索按 subject/issuer、AKI/SKI 与签名可验证性选择链，覆盖多中间与交叉签名；逐链签名验证、有效期、basic constraints/pathLen、KU（keyCertSign）、EKU serverAuth（可选）、Name Constraints、certificatePolicies、信任锚。
 - 解析期**拒绝重复扩展与未知 critical 扩展**。
 - 主机名：SAN dNSName 通配仅限**单个最左标签**；IP literal **只匹配 iPAddress SAN**；**从不回退 CN**（CN 仅用于 name-constraint）；IDNA/punycode。
-- 撤销：纯离线、表驱动（OCSP stapling 由调用方解析入表 + OCSP/CRL 缓存）；`OnlineRequired` 下查不到 → **fail-closed**（`STATUS_TRUST_FAILURE`）。
+- 撤销：纯离线、证据驱动（OCSP stapling、静态条目与 provider callback）；OCSP/CRL DER evidence 会校验签名、issuer/serial、thisUpdate/nextUpdate 与状态；`OnlineRequired` / `RequireRevocationCheck` 下查不到或证据无效 → **fail-closed**（`STATUS_TRUST_FAILURE`）。
 - SPKI pin：对**已配置 pin 的主机**强校验叶证书 SPKI；未配置 pin 的主机 fail-open。
 - mTLS：私钥不入库，经 `TlsClientCredential.Sign` 回调签名。
 
@@ -63,12 +66,17 @@
 | 能力 | 开启方式 / 说明 |
 |------|-----------------|
 | `Expect: 100-continue` | `SendFlagExpectContinue` 显式开启 |
+| HTTP/1.1 pipeline | session `EnableHttp11Pipeline=true`；`Http11PipelineMaxDepth` / `Http11PipelineMethodMask` 可配置，默认仅 `GET`/`HEAD`/`OPTIONS` |
 | h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode` 显式开启；默认不走明文 HTTP/2 |
+| HTTP/2 后台 PING 保活 | session `Http2KeepAlive.Enabled=true`；默认关闭 |
+| HTTP/2 per-request priority | `SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority` |
+| WebSocket permessage-deflate | `ConnectConfig.PerMessageDeflate.Enable=true`；默认不协商 |
 | WebSocket over HTTP/2 | `AllowWebSocketOverHttp2=true` 显式开启；默认 HTTP/1.1 Upgrade |
 | TLS1.2 RSA kx / CBC / SHA-1 | `TlsPolicy.Profile=CompatibilityExplicit` 后分别开启 `EnableTls12RsaKeyExchange`、`EnableTls12Cbc`、`EnableTls12Sha1Signatures` |
+| TLS1.2 真重协商 | `CompatibilityExplicit` + `EnableTls12Renegotiation`，次数由 `MaxTls12Renegotiations` 限制 |
 | TLS1.3 0-RTT | 连接选项 `EnableEarlyData` + `EarlyDataReplaySafe`，且 ticket 通告 `max_early_data_size` |
 | TLS1.3 post-handshake client auth | `EnablePostHandshakeClientAuth`；开启后经 mTLS 回调签名，私钥不进入库 |
-| 强撤销要求 | `RequireRevocationCheck`；查不到调用方提供的 OCSP/CRL 数据时 fail-closed |
+| 强撤销要求 | `RequireRevocationCheck`；查不到调用方提供或 provider 返回的可验证 OCSP/CRL DER 证据时 fail-closed |
 
 ### 安全拒绝 / 策略约束
 
@@ -80,7 +88,7 @@
 | HTTP/1.1 request trailer | 仅允许 chunked 请求路径 |
 | HTTP `br` Transfer-Encoding | 拒绝；`br` 仅作为 `Content-Encoding` 支持 |
 | HTTP/2 `PUSH_PROMISE` | server push 禁用，收到后视为协议错误 |
-| WebSocket 服务端返回未请求扩展 | 拒绝，避免隐式启用 permessage-deflate 等扩展 |
+| WebSocket 服务端返回未请求扩展 | 拒绝；permessage-deflate 仅显式启用后协商 |
 | WebSocket 握手 redirect / 401 / 407 | 不自动跟随或认证，返回 `STATUS_NOT_SUPPORTED` |
 | TLS 1.3 到 TLS 1.2 | 不做握手内自动降级；只有可验证的版本协商证据才允许上层显式重连 1.2 |
 | 证书主机名 | IP literal 只匹配 iPAddress SAN；域名不回退 CN |
@@ -93,15 +101,13 @@
 | 能力 | 当前结论 |
 |------|----------|
 | HTTP 入站 request parser / server role | 非目标；当前项目定位为客户端协议栈 |
-| TRACE / HTTP 管线化 | 非目标 |
 | RFC 9111 cache | 不提供内核缓存 API |
-| `Range` / 条件请求语义处理 | 仅普通 header 透传；不合并、不验证语义；响应 `Content-Range` 只读解析 |
+| `Range` / 条件请求完整缓存语义 | 已提供 typed helper 与响应 `Content-Range` 只读解析；不做分片合并、缓存合并或 RFC9111 cache |
 | 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
-| HTTP/2 priority 公共调度能力 | 不作为公共能力 |
-| HTTP/2 后台自动 PING 保活 | 不提供；调用方可显式 `SendPing` |
-| WebSocket extensions（如 permessage-deflate） | 非目标；不协商 |
+| HTTP/2 priority 公共调度能力 | 已提供显式 per-request priority；不实现复杂树调度策略 |
+| WebSocket 其它 extensions | 非目标；`permessage-deflate` 已支持显式 opt-in，默认不协商 |
 | WebSocket over HTTP/2 默认自动选择 | 当前不做；必须显式 opt-in |
-| TLS 1.2 真重协商 | 非目标；兼容档仅处理安全重协商信令，不执行 renegotiation |
+| TLS 1.2 真重协商 | 已实现/显式开启；需 `CompatibilityExplicit` + `EnableTls12Renegotiation`，次数由 `MaxTls12Renegotiations` 限制；支持服务器 `HelloRequest` 与低层客户端主动全量重协商；不支持 abbreviated/session resumption；ALPN 按本次重协商结果更新 |
 | 在线 OCSP/CRL 抓取 | 非目标；调用方通过外部 trust/cert/revocation 数据或已缓存条目驱动强撤销判定 |
 | HTTP/3 / QUIC | 非目标 |
 

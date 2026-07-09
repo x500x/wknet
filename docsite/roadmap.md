@@ -5,24 +5,18 @@
 ### 明确的非目标
 
 **HTTP/1.1**
-- HTTP 管线化（串行请求/响应，刻意不实现）
-- TRACE 方法
 - 入站 request parser / server role
 - `obs-fold` 折行（安全拒绝而非规范化）
 - 调用方手写 `Transfer-Encoding` / `TE`（安全拒绝，framing 由库生成）
 
 **HTTP/2**
-- 发送 PRIORITY 帧（合法地省略）
-- 后台自动 PING 保活策略（低层已提供显式 `SendPing`，不默认启动定时器）
 - server push（客户端 `ENABLE_PUSH=0`，收到 `PUSH_PROMISE` 安全拒绝）
 
 **WebSocket**（注：分片发送 `kws::SendContinuation` 与显式接收分片 `ReceiveOptions.DeliverFragments=true` **已支持**）
-- permessage-deflate（RFC 7692）
 - 高层 `kws` 默认自动选择 WebSocket over HTTP/2（RFC 8441 已支持显式 opt-in，默认仍保持 HTTP/1.1 Upgrade）
 - 握手 redirect / 401 / 407 跟随（当前安全拒绝为 `STATUS_NOT_SUPPORTED`；未来若做必须显式 opt-in）
 
 **TLS**
-- TLS 1.2 renegotiation（仅信令，未实现）
 - 在线撤销抓取（OCSP/CRL 网络拉取）——内核态刻意省略，支持静态撤销条目
 
 **其它**
@@ -30,13 +24,18 @@
 
 ### 默认关闭、可显式开启
 
-- TLS 1.2 RSA key exchange / CBC / renegotiation / SHA-1 签名（需 `TlsPolicy` + `CompatibilityExplicit`）
+- TLS 1.2 RSA key exchange / CBC / SHA-1 签名（需 `TlsPolicy` + `CompatibilityExplicit`）
+- TLS 1.2 真重协商（服务器 `HelloRequest` 或低层客户端主动发起；需 `CompatibilityExplicit` + `EnableTls12Renegotiation`，次数由 `MaxTls12Renegotiations` 限制）
 - Post-handshake client auth
 - 强制撤销检查
 - TLS 1.3 0-RTT
 - `Expect: 100-continue`（`SendFlagExpectContinue` + `ExpectContinueTimeoutMs`）
+- HTTP/1.1 pipeline（session `EnableHttp11Pipeline=true`，默认仅 `GET`/`HEAD`/`OPTIONS`，深度和方法 mask 可配置）
 - 高层 h2c prior knowledge / Upgrade（`SendOptions.Http2CleartextMode`）
+- HTTP/2 后台 PING 保活（session `Http2KeepAlive.Enabled=true`，默认关闭）
+- HTTP/2 per-request priority（`SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority`）
 - WebSocket over HTTP/2（`ConnectConfig.AllowWebSocketOverHttp2`）
+- WebSocket permessage-deflate（`ConnectConfig.PerMessageDeflate.Enable=true`，默认关闭）
 
 ### 未来改进方向（持续）
 

@@ -119,7 +119,7 @@ khttp::AsyncRelease(op);
 
 ```cpp
 enum class Method : ULONG {
-    Get, Post, Put, Patch, Delete, Head, Options, Connect
+    Get, Post, Put, Patch, Delete, Head, Options, Connect, Trace
 };
 
 enum class PoolType : ULONG {
@@ -183,7 +183,8 @@ enum SendFlags : ULONG {
     SendFlagNone = 0,
     SendFlagAggregateWithCallbacks = 0x00000001,
     SendFlagDisableAutoRedirect = 0x00000002,
-    SendFlagExpectContinue = 0x00000004
+    SendFlagExpectContinue = 0x00000004,
+    SendFlagAllowTrace = 0x00000008
 };
 ```
 
@@ -193,6 +194,7 @@ enum SendFlags : ULONG {
 | `SendFlagAggregateWithCallbacks` | 调用 header/body 回调，同时保留聚合响应。适用于需要流式处理响应但又想保留完整响应的场景 |
 | `SendFlagDisableAutoRedirect` | 禁用自动重定向，直接返回 3xx 响应。适用于需要手动处理重定向的场景 |
 | `SendFlagExpectContinue` | 对有 body 的 HTTP/1.1 请求显式启用 `Expect: 100-continue`；默认不发送 |
+| `SendFlagAllowTrace` | 显式允许 TRACE；body、trailer 与敏感头仍会拒绝 |
 
 ### 回调类型
 
@@ -253,6 +255,7 @@ struct TlsConfig final {
     KernelHttp::tls::TlsPolicy Policy;
     const KernelHttp::tls::TlsClientCredential* ClientCredential;
     ULONG HandshakeTimeoutMs;
+    ULONG MaxTls12Renegotiations;
 };
 ```
 
@@ -268,6 +271,7 @@ struct TlsConfig final {
 | `Policy` | `{}` | TLS 安全策略，详见 TLS 文档。可以配置加密套件、签名算法等 |
 | `ClientCredential` | `nullptr` | mTLS 客户端凭据。仅在需要客户端证书认证时设置 |
 | `HandshakeTimeoutMs` | `DefaultTlsHandshakeTimeoutMs` | TLS 握手超时。网络环境较差时可以适当增大 |
+| `MaxTls12Renegotiations` | `DefaultMaxTls12Renegotiations` | TLS 1.2 真重协商次数上限；仅在 policy 显式开启重协商时有意义 |
 
 ### `ProxyConfig`
 
@@ -303,6 +307,10 @@ struct SessionConfig final {
     ULONG PoolCapacity;
     ULONG MaxConnsPerHost;
     ULONG IdleTimeoutMs;
+    bool EnableHttp11Pipeline;
+    ULONG Http11PipelineMaxDepth;
+    ULONG Http11PipelineMethodMask;
+    Http2KeepAliveConfig Http2KeepAlive;
     TlsConfig Tls;
     ProxyConfig Proxy;
 };
@@ -316,6 +324,10 @@ struct SessionConfig final {
 | `PoolCapacity` | `8` | 连接池总容量。根据并发请求数量调整，但不要设置过大 |
 | `MaxConnsPerHost` | `2` | 单主机最大连接数。HTTP/2 下通常 1 个连接就够了 |
 | `IdleTimeoutMs` | `30000` | 空闲连接回收时间，单位毫秒。30 秒是合理的默认值 |
+| `EnableHttp11Pipeline` | `false` | HTTP/1.1 pipeline 显式开关；默认关闭 |
+| `Http11PipelineMaxDepth` | `DefaultHttp11PipelineMaxDepth` | 单条 HTTP/1.1 pipeline 最大在途深度；默认 4，硬上限 64 |
+| `Http11PipelineMethodMask` | `DefaultHttp11PipelineMethodMask` | pipeline 允许的方法 mask；默认仅 `GET` / `HEAD` / `OPTIONS` |
+| `Http2KeepAlive` | disabled | HTTP/2 池化连接后台 PING 保活；默认关闭，`Enabled=true` 后按 `IdleMs` / `IntervalMs` / `AckTimeoutMs` 驱动 |
 | `Tls` | `DefaultTlsConfig()` | 会话默认 TLS 配置。可以在单次发送时覆盖 |
 | `Proxy` | disabled | HTTP 代理配置。HTTPS 使用 CONNECT，明文 HTTP 使用 absolute-form。默认不启用代理 |
 
@@ -337,6 +349,7 @@ struct SendOptions final {
     ConnPolicy ConnectionPolicy;
     AddressFamily Family;
     Http2CleartextMode Http2CleartextMode;
+    const ::KernelHttp::http2::Http2Priority* Http2Priority;
 };
 ```
 
@@ -354,6 +367,7 @@ struct SendOptions final {
 | `ConnectionPolicy` | `ReuseOrCreate` | 本次发送连接策略。`ReuseOrCreate` 是最常用的选择，它会复用已有连接或创建新连接 |
 | `Family` | `Any` | 本次发送地址族。除非需要强制使用 IPv4 或 IPv6，否则保持 `Any` |
 | `Http2CleartextMode` | `Disabled` | 高层 h2c 显式入口：`Disabled` / `PriorKnowledge` / `Upgrade`，仅对 `http://` 生效 |
+| `Http2Priority` | `nullptr` | HTTP/2 per-request priority；非空时首个 HEADERS 帧携带 priority 字段，HTTP/1.1 路径忽略 |
 
 ### `AsyncOptions`
 

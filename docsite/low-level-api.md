@@ -636,7 +636,7 @@ NTSTATUS KhHttpSendSync(
 | `STATUS_INSUFFICIENT_RESOURCES` | 内存不足或连接池满了 |
 | 其他 `NTSTATUS` | 传输、TLS、解析或回调返回的错误 |
 
-NOTE: `KhHttpSendOptions` 字段：`MaxResponseBytes`、`Flags`、`MaxRedirects`、`HeaderCallback`、`BodyCallback`、`CallbackContext`、`CompletionCallback`、`CompletionContext`。
+NOTE: `KhHttpSendOptions` 字段：`MaxResponseBytes`、`Flags`、`MaxRedirects`、`HeaderCallback`、`BodyCallback`、`CallbackContext`、`CompletionCallback`、`CompletionContext`、`Http2CleartextMode`、`AcceptEncodingPreferences`、`Http2Priority`。
 
 #### `KhHttpSendAsync`
 
