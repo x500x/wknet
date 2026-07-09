@@ -946,7 +946,10 @@ namespace
             KhHttpSendFlagAggregateWithCallbacks |
             KhHttpSendFlagDisableAutoRedirect |
             KhHttpSendFlagExpectContinue |
-            KhHttpSendFlagAllowTrace;
+            KhHttpSendFlagAllowTrace |
+            KhHttpSendFlagBypassCache |
+            KhHttpSendFlagNoCacheStore |
+            KhHttpSendFlagOnlyIfCached;
 
         if (!IsValidMaxResponseBytes(options.MaxResponseBytes)) {
             return false;
@@ -2336,6 +2339,7 @@ namespace
         newSession->Header = { KhHandleKind::Session, 0, nullptr };
         newSession->WskClient = wskClient;
         newSession->Options = effectiveOptions;
+        newSession->Cache = effectiveOptions.Cache;
         newSession->InFlight = 0;
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         KeInitializeEvent(&newSession->DrainEvent, NotificationEvent, TRUE);

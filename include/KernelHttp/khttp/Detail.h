@@ -13,6 +13,7 @@ namespace detail
     constexpr ULONG KhHighRequestMagic = 0x4B485232;
     constexpr ULONG KhHighHeadersMagic = 0x4B484432;
     constexpr ULONG KhHighBodyMagic = 0x4B484232;
+    constexpr ULONG KhHighCacheMagic = 0x4B484332;
 
     enum class BodyStorageKind : ULONG
     {
@@ -102,6 +103,12 @@ struct Body final
     SIZE_T TrailerCount = 0;
 };
 
+struct Cache final
+{
+    ULONG Magic = detail::KhHighCacheMagic;
+    ::KernelHttp::engine::KH_HTTP_CACHE Engine = nullptr;
+};
+
 namespace detail
 {
     inline ::KernelHttp::engine::KhSession* ToApiSession(Session* s) noexcept
@@ -141,6 +148,22 @@ namespace detail
     inline ::KernelHttp::engine::KhAsyncOperation* ToApiAsyncOp(AsyncOp* op) noexcept
     {
         return reinterpret_cast<::KernelHttp::engine::KhAsyncOperation*>(op);
+    }
+
+    inline ::KernelHttp::engine::KhHttpCache* ToApiCache(Cache* cache) noexcept
+    {
+        if (cache == nullptr || cache->Magic != KhHighCacheMagic) {
+            return nullptr;
+        }
+        return cache->Engine;
+    }
+
+    inline const ::KernelHttp::engine::KhHttpCache* ToApiCacheConst(const Cache* cache) noexcept
+    {
+        if (cache == nullptr || cache->Magic != KhHighCacheMagic) {
+            return nullptr;
+        }
+        return cache->Engine;
     }
 
     inline Response* FromApiResponse(::KernelHttp::engine::KhResponse* r) noexcept
@@ -362,6 +385,13 @@ namespace detail
         default:
             return ::KernelHttp::engine::KhHttp2CleartextMode::Disabled;
         }
+    }
+
+    inline ::KernelHttp::engine::KhHttpCacheMode ToApiCacheMode(CacheMode mode) noexcept
+    {
+        return mode == CacheMode::Shared ?
+            ::KernelHttp::engine::KhHttpCacheMode::Shared :
+            ::KernelHttp::engine::KhHttpCacheMode::Private;
     }
 
     inline void FillApiTlsOptions(const TlsConfig& src, ::KernelHttp::engine::KhTlsOptions& dst) noexcept

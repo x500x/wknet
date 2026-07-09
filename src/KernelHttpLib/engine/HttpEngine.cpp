@@ -3,6 +3,7 @@
 #include <KernelHttp/core/TlsTransport.h>
 #include <KernelHttp/core/WorkspaceScratchAllocator.h>
 #include <KernelHttp/core/WskTransport.h>
+#include <KernelHttp/engine/HttpCache.h>
 #include <KernelHttp/client/Http2Client.h>
 #include <KernelHttp/engine/EngineImpl.h>
 #include <KernelHttp/engine/HandleAlloc.h>
@@ -139,6 +140,41 @@ namespace engine
         policy.Preferences = sendOptions.AcceptEncodingPreferences;
         policy.PreferenceCount = sendOptions.AcceptEncodingPreferenceCount;
         return policy;
+    }
+
+    bool RequestHasHeader(_In_ const KhRequest& request, _In_z_ const char* name) noexcept
+    {
+        if (name == nullptr) {
+            return false;
+        }
+        for (SIZE_T index = 0; index < request.HeaderCount; ++index) {
+            if (TextEqualsLiteralIgnoreCase(
+                request.Headers[index].Name,
+                request.Headers[index].NameLength,
+                name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void FillParsedFromCacheSnapshot(
+        const KhHttpCacheSnapshot& snapshot,
+        _Out_ http::HttpResponse* parsed) noexcept
+    {
+        if (parsed == nullptr) {
+            return;
+        }
+        *parsed = {};
+        parsed->MajorVersion = 1;
+        parsed->MinorVersion = 1;
+        parsed->StatusCode = snapshot.StatusCode;
+        parsed->Headers = snapshot.Headers;
+        parsed->HeaderCount = snapshot.HeaderCount;
+        parsed->Body = reinterpret_cast<const char*>(snapshot.Body);
+        parsed->BodyLength = snapshot.BodyLength;
+        parsed->BodyKind = http::HttpBodyKind::ContentLength;
+        parsed->BytesConsumed = snapshot.BodyLength;
     }
 
     _Ret_maybenull_
@@ -6212,6 +6248,65 @@ namespace engine
             return STATUS_INVALID_PARAMETER;
         }
 
+        KH_HTTP_CACHE effectiveCache = effectiveOptions.Cache != nullptr ? effectiveOptions.Cache : session->Cache;
+        KhHttpCacheLookupResult cacheLookup = {};
+        KhHttpCacheSnapshot activeCacheSnapshot = {};
+        bool activeCacheSnapshotValid = false;
+        KH_REQUEST redirectRequest = nullptr;
+        KhRequest* currentRequest = request;
+
+        if (effectiveCache != nullptr) {
+            status = KhHttpCacheLookup(effectiveCache, *currentRequest, effectiveOptions, &cacheLookup);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (cacheLookup.OnlyIfCachedMiss) {
+                return STATUS_NOT_FOUND;
+            }
+            if (cacheLookup.Found && !cacheLookup.RequiresValidation) {
+                http::HttpResponse cachedParsed = {};
+                FillParsedFromCacheSnapshot(cacheLookup.Snapshot, &cachedParsed);
+                status = InvokeResponseCallbacks(effectiveOptions, cachedParsed);
+                if (NT_SUCCESS(status) && shouldAggregate) {
+                    status = CreateOwnedResponse(cachedParsed, nullptr, 0, response);
+                }
+                KhHttpCacheFreeSnapshot(&cacheLookup.Snapshot);
+                return status;
+            }
+            if (cacheLookup.Found && cacheLookup.RequiresValidation) {
+                if ((effectiveOptions.Flags & KhHttpSendFlagOnlyIfCached) != 0) {
+                    return STATUS_NOT_FOUND;
+                }
+                status = CloneRequestForAsync(*currentRequest, &redirectRequest);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                currentRequest = redirectRequest;
+                if (cacheLookup.IfNoneMatchLength != 0 &&
+                    !RequestHasHeader(*currentRequest, "If-None-Match")) {
+                    status = KhHttpRequestSetHeader(
+                        currentRequest,
+                        "If-None-Match",
+                        sizeof("If-None-Match") - 1,
+                        cacheLookup.IfNoneMatch,
+                        cacheLookup.IfNoneMatchLength);
+                }
+                else if (cacheLookup.IfModifiedSinceLength != 0 &&
+                    !RequestHasHeader(*currentRequest, "If-Modified-Since")) {
+                    status = KhHttpRequestSetHeader(
+                        currentRequest,
+                        "If-Modified-Since",
+                        sizeof("If-Modified-Since") - 1,
+                        cacheLookup.IfModifiedSince,
+                        cacheLookup.IfModifiedSinceLength);
+                }
+                if (!NT_SUCCESS(status)) {
+                    KhHttpRequestRelease(redirectRequest);
+                    return status;
+                }
+            }
+        }
+
         const SIZE_T maxResponseBytes = bodyCallbackOnly ?
             0 :
             EffectiveMaxResponseBytes(options, session->Options.MaxResponseBytes);
@@ -6229,8 +6324,6 @@ namespace engine
 
         http::HttpResponse parsed = {};
         SIZE_T rawResponseLength = 0;
-        KH_REQUEST redirectRequest = nullptr;
-        KhRequest* currentRequest = request;
         const bool followRedirects = RedirectsEnabled(effectiveOptions);
         const ULONG maxRedirects = EffectiveMaxRedirects(effectiveOptions);
         ULONG redirectCount = 0;
@@ -6285,18 +6378,60 @@ namespace engine
             ++redirectCount;
         }
 
+        if (NT_SUCCESS(status) &&
+            effectiveCache != nullptr &&
+            parsed.StatusCode == 304) {
+            status = KhHttpCacheUpdateNotModified(
+                effectiveCache,
+                *currentRequest,
+                parsed,
+                &activeCacheSnapshot);
+            if (NT_SUCCESS(status)) {
+                FillParsedFromCacheSnapshot(activeCacheSnapshot, &parsed);
+                rawResponseLength = 0;
+                activeCacheSnapshotValid = true;
+            }
+            else if (status == STATUS_NOT_FOUND) {
+                status = STATUS_SUCCESS;
+            }
+        }
+
         if (NT_SUCCESS(status)) {
             status = InvokeResponseCallbacks(effectiveOptions, parsed);
+        }
+
+        if (NT_SUCCESS(status) &&
+            effectiveCache != nullptr &&
+            parsed.StatusCode != 304 &&
+            !activeCacheSnapshotValid) {
+            if (http::IsUnsafeMethodForInvalidation(static_cast<ULONG>(currentRequest->Method)) &&
+                parsed.StatusCode >= 200 &&
+                parsed.StatusCode < 400) {
+                KhHttpCacheInvalidateForRequest(effectiveCache, *currentRequest);
+            }
+            else {
+                NTSTATUS cacheStatus = KhHttpCacheStoreResponse(
+                    effectiveCache,
+                    *currentRequest,
+                    effectiveOptions,
+                    parsed);
+                if (!NT_SUCCESS(cacheStatus)) {
+                    status = cacheStatus;
+                }
+            }
         }
 
         if (NT_SUCCESS(status) && shouldAggregate) {
             status = CreateOwnedResponse(
                 parsed,
-                reinterpret_cast<const char*>(workspace.Response.Data),
-                rawResponseLength,
+                activeCacheSnapshotValid ? nullptr : reinterpret_cast<const char*>(workspace.Response.Data),
+                activeCacheSnapshotValid ? 0 : rawResponseLength,
                 response);
         }
 
+        if (activeCacheSnapshotValid) {
+            KhHttpCacheFreeSnapshot(&activeCacheSnapshot);
+        }
         if (redirectRequest != nullptr) {
             KhHttpRequestRelease(redirectRequest);
         }

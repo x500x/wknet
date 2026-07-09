@@ -22,6 +22,7 @@
     <ClCompile Include="KernelHttpConfig.cpp" />
     <ClCompile Include="engine\Engine.cpp" />
     <ClCompile Include="engine\HttpEngine.cpp" />
+    <ClCompile Include="engine\HttpCache.cpp" />
     <ClCompile Include="engine\UrlParser.cpp" />
     <ClCompile Include="engine\WsEngine.cpp" />
     <ClCompile Include="engine\Async.cpp" />
@@ -41,6 +42,7 @@
     <ClCompile Include="crypto\KeyExchange.cpp" />
     <ClCompile Include="khttp\AsyncOp.cpp" />
     <ClCompile Include="khttp\Body.cpp" />
+    <ClCompile Include="khttp\Cache.cpp" />
     <ClCompile Include="khttp\Headers.cpp" />
     <ClCompile Include="khttp\Http.cpp" />
     <ClCompile Include="khttp\HttpAsync.cpp" />
@@ -52,6 +54,7 @@
     <ClCompile Include="khttp\Session.cpp" />
     <ClCompile Include="khttp\WebSocket.cpp" />
     <ClCompile Include="http\HttpCoding.cpp" />
+    <ClCompile Include="http\HttpCachePolicy.cpp" />
     <ClCompile Include="http\HttpContentEncoding.cpp" />
     <ClCompile Include="http\HttpParser.cpp" />
     <ClCompile Include="http\HttpRequest.cpp" />
@@ -133,6 +136,7 @@
     <ClInclude Include="..\..\include\KernelHttp\engine\HandleAlloc.h" />
     <ClInclude Include="..\..\include\KernelHttp\engine\HandleTypes.h" />
     <ClInclude Include="..\..\include\KernelHttp\engine\HttpEngine.h" />
+    <ClInclude Include="..\..\include\KernelHttp\engine\HttpCache.h" />
     <ClInclude Include="..\..\include\KernelHttp\engine\UrlParser.h" />
     <ClInclude Include="..\..\include\KernelHttp\engine\WsEngine.h" />
     <ClInclude Include="..\..\include\KernelHttp\engine\Async.h" />
@@ -156,6 +160,7 @@
     <ClInclude Include="..\..\include\KernelHttp\crypto\Ed448.h" />
     <ClInclude Include="..\..\include\KernelHttp\crypto\KeyExchange.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpCoding.h" />
+    <ClInclude Include="..\..\include\KernelHttp\http\HttpCachePolicy.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpContentEncoding.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpParser.h" />
     <ClInclude Include="..\..\include\KernelHttp\http\HttpRequest.h" />
@@ -175,6 +180,7 @@
     <ClInclude Include="..\..\include\KernelHttp\net\WskSocket.h" />
     <ClInclude Include="..\..\include\KernelHttp\khttp\AsyncOp.h" />
     <ClInclude Include="..\..\include\KernelHttp\khttp\Body.h" />
+    <ClInclude Include="..\..\include\KernelHttp\khttp\Cache.h" />
     <ClInclude Include="..\..\include\KernelHttp\khttp\Detail.h" />
     <ClInclude Include="..\..\include\KernelHttp\khttp\Headers.h" />
     <ClInclude Include="..\..\include\KernelHttp\khttp\Http.h" />

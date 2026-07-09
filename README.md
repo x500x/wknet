@@ -80,6 +80,7 @@ KernelHttp 的公开能力按类别列账，避免把“没有实现”“默认
 | TLS 1.3 到 TLS 1.2 | 不做握手内自动降级；只有可验证的版本协商证据才允许上层显式重连 1.2 |
 | 证书主机名 | IP literal 只匹配 iPAddress SAN；域名不回退 CN |
 | HTTPS redirect 到 HTTP | 默认拒绝降级 |
+| RFC 9111 cache | 提供显式内存内内核缓存 API；支持 fresh hit、验证、`Vary`、private/shared 规则、unsafe method 失效、Range/206 partial 合并 |
 
 **明确未实现 / 非目标**
 
@@ -88,8 +89,7 @@ KernelHttp 的公开能力按类别列账，避免把“没有实现”“默认
 | 能力 | 当前结论 |
 |------|----------|
 | HTTP 入站 request parser / server role | 非目标；当前项目定位为客户端协议栈 |
-| RFC 9111 cache | 不提供内核缓存 API |
-| Range / 条件请求缓存合并语义 | 不做分片合并、缓存合并或 RFC9111 cache |
+| 磁盘持久化 HTTP cache | 非目标；RFC 9111 cache 为显式内存内 NonPaged 对象，不跨重启持久化 |
 | 完整 `Accept-Encoding` qvalue/content negotiation | 不提供完整协商语义；默认 header 仅表达已实现 decoder 子集，调用方可覆盖 |
 | HTTP/2 复杂本地 priority tree 调度 | 非目标；不维护本地依赖树，不实现带宽调度器 |
 | 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；不协商其它扩展 |

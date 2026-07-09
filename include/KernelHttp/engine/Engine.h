@@ -30,12 +30,14 @@ namespace engine
     struct KhSession;
     struct KhRequest;
     struct KhResponse;
+    struct KhHttpCache;
     struct KhWebSocket;
     struct KhAsyncOperation;
 
     typedef KhSession* KH_SESSION;
     typedef KhRequest* KH_REQUEST;
     typedef KhResponse* KH_RESPONSE;
+    typedef KhHttpCache* KH_HTTP_CACHE;
     typedef KhWebSocket* KH_WEBSOCKET;
     typedef KhAsyncOperation* KH_ASYNC_OPERATION;
 
@@ -165,7 +167,16 @@ namespace engine
         KhHttpSendFlagAggregateWithCallbacks = 0x00000001,
         KhHttpSendFlagDisableAutoRedirect = 0x00000002,
         KhHttpSendFlagExpectContinue = 0x00000004,
-        KhHttpSendFlagAllowTrace = 0x00000008
+        KhHttpSendFlagAllowTrace = 0x00000008,
+        KhHttpSendFlagBypassCache = 0x00000010,
+        KhHttpSendFlagNoCacheStore = 0x00000020,
+        KhHttpSendFlagOnlyIfCached = 0x00000040
+    };
+
+    enum class KhHttpCacheMode : ULONG
+    {
+        Private = 0,
+        Shared = 1
     };
 
     enum class KhWebSocketMessageType : ULONG
@@ -244,6 +255,25 @@ namespace engine
         ULONG AckTimeoutMilliseconds = KhDefaultHttp2KeepAliveAckTimeoutMilliseconds;
     };
 
+    struct KhHttpCacheOptions final
+    {
+        SIZE_T MaxBytes = 16 * 1024 * 1024;
+        SIZE_T MaxEntries = 256;
+        KhHttpCacheMode Mode = KhHttpCacheMode::Private;
+    };
+
+    struct KhHttpCacheStats final
+    {
+        SIZE_T EntryCount = 0;
+        SIZE_T BytesUsed = 0;
+        ULONGLONG Hits = 0;
+        ULONGLONG Misses = 0;
+        ULONGLONG Revalidations = 0;
+        ULONGLONG Stores = 0;
+        ULONGLONG Invalidations = 0;
+        ULONGLONG Evictions = 0;
+    };
+
     struct KhSessionOptions final
     {
         KhPoolType ResponsePoolType = KhPoolType::NonPaged;
@@ -261,6 +291,7 @@ namespace engine
         KhHttp2KeepAliveOptions Http2KeepAlive = {};
         KhTlsOptions Tls = {};
         KhProxyOptions Proxy = {};
+        KH_HTTP_CACHE Cache = nullptr;
     };
 
     struct KhHttpSendOptions final
@@ -281,6 +312,7 @@ namespace engine
         const http::HttpAcceptEncodingPreference* AcceptEncodingPreferences = nullptr;
         SIZE_T AcceptEncodingPreferenceCount = 0;
         const http2::Http2Priority* Http2Priority = nullptr;
+        KH_HTTP_CACHE Cache = nullptr;
     };
 
     struct KhNameValuePair final
@@ -394,6 +426,21 @@ namespace engine
         _Out_ KH_SESSION* session) noexcept;
 
     void KhSessionClose(_In_opt_ KH_SESSION session) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpCacheCreate(
+        _In_opt_ const KhHttpCacheOptions* options,
+        _Out_ KH_HTTP_CACHE* cache) noexcept;
+
+    void KhHttpCacheClose(_In_opt_ KH_HTTP_CACHE cache) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpCacheClear(_In_ KH_HTTP_CACHE cache) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS KhHttpCacheGetStats(
+        _In_ KH_HTTP_CACHE cache,
+        _Out_ KhHttpCacheStats* stats) noexcept;
 
     _Must_inspect_result_
     NTSTATUS KhHttpRequestCreate(

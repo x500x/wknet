@@ -75,6 +75,7 @@ namespace khttp
     struct AsyncOp;
     struct Headers;
     struct Body;
+    struct Cache;
 
     enum class Method : ULONG
     {
@@ -157,7 +158,16 @@ namespace khttp
         SendFlagAggregateWithCallbacks = 0x00000001,
         SendFlagDisableAutoRedirect = 0x00000002,
         SendFlagExpectContinue = 0x00000004,
-        SendFlagAllowTrace = 0x00000008
+        SendFlagAllowTrace = 0x00000008,
+        SendFlagBypassCache = 0x00000010,
+        SendFlagNoCacheStore = 0x00000020,
+        SendFlagOnlyIfCached = 0x00000040
+    };
+
+    enum class CacheMode : ULONG
+    {
+        Private = 0,
+        Shared = 1
     };
 
     constexpr SIZE_T DefaultRequestBufferBytes = 16 * 1024;
@@ -249,6 +259,25 @@ namespace khttp
         ULONG AckTimeoutMs = DefaultHttp2KeepAliveAckTimeoutMs;
     };
 
+    struct CacheOptions final
+    {
+        SIZE_T MaxBytes = 16 * 1024 * 1024;
+        SIZE_T MaxEntries = 256;
+        CacheMode Mode = CacheMode::Private;
+    };
+
+    struct CacheStats final
+    {
+        SIZE_T EntryCount = 0;
+        SIZE_T BytesUsed = 0;
+        ULONGLONG Hits = 0;
+        ULONGLONG Misses = 0;
+        ULONGLONG Revalidations = 0;
+        ULONGLONG Stores = 0;
+        ULONGLONG Invalidations = 0;
+        ULONGLONG Evictions = 0;
+    };
+
     struct SessionConfig final
     {
         PoolType ResponsePool = PoolType::NonPaged;
@@ -264,6 +293,7 @@ namespace khttp
         Http2KeepAliveConfig Http2KeepAlive = {};
         TlsConfig Tls = {};
         ProxyConfig Proxy = {};
+        Cache* Cache = nullptr;
     };
 
     struct SendOptions final
@@ -283,6 +313,7 @@ namespace khttp
         const ::KernelHttp::http::HttpAcceptEncodingPreference* AcceptEncodingPreferences;
         SIZE_T AcceptEncodingPreferenceCount;
         const ::KernelHttp::http2::Http2Priority* Http2Priority;
+        Cache* Cache;
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
         CompletionCallback OnComplete;
         void* CompletionContext;

@@ -38,6 +38,7 @@ namespace
             apiOptions.Proxy.AuthorityLength = config->Proxy.AuthorityLength;
             apiOptions.Proxy.AuthHeader = config->Proxy.AuthHeader;
             apiOptions.Proxy.AuthHeaderLength = config->Proxy.AuthHeaderLength;
+            apiOptions.Cache = detail::ToApiCache(config->Cache);
         }
         detail::FillApiTlsOptions(tls, apiOptions.Tls);
     }
@@ -69,7 +70,8 @@ SendOptions::SendOptions() noexcept :
     Http2CleartextMode(::khttp::Http2CleartextMode::Disabled),
     AcceptEncodingPreferences(nullptr),
     AcceptEncodingPreferenceCount(0),
-    Http2Priority(nullptr)
+    Http2Priority(nullptr),
+    Cache(nullptr)
 #if defined(KERNEL_HTTP_USER_MODE_TEST)
     ,
     OnComplete(nullptr),

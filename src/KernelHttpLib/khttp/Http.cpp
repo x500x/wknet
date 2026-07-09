@@ -103,6 +103,7 @@ namespace
         dst.AcceptEncodingPreferences = src.AcceptEncodingPreferences;
         dst.AcceptEncodingPreferenceCount = src.AcceptEncodingPreferenceCount;
         dst.Http2Priority = src.Http2Priority;
+        dst.Cache = detail::ToApiCache(src.Cache);
     }
 
     NTSTATUS ApplyOptionsToRequest(

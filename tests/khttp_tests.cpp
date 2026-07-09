@@ -353,6 +353,16 @@ namespace
         NTSTATUS LastStatus = STATUS_PENDING;
     };
 
+    struct CacheCapture
+    {
+        const char* Responses[8] = {};
+        SIZE_T ResponseLengths[8] = {};
+        SIZE_T ResponseCount = 0;
+        SIZE_T CallCount = 0;
+        char Requests[8][1024] = {};
+        SIZE_T RequestLengths[8] = {};
+    };
+
     struct LongUrlCapture
     {
         SIZE_T CallCount = 0;
@@ -490,6 +500,36 @@ namespace
 
         response->RawResponse = captured->RawResponse;
         response->RawResponseLength = captured->RawResponseLength;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS CacheTransport(
+        void* context,
+        const KernelHttp::engine::KhTestHttpTransportRequest* request,
+        KernelHttp::engine::KhTestHttpTransportResponse* response) noexcept
+    {
+        auto* capture = static_cast<CacheCapture*>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        const SIZE_T index = capture->CallCount < 8 ? capture->CallCount : 7;
+        const SIZE_T copyLength = request->BuiltRequestLength < sizeof(capture->Requests[index]) - 1
+            ? request->BuiltRequestLength
+            : sizeof(capture->Requests[index]) - 1;
+        if (copyLength != 0) {
+            memcpy(capture->Requests[index], request->BuiltRequest, copyLength);
+        }
+        capture->Requests[index][copyLength] = '\0';
+        capture->RequestLengths[index] = copyLength;
+        ++capture->CallCount;
+
+        SIZE_T responseIndex = capture->CallCount - 1;
+        if (responseIndex >= capture->ResponseCount && capture->ResponseCount != 0) {
+            responseIndex = capture->ResponseCount - 1;
+        }
+        response->RawResponse = capture->Responses[responseIndex];
+        response->RawResponseLength = capture->ResponseLengths[responseIndex];
         response->ConnectionReusable = false;
         return STATUS_SUCCESS;
     }
@@ -6365,6 +6405,431 @@ namespace
         khttp::SessionClose(session);
         khttp::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
+
+    void TestHttpCacheFreshHit() noexcept
+    {
+        const char response[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Cache-Control: max-age=60\r\n"
+            "Content-Length: 5\r\n"
+            "\r\n"
+            "fresh";
+        CacheCapture capture = {};
+        capture.Responses[0] = response;
+        capture.ResponseLengths[0] = sizeof(response) - 1;
+        capture.ResponseCount = 1;
+        khttp::test::SetHttpTransport(CacheTransport, &capture);
+
+        khttp::Cache* cache = nullptr;
+        NTSTATUS status = khttp::CacheCreate(&cache);
+        Expect(NT_SUCCESS(status), "CacheCreate succeeds for fresh hit");
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.Cache = cache;
+        khttp::Session* session = nullptr;
+        status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds with cache");
+
+        khttp::Response* first = nullptr;
+        status = khttp::Get(session, "http://example.com/cache", &first);
+        Expect(NT_SUCCESS(status), "first cached GET succeeds");
+        Expect(capture.CallCount == 1, "first cached GET reaches transport");
+        khttp::ResponseRelease(first);
+
+        khttp::Response* second = nullptr;
+        status = khttp::Get(session, "http://example.com/cache", &second);
+        Expect(NT_SUCCESS(status), "fresh cached GET succeeds");
+        Expect(capture.CallCount == 1, "fresh cached GET does not reach transport");
+        Expect(khttp::ResponseStatusCode(second) == 200, "fresh cached response status is preserved");
+        Expect(khttp::ResponseBodyLength(second) == 5 &&
+            memcmp(khttp::ResponseBody(second), "fresh", 5) == 0,
+            "fresh cached body is returned");
+
+        khttp::CacheStats stats = {};
+        status = khttp::CacheGetStats(cache, &stats);
+        Expect(NT_SUCCESS(status), "CacheGetStats succeeds");
+        Expect(stats.Hits == 1 && stats.Stores == 1, "cache stats record hit and store");
+
+        khttp::ResponseRelease(second);
+        khttp::SessionClose(session);
+        khttp::CacheRelease(cache);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttpCacheStaleRevalidatesWith304() noexcept
+    {
+        const char firstResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Cache-Control: max-age=0\r\n"
+            "ETag: \"abc\"\r\n"
+            "Content-Length: 6\r\n"
+            "\r\n"
+            "cached";
+        const char notModified[] =
+            "HTTP/1.1 304 Not Modified\r\n"
+            "ETag: \"abc\"\r\n"
+            "\r\n";
+        CacheCapture capture = {};
+        capture.Responses[0] = firstResponse;
+        capture.ResponseLengths[0] = sizeof(firstResponse) - 1;
+        capture.Responses[1] = notModified;
+        capture.ResponseLengths[1] = sizeof(notModified) - 1;
+        capture.ResponseCount = 2;
+        khttp::test::SetHttpTransport(CacheTransport, &capture);
+
+        khttp::Cache* cache = nullptr;
+        NTSTATUS status = khttp::CacheCreate(&cache);
+        Expect(NT_SUCCESS(status), "CacheCreate succeeds for revalidation");
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.Cache = cache;
+        khttp::Session* session = nullptr;
+        status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for revalidation");
+
+        khttp::Response* response = nullptr;
+        status = khttp::Get(session, "http://example.com/revalidate", &response);
+        Expect(NT_SUCCESS(status), "initial stale-cache GET succeeds");
+        khttp::ResponseRelease(response);
+
+        response = nullptr;
+        status = khttp::Get(session, "http://example.com/revalidate", &response);
+        Expect(NT_SUCCESS(status), "304 revalidation GET succeeds");
+        Expect(capture.CallCount == 2, "stale cache reaches transport for validation");
+        Expect(BufferContainsLiteral(capture.Requests[1], capture.RequestLengths[1], "If-None-Match: \"abc\"\r\n"),
+            "stale cache emits If-None-Match");
+        Expect(khttp::ResponseStatusCode(response) == 200, "304 merge returns cached status");
+        Expect(khttp::ResponseBodyLength(response) == 6 &&
+            memcmp(khttp::ResponseBody(response), "cached", 6) == 0,
+            "304 merge returns cached body");
+
+        khttp::ResponseRelease(response);
+        khttp::SessionClose(session);
+        khttp::CacheRelease(cache);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttpCacheOnlyIfCachedMiss() noexcept
+    {
+        CacheCapture capture = {};
+        khttp::test::SetHttpTransport(CacheTransport, &capture);
+        khttp::Cache* cache = nullptr;
+        NTSTATUS status = khttp::CacheCreate(&cache);
+        Expect(NT_SUCCESS(status), "CacheCreate succeeds for only-if-cached");
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.Cache = cache;
+        khttp::Session* session = nullptr;
+        status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for only-if-cached");
+
+        khttp::SendOptions options = khttp::DefaultSendOptions();
+        options.Flags = khttp::SendFlagOnlyIfCached;
+        khttp::Response* response = nullptr;
+        status = khttp::GetEx(session, "http://example.com/miss", Length("http://example.com/miss"), nullptr, &options, &response);
+        Expect(status == STATUS_NOT_FOUND, "only-if-cached miss returns not found");
+        Expect(response == nullptr, "only-if-cached miss does not allocate response");
+        Expect(capture.CallCount == 0, "only-if-cached miss does not reach transport");
+
+        khttp::SessionClose(session);
+        khttp::CacheRelease(cache);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttpCacheVarySeparatesRequests() noexcept
+    {
+        const char gzipResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Cache-Control: max-age=60\r\n"
+            "Vary: Accept-Encoding\r\n"
+            "Content-Length: 4\r\n"
+            "\r\n"
+            "gzip";
+        const char brResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Cache-Control: max-age=60\r\n"
+            "Vary: Accept-Encoding\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "br";
+        CacheCapture capture = {};
+        capture.Responses[0] = gzipResponse;
+        capture.ResponseLengths[0] = sizeof(gzipResponse) - 1;
+        capture.Responses[1] = brResponse;
+        capture.ResponseLengths[1] = sizeof(brResponse) - 1;
+        capture.ResponseCount = 2;
+        khttp::test::SetHttpTransport(CacheTransport, &capture);
+
+        khttp::Cache* cache = nullptr;
+        NTSTATUS status = khttp::CacheCreate(&cache);
+        Expect(NT_SUCCESS(status), "CacheCreate succeeds for Vary");
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.Cache = cache;
+        khttp::Session* session = nullptr;
+        status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for Vary");
+
+        khttp::Headers* gzipHeaders = nullptr;
+        khttp::Headers* brHeaders = nullptr;
+        status = khttp::HeadersCreate(&gzipHeaders);
+        Expect(NT_SUCCESS(status), "gzip headers create");
+        status = khttp::HeadersAdd(gzipHeaders, "Accept-Encoding", "gzip");
+        Expect(NT_SUCCESS(status), "gzip header add");
+        status = khttp::HeadersCreate(&brHeaders);
+        Expect(NT_SUCCESS(status), "br headers create");
+        status = khttp::HeadersAdd(brHeaders, "Accept-Encoding", "br");
+        Expect(NT_SUCCESS(status), "br header add");
+
+        khttp::Response* response = nullptr;
+        status = khttp::GetEx(session, "http://example.com/vary", Length("http://example.com/vary"), gzipHeaders, nullptr, &response);
+        Expect(NT_SUCCESS(status), "gzip Vary request succeeds");
+        khttp::ResponseRelease(response);
+        response = nullptr;
+        status = khttp::GetEx(session, "http://example.com/vary", Length("http://example.com/vary"), brHeaders, nullptr, &response);
+        Expect(NT_SUCCESS(status), "br Vary request succeeds");
+        khttp::ResponseRelease(response);
+        response = nullptr;
+        status = khttp::GetEx(session, "http://example.com/vary", Length("http://example.com/vary"), gzipHeaders, nullptr, &response);
+        Expect(NT_SUCCESS(status), "gzip Vary cache hit succeeds");
+        Expect(capture.CallCount == 2, "Vary hit does not reach transport");
+        Expect(khttp::ResponseBodyLength(response) == 4 &&
+            memcmp(khttp::ResponseBody(response), "gzip", 4) == 0,
+            "Vary returns matching representation");
+
+        khttp::ResponseRelease(response);
+        khttp::HeadersRelease(gzipHeaders);
+        khttp::HeadersRelease(brHeaders);
+        khttp::SessionClose(session);
+        khttp::CacheRelease(cache);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttpCacheServesRangeFromFullResponse() noexcept
+    {
+        const char fullResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Cache-Control: max-age=60\r\n"
+            "Content-Length: 10\r\n"
+            "\r\n"
+            "abcdefghij";
+        CacheCapture capture = {};
+        capture.Responses[0] = fullResponse;
+        capture.ResponseLengths[0] = sizeof(fullResponse) - 1;
+        capture.ResponseCount = 1;
+        khttp::test::SetHttpTransport(CacheTransport, &capture);
+
+        khttp::Cache* cache = nullptr;
+        NTSTATUS status = khttp::CacheCreate(&cache);
+        Expect(NT_SUCCESS(status), "CacheCreate succeeds for range");
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.Cache = cache;
+        khttp::Session* session = nullptr;
+        status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for range");
+
+        khttp::Response* response = nullptr;
+        status = khttp::Get(session, "http://example.com/range", &response);
+        Expect(NT_SUCCESS(status), "initial range source GET succeeds");
+        khttp::ResponseRelease(response);
+
+        khttp::Headers* headers = nullptr;
+        status = khttp::HeadersCreate(&headers);
+        Expect(NT_SUCCESS(status), "range headers create");
+        status = khttp::HeadersAdd(headers, "Range", "bytes=2-5");
+        Expect(NT_SUCCESS(status), "range header add");
+        response = nullptr;
+        status = khttp::GetEx(session, "http://example.com/range", Length("http://example.com/range"), headers, nullptr, &response);
+        Expect(NT_SUCCESS(status), "range cache hit succeeds");
+        Expect(capture.CallCount == 1, "range cache hit avoids transport");
+        Expect(khttp::ResponseStatusCode(response) == 206, "range cache hit returns 206");
+        Expect(khttp::ResponseBodyLength(response) == 4 &&
+            memcmp(khttp::ResponseBody(response), "cdef", 4) == 0,
+            "range cache hit returns sliced body");
+
+        khttp::ResponseRelease(response);
+        khttp::HeadersRelease(headers);
+        khttp::SessionClose(session);
+        khttp::CacheRelease(cache);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttpCacheCombinesPartialContent() noexcept
+    {
+        const char firstPartial[] =
+            "HTTP/1.1 206 Partial Content\r\n"
+            "Cache-Control: max-age=60\r\n"
+            "ETag: \"range-a\"\r\n"
+            "Content-Range: bytes 0-3/8\r\n"
+            "Content-Length: 4\r\n"
+            "\r\n"
+            "abcd";
+        const char secondPartial[] =
+            "HTTP/1.1 206 Partial Content\r\n"
+            "Cache-Control: max-age=60\r\n"
+            "ETag: \"range-a\"\r\n"
+            "Content-Range: bytes 4-7/8\r\n"
+            "Content-Length: 4\r\n"
+            "\r\n"
+            "efgh";
+        CacheCapture capture = {};
+        capture.Responses[0] = firstPartial;
+        capture.ResponseLengths[0] = sizeof(firstPartial) - 1;
+        capture.Responses[1] = secondPartial;
+        capture.ResponseLengths[1] = sizeof(secondPartial) - 1;
+        capture.ResponseCount = 2;
+        khttp::test::SetHttpTransport(CacheTransport, &capture);
+
+        khttp::Cache* cache = nullptr;
+        NTSTATUS status = khttp::CacheCreate(&cache);
+        Expect(NT_SUCCESS(status), "CacheCreate succeeds for partial combine");
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.Cache = cache;
+        khttp::Session* session = nullptr;
+        status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for partial combine");
+
+        khttp::Headers* firstRange = nullptr;
+        khttp::Headers* secondRange = nullptr;
+        khttp::Headers* fullRange = nullptr;
+        status = khttp::HeadersCreate(&firstRange);
+        Expect(NT_SUCCESS(status), "first partial range headers create");
+        status = khttp::HeadersAdd(firstRange, "Range", "bytes=0-3");
+        Expect(NT_SUCCESS(status), "first partial range header add");
+        status = khttp::HeadersCreate(&secondRange);
+        Expect(NT_SUCCESS(status), "second partial range headers create");
+        status = khttp::HeadersAdd(secondRange, "Range", "bytes=4-7");
+        Expect(NT_SUCCESS(status), "second partial range header add");
+        status = khttp::HeadersCreate(&fullRange);
+        Expect(NT_SUCCESS(status), "combined partial range headers create");
+        status = khttp::HeadersAdd(fullRange, "Range", "bytes=0-7");
+        Expect(NT_SUCCESS(status), "combined partial range header add");
+
+        khttp::Response* response = nullptr;
+        status = khttp::GetEx(session, "http://example.com/partial", Length("http://example.com/partial"), firstRange, nullptr, &response);
+        Expect(NT_SUCCESS(status), "first partial GET succeeds");
+        khttp::ResponseRelease(response);
+        response = nullptr;
+        status = khttp::GetEx(session, "http://example.com/partial", Length("http://example.com/partial"), secondRange, nullptr, &response);
+        Expect(NT_SUCCESS(status), "second partial GET succeeds");
+        khttp::ResponseRelease(response);
+        response = nullptr;
+        status = khttp::GetEx(session, "http://example.com/partial", Length("http://example.com/partial"), fullRange, nullptr, &response);
+        Expect(NT_SUCCESS(status), "combined partial cache hit succeeds");
+        Expect(capture.CallCount == 2, "combined partial range avoids transport");
+        Expect(khttp::ResponseStatusCode(response) == 206, "combined partial response is 206");
+        Expect(khttp::ResponseBodyLength(response) == 8 &&
+            memcmp(khttp::ResponseBody(response), "abcdefgh", 8) == 0,
+            "combined partial response returns merged body");
+
+        khttp::ResponseRelease(response);
+        khttp::HeadersRelease(firstRange);
+        khttp::HeadersRelease(secondRange);
+        khttp::HeadersRelease(fullRange);
+        khttp::SessionClose(session);
+        khttp::CacheRelease(cache);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttpCacheUnsafeMethodInvalidates() noexcept
+    {
+        const char firstResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Cache-Control: max-age=60\r\n"
+            "Content-Length: 3\r\n"
+            "\r\n"
+            "one";
+        const char postResponse[] =
+            "HTTP/1.1 204 No Content\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n";
+        const char secondResponse[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Cache-Control: max-age=60\r\n"
+            "Content-Length: 3\r\n"
+            "\r\n"
+            "two";
+        CacheCapture capture = {};
+        capture.Responses[0] = firstResponse;
+        capture.ResponseLengths[0] = sizeof(firstResponse) - 1;
+        capture.Responses[1] = postResponse;
+        capture.ResponseLengths[1] = sizeof(postResponse) - 1;
+        capture.Responses[2] = secondResponse;
+        capture.ResponseLengths[2] = sizeof(secondResponse) - 1;
+        capture.ResponseCount = 3;
+        khttp::test::SetHttpTransport(CacheTransport, &capture);
+
+        khttp::Cache* cache = nullptr;
+        NTSTATUS status = khttp::CacheCreate(&cache);
+        Expect(NT_SUCCESS(status), "CacheCreate succeeds for invalidation");
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.Cache = cache;
+        khttp::Session* session = nullptr;
+        status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for invalidation");
+
+        khttp::Response* response = nullptr;
+        status = khttp::Get(session, "http://example.com/item", &response);
+        Expect(NT_SUCCESS(status), "initial invalidation GET succeeds");
+        khttp::ResponseRelease(response);
+        response = nullptr;
+        status = khttp::SendEx(session, khttp::Method::Post, "http://example.com/item", Length("http://example.com/item"), nullptr, nullptr, nullptr, &response);
+        Expect(NT_SUCCESS(status), "unsafe method succeeds");
+        khttp::ResponseRelease(response);
+        response = nullptr;
+        status = khttp::Get(session, "http://example.com/item", &response);
+        Expect(NT_SUCCESS(status), "GET after invalidation succeeds");
+        Expect(capture.CallCount == 3, "GET after unsafe method reaches transport");
+        Expect(khttp::ResponseBodyLength(response) == 3 &&
+            memcmp(khttp::ResponseBody(response), "two", 3) == 0,
+            "GET after invalidation returns new representation");
+
+        khttp::ResponseRelease(response);
+        khttp::SessionClose(session);
+        khttp::CacheRelease(cache);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestHttpCacheAsyncHit() noexcept
+    {
+        const char responseBytes[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Cache-Control: max-age=60\r\n"
+            "Content-Length: 5\r\n"
+            "\r\n"
+            "async";
+        CacheCapture capture = {};
+        capture.Responses[0] = responseBytes;
+        capture.ResponseLengths[0] = sizeof(responseBytes) - 1;
+        capture.ResponseCount = 1;
+        khttp::test::SetHttpTransport(CacheTransport, &capture);
+
+        khttp::Cache* cache = nullptr;
+        NTSTATUS status = khttp::CacheCreate(&cache);
+        Expect(NT_SUCCESS(status), "CacheCreate succeeds for async hit");
+        khttp::SessionConfig config = khttp::DefaultSessionConfig();
+        config.Cache = cache;
+        khttp::Session* session = nullptr;
+        status = khttp::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for async hit");
+
+        khttp::Response* response = nullptr;
+        status = khttp::Get(session, "http://example.com/async-cache", &response);
+        Expect(NT_SUCCESS(status), "initial async cache seed succeeds");
+        khttp::ResponseRelease(response);
+
+        khttp::AsyncOp* operation = nullptr;
+        status = khttp::AsyncGet(session, "http://example.com/async-cache", &operation);
+        Expect(NT_SUCCESS(status), "AsyncGet cache hit starts");
+        status = khttp::AsyncGetResponse(operation, &response);
+        Expect(NT_SUCCESS(status), "AsyncGetResponse returns cached response");
+        Expect(capture.CallCount == 1, "async cache hit avoids transport");
+        Expect(khttp::ResponseBodyLength(response) == 5 &&
+            memcmp(khttp::ResponseBody(response), "async", 5) == 0,
+            "async cache hit returns cached body");
+
+        khttp::ResponseRelease(response);
+        khttp::AsyncRelease(operation);
+        khttp::SessionClose(session);
+        khttp::CacheRelease(cache);
+        khttp::test::SetHttpTransport(nullptr, nullptr);
+    }
 }
 
 int main() noexcept
@@ -6467,6 +6932,14 @@ int main() noexcept
     TestWebSocketReceiveCannotRaiseConnectionLimit();
     TestWebSocketPublicValidationMatchesRealPath();
     TestWebSocketTerminalTransportStatusDisconnectsHandle();
+    TestHttpCacheFreshHit();
+    TestHttpCacheStaleRevalidatesWith304();
+    TestHttpCacheOnlyIfCachedMiss();
+    TestHttpCacheVarySeparatesRequests();
+    TestHttpCacheServesRangeFromFullResponse();
+    TestHttpCacheCombinesPartialContent();
+    TestHttpCacheUnsafeMethodInvalidates();
+    TestHttpCacheAsyncHit();
 
     if (g_failed) {
         printf("khttp tests FAILED\n");

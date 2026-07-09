@@ -11,6 +11,8 @@ namespace KernelHttp
 {
 namespace engine
 {
+    struct KhHttpCache;
+
     constexpr SIZE_T KhMaxHeadersPerRequest = 16;
     constexpr SIZE_T KhMaxHeadersPerResponse = KhMaxConfigurableResponseHeaders;
     constexpr SIZE_T KhMaxTrailersPerResponse = 16;
@@ -29,6 +31,7 @@ namespace engine
         Session = 0x4B485331,
         Request = 0x4B485231,
         Response = 0x4B485031,
+        HttpCache = 0x4B484331,
         WebSocket = 0x4B485731,
         AsyncOperation = 0x4B484131
     };
@@ -46,6 +49,7 @@ namespace engine
         net::WskClient* WskClient = nullptr;
         KhSessionOptions Options = {};
         KhWorkspace* Workspace = nullptr;
+        KhHttpCache* Cache = nullptr;
         core::KhLookasideList WorkspaceLookaside = {};
         crypto::CngProviderCache* ProviderCache = nullptr;
         KhConnectionPool ConnectionPool = {};

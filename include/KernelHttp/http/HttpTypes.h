@@ -13,6 +13,7 @@ using LONG = int32_t;
 using USHORT = uint16_t;
 using UCHAR = uint8_t;
 using ULONGLONG = uint64_t;
+using LONGLONG = int64_t;
 
 #ifndef RtlCopyMemory
 #define RtlCopyMemory(Destination, Source, Length) memcpy((Destination), (Source), (Length))

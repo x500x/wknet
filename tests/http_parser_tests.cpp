@@ -4,6 +4,7 @@
 
 #include <KernelHttp/http/HttpParser.h>
 #include <KernelHttp/http/HttpRequest.h>
+#include <KernelHttp/http/HttpCachePolicy.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -22,6 +23,9 @@ using KernelHttp::http::HttpResponse;
 using KernelHttp::http::HttpText;
 using KernelHttp::http::MakeText;
 using KernelHttp::http::TextEqualsIgnoreCase;
+using KernelHttp::http::HttpCacheControl;
+using KernelHttp::http::HttpCacheMetadata;
+using KernelHttp::http::HttpByteRange;
 
 namespace
 {
@@ -2667,6 +2671,92 @@ namespace
         HttpContentRange range = {};
         Expect(!empty.GetContentRange(&range), "absent Content-Range returns false");
     }
+
+    void TestHttpCachePolicyDateParsing()
+    {
+        LONGLONG imf = 0;
+        LONGLONG rfc850 = 0;
+        LONGLONG asctime = 0;
+        Expect(KernelHttp::http::ParseHttpDate(MakeText("Sun, 06 Nov 1994 08:49:37 GMT"), &imf), "IMF-fixdate parses");
+        Expect(KernelHttp::http::ParseHttpDate(MakeText("Sunday, 06-Nov-94 08:49:37 GMT"), &rfc850), "RFC 850 date parses");
+        Expect(KernelHttp::http::ParseHttpDate(MakeText("Sun Nov  6 08:49:37 1994"), &asctime), "asctime date parses");
+        Expect(imf == rfc850 && imf == asctime, "HTTP date formats normalize to same second");
+        Expect(!KernelHttp::http::ParseHttpDate(MakeText("Sun, 31 Feb 1994 08:49:37 GMT"), &imf), "invalid HTTP date rejects");
+    }
+
+    void TestHttpCacheControlParsing()
+    {
+        HttpCacheControl control = {};
+        Expect(KernelHttp::http::ParseCacheControl(
+            MakeText("no-cache, max-age=60, s-maxage=\"30\", private=\"Set-Cookie\", only-if-cached, max-stale=10"),
+            &control),
+            "Cache-Control parses");
+        Expect(control.NoCache, "no-cache directive is recorded");
+        Expect(control.Private, "private directive is recorded");
+        Expect(control.OnlyIfCached, "only-if-cached directive is recorded");
+        Expect(control.HasMaxAge && control.MaxAgeSeconds == 60, "max-age parses");
+        Expect(control.HasSharedMaxAge && control.SharedMaxAgeSeconds == 30, "s-maxage quoted value parses");
+        Expect(control.HasMaxStale && !control.MaxStaleAny && control.MaxStaleSeconds == 10, "max-stale value parses");
+    }
+
+    void TestHttpCacheRangeParsing()
+    {
+        HttpByteRange range = {};
+        Expect(KernelHttp::http::ParseSingleByteRange(MakeText("bytes=5-9"), &range), "single byte range parses");
+        Expect(range.Valid && !range.Suffix && range.First == 5 && range.Last == 9, "byte range bounds are exposed");
+        Expect(KernelHttp::http::ParseSingleByteRange(MakeText("bytes=-128"), &range), "suffix range parses");
+        Expect(range.Valid && range.Suffix && range.SuffixLength == 128, "suffix range length is exposed");
+        Expect(!KernelHttp::http::ParseSingleByteRange(MakeText("bytes=0-1,4-5"), &range), "multi-range is not treated as single range");
+        Expect(!KernelHttp::http::ParseSingleByteRange(MakeText("items=0-1"), &range), "non-byte range rejects");
+    }
+
+    void TestHttpCacheFreshnessAndValidationPolicy()
+    {
+        HttpHeader headers[4] = {};
+        headers[0].Name = MakeText("Date");
+        headers[0].Value = MakeText("Sun, 06 Nov 1994 08:49:37 GMT");
+        headers[1].Name = MakeText("Cache-Control");
+        headers[1].Value = MakeText("max-age=60");
+        headers[2].Name = MakeText("ETag");
+        headers[2].Value = MakeText("\"abc\"");
+        headers[3].Name = MakeText("Vary");
+        headers[3].Value = MakeText("Accept-Encoding");
+
+        HttpResponse response = {};
+        response.StatusCode = 200;
+        response.Headers = headers;
+        response.HeaderCount = 4;
+
+        HttpCacheMetadata metadata = {};
+        Expect(KernelHttp::http::CollectCacheMetadata(response, &metadata), "cache metadata collects");
+        Expect(metadata.CacheControl.HasMaxAge && metadata.CacheControl.MaxAgeSeconds == 60, "response max-age is collected");
+        Expect(metadata.HasDate && metadata.HasETag, "date and ETag are collected");
+        Expect(KernelHttp::http::FreshnessLifetimeSeconds(metadata, 200, KernelHttp::http::HttpCacheScope::Private) == 60, "freshness lifetime uses max-age");
+
+        HttpCacheMetadata requestMetadata = {};
+        bool requiresValidation = true;
+        Expect(KernelHttp::http::CanUseStoredResponse(
+            requestMetadata,
+            metadata,
+            200,
+            metadata.DateSeconds,
+            metadata.DateSeconds + 30,
+            KernelHttp::http::HttpCacheScope::Private,
+            &requiresValidation),
+            "fresh response is reusable");
+        Expect(!requiresValidation, "fresh response does not require validation");
+
+        Expect(KernelHttp::http::CanUseStoredResponse(
+            requestMetadata,
+            metadata,
+            200,
+            metadata.DateSeconds,
+            metadata.DateSeconds + 90,
+            KernelHttp::http::HttpCacheScope::Private,
+            &requiresValidation),
+            "stale response can be selected for validation");
+        Expect(requiresValidation, "stale response requires validation");
+    }
 }
 
 int main()
@@ -2746,6 +2836,10 @@ int main()
     TestContentRangeParsing();
     TestContentRangeUnknownAndUnsatisfied();
     TestContentRangeRejectsMalformed();
+    TestHttpCachePolicyDateParsing();
+    TestHttpCacheControlParsing();
+    TestHttpCacheRangeParsing();
+    TestHttpCacheFreshnessAndValidationPolicy();
 
     if (g_failed) {
         return 1;
