@@ -556,6 +556,16 @@ namespace
             return STATUS_SUCCESS;
         }
 
+        NTSTATUS ReceiveWithTimeout(
+            UCHAR* data,
+            SIZE_T length,
+            SIZE_T* bytesReceived,
+            ULONG timeoutMilliseconds) noexcept override
+        {
+            LastReceiveTimeoutMilliseconds = timeoutMilliseconds;
+            return Receive(data, length, bytesReceived);
+        }
+
         const UCHAR* SentBytes() const noexcept
         {
             return sentBytes_;
@@ -565,6 +575,8 @@ namespace
         {
             return sentLength_;
         }
+
+        ULONG LastReceiveTimeoutMilliseconds = 0;
 
     private:
         const UCHAR* receiveBytes_ = nullptr;
@@ -3409,6 +3421,91 @@ namespace
             "HTTP/2 active PING preserves opaque data");
     }
 
+    void TestConnectionPingWaitsForMatchingAck()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR opaqueData[8] = { 0x90, 0x81, 0x72, 0x63, 0x54, 0x45, 0x36, 0x27 };
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 PING ACK server settings fixture builds");
+        Expect(AppendRawFrame(
+            KernelHttp::http2::Http2FrameType::Ping,
+            Http2FrameFlags::Ack,
+            0,
+            opaqueData,
+            sizeof(opaqueData),
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 matching PING ACK fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(NT_SUCCESS(status), "HTTP/2 PING ACK wait connection initializes");
+
+        status = connection.SendPingAndWaitForAck(transport, opaqueData, 1234);
+        Expect(NT_SUCCESS(status), "HTTP/2 PING waits for matching ACK");
+        Expect(transport.LastReceiveTimeoutMilliseconds == 1234,
+            "HTTP/2 PING ACK wait uses caller timeout");
+        Expect(CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Ping, 0) == 1,
+            "HTTP/2 PING ACK wait emits one active PING");
+    }
+
+    void TestConnectionPingIgnoresMismatchedAck()
+    {
+        UCHAR script[256] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR opaqueData[8] = { 0x01, 0x12, 0x23, 0x34, 0x45, 0x56, 0x67, 0x78 };
+        const UCHAR wrongOpaqueData[8] = { 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11 };
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 mismatched PING ACK server settings fixture builds");
+        Expect(AppendRawFrame(
+            KernelHttp::http2::Http2FrameType::Ping,
+            Http2FrameFlags::Ack,
+            0,
+            wrongOpaqueData,
+            sizeof(wrongOpaqueData),
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 mismatched PING ACK fixture builds");
+        Expect(AppendRawFrame(
+            KernelHttp::http2::Http2FrameType::Ping,
+            Http2FrameFlags::Ack,
+            0,
+            opaqueData,
+            sizeof(opaqueData),
+            script,
+            sizeof(script),
+            &scriptLength), "HTTP/2 later matching PING ACK fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(NT_SUCCESS(status), "HTTP/2 mismatched PING ACK connection initializes");
+
+        status = connection.SendPingAndWaitForAck(transport, opaqueData, 2000);
+        Expect(NT_SUCCESS(status), "HTTP/2 PING ignores mismatched ACK and waits for matching ACK");
+    }
+
+    void TestConnectionPingAckTimeoutFailsClosed()
+    {
+        UCHAR script[128] = {};
+        SIZE_T scriptLength = 0;
+        const UCHAR opaqueData[8] = { 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x10, 0x20 };
+        Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
+            "HTTP/2 PING ACK timeout server settings fixture builds");
+
+        ScriptedHttp2Transport transport(script, scriptLength, true);
+        Http2Connection connection;
+        NTSTATUS status = connection.Initialize(transport);
+        Expect(NT_SUCCESS(status), "HTTP/2 PING ACK timeout connection initializes");
+
+        status = connection.SendPingAndWaitForAck(transport, opaqueData, 50);
+        Expect(status == STATUS_IO_TIMEOUT, "HTTP/2 PING ACK timeout fails closed");
+        Expect(CountSentFrames(transport, KernelHttp::http2::Http2FrameType::GoAway, 0) == 0,
+            "HTTP/2 PING ACK timeout does not report SETTINGS timeout");
+    }
+
     void TestHpackDecodeErrorsSendCompressionGoAway()
     {
         const UCHAR invalidIndex[] = { 0xff, 0x00 };
@@ -4605,6 +4702,9 @@ int main()
     TestConnectionErrorSendsGoAway();
     TestConnectionControlSignalFloodSendsGoAway();
     TestConnectionSendsActivePing();
+    TestConnectionPingWaitsForMatchingAck();
+    TestConnectionPingIgnoresMismatchedAck();
+    TestConnectionPingAckTimeoutFailsClosed();
     TestHpackDecodeErrorsSendCompressionGoAway();
     TestStreamErrorSendsRstStream();
     TestConnectionRejectsStreamZeroHeaders();

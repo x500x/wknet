@@ -28,6 +28,13 @@ namespace http2
             _Out_writes_bytes_(length) UCHAR* data,
             SIZE_T length,
             _Out_opt_ SIZE_T* bytesReceived) noexcept = 0;
+
+        _Must_inspect_result_
+        virtual NTSTATUS ReceiveWithTimeout(
+            _Out_writes_bytes_(length) UCHAR* data,
+            SIZE_T length,
+            _Out_opt_ SIZE_T* bytesReceived,
+            ULONG timeoutMilliseconds) noexcept = 0;
     };
 
     class Http2ITransportAdapter final : public Http2Transport
@@ -65,6 +72,16 @@ namespace http2
             _Out_opt_ SIZE_T* bytesReceived) noexcept override
         {
             return transport_.Receive(data, length, bytesReceived);
+        }
+
+        _Must_inspect_result_
+        NTSTATUS ReceiveWithTimeout(
+            _Out_writes_bytes_(length) UCHAR* data,
+            SIZE_T length,
+            _Out_opt_ SIZE_T* bytesReceived,
+            ULONG timeoutMilliseconds) noexcept override
+        {
+            return transport_.ReceiveWithTimeout(data, length, bytesReceived, timeoutMilliseconds);
         }
 
     private:
@@ -456,6 +473,16 @@ namespace http2
             _Inout_ core::ITransport& transport,
             _In_reads_bytes_(8) const UCHAR* opaqueData) noexcept;
 
+        NTSTATUS SendPingAndWaitForAck(
+            _Inout_ Http2Transport& transport,
+            _In_reads_bytes_(8) const UCHAR* opaqueData,
+            ULONG ackTimeoutMilliseconds) noexcept;
+
+        NTSTATUS SendPingAndWaitForAck(
+            _Inout_ core::ITransport& transport,
+            _In_reads_bytes_(8) const UCHAR* opaqueData,
+            ULONG ackTimeoutMilliseconds) noexcept;
+
         NTSTATUS Shutdown(_Inout_ Http2Transport& transport) noexcept;
 
         NTSTATUS Shutdown(_Inout_ core::ITransport& transport) noexcept;
@@ -533,6 +560,12 @@ namespace http2
             _Out_writes_bytes_(length) UCHAR* buffer,
             SIZE_T length) noexcept;
 
+        NTSTATUS ReadExactWithTimeout(
+            _Inout_ Http2Transport& transport,
+            _Out_writes_bytes_(length) UCHAR* buffer,
+            SIZE_T length,
+            ULONG timeoutMilliseconds) noexcept;
+
         // Read next frame header + payload
         NTSTATUS ReadFrame(
             _Inout_ Http2Transport& transport,
@@ -540,6 +573,14 @@ namespace http2
             _Out_writes_bytes_(payloadCapacity) UCHAR* payload,
             SIZE_T payloadCapacity,
             _Out_ SIZE_T* payloadLength) noexcept;
+
+        NTSTATUS ReadFrameWithTimeout(
+            _Inout_ Http2Transport& transport,
+            _Out_ Http2FrameHeader* header,
+            _Out_writes_bytes_(payloadCapacity) UCHAR* payload,
+            SIZE_T payloadCapacity,
+            _Out_ SIZE_T* payloadLength,
+            ULONG timeoutMilliseconds) noexcept;
 
         // Handle connection-level frames (SETTINGS, PING, GOAWAY, WINDOW_UPDATE on stream 0)
         NTSTATUS HandleConnectionFrame(

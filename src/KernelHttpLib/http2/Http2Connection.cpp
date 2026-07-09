@@ -2943,6 +2943,66 @@ namespace http2
         return SendPing(adapter, opaqueData);
     }
 
+    NTSTATUS Http2Connection::SendPingAndWaitForAck(
+        Http2Transport& transport,
+        const UCHAR* opaqueData,
+        ULONG ackTimeoutMilliseconds) noexcept
+    {
+        if (opaqueData == nullptr || ackTimeoutMilliseconds == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ScopedReceiveLock receiveLock(*this);
+
+        NTSTATUS status = SendPing(transport, opaqueData);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = EnsureBuffers();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        for (;;) {
+            Http2FrameHeader header = {};
+            SIZE_T payloadLength = 0;
+            status = ReadFrameWithTimeout(
+                transport,
+                &header,
+                framePayload_,
+                framePayloadCapacity_,
+                &payloadLength,
+                ackTimeoutMilliseconds);
+            if (!NT_SUCCESS(status)) {
+                return status == STATUS_INVALID_NETWORK_RESPONSE ?
+                    HandleReadFrameFailure(transport, status) :
+                    status;
+            }
+
+            if (header.Type == Http2FrameType::Ping &&
+                (header.Flags & Http2FrameFlags::Ack) != 0 &&
+                payloadLength == 8 &&
+                RtlCompareMemory(framePayload_, opaqueData, 8) == 8) {
+                return STATUS_SUCCESS;
+            }
+
+            status = DispatchFrame(transport, header, framePayload_, payloadLength, nullptr);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+    }
+
+    NTSTATUS Http2Connection::SendPingAndWaitForAck(
+        core::ITransport& transport,
+        const UCHAR* opaqueData,
+        ULONG ackTimeoutMilliseconds) noexcept
+    {
+        Http2ITransportAdapter adapter(transport);
+        return SendPingAndWaitForAck(adapter, opaqueData, ackTimeoutMilliseconds);
+    }
+
     NTSTATUS Http2Connection::Shutdown(Http2Transport& transport) noexcept
     {
         if (goAwaySent_) return STATUS_SUCCESS;
@@ -2999,6 +3059,27 @@ namespace http2
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS Http2Connection::ReadExactWithTimeout(
+        Http2Transport& transport,
+        UCHAR* buffer,
+        SIZE_T length,
+        ULONG timeoutMilliseconds) noexcept
+    {
+        SIZE_T totalRead = 0;
+        while (totalRead < length) {
+            SIZE_T received = 0;
+            NTSTATUS status = transport.ReceiveWithTimeout(
+                buffer + totalRead,
+                length - totalRead,
+                &received,
+                timeoutMilliseconds);
+            if (!NT_SUCCESS(status)) return status;
+            if (received == 0) return STATUS_CONNECTION_DISCONNECTED;
+            totalRead += received;
+        }
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS Http2Connection::ReadFrame(
         Http2Transport& transport,
         Http2FrameHeader* header,
@@ -3028,6 +3109,49 @@ namespace http2
         // Read payload
         if (header->Length > 0) {
             status = ReadExact(transport, payload, header->Length);
+            if (!NT_SUCCESS(status)) return status;
+        }
+
+        *payloadLength = header->Length;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS Http2Connection::ReadFrameWithTimeout(
+        Http2Transport& transport,
+        Http2FrameHeader* header,
+        UCHAR* payload,
+        SIZE_T payloadCapacity,
+        SIZE_T* payloadLength,
+        ULONG timeoutMilliseconds) noexcept
+    {
+        readFrameErrorCode_ = static_cast<ULONG>(Http2ErrorCode::NoError);
+
+        UCHAR* headerBuf = sendBuffer_;
+        NTSTATUS status = ReadExactWithTimeout(
+            transport,
+            headerBuf,
+            Http2FrameHeaderLength,
+            timeoutMilliseconds);
+        if (!NT_SUCCESS(status)) return status;
+
+        status = Http2FrameCodec::DecodeFrameHeader(headerBuf, Http2FrameHeaderLength, header);
+        if (!NT_SUCCESS(status)) return status;
+
+        if (header->Length > localSettings_.MaxFrameSize) {
+            readFrameErrorCode_ = static_cast<ULONG>(Http2ErrorCode::FrameSizeError);
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (header->Length > payloadCapacity) return STATUS_BUFFER_TOO_SMALL;
+
+        status = RecordReceivedFrame(*header);
+        if (!NT_SUCCESS(status)) return status;
+
+        if (header->Length > 0) {
+            status = ReadExactWithTimeout(
+                transport,
+                payload,
+                header->Length,
+                timeoutMilliseconds);
             if (!NT_SUCCESS(status)) return status;
         }
 
