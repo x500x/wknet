@@ -3,6 +3,7 @@
 #include <KernelHttp/crypto/Aead.h>
 #include <KernelHttp/crypto/CngProvider.h>
 #include "HttpExiDecoder.h"
+#include "HttpDeflateDecoder.h"
 #include "HttpPack200Decoder.h"
 
 #include <brotli/decode.h>
@@ -1281,6 +1282,21 @@ namespace http
                 return;
             }
         }
+    }
+
+    NTSTATUS HttpDecodeRawDeflate(
+        const UCHAR* compressed,
+        SIZE_T compressedLength,
+        char* destination,
+        SIZE_T destinationCapacity,
+        SIZE_T* decodedLength) noexcept
+    {
+        return DecodeRawDeflate(
+            compressed,
+            compressedLength,
+            destination,
+            destinationCapacity,
+            decodedLength);
     }
 
     bool HttpCodingCodec::DeflateRuntimeAvailable() noexcept

@@ -1,0 +1,131 @@
+#pragma once
+
+#include <KernelHttp/http/HttpTypes.h>
+#include "HttpXmlWriter.h"
+
+namespace KernelHttp
+{
+namespace http
+{
+    struct HttpPack200ExceptionHandler final
+    {
+        USHORT StartPc = 0;
+        USHORT EndPc = 0;
+        USHORT HandlerPc = 0;
+        USHORT CatchTypeIndex = 0;
+    };
+
+    struct HttpPack200ClassMember final
+    {
+        USHORT AccessFlags = 0;
+        USHORT NameIndex = 0;
+        USHORT DescriptorIndex = 0;
+        USHORT ConstantValueAttributeNameIndex = 0;
+        USHORT ConstantValueIndex = 0;
+        USHORT CodeAttributeNameIndex = 0;
+        USHORT MaxStack = 0;
+        USHORT MaxLocals = 0;
+        const UCHAR* Code = nullptr;
+        SIZE_T CodeLength = 0;
+        const HttpPack200ExceptionHandler* ExceptionHandlers = nullptr;
+        SIZE_T ExceptionHandlerCount = 0;
+        USHORT ExceptionsAttributeNameIndex = 0;
+        const USHORT* DeclaredExceptionIndexes = nullptr;
+        SIZE_T DeclaredExceptionCount = 0;
+    };
+
+    class HttpPack200ClassWriter final
+    {
+    public:
+        HttpPack200ClassWriter(_Out_writes_bytes_(capacity) char* destination, SIZE_T capacity) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS Begin(USHORT minorVersion, USHORT majorVersion, USHORT maxConstantPoolEntries) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddUtf8(HttpXmlText value, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddClass(USHORT nameIndex, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddString(USHORT utf8Index, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddInteger(ULONG value, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddFloat(ULONG bits, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddLong(ULONG highBits, ULONG lowBits, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddDouble(ULONG highBits, ULONG lowBits, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddNameAndType(USHORT nameIndex, USHORT descriptorIndex, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddFieldref(USHORT classIndex, USHORT nameAndTypeIndex, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddMethodref(USHORT classIndex, USHORT nameAndTypeIndex, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddInterfaceMethodref(
+            USHORT classIndex,
+            USHORT nameAndTypeIndex,
+            _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS FinishHeader(
+            USHORT accessFlags,
+            USHORT thisClass,
+            USHORT superClass,
+            _Out_ SIZE_T* classLength) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS FinishClass(
+            USHORT accessFlags,
+            USHORT thisClass,
+            USHORT superClass,
+            _In_reads_(interfaceCount) const USHORT* interfaces,
+            SIZE_T interfaceCount,
+            _In_reads_(fieldCount) const HttpPack200ClassMember* fields,
+            SIZE_T fieldCount,
+            _In_reads_(methodCount) const HttpPack200ClassMember* methods,
+            SIZE_T methodCount,
+            USHORT sourceFileAttributeNameIndex,
+            USHORT sourceFileIndex,
+            _Out_ SIZE_T* classLength) noexcept;
+
+    private:
+        _Must_inspect_result_
+        NTSTATUS AppendByte(UCHAR value) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AppendBytes(const void* value, SIZE_T valueLength) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AppendBe16(USHORT value) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AppendBe32(ULONG value) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS ReserveConstantPoolIndex(_Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS ReserveConstantPoolSlots(USHORT slotCount, _Out_ USHORT* index) noexcept;
+
+        char* destination_ = nullptr;
+        SIZE_T capacity_ = 0;
+        SIZE_T length_ = 0;
+        USHORT constantPoolCount_ = 1;
+        USHORT maxConstantPoolEntries_ = 0;
+        bool begun_ = false;
+        bool headerFinished_ = false;
+    };
+}
+}

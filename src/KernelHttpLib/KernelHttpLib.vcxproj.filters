@@ -146,7 +146,49 @@
     <ClCompile Include="http\HttpExiDecoder.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
+    <ClCompile Include="http\HttpExiEventReader.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiGrammar.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiGrammarTable.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiOptions.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiQNameReader.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiStringTable.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiValueDecoder.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200BandCodec.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200BandParser.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200Bands.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200ClassWriter.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200Codec.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
     <ClCompile Include="http\HttpPack200Decoder.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200JarWriter.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpXmlWriter.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
     <ClCompile Include="http\HttpCachePolicy.cpp">
@@ -415,7 +457,52 @@
     <ClInclude Include="http\HttpExiDecoder.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>
+    <ClInclude Include="http\HttpDeflateDecoder.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiEventReader.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiGrammar.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiGrammarTable.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiOptions.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiQNameReader.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiStringTable.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiValueDecoder.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200BandCodec.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200BandParser.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200Bands.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200ClassWriter.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200Codec.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
     <ClInclude Include="http\HttpPack200Decoder.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200JarWriter.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpXmlWriter.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\KernelHttp\http2\Hpack.h">

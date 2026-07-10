@@ -7,6 +7,21 @@
 #include <KernelHttp/http/HttpCachePolicy.h>
 #include <KernelHttp/http/HttpContentEncoding.h>
 
+#include "../src/KernelHttpLib/http/HttpXmlWriter.h"
+#include "../src/KernelHttpLib/http/HttpExiEventReader.h"
+#include "../src/KernelHttpLib/http/HttpExiGrammar.h"
+#include "../src/KernelHttpLib/http/HttpExiGrammarTable.h"
+#include "../src/KernelHttpLib/http/HttpExiQNameReader.h"
+#include "../src/KernelHttpLib/http/HttpExiStringTable.h"
+#include "../src/KernelHttpLib/http/HttpExiValueDecoder.h"
+#include "../src/KernelHttpLib/http/HttpPack200BandCodec.h"
+#include "../src/KernelHttpLib/http/HttpPack200BandParser.h"
+#include "../src/KernelHttpLib/http/HttpPack200Bands.h"
+#include "../src/KernelHttpLib/http/HttpPack200ClassWriter.h"
+#include "../src/KernelHttpLib/http/HttpPack200Codec.h"
+#include "../src/KernelHttpLib/http/HttpPack200Decoder.h"
+#include "../src/KernelHttpLib/http/HttpPack200JarWriter.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -30,6 +45,49 @@ using KernelHttp::http::HttpByteRange;
 using KernelHttp::http::HttpAcceptEncodingEntry;
 using KernelHttp::http::HttpAcceptEncodingRules;
 using KernelHttp::http::HttpContentEncoding;
+using KernelHttp::http::HttpXmlName;
+using KernelHttp::http::HttpXmlText;
+using KernelHttp::http::HttpXmlWriter;
+using KernelHttp::http::HttpPack200BandReader;
+using KernelHttp::http::HttpPack200AttributeBands;
+using KernelHttp::http::HttpPack200ClassBands;
+using KernelHttp::http::HttpPack200CodeBands;
+using KernelHttp::http::HttpPack200CodingFor;
+using KernelHttp::http::HttpPack200CodingKind;
+using KernelHttp::http::HttpPack200CpBands;
+using KernelHttp::http::HttpPack200CpCounts;
+using KernelHttp::http::HttpPack200FileBands;
+using KernelHttp::http::HttpExiBuiltinProduction;
+using KernelHttp::http::HttpExiBitInput;
+using KernelHttp::http::HttpExiEventKind;
+using KernelHttp::http::HttpExiGrammarKind;
+using KernelHttp::http::HttpExiEventCode;
+using KernelHttp::http::HttpExiGrammarTable;
+using KernelHttp::http::HttpExiLearnedProduction;
+using KernelHttp::http::HttpExiProduction;
+using KernelHttp::http::HttpExiQNameEntry;
+using KernelHttp::http::HttpExiQNameTable;
+using KernelHttp::http::HttpExiNameTables;
+using KernelHttp::http::HttpExiDecimalValue;
+using KernelHttp::http::HttpExiFloatValue;
+using KernelHttp::http::HttpExiStringTable;
+using KernelHttp::http::HttpExiLearnQName;
+using KernelHttp::http::HttpExiReadQNameLiteral;
+using KernelHttp::http::HttpExiResolveQName;
+using KernelHttp::http::HttpPack200ClassWriter;
+using KernelHttp::http::HttpPack200BandCodec;
+using KernelHttp::http::HttpPack200BandCodecKind;
+using KernelHttp::http::HttpPack200CodecArena;
+using KernelHttp::http::HttpPack200DecodeBand;
+using KernelHttp::http::HttpPack200DecodePopulationBand;
+using KernelHttp::http::HttpPack200ParseMetaCodec;
+using KernelHttp::http::HttpPack200ReadAttributeBands;
+using KernelHttp::http::HttpPack200ReadClassBands;
+using KernelHttp::http::HttpPack200ReadCodeBands;
+using KernelHttp::http::HttpPack200ReadCpBands;
+using KernelHttp::http::HttpPack200ReadFileBands;
+using KernelHttp::http::HttpPack200JarWriter;
+using KernelHttp::http::DecodePack200GzipContent;
 
 namespace
 {
@@ -57,6 +115,22 @@ namespace
         return data != nullptr &&
             length == literalLength &&
             memcmp(data, literal, literalLength) == 0;
+    }
+
+    HttpXmlText XmlText(const char* value)
+    {
+        HttpXmlText text = {};
+        text.Data = value;
+        text.Length = value == nullptr ? 0 : strlen(value);
+        return text;
+    }
+
+    HttpXmlName XmlName(const char* prefix, const char* localName)
+    {
+        HttpXmlName name = {};
+        name.Prefix = XmlText(prefix);
+        name.LocalName = XmlText(localName);
+        return name;
     }
 
     bool BuildEncodedResponse(
@@ -92,6 +166,600 @@ namespace
         memcpy(response + headerLength, encodedBody, encodedBodyLength);
         *responseLength = static_cast<size_t>(headerLength) + encodedBodyLength;
         return true;
+    }
+
+    void TestXmlWriterSerializesElementEvents()
+    {
+        char output[160] = {};
+        HttpXmlWriter writer(output, sizeof(output));
+
+        NTSTATUS status = writer.WriteStartElement(XmlName("p", "root"));
+        Expect(NT_SUCCESS(status), "xml writer starts prefixed element");
+        status = writer.WriteNamespace(XmlText("p"), XmlText("urn:test"));
+        Expect(NT_SUCCESS(status), "xml writer writes namespace");
+        status = writer.WriteAttribute(XmlName(nullptr, "a"), XmlText("1&\"<\t"));
+        Expect(NT_SUCCESS(status), "xml writer writes escaped attribute");
+        status = writer.WriteCharacters(XmlText("x<&>y"));
+        Expect(NT_SUCCESS(status), "xml writer writes escaped text");
+        status = writer.WriteEndElement(XmlName("p", "root"));
+        Expect(NT_SUCCESS(status), "xml writer ends prefixed element");
+
+        Expect(
+            MemoryEqualsLiteral(
+                output,
+                writer.Length(),
+                "<p:root xmlns:p=\"urn:test\" a=\"1&amp;&quot;&lt;&#x9;\">x&lt;&amp;&gt;y</p:root>"),
+            "xml writer output matches expected XML bytes");
+    }
+
+    void TestXmlWriterRejectsInvalidEvents()
+    {
+        char output[64] = {};
+        HttpXmlWriter writer(output, sizeof(output));
+
+        NTSTATUS status = writer.WriteStartElement(XmlName(nullptr, "1bad"));
+        Expect(status == STATUS_INVALID_PARAMETER, "xml writer rejects invalid element name");
+
+        status = writer.WriteStartElement(XmlName(nullptr, "root"));
+        Expect(NT_SUCCESS(status), "xml writer starts element for invalid event checks");
+        const char invalidText[] = { 'a', static_cast<char>(0x01), 'b' };
+        status = writer.WriteCharacters({ invalidText, sizeof(invalidText) });
+        Expect(status == STATUS_INVALID_PARAMETER, "xml writer rejects invalid XML text byte");
+    }
+
+    void TestXmlWriterReportsOutputTooSmall()
+    {
+        char output[8] = {};
+        HttpXmlWriter writer(output, sizeof(output));
+
+        NTSTATUS status = writer.WriteStartElement(XmlName(nullptr, "root"));
+        Expect(NT_SUCCESS(status), "xml writer starts element in small buffer");
+        status = writer.WriteCharacters(XmlText("too long"));
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "xml writer reports small output buffer");
+    }
+
+    void TestXmlWriterSerializesAuxiliaryEvents()
+    {
+        char output[96] = {};
+        HttpXmlWriter writer(output, sizeof(output));
+
+        NTSTATUS status = writer.WriteComment(XmlText("ok"));
+        Expect(NT_SUCCESS(status), "xml writer writes comment");
+        status = writer.WriteProcessingInstruction(XmlText("pi"), XmlText("value"));
+        Expect(NT_SUCCESS(status), "xml writer writes processing instruction");
+        status = writer.WriteComment(XmlText("bad--comment"));
+        Expect(status == STATUS_INVALID_PARAMETER, "xml writer rejects invalid comment");
+
+        Expect(
+            MemoryEqualsLiteral(output, writer.Length(), "<!--ok--><?pi value?>"),
+            "xml writer auxiliary event output matches expected XML bytes");
+    }
+
+    void TestPack200BandReaderUnsignedAndSigned()
+    {
+        const unsigned char bytes[] = {
+            0x05,
+            0x01,
+            0x02
+        };
+        HttpPack200BandReader reader(bytes, sizeof(bytes));
+
+        ULONG unsignedValue = 0;
+        Expect(
+            reader.ReadUnsigned(HttpPack200CodingKind::Unsigned5, &unsignedValue) && unsignedValue == 5,
+            "pack200 unsigned5 reads single-byte value");
+
+        LONG signedValue = 0;
+        Expect(
+            reader.ReadInt(HttpPack200CodingFor(HttpPack200CodingKind::Signed5), &signedValue) && signedValue == -1,
+            "pack200 signed5 reads negative value");
+        Expect(
+            reader.ReadInt(HttpPack200CodingFor(HttpPack200CodingKind::Signed5), &signedValue) && signedValue == 1,
+            "pack200 signed5 reads positive value");
+        Expect(reader.Remaining() == 0, "pack200 band reader consumes expected bytes");
+    }
+
+    void TestPack200BandReaderDelta()
+    {
+        const unsigned char bytes[] = {
+            0x02,
+            0x04,
+            0x01
+        };
+        HttpPack200BandReader reader(bytes, sizeof(bytes));
+
+        LONG value = 0;
+        Expect(
+            reader.ReadInt(HttpPack200CodingFor(HttpPack200CodingKind::Delta5), &value) && value == 1,
+            "pack200 delta5 reads first delta");
+        Expect(
+            reader.ReadInt(HttpPack200CodingFor(HttpPack200CodingKind::Delta5), &value) && value == 3,
+            "pack200 delta5 accumulates positive delta");
+        Expect(
+            reader.ReadInt(HttpPack200CodingFor(HttpPack200CodingKind::Delta5), &value) && value == 2,
+            "pack200 delta5 accumulates negative delta");
+    }
+
+    void TestExiStringAndQNameTables()
+    {
+        HttpExiStringTable strings = {};
+        NTSTATUS status = strings.Initialize(4, 32);
+        Expect(NT_SUCCESS(status), "exi string table initializes");
+
+        ULONG uri = 0;
+        status = strings.Add(XmlText("urn:test"), &uri);
+        Expect(NT_SUCCESS(status) && uri == 0, "exi string table adds URI");
+        ULONG duplicate = 0;
+        status = strings.Add(XmlText("urn:test"), &duplicate);
+        Expect(NT_SUCCESS(status) && duplicate == uri && strings.Count() == 1, "exi string table deduplicates values");
+
+        HttpXmlText stored = {};
+        Expect(strings.Get(uri, &stored) && MemoryEqualsLiteral(stored.Data, stored.Length, "urn:test"), "exi string table returns stored text");
+
+        HttpExiQNameTable qnames = {};
+        status = qnames.Initialize(2);
+        Expect(NT_SUCCESS(status), "exi qname table initializes");
+        HttpExiQNameEntry entry = {};
+        entry.UriId = uri;
+        entry.LocalNameId = 1;
+        entry.PrefixId = 2;
+        ULONG qname = 0;
+        status = qnames.Add(entry, &qname);
+        Expect(NT_SUCCESS(status) && qname == 0, "exi qname table adds QName");
+        ULONG found = 0;
+        Expect(qnames.Find(entry, &found) && found == qname, "exi qname table finds QName");
+    }
+
+    void TestExiBuiltinGrammarProductions()
+    {
+        HttpExiProduction production = {};
+        Expect(
+            HttpExiBuiltinProduction(
+                HttpExiGrammarKind::Document,
+                0,
+                false,
+                false,
+                false,
+                &production) &&
+                production.Event == HttpExiEventKind::StartDocument &&
+                production.NextGrammar == HttpExiGrammarKind::DocContent,
+            "exi document grammar maps SD production");
+
+        Expect(
+            HttpExiBuiltinProduction(
+                HttpExiGrammarKind::ElementContent,
+                2,
+                false,
+                false,
+                false,
+                &production) &&
+                production.Event == HttpExiEventKind::EndElement &&
+                production.PopGrammar,
+            "exi element grammar maps EE production");
+
+        Expect(
+            HttpExiBuiltinProduction(
+                HttpExiGrammarKind::ElementContent,
+                3,
+                true,
+                false,
+                false,
+                &production) &&
+                production.Event == HttpExiEventKind::Comment,
+            "exi fidelity comment production follows base element productions");
+    }
+
+    void TestExiEventCodeAndStringValueReader()
+    {
+        const unsigned char eventBytes[] = { 0xc0 };
+        HttpExiBitInput eventInput(eventBytes, sizeof(eventBytes));
+        HttpExiEventCode eventCode = {};
+        HttpExiProduction production = {};
+        NTSTATUS status = KernelHttp::http::HttpExiReadEventCode(
+            &eventInput,
+            HttpExiGrammarKind::ElementContent,
+            false,
+            false,
+            false,
+            false,
+            false,
+            &eventCode,
+            &production);
+        Expect(
+            NT_SUCCESS(status) &&
+                eventCode.Value == 1 &&
+                eventCode.Width == 2 &&
+                production.Event == HttpExiEventKind::Characters,
+            "exi event-code reader maps element CH production");
+
+        const unsigned char stringBytes[] = { 0x03, 'a', 'b', 'c', 0x00 };
+        HttpExiBitInput stringInput(stringBytes, sizeof(stringBytes));
+        HttpExiStringTable values = {};
+        status = values.Initialize(4, 16);
+        Expect(NT_SUCCESS(status), "exi value string table initializes");
+        HttpXmlText literal = {};
+        status = KernelHttp::http::HttpExiReadLiteralString(&stringInput, &values, &literal);
+        Expect(
+            NT_SUCCESS(status) && MemoryEqualsLiteral(literal.Data, literal.Length, "abc"),
+            "exi literal string reader stores string value");
+
+        HttpXmlText referenced = {};
+        status = KernelHttp::http::HttpExiReadStringTableReference(&stringInput, values, &referenced);
+        Expect(
+            NT_SUCCESS(status) && MemoryEqualsLiteral(referenced.Data, referenced.Length, "abc"),
+            "exi string table reference reader returns stored value");
+    }
+
+    void TestExiGrammarLearningTable()
+    {
+        HttpExiGrammarTable table = {};
+        NTSTATUS status = table.Initialize(4);
+        Expect(NT_SUCCESS(status), "exi grammar learning table initializes");
+
+        HttpExiLearnedProduction learned = {};
+        learned.Grammar = HttpExiGrammarKind::ElementContent;
+        learned.Event = HttpExiEventKind::StartElement;
+        learned.QNameId = 7;
+        learned.NextGrammar = HttpExiGrammarKind::StartTagContent;
+        learned.PushElementGrammar = true;
+
+        ULONG index = 0;
+        status = table.Learn(learned, &index);
+        Expect(NT_SUCCESS(status) && index == 0 && table.Count() == 1, "exi grammar table learns production");
+        status = table.Learn(learned, &index);
+        Expect(NT_SUCCESS(status) && index == 0 && table.Count() == 1, "exi grammar table deduplicates production");
+
+        ULONG found = 0;
+        Expect(
+            table.Find(HttpExiGrammarKind::ElementContent, HttpExiEventKind::StartElement, 7, &found) && found == 0,
+            "exi grammar table finds learned production");
+    }
+
+    void TestExiQNameReaderLearnsAndResolvesNames()
+    {
+        HttpExiStringTable uris = {};
+        HttpExiStringTable locals = {};
+        HttpExiStringTable prefixes = {};
+        HttpExiQNameTable qnames = {};
+        Expect(NT_SUCCESS(uris.Initialize(8, 32)), "exi URI table initializes for QName reader");
+        Expect(NT_SUCCESS(locals.Initialize(8, 32)), "exi local-name table initializes for QName reader");
+        Expect(NT_SUCCESS(prefixes.Initialize(8, 32)), "exi prefix table initializes for QName reader");
+        Expect(NT_SUCCESS(qnames.Initialize(8)), "exi QName table initializes for QName reader");
+
+        HttpExiNameTables tables = {};
+        tables.Uris = &uris;
+        tables.LocalNames = &locals;
+        tables.Prefixes = &prefixes;
+        tables.QNames = &qnames;
+
+        ULONG qnameId = 0;
+        HttpXmlName xmlName = {};
+        NTSTATUS status = HttpExiLearnQName(
+            &tables,
+            XmlText("urn:test"),
+            XmlText("root"),
+            XmlText("p"),
+            &qnameId,
+            &xmlName);
+        Expect(
+            NT_SUCCESS(status) &&
+                qnameId == 0 &&
+                MemoryEqualsLiteral(xmlName.Prefix.Data, xmlName.Prefix.Length, "p") &&
+                MemoryEqualsLiteral(xmlName.LocalName.Data, xmlName.LocalName.Length, "root"),
+            "exi qname reader learns QName from string tables");
+
+        HttpXmlName resolved = {};
+        status = HttpExiResolveQName(tables, qnameId, &resolved);
+        Expect(
+            NT_SUCCESS(status) &&
+                MemoryEqualsLiteral(resolved.Prefix.Data, resolved.Prefix.Length, "p") &&
+                MemoryEqualsLiteral(resolved.LocalName.Data, resolved.LocalName.Length, "root"),
+            "exi qname reader resolves learned QName");
+
+        // Existing URI selector 1, literal local-name length 1 encoded as 2,
+        // code point 'n', and the sole learned prefix 'p'.
+        const unsigned char literalBytes[] = { 0x81, 0x37, 0x00 };
+        HttpExiBitInput input(literalBytes, sizeof(literalBytes));
+        status = HttpExiReadQNameLiteral(&input, &tables, true, &qnameId, &xmlName);
+        Expect(
+            NT_SUCCESS(status) &&
+                qnameId == 1 &&
+                MemoryEqualsLiteral(xmlName.Prefix.Data, xmlName.Prefix.Length, "p") &&
+                MemoryEqualsLiteral(xmlName.LocalName.Data, xmlName.LocalName.Length, "n"),
+            "exi qname reader reads literal QName");
+    }
+
+    void TestExiBuiltInValueDecoders()
+    {
+        const unsigned char booleanBytes[] = { 0x80 };
+        HttpExiBitInput booleanInput(booleanBytes, sizeof(booleanBytes));
+        bool booleanValue = false;
+        NTSTATUS status = KernelHttp::http::HttpExiReadBoolean(&booleanInput, &booleanValue);
+        Expect(NT_SUCCESS(status) && booleanValue, "exi boolean decoder reads true bit");
+
+        const unsigned char integerBytes[] = { 0x82, 0x00 };
+        HttpExiBitInput integerInput(integerBytes, sizeof(integerBytes));
+        LONG integerValue = 0;
+        status = KernelHttp::http::HttpExiReadInteger(&integerInput, &integerValue);
+        Expect(NT_SUCCESS(status) && integerValue == -5, "exi integer decoder reads negative magnitude minus one");
+
+        const unsigned char decimalBytes[] = { 0x81, 0x01, 0x80 };
+        HttpExiBitInput decimalInput(decimalBytes, sizeof(decimalBytes));
+        HttpExiDecimalValue decimalValue = {};
+        status = KernelHttp::http::HttpExiReadDecimal(&decimalInput, &decimalValue);
+        Expect(
+            NT_SUCCESS(status) &&
+                decimalValue.Negative &&
+                decimalValue.Integral == 2 &&
+                decimalValue.Fractional == 3,
+            "exi decimal decoder reads sign and components");
+
+        const unsigned char floatBytes[] = { 0x02, 0xc0, 0x40 };
+        HttpExiBitInput floatInput(floatBytes, sizeof(floatBytes));
+        HttpExiFloatValue floatValue = {};
+        status = KernelHttp::http::HttpExiReadFloat(&floatInput, &floatValue);
+        Expect(
+            NT_SUCCESS(status) && floatValue.Mantissa == 5 && floatValue.Exponent == -2,
+            "exi float decoder reads mantissa and exponent");
+    }
+
+    void TestPack200JarWriterStoredEntries()
+    {
+        char jar[256] = {};
+        HttpPack200JarWriter writer(jar, sizeof(jar));
+        NTSTATUS status = writer.Initialize(2);
+        Expect(NT_SUCCESS(status), "pack200 jar writer initializes");
+
+        const unsigned char manifest[] = {
+            'M', 'a', 'n', 'i', 'f', 'e', 's', 't', '-', 'V', 'e', 'r', 's', 'i', 'o', 'n',
+            ':', ' ', '1', '.', '0', '\r', '\n', '\r', '\n'
+        };
+        status = writer.AddStoredEntry(XmlText("META-INF/MANIFEST.MF"), manifest, sizeof(manifest));
+        Expect(NT_SUCCESS(status), "pack200 jar writer writes stored manifest");
+
+        SIZE_T jarLength = 0;
+        status = writer.Finish(&jarLength);
+        Expect(NT_SUCCESS(status), "pack200 jar writer finishes archive");
+        Expect(
+            jarLength > 22 &&
+                static_cast<unsigned char>(jar[0]) == 0x50 &&
+                static_cast<unsigned char>(jar[1]) == 0x4b &&
+                static_cast<unsigned char>(jar[2]) == 0x03 &&
+                static_cast<unsigned char>(jar[3]) == 0x04,
+            "pack200 jar writer output starts with local header");
+    }
+
+    void TestPack200ClassWriterConstantPool()
+    {
+        char classBytes[256] = {};
+        HttpPack200ClassWriter writer(classBytes, sizeof(classBytes));
+        NTSTATUS status = writer.Begin(0, 52, 4);
+        Expect(NT_SUCCESS(status), "pack200 class writer begins classfile");
+
+        USHORT thisName = 0;
+        USHORT superName = 0;
+        USHORT thisClass = 0;
+        status = writer.AddUtf8(XmlText("Example"), &thisName);
+        Expect(NT_SUCCESS(status) && thisName == 1, "pack200 class writer adds this class name");
+        status = writer.AddUtf8(XmlText("java/lang/Object"), &superName);
+        Expect(NT_SUCCESS(status) && superName == 2, "pack200 class writer adds super class name");
+        status = writer.AddClass(thisName, &thisClass);
+        Expect(NT_SUCCESS(status) && thisClass == 3, "pack200 class writer adds class entry");
+
+        SIZE_T classLength = 0;
+        status = writer.FinishHeader(0x0021, thisClass, 0, &classLength);
+        Expect(NT_SUCCESS(status), "pack200 class writer finishes minimal class header");
+        Expect(
+            classLength >= 10 &&
+                static_cast<unsigned char>(classBytes[0]) == 0xca &&
+                static_cast<unsigned char>(classBytes[1]) == 0xfe &&
+                static_cast<unsigned char>(classBytes[2]) == 0xba &&
+                static_cast<unsigned char>(classBytes[3]) == 0xbe,
+            "pack200 class writer output starts with classfile magic");
+    }
+
+    void TestPack200MetaCodecAndRunAdaptiveDecode()
+    {
+        const unsigned char metaBytes[] = { 26, 0x05 };
+        HttpPack200BandReader metaReader(metaBytes, sizeof(metaBytes));
+        HttpPack200BandCodec codec = {};
+        NTSTATUS status = HttpPack200ParseMetaCodec(&metaReader, &codec);
+        Expect(
+            NT_SUCCESS(status) && codec.Kind == HttpPack200BandCodecKind::Canonical,
+            "pack200 meta codec parses canonical unsigned5");
+
+        LONG value = 0;
+        status = HttpPack200DecodeBand(&metaReader, codec, &value, 1);
+        Expect(NT_SUCCESS(status) && value == 5, "pack200 canonical codec decodes band value");
+
+        HttpPack200BandCodec unsignedCodec = {};
+        unsignedCodec.Kind = HttpPack200BandCodecKind::Canonical;
+        unsignedCodec.Canonical = HttpPack200CodingFor(HttpPack200CodingKind::Unsigned5);
+        HttpPack200BandCodec signedCodec = {};
+        signedCodec.Kind = HttpPack200BandCodecKind::Canonical;
+        signedCodec.Canonical = HttpPack200CodingFor(HttpPack200CodingKind::Signed5);
+
+        HttpPack200BandCodec runCodec = {};
+        runCodec.Kind = HttpPack200BandCodecKind::Run;
+        runCodec.First = &unsignedCodec;
+        runCodec.Second = &signedCodec;
+        runCodec.FirstCount = 1;
+
+        const unsigned char runBytes[] = { 0x05, 0x01, 0x02 };
+        HttpPack200BandReader runReader(runBytes, sizeof(runBytes));
+        LONG runValues[3] = {};
+        status = HttpPack200DecodeBand(&runReader, runCodec, runValues, sizeof(runValues) / sizeof(runValues[0]));
+        Expect(
+            NT_SUCCESS(status) && runValues[0] == 5 && runValues[1] == -1 && runValues[2] == 1,
+            "pack200 run codec decodes split band");
+
+        HttpPack200BandCodec adaptiveCodec = runCodec;
+        adaptiveCodec.Kind = HttpPack200BandCodecKind::Adaptive;
+        HttpPack200BandReader adaptiveReader(runBytes, sizeof(runBytes));
+        LONG adaptiveValues[3] = {};
+        status = HttpPack200DecodeBand(
+            &adaptiveReader,
+            adaptiveCodec,
+            adaptiveValues,
+            sizeof(adaptiveValues) / sizeof(adaptiveValues[0]));
+        Expect(
+            NT_SUCCESS(status) &&
+                adaptiveValues[0] == 5 &&
+                adaptiveValues[1] == -1 &&
+                adaptiveValues[2] == 1,
+            "pack200 adaptive codec decodes split band");
+    }
+
+    void TestPack200PopulationDecode()
+    {
+        const LONG favoured[] = { 10, 20 };
+        const unsigned char tokenBytes[] = { 0x01, 0x02, 0x01 };
+        HttpPack200BandReader tokenReader(tokenBytes, sizeof(tokenBytes));
+        LONG values[3] = {};
+        NTSTATUS status = HttpPack200DecodePopulationBand(
+            &tokenReader,
+            favoured,
+            sizeof(favoured) / sizeof(favoured[0]),
+            values,
+            sizeof(values) / sizeof(values[0]));
+        Expect(
+            NT_SUCCESS(status) && values[0] == 10 && values[1] == 20 && values[2] == 10,
+            "pack200 population codec maps favoured tokens");
+    }
+
+    void TestPack200BandContainers()
+    {
+        HttpPack200CpCounts counts = {};
+        counts.Utf8 = 2;
+        counts.Class = 1;
+        HttpPack200CpBands cpBands = {};
+        NTSTATUS status = cpBands.Initialize(counts);
+        Expect(
+            NT_SUCCESS(status) &&
+                cpBands.Utf8Count() == 2 &&
+                cpBands.ClassCount() == 1 &&
+                cpBands.Utf8SuffixLengths() != nullptr &&
+                cpBands.Utf8CharOffsets() != nullptr &&
+                cpBands.Utf8ByteLengths() != nullptr &&
+                cpBands.Utf16CharOffsets() != nullptr &&
+                cpBands.Utf16CharLengths() != nullptr &&
+                cpBands.ClassNameIndexes() != nullptr,
+            "pack200 cp band container initializes counted arrays");
+
+        HttpPack200FileBands fileBands = {};
+        status = fileBands.Initialize(1);
+        Expect(
+            NT_SUCCESS(status) && fileBands.NameIndexes() != nullptr && fileBands.SizesLow() != nullptr,
+            "pack200 file band container initializes");
+
+        HttpPack200ClassBands classBands = {};
+        status = classBands.Initialize(1);
+        Expect(
+            NT_SUCCESS(status) &&
+                classBands.ThisClassIndexes() != nullptr &&
+                classBands.SuperClassIndexes() != nullptr,
+            "pack200 class band container initializes");
+
+        HttpPack200CodeBands codeBands = {};
+        status = codeBands.Initialize(1);
+        Expect(
+            NT_SUCCESS(status) && codeBands.MaxStacks() != nullptr && codeBands.MaxLocals() != nullptr,
+            "pack200 code band container initializes");
+
+        HttpPack200AttributeBands attributeBands = {};
+        status = attributeBands.Initialize(1);
+        Expect(
+            NT_SUCCESS(status) && attributeBands.LayoutNameIndexes() != nullptr,
+            "pack200 attribute band container initializes");
+    }
+
+    void TestPack200BandParserFillsContainers()
+    {
+        HttpPack200BandCodec codec = {};
+        codec.Kind = HttpPack200BandCodecKind::Canonical;
+        codec.Canonical = HttpPack200CodingFor(HttpPack200CodingKind::Unsigned5);
+
+        const unsigned char cpBytes[] = { 3, 'a', 'b', 'c', 1 };
+        HttpPack200BandReader cpReader(cpBytes, sizeof(cpBytes));
+        HttpPack200BandReader cpHeaders(nullptr, 0);
+        HttpPack200CodecArena cpArena = {};
+        NTSTATUS status = cpArena.Initialize(64);
+        Expect(NT_SUCCESS(status), "pack200 cp parser codec arena initializes");
+        HttpPack200CpCounts counts = {};
+        counts.Utf8 = 2;
+        counts.Class = 1;
+        HttpPack200CpBands cpBands = {};
+        if (NT_SUCCESS(status)) {
+            status = HttpPack200ReadCpBands(&cpReader, &cpHeaders, &cpArena, counts, &cpBands);
+        }
+        Expect(
+            NT_SUCCESS(status) &&
+                cpBands.Utf8SuffixLengths()[0] == 0 &&
+                cpBands.Utf8SuffixLengths()[1] == 3 &&
+                cpBands.Utf8CharOffsets()[0] == 0 &&
+                cpBands.Utf8CharOffsets()[1] == 0 &&
+                cpBands.Utf8ByteLengths()[1] == 3 &&
+                cpBands.Utf8CharCount() == 3 &&
+                cpBands.Utf8Chars()[0] == 'a' &&
+                cpBands.Utf8Chars()[1] == 'b' &&
+                cpBands.Utf8Chars()[2] == 'c' &&
+                cpBands.ClassNameIndexes()[0] == 1,
+            "pack200 band parser fills cp utf8 chars and class bands");
+
+        const unsigned char fileBytes[] = { 4, 5 };
+        HttpPack200BandReader fileReader(fileBytes, sizeof(fileBytes));
+        HttpPack200BandReader fileHeaders(nullptr, 0);
+        HttpPack200CodecArena fileArena = {};
+        status = fileArena.Initialize(64);
+        Expect(NT_SUCCESS(status), "pack200 file parser codec arena initializes");
+        HttpPack200FileBands fileBands = {};
+        if (NT_SUCCESS(status)) {
+            status = HttpPack200ReadFileBands(
+                &fileReader,
+                &fileHeaders,
+                &fileArena,
+                1,
+                false,
+                false,
+                false,
+                &fileBands);
+        }
+        Expect(
+            NT_SUCCESS(status) &&
+                fileBands.NameIndexes()[0] == 4 &&
+                fileBands.SizesLow()[0] == 5 &&
+                fileBands.SizesHigh()[0] == 0 &&
+                fileBands.Modtimes()[0] == 0 &&
+                fileBands.Options()[0] == 0,
+            "pack200 band parser fills file bands");
+
+        const unsigned char classBytes[] = { 6, 7 };
+        HttpPack200BandReader classReader(classBytes, sizeof(classBytes));
+        HttpPack200ClassBands classBands = {};
+        status = HttpPack200ReadClassBands(&classReader, codec, 1, &classBands);
+        Expect(
+            NT_SUCCESS(status) &&
+                classBands.ThisClassIndexes()[0] == 6 &&
+                classBands.SuperClassIndexes()[0] == 7,
+            "pack200 band parser fills class bands");
+
+        const unsigned char codeBytes[] = { 8, 9 };
+        HttpPack200BandReader codeReader(codeBytes, sizeof(codeBytes));
+        HttpPack200CodeBands codeBands = {};
+        status = HttpPack200ReadCodeBands(&codeReader, codec, 1, &codeBands);
+        Expect(
+            NT_SUCCESS(status) &&
+                codeBands.MaxStacks()[0] == 8 &&
+                codeBands.MaxLocals()[0] == 9,
+            "pack200 band parser fills code bands");
+
+        const unsigned char attributeBytes[] = { 10 };
+        HttpPack200BandReader attributeReader(attributeBytes, sizeof(attributeBytes));
+        HttpPack200AttributeBands attributeBands = {};
+        status = HttpPack200ReadAttributeBands(&attributeReader, codec, 1, &attributeBands);
+        Expect(
+            NT_SUCCESS(status) && attributeBands.LayoutNameIndexes()[0] == 10,
+            "pack200 band parser fills attribute bands");
     }
 
     bool BuildChunkedBody(
@@ -280,18 +948,32 @@ namespace
         0x65, 0x78, 0x74, 0x00
     };
 
+    const unsigned char SimpleExiBody[] = {
+        0x24, 0x45, 0x58, 0x49, 0x80, 0x41, 0x5c, 0x9b,
+        0xdb, 0xdd, 0x30, 0x67, 0x46, 0x57, 0x87, 0x40
+    };
+
     const unsigned char Pack200GzipBody[] = {
         0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x0a, 0x3b, 0xf5, 0xef, 0x02, 0x2f, 0xe3,
-        0x2a, 0x01, 0x06, 0x06, 0x06, 0x06, 0x46, 0x26,
-        0x10, 0x09, 0x05, 0x22, 0xbe, 0xae, 0x21, 0x8e,
-        0xba, 0x9e, 0x7e, 0x6e, 0xfa, 0xbe, 0x8e, 0x7e,
-        0x9e, 0x6e, 0xae, 0xc1, 0x21, 0x7a, 0xbe, 0x6e,
-        0x8c, 0x92, 0xbe, 0x89, 0x79, 0x99, 0x69, 0xa9,
-        0xc5, 0x25, 0xba, 0x61, 0xa9, 0x45, 0xc5, 0x99,
-        0xf9, 0x79, 0x56, 0x0a, 0x86, 0x7a, 0x06, 0xbc,
-        0x5c, 0xbc, 0x5c, 0x00, 0x73, 0xaa, 0x1c, 0xc6,
-        0x48, 0x00, 0x00, 0x00
+        0x00, 0xff, 0x3b, 0xf5, 0xef, 0x02, 0x2f, 0xfb,
+        0xb4, 0x2b, 0x0c, 0x20, 0xc0, 0xc8, 0xc4, 0x80,
+        0x00, 0x7c, 0x29, 0x89, 0x25, 0x89, 0xfa, 0x19,
+        0xa9, 0x39, 0x39, 0xf9, 0x7a, 0x25, 0x15, 0x25,
+        0x8c, 0xbc, 0x07, 0x3e, 0xde, 0x7f, 0xa2, 0xc4,
+        0x00, 0x16, 0x50, 0x28, 0x48, 0x4c, 0xce, 0x36,
+        0x32, 0x30, 0x00, 0x00, 0x6a, 0x6d, 0xd6, 0xdb,
+        0x3d, 0x00, 0x00, 0x00
+    };
+
+    const unsigned char Pack200BareSegmentWithBands[] = {
+        0xca, 0xfe, 0xd0, 0x0d, 0x07, 0x96, 0xd4, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x0e, 0x64, 0x61, 0x74, 0x61, 0x2f, 0x68,
+        0x65, 0x6c, 0x6c, 0x6f, 0x2e, 0x74, 0x78, 0x74,
+        0x01, 0x0d, 0xc0, 0xf1, 0xdf, 0xe4, 0x22, 0x00,
+        0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x70, 0x61,
+        0x63, 0x6b, 0x32, 0x30, 0x30
     };
 
     // UNIX compress .Z stream for "encoded response body" with 16-bit max codes and no block reset.
@@ -1630,7 +2312,7 @@ namespace
         Expect(!NT_SUCCESS(status), "aes128gcm rejects incorrect keying material");
     }
 
-    void TestDecodeExiContentEncodingFailsClosedUntilFullDecoder()
+    void TestDecodeExiContentEncodingByteAlignment()
     {
         HttpHeader headers[] = {
             { MakeText("Content-Encoding"), MakeText("exi") }
@@ -1649,7 +2331,37 @@ namespace
             buffers,
             result);
 
-        Expect(!NT_SUCCESS(status), "exi content encoding fails closed until full EXI decoder is complete");
+        Expect(
+            NT_SUCCESS(status) &&
+                result.BodyLength == 17 &&
+                memcmp(decoded, "<root>text</root>", 17) == 0,
+            "exi content encoding decodes byte-aligned options stream");
+    }
+
+    void TestDecodeExiDrivesXmlSinkForBuiltInEvents()
+    {
+        HttpHeader headers[] = {
+            { MakeText("Content-Encoding"), MakeText("exi") }
+        };
+        char decoded[64] = {};
+        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        buffers.DecodedBody = decoded;
+        buffers.DecodedBodyCapacity = sizeof(decoded);
+
+        KernelHttp::http::HttpContentDecodeResult result = {};
+        const NTSTATUS status = HttpContentEncoding::Decode(
+            headers,
+            sizeof(headers) / sizeof(headers[0]),
+            reinterpret_cast<const char*>(SimpleExiBody),
+            sizeof(SimpleExiBody),
+            buffers,
+            result);
+
+        Expect(
+            NT_SUCCESS(status) &&
+                result.BodyLength == 17 &&
+                memcmp(decoded, "<root>text</root>", 17) == 0,
+            "exi event loop drives XML sink for document, element, characters, and end events");
     }
 
     void TestDecodeExiRejectsUnsupportedHeader()
@@ -1658,8 +2370,7 @@ namespace
             { MakeText("Content-Encoding"), MakeText("exi") }
         };
         const unsigned char unsupported[] = {
-            0x24, 0x45, 0x58, 0x49, 0x80, 0x41, 0x5c, 0x9b,
-            0xdb, 0xdd, 0x30, 0x67, 0x46, 0x57, 0x87, 0x40
+            0x24, 0x45, 0x58, 0x49, 0x00
         };
         char decoded[64] = {};
         KernelHttp::http::HttpContentDecodeBuffers buffers = {};
@@ -1678,7 +2389,7 @@ namespace
         Expect(!NT_SUCCESS(status), "exi rejects invalid or unsupported EXI stream");
     }
 
-    void TestDecodePack200GzipContentEncodingFailsClosedUntilFullDecoder()
+    void TestDecodePack200GzipContentEncodingRebuildsJar()
     {
         HttpHeader headers[] = {
             { MakeText("Content-Encoding"), MakeText("pack200-gzip") }
@@ -1697,7 +2408,67 @@ namespace
             buffers,
             result);
 
-        Expect(status == STATUS_NOT_SUPPORTED, "pack200-gzip content encoding fails closed until full Pack200 decoder is complete");
+        Expect(
+            NT_SUCCESS(status) &&
+                result.BodyLength > 4 &&
+                static_cast<unsigned char>(decoded[0]) == 0x50 &&
+                static_cast<unsigned char>(decoded[1]) == 0x4b &&
+                static_cast<unsigned char>(decoded[2]) == 0x03 &&
+                static_cast<unsigned char>(decoded[3]) == 0x04,
+            "pack200-gzip content encoding rebuilds a JAR from a file-only segment");
+    }
+
+    void TestDecodePack200GzipRejectsNonPackSegmentAfterGzip()
+    {
+        char decoded[256] = {};
+        SIZE_T decodedLength = 0;
+        const NTSTATUS status = DecodePack200GzipContent(
+            GzipBody,
+            sizeof(GzipBody),
+            decoded,
+            sizeof(decoded),
+            &decodedLength);
+
+        Expect(
+            status == STATUS_INVALID_NETWORK_RESPONSE && decodedLength == 0,
+            "pack200-gzip decodes gzip wrapper and rejects non-Pack200 segment payload");
+    }
+
+    void TestDecodePack200BareSegmentRebuildsJar()
+    {
+        char decoded[256] = {};
+        SIZE_T decodedLength = 0;
+        const NTSTATUS status = DecodePack200GzipContent(
+            Pack200BareSegmentWithBands,
+            sizeof(Pack200BareSegmentWithBands),
+            decoded,
+            sizeof(decoded),
+            &decodedLength);
+
+        Expect(
+            NT_SUCCESS(status) &&
+                decodedLength > 4 &&
+                static_cast<unsigned char>(decoded[0]) == 0x50 &&
+                static_cast<unsigned char>(decoded[1]) == 0x4b &&
+                static_cast<unsigned char>(decoded[2]) == 0x03 &&
+                static_cast<unsigned char>(decoded[3]) == 0x04,
+            "pack200 bare segment path rebuilds a JAR from decoded cp and file bands");
+    }
+
+    void TestDecodePack200SegmentRejectsTruncatedBands()
+    {
+        char decoded[256] = {};
+        SIZE_T decodedLength = 0;
+        const NTSTATUS status = DecodePack200GzipContent(
+            Pack200BareSegmentWithBands,
+            sizeof(Pack200BareSegmentWithBands) - 1,
+            decoded,
+            sizeof(decoded),
+            &decodedLength);
+
+        Expect(
+            status == STATUS_INVALID_NETWORK_RESPONSE && decodedLength == 0,
+            "pack200 segment path rejects truncated cp or file bands");
     }
 
     void TestDecodePack200GzipRejectsCorruptPack()
@@ -3165,6 +3936,24 @@ namespace
 
 int main()
 {
+    TestXmlWriterSerializesElementEvents();
+    TestXmlWriterRejectsInvalidEvents();
+    TestXmlWriterReportsOutputTooSmall();
+    TestXmlWriterSerializesAuxiliaryEvents();
+    TestPack200BandReaderUnsignedAndSigned();
+    TestPack200BandReaderDelta();
+    TestExiStringAndQNameTables();
+    TestExiBuiltinGrammarProductions();
+    TestExiEventCodeAndStringValueReader();
+    TestExiGrammarLearningTable();
+    TestExiQNameReaderLearnsAndResolvesNames();
+    TestExiBuiltInValueDecoders();
+    TestPack200JarWriterStoredEntries();
+    TestPack200ClassWriterConstantPool();
+    TestPack200MetaCodecAndRunAdaptiveDecode();
+    TestPack200PopulationDecode();
+    TestPack200BandContainers();
+    TestPack200BandParserFillsContainers();
     TestBuildGetRequest();
     TestBuildConnectRequest();
     TestBuildTraceRequestRequiresExplicitOptIn();
@@ -3202,9 +3991,13 @@ int main()
     TestDecodeDictionaryCompressedZstdRequiresDictionary();
     TestDecodeAes128GcmContentEncoding();
     TestDecodeAes128GcmRejectsWrongKey();
-    TestDecodeExiContentEncodingFailsClosedUntilFullDecoder();
+    TestDecodeExiContentEncodingByteAlignment();
+    TestDecodeExiDrivesXmlSinkForBuiltInEvents();
     TestDecodeExiRejectsUnsupportedHeader();
-    TestDecodePack200GzipContentEncodingFailsClosedUntilFullDecoder();
+    TestDecodePack200GzipContentEncodingRebuildsJar();
+    TestDecodePack200GzipRejectsNonPackSegmentAfterGzip();
+    TestDecodePack200BareSegmentRebuildsJar();
+    TestDecodePack200SegmentRejectsTruncatedBands();
     TestDecodePack200GzipRejectsCorruptPack();
     TestParseCompressContentEncoding();
     TestParseChunkedGzipContentEncoding();
