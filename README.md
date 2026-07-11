@@ -29,7 +29,7 @@ KernelHttp 是一个纯内核态的 HTTP/HTTPS 客户端库，专为 Windows 内
 - **⚡ 异步操作**：支持异步请求，带并发保护和 Workspace 隔离，避免阻塞内核线程
 - **🎯 两层 API**：提供高层简洁 API（`khttp`）和底层精细控制 API（`engine`）
 - **🛡️ 证书验证**：支持证书锁定（Certificate Pinning）、信任锚（Trust Anchor）、SPKI 哈希验证和 TLS 1.3 签名方案校验
-- **📦 响应编码**：支持 `Content-Encoding: gzip/deflate/br/compress/zstd/dcz/aes128gcm/identity`，识别 `exi/pack200-gzip` 并在完整解码器补全前 fail-closed；支持 HTTP/1.1 响应 `Transfer-Encoding` 的 `chunked/gzip/deflate/compress` 链式解码
+- **📦 响应编码**：支持 `Content-Encoding: gzip/deflate/br/compress/zstd/dcz/aes128gcm/exi/pack200-gzip/identity`；EXI 覆盖无外部 Schema 的 EXI 1.0，Pack200 覆盖 Java 5–8 稳定格式；HTTP/1.1 `Transfer-Encoding` 支持 `chunked/gzip/deflate/compress` 链式解码
 - **🧱 堆内存管理**：响应聚合默认不设低位总量硬顶（`MaxResponseBytes=0`），按需使用堆内存增长；使用 `HeapObject<T>` / `HeapArray<T>` 统一管理堆内存，高频缓冲常驻 Workspace
 
 ### 协议能力账本
@@ -44,6 +44,8 @@ KernelHttp 的公开能力按类别列账，避免把“没有实现”“默认
 | HTTP/2 | TLS ALPN、h2c prior knowledge / Upgrade、SETTINGS（含 `ENABLE_CONNECT_PROTOCOL`）、HEADERS/CONTINUATION、DATA body source、请求/响应 trailers、显式 per-request PRIORITY、显式 `SendPing`、session 显式开启的后台 PING 保活（默认关闭）、GOAWAY/RST 可重试语义、WINDOW_UPDATE、HPACK、header block 语义校验、HPACK header-list/table-size 限制、活动 stream 表、`BeginRequest`/`ReceiveResponse(streamId)` 两阶段接口、RFC 8441 extended CONNECT DATA tunnel、高层连接池 HTTP/2 多活动流复用 |
 | WebSocket | ws/wss 握手、Accept 常量时间校验、自定义 opening handshake headers、文本/二进制发送、空消息、分片发送（`kws::SendContinuation`）、接收分片回调（`ReceiveOptions.OnMessage`）、控制帧校验、自动 Pong、Ping/Pong/CloseEx、selected subprotocol 查询、跨片 UTF-8 校验、默认聚合完整消息、默认自动选择 RFC 8441 WebSocket over HTTP/2（`wss` offer `h2,http/1.1`，可用 `Http11Only` 强制 HTTP/1.1） |
 | TLS 与证书 | TLS 1.2/1.3、TLS 1.3 标准 cipher suite、TLS 1.2 ECDHE/DHE 与兼容档 RSA key exchange、AES-GCM/AES-CBC/ChaCha20-Poly1305、X25519/X448/NIST P curves/FFDHE、RSA-PSS/RSA-PKCS1/ECDSA/Ed25519/Ed448 signature scheme、SNI、ALPN、PSK/session ticket、0-RTT、被动 KeyUpdate、record padding、客户端证书（mTLS）、OCSP stapling 解析、证书链重排和校验、Name Constraints、certificatePolicies、IDNA、OCSP/CRL DER 撤销证据校验、撤销 provider callback、SPKI pin |
+| Pack200 | Java 5–8 稳定格式 `150.7`/`160.1`/`170.1`/`171.0`；支持裸/gzip、多 segment、class/file/bytecode、自定义 attribute layout（class/field/method/code）、overflow index、常量池与 BCI relocation；输出语义等价 JAR；真实语料带 SHA-256/provenance |
+| EXI | W3C EXI 1.0 Second Edition 无外部 Schema 流；支持四种 alignment、Options、保真项、内建 XML Schema 类型、`xsi:type`/`xsi:nil`；输出 Infoset 等价 XML；外部 Schema/strict grammar 返回 `STATUS_NOT_SUPPORTED` |
 
 **默认关闭 / 需显式开启**
 
