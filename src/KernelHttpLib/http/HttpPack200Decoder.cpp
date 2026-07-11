@@ -931,6 +931,83 @@ namespace
     }
 
     _Must_inspect_result_
+    NTSTATUS ResolveAnyMemberAttributeReference(
+        const HttpPack200CpBands& cpBands,
+        ULONG referenceIndex,
+        _Out_ HttpPack200AttributeReferenceKind* kind,
+        _Out_ ULONG* localIndex) noexcept
+    {
+        if (kind == nullptr || localIndex == nullptr) return STATUS_INVALID_PARAMETER;
+        if (referenceIndex < cpBands.FieldCount()) {
+            *kind = HttpPack200AttributeReferenceKind::Field;
+            *localIndex = referenceIndex;
+            return STATUS_SUCCESS;
+        }
+        referenceIndex -= static_cast<ULONG>(cpBands.FieldCount());
+        if (referenceIndex < cpBands.MethodCount()) {
+            *kind = HttpPack200AttributeReferenceKind::Method;
+            *localIndex = referenceIndex;
+            return STATUS_SUCCESS;
+        }
+        referenceIndex -= static_cast<ULONG>(cpBands.MethodCount());
+        if (referenceIndex < cpBands.InterfaceMethodCount()) {
+            *kind = HttpPack200AttributeReferenceKind::InterfaceMethod;
+            *localIndex = referenceIndex;
+            return STATUS_SUCCESS;
+        }
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS ResolveAnyAttributeReference(
+        const HttpPack200CpBands& cpBands,
+        ULONG referenceIndex,
+        _Out_ HttpPack200AttributeReferenceKind* kind,
+        _Out_ ULONG* localIndex) noexcept
+    {
+        if (kind == nullptr || localIndex == nullptr) return STATUS_INVALID_PARAMETER;
+        SIZE_T index = referenceIndex;
+        auto resolveGroup = [&](HttpPack200AttributeReferenceKind groupKind, SIZE_T count) noexcept -> bool {
+            if (index < count) {
+                *kind = groupKind;
+                *localIndex = static_cast<ULONG>(index);
+                return true;
+            }
+            index -= count;
+            return false;
+        };
+        if (resolveGroup(HttpPack200AttributeReferenceKind::Utf8, cpBands.Utf8Count()) ||
+            resolveGroup(HttpPack200AttributeReferenceKind::Integer, cpBands.IntCount()) ||
+            resolveGroup(HttpPack200AttributeReferenceKind::Float, cpBands.FloatCount()) ||
+            resolveGroup(HttpPack200AttributeReferenceKind::Long, cpBands.LongCount()) ||
+            resolveGroup(HttpPack200AttributeReferenceKind::Double, cpBands.DoubleCount()) ||
+            resolveGroup(HttpPack200AttributeReferenceKind::String, cpBands.StringCount()) ||
+            resolveGroup(HttpPack200AttributeReferenceKind::Class, cpBands.ClassCount()) ||
+            resolveGroup(HttpPack200AttributeReferenceKind::Signature, cpBands.SignatureCount()) ||
+            resolveGroup(HttpPack200AttributeReferenceKind::Descriptor, cpBands.DescriptorCount()) ||
+            resolveGroup(HttpPack200AttributeReferenceKind::Field, cpBands.FieldCount()) ||
+            resolveGroup(HttpPack200AttributeReferenceKind::Method, cpBands.MethodCount()) ||
+            resolveGroup(
+                HttpPack200AttributeReferenceKind::InterfaceMethod,
+                cpBands.InterfaceMethodCount()) ||
+            resolveGroup(
+                HttpPack200AttributeReferenceKind::MethodHandle,
+                cpBands.MethodHandleCount()) ||
+            resolveGroup(
+                HttpPack200AttributeReferenceKind::MethodType,
+                cpBands.MethodTypeCount()) ||
+            resolveGroup(
+                HttpPack200AttributeReferenceKind::BootstrapMethod,
+                cpBands.BootstrapMethodCount()) ||
+            resolveGroup(
+                HttpPack200AttributeReferenceKind::InvokeDynamic,
+                cpBands.InvokeDynamicCount())) {
+            return STATUS_SUCCESS;
+        }
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+
+    _Must_inspect_result_
     NTSTATUS WriteCustomAttributeValue(
         _Inout_updates_bytes_(length) UCHAR* data,
         SIZE_T length,
@@ -1722,6 +1799,101 @@ namespace
                 }
             }
         }
+        for (SIZE_T occurrenceIndex = 0;
+             occurrenceIndex < customAttributes.OccurrenceCount();
+             ++occurrenceIndex) {
+            const auto& occurrence = customAttributes.Occurrences()[occurrenceIndex];
+            if (!occurrenceBelongsToClass(occurrence) ||
+                occurrence.RelocationOffset > customAttributes.RelocationCount() ||
+                occurrence.RelocationCount >
+                    customAttributes.RelocationCount() - occurrence.RelocationOffset) {
+                if (occurrenceBelongsToClass(occurrence)) return STATUS_INVALID_NETWORK_RESPONSE;
+                continue;
+            }
+            for (SIZE_T relocationIndex = 0;
+                 relocationIndex < occurrence.RelocationCount;
+                 ++relocationIndex) {
+                const auto& relocation = customAttributes.Relocations()[
+                    occurrence.RelocationOffset + relocationIndex];
+                if (relocation.ReferenceKind == HttpPack200AttributeReferenceKind::None ||
+                    (relocation.Nullable && relocation.Value == 0)) {
+                    continue;
+                }
+                if (relocation.Value < 0) return STATUS_INVALID_NETWORK_RESPONSE;
+                ULONG referenceIndex = static_cast<ULONG>(relocation.Value);
+                if (relocation.Nullable) --referenceIndex;
+                HttpPack200AttributeReferenceKind kind = relocation.ReferenceKind;
+                NTSTATUS resolveStatus = STATUS_SUCCESS;
+                if (kind == HttpPack200AttributeReferenceKind::Any) {
+                    resolveStatus = ResolveAnyAttributeReference(
+                        cpBands, referenceIndex, &kind, &referenceIndex);
+                }
+                else if (kind == HttpPack200AttributeReferenceKind::AnyMember) {
+                    resolveStatus = ResolveAnyMemberAttributeReference(
+                        cpBands, referenceIndex, &kind, &referenceIndex);
+                }
+                if (!NT_SUCCESS(resolveStatus)) return resolveStatus;
+                ULONG bootstrapIndex = 0;
+                SIZE_T entryCount = 0;
+                if (kind == HttpPack200AttributeReferenceKind::BootstrapMethod) {
+                    bootstrapIndex = referenceIndex;
+                    entryCount = 7;
+                }
+                else if (kind == HttpPack200AttributeReferenceKind::InvokeDynamic) {
+                    const ULONG* invokeBootstrapIndexes = cpBands.InvokeDynamicBootstrapIndexes();
+                    if (referenceIndex >= cpBands.InvokeDynamicCount() ||
+                        invokeBootstrapIndexes == nullptr) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    bootstrapIndex = invokeBootstrapIndexes[referenceIndex];
+                    entryCount = 11;
+                }
+                else {
+                    continue;
+                }
+                const ULONG* bootstrapArgumentCounts = cpBands.BootstrapMethodArgumentCounts();
+                const ULONG* bootstrapArguments = cpBands.BootstrapMethodArgumentIndexes();
+                if (bootstrapIndex >= cpBands.BootstrapMethodCount() ||
+                    bootstrapArgumentCounts == nullptr) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                SIZE_T argumentOffset = 0;
+                for (SIZE_T index = 0; index < bootstrapIndex; ++index) {
+                    if (!CheckedAddSize(
+                            argumentOffset,
+                            bootstrapArgumentCounts[index],
+                            &argumentOffset)) {
+                        return STATUS_INTEGER_OVERFLOW;
+                    }
+                }
+                const SIZE_T argumentCount = bootstrapArgumentCounts[bootstrapIndex];
+                if (argumentCount != 0 && bootstrapArguments == nullptr) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                for (SIZE_T index = 0; index < argumentCount; ++index) {
+                    SIZE_T argumentEntryCount = 0;
+                    NTSTATUS countStatus = LoadableConstantEntryCount(
+                        cpBands,
+                        bootstrapArguments[argumentOffset + index],
+                        &argumentEntryCount);
+                    if (!NT_SUCCESS(countStatus) ||
+                        !CheckedAddSize(entryCount, argumentEntryCount, &entryCount)) {
+                        return NT_SUCCESS(countStatus) ? STATUS_INTEGER_OVERFLOW : countStatus;
+                    }
+                }
+                if (!CheckedAddSize(
+                        classBootstrapMethodCount,
+                        1,
+                        &classBootstrapMethodCount) ||
+                    !CheckedAddSize(
+                        classBootstrapArgumentCount,
+                        argumentCount,
+                        &classBootstrapArgumentCount) ||
+                    !CheckedAddSize(customPoolEntryCount, entryCount, &customPoolEntryCount)) {
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+            }
+        }
         if (classBootstrapMethodCount != 0 &&
             !CheckedAddSize(relocationPoolEntryCount, 1, &relocationPoolEntryCount)) {
             return STATUS_INTEGER_OVERFLOW;
@@ -2508,6 +2680,69 @@ namespace
         USHORT bootstrapMethodsAttributeNameIndex = 0;
         SIZE_T storedBootstrapMethodCount = 0;
         SIZE_T storedBootstrapArgumentCount = 0;
+        auto storeBootstrapMethod = [&](ULONG bootstrapIndex, _Out_ USHORT* localIndex) noexcept -> NTSTATUS {
+            const ULONG* bootstrapReferences = cpBands.BootstrapMethodReferenceIndexes();
+            const ULONG* bootstrapArgumentCounts = cpBands.BootstrapMethodArgumentCounts();
+            const ULONG* bootstrapArgumentIndexes = cpBands.BootstrapMethodArgumentIndexes();
+            if (localIndex == nullptr || bootstrapIndex >= cpBands.BootstrapMethodCount() ||
+                bootstrapReferences == nullptr || bootstrapArgumentCounts == nullptr ||
+                storedBootstrapMethodCount >= bootstrapMethods.Count() ||
+                storedBootstrapMethodCount > 0xffffU) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            SIZE_T argumentOffset = 0;
+            for (SIZE_T index = 0; index < bootstrapIndex; ++index) {
+                if (!CheckedAddSize(
+                        argumentOffset,
+                        bootstrapArgumentCounts[index],
+                        &argumentOffset)) {
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+            }
+            const SIZE_T argumentCount = bootstrapArgumentCounts[bootstrapIndex];
+            SIZE_T nextStoredArgumentCount = 0;
+            if (!CheckedAddSize(
+                    storedBootstrapArgumentCount,
+                    argumentCount,
+                    &nextStoredArgumentCount) ||
+                nextStoredArgumentCount > bootstrapArguments.Count() ||
+                (argumentCount != 0 && bootstrapArgumentIndexes == nullptr)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            HttpPack200BootstrapMethod& bootstrapMethod =
+                bootstrapMethods[storedBootstrapMethodCount];
+            NTSTATUS localStatus = AddMethodHandleConstant(
+                cpBands,
+                bootstrapReferences[bootstrapIndex],
+                &writer,
+                &signatureStorage,
+                &bootstrapMethod.MethodHandleIndex);
+            bootstrapMethod.ArgumentIndexes = argumentCount == 0 ? nullptr :
+                bootstrapArguments.Get() + storedBootstrapArgumentCount;
+            bootstrapMethod.ArgumentCount = argumentCount;
+            for (SIZE_T index = 0; NT_SUCCESS(localStatus) && index < argumentCount; ++index) {
+                localStatus = AddLoadableConstant(
+                    cpBands,
+                    bootstrapArgumentIndexes[argumentOffset + index],
+                    &writer,
+                    &signatureStorage,
+                    &bootstrapArguments[storedBootstrapArgumentCount + index]);
+            }
+            if (!NT_SUCCESS(localStatus)) return localStatus;
+            *localIndex = static_cast<USHORT>(storedBootstrapMethodCount);
+            storedBootstrapArgumentCount = nextStoredArgumentCount;
+            ++storedBootstrapMethodCount;
+            return STATUS_SUCCESS;
+        };
+        HeapArray<USHORT> customBootstrapIndexes = {};
+        if (NT_SUCCESS(status) && customAttributes.RelocationCount() != 0) {
+            status = customBootstrapIndexes.Allocate(customAttributes.RelocationCount());
+            if (NT_SUCCESS(status)) {
+                for (SIZE_T index = 0; index < customBootstrapIndexes.Count(); ++index) {
+                    customBootstrapIndexes[index] = 0xffffU;
+                }
+            }
+        }
         if (NT_SUCCESS(status) && classRelocationCount != 0) {
             ULONG* codeOffsets = codeBands->CodeOffsets();
             UCHAR* codeBytes = codeBands->CodeBytes();
@@ -3184,6 +3419,58 @@ namespace
                 status = writer.AddUtf8(attributeName, &enclosingMethodAttributeNameIndex);
             }
         }
+        for (SIZE_T occurrenceIndex = 0;
+             NT_SUCCESS(status) && occurrenceIndex < customAttributes.OccurrenceCount();
+             ++occurrenceIndex) {
+            const auto& occurrence = customAttributes.Occurrences()[occurrenceIndex];
+            if (!occurrenceBelongsToClass(occurrence)) continue;
+            if (occurrence.RelocationOffset > customAttributes.RelocationCount() ||
+                occurrence.RelocationCount >
+                    customAttributes.RelocationCount() - occurrence.RelocationOffset) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            for (SIZE_T relocationIndex = 0;
+                 NT_SUCCESS(status) && relocationIndex < occurrence.RelocationCount;
+                 ++relocationIndex) {
+                const SIZE_T absoluteIndex = occurrence.RelocationOffset + relocationIndex;
+                const auto& relocation = customAttributes.Relocations()[absoluteIndex];
+                if (relocation.ReferenceKind == HttpPack200AttributeReferenceKind::None ||
+                    (relocation.Nullable && relocation.Value == 0)) {
+                    continue;
+                }
+                if (relocation.Value < 0) return STATUS_INVALID_NETWORK_RESPONSE;
+                ULONG referenceIndex = static_cast<ULONG>(relocation.Value);
+                if (relocation.Nullable) --referenceIndex;
+                HttpPack200AttributeReferenceKind referenceKind = relocation.ReferenceKind;
+                if (referenceKind == HttpPack200AttributeReferenceKind::Any) {
+                    status = ResolveAnyAttributeReference(
+                        cpBands, referenceIndex, &referenceKind, &referenceIndex);
+                }
+                else if (referenceKind == HttpPack200AttributeReferenceKind::AnyMember) {
+                    status = ResolveAnyMemberAttributeReference(
+                        cpBands, referenceIndex, &referenceKind, &referenceIndex);
+                }
+                if (!NT_SUCCESS(status)) break;
+                ULONG bootstrapIndex = 0;
+                if (referenceKind == HttpPack200AttributeReferenceKind::BootstrapMethod) {
+                    bootstrapIndex = referenceIndex;
+                }
+                else if (referenceKind == HttpPack200AttributeReferenceKind::InvokeDynamic) {
+                    const ULONG* invokeBootstrapIndexes = cpBands.InvokeDynamicBootstrapIndexes();
+                    if (referenceIndex >= cpBands.InvokeDynamicCount() ||
+                        invokeBootstrapIndexes == nullptr) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    bootstrapIndex = invokeBootstrapIndexes[referenceIndex];
+                }
+                else {
+                    continue;
+                }
+                status = storeBootstrapMethod(
+                    bootstrapIndex,
+                    &customBootstrapIndexes[absoluteIndex]);
+            }
+        }
         if (NT_SUCCESS(status) && storedBootstrapMethodCount != classBootstrapMethodCount) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
@@ -3492,8 +3779,10 @@ namespace
                 for (SIZE_T relocationIndex = 0;
                      relocationIndex < occurrence.RelocationCount;
                      ++relocationIndex) {
+                    const SIZE_T absoluteRelocationIndex =
+                        occurrence.RelocationOffset + relocationIndex;
                     const auto& relocation = customAttributes.Relocations()[
-                        occurrence.RelocationOffset + relocationIndex];
+                        absoluteRelocationIndex];
                     if (relocation.Offset < occurrence.PayloadOffset ||
                         relocation.Offset - occurrence.PayloadOffset > occurrence.PayloadLength) {
                         return STATUS_INVALID_NETWORK_RESPONSE;
@@ -3508,9 +3797,27 @@ namespace
                         else {
                             ULONG referenceIndex = static_cast<ULONG>(relocation.Value);
                             if (relocation.Nullable) --referenceIndex;
+                            HttpPack200AttributeReferenceKind referenceKind =
+                                relocation.ReferenceKind;
+                            if (referenceKind == HttpPack200AttributeReferenceKind::Any) {
+                                localStatus = ResolveAnyAttributeReference(
+                                    cpBands,
+                                    referenceIndex,
+                                    &referenceKind,
+                                    &referenceIndex);
+                            }
+                            else if (referenceKind ==
+                                HttpPack200AttributeReferenceKind::AnyMember) {
+                                localStatus = ResolveAnyMemberAttributeReference(
+                                    cpBands,
+                                    referenceIndex,
+                                    &referenceKind,
+                                    &referenceIndex);
+                            }
+                            if (!NT_SUCCESS(localStatus)) return localStatus;
                             USHORT constantIndex = 0;
                             HttpXmlText fieldDescriptor = {};
-                            if (relocation.ReferenceKind ==
+                            if (referenceKind ==
                                 HttpPack200AttributeReferenceKind::FieldSpecific) {
                                 if (context != 1 || ownerIndex < fieldOffset ||
                                     ownerIndex - fieldOffset >= fieldCount ||
@@ -3528,14 +3835,86 @@ namespace
                                     &fieldDescriptor);
                                 if (!NT_SUCCESS(localStatus)) return localStatus;
                             }
-                            localStatus = AddCustomAttributeReference(
-                                cpBands,
-                                relocation.ReferenceKind,
-                                referenceIndex,
-                                fieldDescriptor,
-                                &writer,
-                                &signatureStorage,
-                                &constantIndex);
+                            if (referenceKind ==
+                                HttpPack200AttributeReferenceKind::BootstrapMethod) {
+                                if (absoluteRelocationIndex >= customBootstrapIndexes.Count() ||
+                                    customBootstrapIndexes[absoluteRelocationIndex] == 0xffffU) {
+                                    return STATUS_INVALID_NETWORK_RESPONSE;
+                                }
+                                constantIndex = customBootstrapIndexes[absoluteRelocationIndex];
+                            }
+                            else if (referenceKind ==
+                                HttpPack200AttributeReferenceKind::InvokeDynamic) {
+                                const ULONG* invokeBootstrapIndexes =
+                                    cpBands.InvokeDynamicBootstrapIndexes();
+                                const ULONG* invokeDescriptorIndexes =
+                                    cpBands.InvokeDynamicDescriptorIndexes();
+                                if (referenceIndex >= cpBands.InvokeDynamicCount() ||
+                                    invokeBootstrapIndexes == nullptr ||
+                                    invokeDescriptorIndexes == nullptr) {
+                                    return STATUS_INVALID_NETWORK_RESPONSE;
+                                }
+                                const ULONG descriptorIndex =
+                                    invokeDescriptorIndexes[referenceIndex];
+                                if (descriptorIndex >= cpBands.DescriptorCount() ||
+                                    descriptorNames == nullptr || descriptorTypes == nullptr) {
+                                    return STATUS_INVALID_NETWORK_RESPONSE;
+                                }
+                                if (absoluteRelocationIndex >= customBootstrapIndexes.Count() ||
+                                    customBootstrapIndexes[absoluteRelocationIndex] == 0xffffU) {
+                                    return STATUS_INVALID_NETWORK_RESPONSE;
+                                }
+                                const USHORT localBootstrapIndex =
+                                    customBootstrapIndexes[absoluteRelocationIndex];
+                                HttpXmlText memberName = {};
+                                HttpXmlText memberDescriptor = {};
+                                if (NT_SUCCESS(localStatus) &&
+                                    !cpBands.GetUtf8(
+                                        descriptorNames[descriptorIndex],
+                                        &memberName)) {
+                                    localStatus = STATUS_INVALID_NETWORK_RESPONSE;
+                                }
+                                if (NT_SUCCESS(localStatus)) {
+                                    localStatus = ExpandSignature(
+                                        cpBands,
+                                        descriptorTypes[descriptorIndex],
+                                        &signatureStorage,
+                                        &memberDescriptor);
+                                }
+                                USHORT nameIndex = 0;
+                                USHORT descriptorUtf8Index = 0;
+                                USHORT nameAndTypeIndex = 0;
+                                if (NT_SUCCESS(localStatus)) {
+                                    localStatus = writer.AddUtf8(memberName, &nameIndex);
+                                }
+                                if (NT_SUCCESS(localStatus)) {
+                                    localStatus = writer.AddUtf8(
+                                        memberDescriptor,
+                                        &descriptorUtf8Index);
+                                }
+                                if (NT_SUCCESS(localStatus)) {
+                                    localStatus = writer.AddNameAndType(
+                                        nameIndex,
+                                        descriptorUtf8Index,
+                                        &nameAndTypeIndex);
+                                }
+                                if (NT_SUCCESS(localStatus)) {
+                                    localStatus = writer.AddInvokeDynamic(
+                                        localBootstrapIndex,
+                                        nameAndTypeIndex,
+                                        &constantIndex);
+                                }
+                            }
+                            else {
+                                localStatus = AddCustomAttributeReference(
+                                    cpBands,
+                                    referenceKind,
+                                    referenceIndex,
+                                    fieldDescriptor,
+                                    &writer,
+                                    &signatureStorage,
+                                    &constantIndex);
+                            }
                             if (!NT_SUCCESS(localStatus)) return localStatus;
                             outputValue = constantIndex;
                         }

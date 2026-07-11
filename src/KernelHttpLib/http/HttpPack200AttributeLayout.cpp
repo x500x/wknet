@@ -152,6 +152,10 @@ namespace
         case 'M': return HttpPack200AttributeReferenceKind::Method;
         case 'I': return HttpPack200AttributeReferenceKind::InterfaceMethod;
         case 'U': return HttpPack200AttributeReferenceKind::Utf8;
+        case 'Q': return HttpPack200AttributeReferenceKind::Any;
+        case 'N': return HttpPack200AttributeReferenceKind::AnyMember;
+        case 'B': return HttpPack200AttributeReferenceKind::BootstrapMethod;
+        case 'Y': return HttpPack200AttributeReferenceKind::InvokeDynamic;
         default: return HttpPack200AttributeReferenceKind::None;
         }
     }

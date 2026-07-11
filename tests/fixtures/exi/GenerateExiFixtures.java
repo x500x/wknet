@@ -1,4 +1,7 @@
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
 
 import javax.xml.namespace.QName;
 
@@ -333,7 +336,7 @@ public final class GenerateExiFixtures {
         return output.toByteArray();
     }
 
-    private static byte[] encodeXsiNil(CodingMode mode) throws Exception {
+    private static byte[] encodeXsiNil(CodingMode mode, boolean nil) throws Exception {
         EXIFactory factory = DefaultEXIFactory.newInstance();
         factory.setCodingMode(mode);
         factory.getFidelityOptions().setFidelity(FidelityOptions.FEATURE_PREFIX, true);
@@ -349,11 +352,78 @@ public final class GenerateExiFixtures {
         body.encodeStartDocument();
         body.encodeStartElement("", "root", null);
         body.encodeNamespaceDeclaration("http://www.w3.org/2001/XMLSchema-instance", "xsi");
-        body.encodeAttributeXsiNil(BooleanValue.BOOLEAN_VALUE_TRUE, "xsi");
+        body.encodeAttributeXsiNil(
+                nil ? BooleanValue.BOOLEAN_VALUE_TRUE : BooleanValue.BOOLEAN_VALUE_FALSE,
+                "xsi");
+        if (!nil) {
+            body.encodeCharacters(new StringValue("text"));
+        }
         body.encodeEndElement();
         body.encodeEndDocument();
         body.flush();
         return output.toByteArray();
+    }
+
+    private static byte[] encodeInvalidXsiNilContent(CodingMode mode) throws Exception {
+        EXIFactory factory = DefaultEXIFactory.newInstance();
+        factory.setCodingMode(mode);
+        factory.getFidelityOptions().setFidelity(FidelityOptions.FEATURE_PREFIX, true);
+        factory.setGrammars(GrammarFactory.newInstance().createXSDTypesOnlyGrammars());
+        EncodingOptions encodingOptions = EncodingOptions.createDefault();
+        encodingOptions.setOption(EncodingOptions.INCLUDE_OPTIONS);
+        encodingOptions.setOption(EncodingOptions.INCLUDE_SCHEMA_ID);
+        factory.setEncodingOptions(encodingOptions);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        EXIBodyEncoder body = factory.createEXIStreamEncoder().encodeHeader(output);
+        body.encodeStartDocument();
+        body.encodeStartElement("", "root", null);
+        body.encodeNamespaceDeclaration("http://www.w3.org/2001/XMLSchema-instance", "xsi");
+        body.encodeAttributeXsiNil(BooleanValue.BOOLEAN_VALUE_TRUE, "xsi");
+        body.encodeCharacters(new StringValue("invalid"));
+        body.encodeEndElement();
+        body.encodeEndDocument();
+        body.flush();
+        return output.toByteArray();
+    }
+
+    private static void write(File directory, String name, byte[] bytes) throws Exception {
+        try (FileOutputStream output = new FileOutputStream(new File(directory, name))) {
+            output.write(bytes);
+        }
+    }
+
+    private static void writeCorpus(String path) throws Exception {
+        File directory = new File(path);
+        if (!directory.isDirectory() && !directory.mkdirs()) {
+            throw new IllegalStateException("Cannot create corpus directory: " + path);
+        }
+        CodingMode[] modes = {
+            CodingMode.BIT_PACKED,
+            CodingMode.BYTE_PACKED,
+            CodingMode.PRE_COMPRESSION,
+            CodingMode.COMPRESSION
+        };
+        String[] names = { "bit-packed", "byte-aligned", "pre-compression", "compression" };
+        for (int index = 0; index < modes.length; ++index) {
+            write(directory, "basic-" + names[index] + ".exi", encode(modes[index], true, false));
+            write(directory, "xsi-nil-true-" + names[index] + ".exi", encodeXsiNil(modes[index], true));
+            write(directory, "xsi-nil-false-" + names[index] + ".exi", encodeXsiNil(modes[index], false));
+            write(directory, "xsi-nil-invalid-content-" + names[index] + ".exi", encodeInvalidXsiNilContent(modes[index]));
+        }
+        write(
+                directory,
+                "basic.expected.xml",
+                "<root>text</root>".getBytes(StandardCharsets.UTF_8));
+        write(
+                directory,
+                "xsi-nil-true.expected.xml",
+                ("<root xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
+                 "xsi:nil=\"true\"></root>").getBytes(StandardCharsets.UTF_8));
+        write(
+                directory,
+                "xsi-nil-false.expected.xml",
+                ("<root xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
+                 "xsi:nil=\"false\">text</root>").getBytes(StandardCharsets.UTF_8));
     }
 
     private static byte[] encodeSchemaLessSchemaIdNil() throws Exception {
@@ -438,6 +508,10 @@ public final class GenerateExiFixtures {
     }
 
     public static void main(String[] args) throws Exception {
+        if (args.length == 2 && "--corpus".equals(args[0])) {
+            writeCorpus(args[1]);
+            return;
+        }
         print("bit_packed", encode(CodingMode.BIT_PACKED, false, false));
         print("bit_packed_cookie", encode(CodingMode.BIT_PACKED, false, true));
         print("bit_packed_options", encode(CodingMode.BIT_PACKED, true, false));
@@ -479,10 +553,10 @@ public final class GenerateExiFixtures {
                 CodingMode.COMPRESSION,
                 "boolean",
                 BooleanValue.BOOLEAN_VALUE_TRUE));
-        print("xsi_nil_bit_packed", encodeXsiNil(CodingMode.BIT_PACKED));
-        print("xsi_nil_byte_packed", encodeXsiNil(CodingMode.BYTE_PACKED));
-        print("xsi_nil_pre_compression", encodeXsiNil(CodingMode.PRE_COMPRESSION));
-        print("xsi_nil_compression", encodeXsiNil(CodingMode.COMPRESSION));
+        print("xsi_nil_bit_packed", encodeXsiNil(CodingMode.BIT_PACKED, true));
+        print("xsi_nil_byte_packed", encodeXsiNil(CodingMode.BYTE_PACKED, true));
+        print("xsi_nil_pre_compression", encodeXsiNil(CodingMode.PRE_COMPRESSION, true));
+        print("xsi_nil_compression", encodeXsiNil(CodingMode.COMPRESSION, true));
         print("schema_less_schema_id_nil", encodeSchemaLessSchemaIdNil());
         print("schema_less_drmap", encodeSchemaLessDatatypeRepresentationMap());
         print("lexical_boolean", encodeLexicalValue("boolean", "1"));

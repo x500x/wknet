@@ -3,6 +3,7 @@
 #endif
 
 #include "../src/KernelHttpLib/http/HttpPack200BandCodec.h"
+#include "../src/KernelHttpLib/http/HttpPack200AttributeLayout.h"
 #include "../src/KernelHttpLib/http/HttpPack200BandParser.h"
 #include "../src/KernelHttpLib/http/HttpPack200Bands.h"
 #include "../src/KernelHttpLib/http/HttpPack200Codec.h"
@@ -10,12 +11,18 @@
 #include "../src/KernelHttpLib/http/HttpPack200ClassWriter.h"
 #include "../src/KernelHttpLib/http/HttpPack200JarWriter.h"
 #include "../src/KernelHttpLib/http/HttpDeflateDecoder.h"
+#include <KernelHttp/crypto/CngProvider.h>
 
 #include <stdio.h>
 #include <string.h>
 
 using KernelHttp::http::DecodePack200GzipContent;
 using KernelHttp::http::HttpPack200BandCodec;
+using KernelHttp::http::HttpPack200AttributeLayout;
+using KernelHttp::http::HttpPack200AttributeElementKind;
+using KernelHttp::http::HttpPack200AttributeReferenceKind;
+using KernelHttp::http::HttpPack200AttributeValueBands;
+using KernelHttp::http::HttpPack200AttributeRelocation;
 using KernelHttp::http::HttpPack200BandCodecKind;
 using KernelHttp::http::HttpPack200BandReader;
 using KernelHttp::http::HttpPack200CpBands;
@@ -42,6 +49,8 @@ using KernelHttp::http::HttpPack200JarWriter;
 using KernelHttp::http::HttpDecodeRawDeflate;
 using KernelHttp::http::HttpXmlText;
 using KernelHttp::HeapArray;
+using KernelHttp::crypto::CngProvider;
+using KernelHttp::crypto::HashAlgorithm;
 
 namespace
 {
@@ -57,6 +66,391 @@ namespace
 
     SIZE_T CountBytes(const char* data, SIZE_T length, const char* needle, SIZE_T needleLength);
 
+    bool HexDigestEquals(const UCHAR* digest, SIZE_T digestLength, const char* expected) noexcept
+    {
+        if (digest == nullptr || expected == nullptr || digestLength != 32) return false;
+        for (SIZE_T index = 0; index < digestLength; ++index) {
+            const char high = expected[index * 2];
+            const char low = expected[index * 2 + 1];
+            const auto digit = [](char value) noexcept -> int {
+                if (value >= '0' && value <= '9') return value - '0';
+                if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+                if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+                return -1;
+            };
+            const int highValue = digit(high);
+            const int lowValue = digit(low);
+            if (highValue < 0 || lowValue < 0 ||
+                digest[index] != static_cast<UCHAR>((highValue << 4) | lowValue)) {
+                return false;
+            }
+        }
+        return expected[digestLength * 2] == '\0';
+    }
+
+    bool DecodeCorpusFixture(
+        const char* path,
+        const char* expectedSha256,
+        USHORT expectedClassMajor,
+        const char* expectedClassName,
+        const char* expectedSourceName) noexcept
+    {
+        FILE* file = nullptr;
+        if (path == nullptr || fopen_s(&file, path, "rb") != 0 || file == nullptr) return false;
+        if (fseek(file, 0, SEEK_END) != 0) {
+            fclose(file);
+            return false;
+        }
+        const long fileLength = ftell(file);
+        if (fileLength <= 0 || fseek(file, 0, SEEK_SET) != 0) {
+            fclose(file);
+            return false;
+        }
+        HeapArray<UCHAR> packed(static_cast<SIZE_T>(fileLength));
+        HeapArray<char> jar(256 * 1024);
+        const bool loaded = packed.IsValid() && jar.IsValid() &&
+            fread(packed.Get(), 1, packed.Count(), file) == packed.Count();
+        fclose(file);
+        if (!loaded) return false;
+
+        UCHAR digest[32] = {};
+        SIZE_T digestLength = 0;
+        if (!NT_SUCCESS(CngProvider::Hash(
+                HashAlgorithm::Sha256,
+                packed.Get(),
+                packed.Count(),
+                digest,
+                sizeof(digest),
+                &digestLength)) ||
+            digestLength != sizeof(digest) ||
+            !HexDigestEquals(digest, digestLength, expectedSha256)) {
+            return false;
+        }
+
+        SIZE_T jarLength = 0;
+        if (!NT_SUCCESS(DecodePack200GzipContent(
+                packed.Get(), packed.Count(), jar.Get(), jar.Count(), &jarLength)) ||
+            jarLength < 8 ||
+            CountBytes(jar.Get(), jarLength, expectedClassName, strlen(expectedClassName)) == 0 ||
+            CountBytes(jar.Get(), jarLength, expectedSourceName, strlen(expectedSourceName)) == 0) {
+            return false;
+        }
+        const UCHAR magic[] = { 0xca, 0xfe, 0xba, 0xbe };
+        const auto* bytes = reinterpret_cast<const UCHAR*>(jar.Get());
+        for (SIZE_T index = 0; index + 8 <= jarLength; ++index) {
+            if (memcmp(bytes + index, magic, sizeof(magic)) == 0) {
+                const USHORT major = static_cast<USHORT>(
+                    (static_cast<USHORT>(bytes[index + 6]) << 8) | bytes[index + 7]);
+                return major == expectedClassMajor;
+            }
+        }
+        return false;
+    }
+
+    void TestPublishedJdkCorpora()
+    {
+        struct Corpus final
+        {
+            const char* Directory;
+            USHORT Major;
+            const char* ClassName;
+            const char* SourceName;
+            const char* RawSha256;
+            const char* GzipSha256;
+        };
+        const Corpus corpora[] = {
+            { "jdk5", 49, "sample/Jdk5Fixture", "Jdk5Fixture.java",
+              "d8b46c91e7dd4e0e4b7d920f2675c23e373c527ba5178f404d28b3382b474f4a",
+              "2a5f80937e9277d9c35020e3e36f3da5c5f620cf77794197603f429984005d66" },
+            { "jdk6", 50, "sample/Jdk6Fixture", "Jdk6Fixture.java",
+              "bd7494eda71da33aa7908119d676724b170f3097414c8c9c9f3f89d9615bfc28",
+              "e69ce2b331ee8bc9fa3edf6c376e1559ed78570321e04e51d873ac2a1dec5c04" },
+            { "jdk7", 51, "sample/Jdk7Fixture", "Jdk7Fixture.java",
+              "abc9760c1c4923bca7fdd585891707d82d28cf387bfe3e00f9aa6a895a6b857d",
+              "29297c790f055503ab1962782c8f3759ac1cf935d67954d31b71a449caded47b" },
+            { "jdk8", 52, "sample/Jdk8Fixture", "Jdk8Fixture.java",
+              "6a470663ad193ef4a2cf588bdfbc13dc501aa3586f01761d0a56213ff3b40290",
+              "99685fde63be5efe71312b4edb0d6347cd1328c4382345748891126205d96db8" },
+        };
+        for (SIZE_T index = 0; index < sizeof(corpora) / sizeof(corpora[0]); ++index) {
+            char rawPath[128] = {};
+            char gzipPath[128] = {};
+            const int rawLength = sprintf_s(
+                rawPath,
+                "tests/fixtures/pack200/corpus/%s/archive.pack",
+                corpora[index].Directory);
+            const int gzipLength = sprintf_s(
+                gzipPath,
+                "tests/fixtures/pack200/corpus/%s/archive.pack.gz",
+                corpora[index].Directory);
+            Expect(
+                rawLength > 0 && DecodeCorpusFixture(
+                    rawPath,
+                    corpora[index].RawSha256,
+                    corpora[index].Major,
+                    corpora[index].ClassName,
+                    corpora[index].SourceName),
+                "published JDK raw Pack200 corpus decodes with its recorded SHA-256");
+            Expect(
+                gzipLength > 0 && DecodeCorpusFixture(
+                    gzipPath,
+                    corpora[index].GzipSha256,
+                    corpora[index].Major,
+                    corpora[index].ClassName,
+                    corpora[index].SourceName),
+                "published JDK gzip Pack200 corpus decodes with its recorded SHA-256");
+        }
+    }
+
+    struct AttributeBandFixture final
+    {
+        const LONG* Values = nullptr;
+        SIZE_T Count = 0;
+        SIZE_T Offset = 0;
+    };
+
+    NTSTATUS DecodeAttributeBandFixture(
+        void* context,
+        KernelHttp::http::HttpPack200CodingKind,
+        LONG* values,
+        SIZE_T valueCount) noexcept
+    {
+        auto* fixture = static_cast<AttributeBandFixture*>(context);
+        if (fixture == nullptr || fixture->Offset > fixture->Count ||
+            valueCount > fixture->Count - fixture->Offset ||
+            (values == nullptr && valueCount != 0)) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        for (SIZE_T index = 0; index < valueCount; ++index) {
+            values[index] = fixture->Values[fixture->Offset++];
+        }
+        return STATUS_SUCCESS;
+    }
+
+    void TestCustomAttributeLayoutCompiler()
+    {
+        HttpPack200AttributeLayout simple = {};
+        NTSTATUS status = simple.Compile({ "BHSIRUNH", 8 });
+        Expect(
+            NT_SUCCESS(status) && simple.BandCount() == 4 &&
+                simple.CallableCount() == 0 && simple.BackwardCallableCount() == 0 &&
+                simple.Bands()[3].ReferenceKind == HttpPack200AttributeReferenceKind::Utf8 &&
+                simple.Bands()[3].Nullable && simple.Bands()[3].OutputSize == 2,
+            "Pack200 custom attribute compiler accepts integral and nullable reference tokens");
+
+        HttpPack200AttributeLayout fieldSpecific = {};
+        status = fieldSpecific.Compile({ "KQH", 3 });
+        Expect(
+            NT_SUCCESS(status) && fieldSpecific.BandCount() == 1 &&
+                fieldSpecific.Bands()[0].ReferenceKind ==
+                    HttpPack200AttributeReferenceKind::FieldSpecific,
+            "Pack200 KQ layout preserves field-specific constant semantics");
+
+        HttpPack200AttributeLayout groupedReferences = {};
+        status = groupedReferences.Compile({ "RQHRNHRBHRYH", 12 });
+        Expect(
+            NT_SUCCESS(status) && groupedReferences.BandCount() == 4 &&
+                groupedReferences.Bands()[0].ReferenceKind ==
+                    HttpPack200AttributeReferenceKind::Any &&
+                groupedReferences.Bands()[1].ReferenceKind ==
+                    HttpPack200AttributeReferenceKind::AnyMember &&
+                groupedReferences.Bands()[2].ReferenceKind ==
+                    HttpPack200AttributeReferenceKind::BootstrapMethod &&
+                groupedReferences.Bands()[3].ReferenceKind ==
+                    HttpPack200AttributeReferenceKind::InvokeDynamic,
+            "Pack200 RQ, RN, RB, and RY layout references compile");
+
+        HttpPack200AttributeLayout structured = {};
+        status = structured.Compile({ "[NH[(1)]][TB(0-1,-3--1)[B(0)]()[H]]", 35 });
+        bool sawReplication = false;
+        bool sawUnion = false;
+        bool sawForwardCall = false;
+        bool sawBackwardCall = false;
+        if (NT_SUCCESS(status)) {
+            for (SIZE_T index = 0; index < structured.ElementCount(); ++index) {
+                const auto& element = structured.Elements()[index];
+                sawReplication = sawReplication ||
+                    element.Kind == HttpPack200AttributeElementKind::Replication;
+                sawUnion = sawUnion || element.Kind == HttpPack200AttributeElementKind::Union;
+                sawForwardCall = sawForwardCall ||
+                    (element.Kind == HttpPack200AttributeElementKind::Call &&
+                        !element.BackwardCall && element.TargetCallable == 1);
+                sawBackwardCall = sawBackwardCall ||
+                    (element.Kind == HttpPack200AttributeElementKind::Call &&
+                        element.BackwardCall && element.TargetCallable == 1);
+            }
+        }
+        Expect(
+            NT_SUCCESS(status) && structured.CallableCount() == 2 &&
+                structured.BackwardCallableCount() == 1 && sawReplication && sawUnion &&
+                sawForwardCall && sawBackwardCall,
+            "Pack200 custom attribute compiler resolves replication, union, callable, forward call, and back-call");
+
+        HttpPack200AttributeLayout malformed = {};
+        Expect(
+            malformed.Compile({ "NH[B", 4 }) == STATUS_INVALID_NETWORK_RESPONSE &&
+                malformed.Compile({ "[(-1)]", 6 }) == STATUS_INVALID_NETWORK_RESPONSE &&
+                malformed.Compile({ "TB(1)[B](1)[H]()[I]", 19 }) == STATUS_INVALID_NETWORK_RESPONSE &&
+                malformed.Compile({ "TB(2-1)[B]()[H]", 15 }) == STATUS_INVALID_NETWORK_RESPONSE &&
+                malformed.Compile({ "TB(0-2)[B](2-3)[H]()[I]", 23 }) == STATUS_INVALID_NETWORK_RESPONSE,
+            "Pack200 custom attribute compiler rejects unterminated, invalid-call, and duplicate-union layouts");
+    }
+
+    void TestCustomAttributeLayoutExecution()
+    {
+        HttpPack200AttributeLayout layout = {};
+        NTSTATUS status = layout.Compile({ "[NH[(1)]][TB(1)[B(-1)]()[H]]", 28 });
+        const LONG values[] = { 1, 0, 1, 7 };
+        constexpr SIZE_T valueCount = sizeof(values) / sizeof(values[0]);
+        AttributeBandFixture fixture = { values, valueCount, 0 };
+        const ULONG backwardCalls[] = { 1 };
+        HttpPack200AttributeValueBands bands = {};
+        if (NT_SUCCESS(status)) {
+            status = bands.Decode(
+                layout,
+                1,
+                backwardCalls,
+                sizeof(backwardCalls) / sizeof(backwardCalls[0]),
+                DecodeAttributeBandFixture,
+                &fixture);
+        }
+        SIZE_T payloadLength = 0;
+        SIZE_T relocationCount = 0;
+        if (NT_SUCCESS(status)) {
+            status = bands.Measure(layout, 1, &payloadLength, &relocationCount);
+        }
+        UCHAR payload[6] = {};
+        HttpPack200AttributeRelocation relocation = {};
+        const SIZE_T zero = 0;
+        if (NT_SUCCESS(status)) {
+            status = bands.Emit(
+                layout,
+                1,
+                &zero,
+                &payloadLength,
+                &zero,
+                &relocationCount,
+                payload,
+                sizeof(payload),
+                &relocation,
+                1);
+        }
+        const UCHAR expected[] = { 0x00, 0x01, 0x01, 0x07, 0x00, 0x00 };
+        Expect(
+            NT_SUCCESS(status) && fixture.Offset == valueCount &&
+                payloadLength == sizeof(expected) && relocationCount == 0 &&
+                memcmp(payload, expected, sizeof(expected)) == 0,
+            "Pack200 custom attribute bands execute replication, union, forward call, and finite back-call");
+    }
+
+    void TestJdk8CustomAttributeInteroperability()
+    {
+        const char path[] = "tests/fixtures/pack200/corpus/jdk8/custom-attributes.pack";
+        FILE* file = nullptr;
+        if (fopen_s(&file, path, "rb") != 0 || file == nullptr) {
+            Expect(false, "JDK 8 custom Pack200 fixture opens");
+            return;
+        }
+        fseek(file, 0, SEEK_END);
+        const long fileLength = ftell(file);
+        fseek(file, 0, SEEK_SET);
+        if (fileLength <= 0) {
+            fclose(file);
+            Expect(false, "JDK 8 custom Pack200 fixture has bytes");
+            return;
+        }
+        HeapArray<UCHAR> packed(static_cast<SIZE_T>(fileLength));
+        HeapArray<char> jar(256 * 1024);
+        const bool loaded = packed.IsValid() && jar.IsValid() &&
+            fread(packed.Get(), 1, packed.Count(), file) == packed.Count();
+        fclose(file);
+        UCHAR fixtureDigest[32] = {};
+        SIZE_T fixtureDigestLength = 0;
+        const bool fixtureHashValid = loaded && NT_SUCCESS(CngProvider::Hash(
+            HashAlgorithm::Sha256,
+            packed.Get(),
+            packed.Count(),
+            fixtureDigest,
+            sizeof(fixtureDigest),
+            &fixtureDigestLength)) &&
+            fixtureDigestLength == sizeof(fixtureDigest) &&
+            HexDigestEquals(
+                fixtureDigest,
+                fixtureDigestLength,
+                "b1e29210383f121e7c7e9b33714c2656be8f77556f417c8dd8927e41aaa9006d");
+        SIZE_T jarLength = 0;
+        const NTSTATUS status = loaded ? DecodePack200GzipContent(
+            packed.Get(), packed.Count(), jar.Get(), jar.Count(), &jarLength) :
+            STATUS_INSUFFICIENT_RESOURCES;
+        const char payload[] = { 0x00, 0x01, 0x01, 0x07, 0x00, 0x00 };
+        const char codePayload[] = {
+            0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x01,
+            0x00, 0x01, static_cast<char>(0xff), static_cast<char>(0xff) };
+        USHORT classAccessFlags = 0;
+        bool validClass = false;
+        if (NT_SUCCESS(status) && jarLength >= 30) {
+            const auto* bytes = reinterpret_cast<const unsigned char*>(jar.Get());
+            const SIZE_T nameLength = static_cast<SIZE_T>(bytes[26]) |
+                (static_cast<SIZE_T>(bytes[27]) << 8);
+            const SIZE_T extraLength = static_cast<SIZE_T>(bytes[28]) |
+                (static_cast<SIZE_T>(bytes[29]) << 8);
+            const SIZE_T classOffset = 30 + nameLength + extraLength;
+            if (classOffset <= jarLength && jarLength - classOffset >= 10 &&
+                bytes[classOffset] == 0xca && bytes[classOffset + 1] == 0xfe &&
+                bytes[classOffset + 2] == 0xba && bytes[classOffset + 3] == 0xbe) {
+                const USHORT constantPoolCount = static_cast<USHORT>(
+                    (static_cast<USHORT>(bytes[classOffset + 8]) << 8) |
+                    bytes[classOffset + 9]);
+                SIZE_T cursor = classOffset + 10;
+                validClass = true;
+                for (USHORT index = 1; index < constantPoolCount && validClass; ++index) {
+                    if (cursor >= jarLength) {
+                        validClass = false;
+                        break;
+                    }
+                    const UCHAR tag = bytes[cursor++];
+                    SIZE_T entryLength = 0;
+                    if (tag == 1) {
+                        if (cursor + 2 > jarLength) { validClass = false; break; }
+                        entryLength = 2 +
+                            (static_cast<SIZE_T>(bytes[cursor]) << 8) + bytes[cursor + 1];
+                    }
+                    else if (tag == 3 || tag == 4 || (tag >= 9 && tag <= 12) ||
+                        tag == 17 || tag == 18) entryLength = 4;
+                    else if (tag == 5 || tag == 6) { entryLength = 8; ++index; }
+                    else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) entryLength = 2;
+                    else if (tag == 15) entryLength = 3;
+                    else { validClass = false; break; }
+                    if (entryLength > jarLength - cursor) { validClass = false; break; }
+                    cursor += entryLength;
+                }
+                if (validClass && cursor + 2 <= jarLength) {
+                    classAccessFlags = static_cast<USHORT>(
+                        (static_cast<USHORT>(bytes[cursor]) << 8) | bytes[cursor + 1]);
+                }
+                else {
+                    validClass = false;
+                }
+            }
+        }
+        Expect(
+            fixtureHashValid && NT_SUCCESS(status) && jarLength != 0 &&
+                CountBytes(jar.Get(), jarLength, "PackCustom", 10) != 0 &&
+                CountBytes(jar.Get(), jarLength, "Overflow59", 10) != 0 &&
+                CountBytes(jar.Get(), jarLength, payload, sizeof(payload)) != 0 &&
+                CountBytes(jar.Get(), jarLength, "ReferenceCustom", 15) != 0 &&
+                CountBytes(jar.Get(), jarLength, "FieldCustom", 11) != 0 &&
+                CountBytes(jar.Get(), jarLength, "MethodCustom", 12) != 0 &&
+                CountBytes(jar.Get(), jarLength, "CodeCustom", 10) != 0 &&
+                CountBytes(jar.Get(), jarLength, "field-utf8", 10) != 0 &&
+                CountBytes(jar.Get(), jarLength, "method-utf8", 11) != 0 &&
+                CountBytes(jar.Get(), jarLength, "any-utf8", 8) != 0 &&
+                CountBytes(jar.Get(), jarLength, codePayload, sizeof(codePayload)) != 0 &&
+                validClass && classAccessFlags == 0x0021,
+            "JDK 8 pack200 restores arbitrary callable layout and overflow-index attributes");
+    }
+
     void TestBhsdContinuationUsesFullByteValue()
     {
         const unsigned char bytes[] = { 0xec, 0x01 };
@@ -66,6 +460,18 @@ namespace
         Expect(
             reader.ReadInt(unsigned5, &value) && value == 300,
             "pack200 BHSD continuation contributes the full byte value");
+    }
+
+    void TestUnsigned5PreservesFullFlagWord()
+    {
+        const unsigned char bytes[] = { 0xc0, 0xfd, 0xfc, 0xfc, 0x7c };
+        HttpPack200BandReader reader(bytes, sizeof(bytes));
+        LONG value = 0;
+        Expect(
+            reader.ReadInt(KernelHttp::http::HttpPack200CodingFor(
+                KernelHttp::http::HttpPack200CodingKind::Unsigned5), &value) &&
+                static_cast<ULONG>(value) == 0x80000000UL,
+            "Pack200 UNSIGNED5 preserves the full 32-bit flags word");
     }
 
     void TestCanonicalAndArbitraryMetaCodings()
@@ -408,6 +814,10 @@ namespace
                 definitions.NameIndexes()[0] == 1 &&
                 definitions.LayoutIndexes()[0] == 2,
             "Pack200 attribute definition header, name and layout bands decode");
+        status = definitions.ResolveIndexes(false);
+        Expect(
+            NT_SUCCESS(status) && definitions.Indexes()[0] == 0,
+            "Pack200 explicit attribute definition index resolves from its header");
 
         const unsigned char innerBytes[] = { 1, 0xc1, 0xfd, 0x0c, 2, 4 };
         HttpPack200BandReader innerReader(innerBytes, sizeof(innerBytes));
@@ -2428,7 +2838,12 @@ namespace
 
 int main()
 {
+    TestCustomAttributeLayoutCompiler();
+    TestCustomAttributeLayoutExecution();
+    TestJdk8CustomAttributeInteroperability();
+    TestPublishedJdkCorpora();
     TestBhsdContinuationUsesFullByteValue();
+    TestUnsigned5PreservesFullFlagWord();
     TestCanonicalAndArbitraryMetaCodings();
     TestPublishedPack200VersionsAreRecognized();
     TestRunMetaCoding();

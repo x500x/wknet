@@ -47,6 +47,10 @@ namespace http
         Loadable,
         MethodHandle,
         MethodType,
+        Any,
+        AnyMember,
+        BootstrapMethod,
+        InvokeDynamic,
     };
 
     struct HttpPack200AttributeBandDescriptor final

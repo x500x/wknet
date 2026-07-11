@@ -7,6 +7,7 @@
 #include "../src/KernelHttpLib/http/HttpExiStringTable.h"
 #include "../src/KernelHttpLib/http/HttpExiDecoder.h"
 #include "../src/KernelHttpLib/http/HttpXmlWriter.h"
+#include <KernelHttp/crypto/CngProvider.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -22,6 +23,9 @@ using KernelHttp::http::DecodeExiContent;
 using KernelHttp::http::HttpXmlText;
 using KernelHttp::http::HttpXmlName;
 using KernelHttp::http::HttpXmlWriter;
+using KernelHttp::crypto::CngProvider;
+using KernelHttp::crypto::HashAlgorithm;
+using KernelHttp::HeapArray;
 
 namespace
 {
@@ -33,6 +37,126 @@ namespace
             g_failed = true;
             printf("FAIL: %s\n", message);
         }
+    }
+
+    bool HexDigestEquals(const UCHAR* digest, SIZE_T digestLength, const char* expected) noexcept
+    {
+        if (digest == nullptr || expected == nullptr || digestLength != 32) return false;
+        for (SIZE_T index = 0; index < digestLength; ++index) {
+            const auto digit = [](char value) noexcept -> int {
+                if (value >= '0' && value <= '9') return value - '0';
+                if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+                if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+                return -1;
+            };
+            const int high = digit(expected[index * 2]);
+            const int low = digit(expected[index * 2 + 1]);
+            if (high < 0 || low < 0 ||
+                digest[index] != static_cast<UCHAR>((high << 4) | low)) {
+                return false;
+            }
+        }
+        return expected[digestLength * 2] == '\0';
+    }
+
+    bool LoadFile(const char* path, _Inout_ HeapArray<UCHAR>* bytes) noexcept
+    {
+        if (path == nullptr || bytes == nullptr) return false;
+        FILE* file = nullptr;
+        if (fopen_s(&file, path, "rb") != 0 || file == nullptr) return false;
+        if (fseek(file, 0, SEEK_END) != 0) {
+            fclose(file);
+            return false;
+        }
+        const long length = ftell(file);
+        if (length < 0 || fseek(file, 0, SEEK_SET) != 0 ||
+            !NT_SUCCESS(bytes->Allocate(static_cast<SIZE_T>(length)))) {
+            fclose(file);
+            return false;
+        }
+        const bool loaded = bytes->Count() == 0 ||
+            fread(bytes->Get(), 1, bytes->Count(), file) == bytes->Count();
+        fclose(file);
+        return loaded;
+    }
+
+    bool DecodeExiFixture(
+        const char* fixtureName,
+        const char* expectedName,
+        const char* expectedSha256) noexcept
+    {
+        char fixturePath[192] = {};
+        char expectedPath[192] = {};
+        if (sprintf_s(
+                fixturePath,
+                "tests/fixtures/exi/corpus/%s",
+                fixtureName) <= 0 ||
+            sprintf_s(
+                expectedPath,
+                "tests/fixtures/exi/corpus/%s",
+                expectedName) <= 0) {
+            return false;
+        }
+        HeapArray<UCHAR> fixture = {};
+        HeapArray<UCHAR> expected = {};
+        if (!LoadFile(fixturePath, &fixture) || !LoadFile(expectedPath, &expected)) return false;
+        UCHAR digest[32] = {};
+        SIZE_T digestLength = 0;
+        if (!NT_SUCCESS(CngProvider::Hash(
+                HashAlgorithm::Sha256,
+                fixture.Get(),
+                fixture.Count(),
+                digest,
+                sizeof(digest),
+                &digestLength)) ||
+            !HexDigestEquals(digest, digestLength, expectedSha256)) {
+            return false;
+        }
+        HeapArray<char> output(1024);
+        if (!output.IsValid()) return false;
+        SIZE_T outputLength = 0;
+        const NTSTATUS status = DecodeExiContent(
+            fixture.Get(),
+            fixture.Count(),
+            output.Get(),
+            output.Count(),
+            &outputLength);
+        return NT_SUCCESS(status) && outputLength == expected.Count() &&
+            (outputLength == 0 || memcmp(output.Get(), expected.Get(), outputLength) == 0);
+    }
+
+    bool RejectExiFixture(const char* fixtureName, const char* expectedSha256) noexcept
+    {
+        char fixturePath[192] = {};
+        if (sprintf_s(
+                fixturePath,
+                "tests/fixtures/exi/corpus/%s",
+                fixtureName) <= 0) {
+            return false;
+        }
+        HeapArray<UCHAR> fixture = {};
+        if (!LoadFile(fixturePath, &fixture)) return false;
+        UCHAR digest[32] = {};
+        SIZE_T digestLength = 0;
+        if (!NT_SUCCESS(CngProvider::Hash(
+                HashAlgorithm::Sha256,
+                fixture.Get(),
+                fixture.Count(),
+                digest,
+                sizeof(digest),
+                &digestLength)) ||
+            !HexDigestEquals(digest, digestLength, expectedSha256)) {
+            return false;
+        }
+        char output[256] = {};
+        SIZE_T outputLength = 1;
+        const NTSTATUS status = DecodeExiContent(
+            fixture.Get(),
+            fixture.Count(),
+            output,
+            sizeof(output),
+            &outputLength);
+        return status == STATUS_INVALID_NETWORK_RESPONSE && outputLength == 0;
     }
 
     class TestBitWriter final
@@ -1178,6 +1302,51 @@ namespace
                 messages[index]);
         }
     }
+
+    void TestOfflineExificientCorpus()
+    {
+        struct Fixture final
+        {
+            const char* Name;
+            const char* Expected;
+            const char* Sha256;
+        };
+        const Fixture fixtures[] = {
+            { "basic-bit-packed.exi", "basic.expected.xml", "80a2093d5fe146977034a75659445656c34a24675832c9d00448bced09279829" },
+            { "basic-byte-aligned.exi", "basic.expected.xml", "3d3db91ae422d607dceec06084668fa744ee84d1fdb3bd1b2230ddca0e010c58" },
+            { "basic-pre-compression.exi", "basic.expected.xml", "ab05714b2ed333428ee17f69d42cee1a953e722fa69ebafc1997d77cdeb6811d" },
+            { "basic-compression.exi", "basic.expected.xml", "a250ea98c2a41c55640de9b6b31cce75f69d87d0cb285e21bd9aaeb565910878" },
+            { "xsi-nil-true-bit-packed.exi", "xsi-nil-true.expected.xml", "d50c44689d5dad40f3cc9f733977cc3e03de0b991ab3a5ecc0264132ab60b046" },
+            { "xsi-nil-true-byte-aligned.exi", "xsi-nil-true.expected.xml", "62287f52459633def2dd1ac9237b89b6f52a0c985a5d13e7adf0e403ab497730" },
+            { "xsi-nil-true-pre-compression.exi", "xsi-nil-true.expected.xml", "71aadaf8e9049847f0e5648246bc5a7084199baad7d3cb78ae5c0248c6509b06" },
+            { "xsi-nil-true-compression.exi", "xsi-nil-true.expected.xml", "87bf682bf908877e66f7552307d8d44a50328f6526b03ec16cc02d80525b3957" },
+            { "xsi-nil-false-bit-packed.exi", "xsi-nil-false.expected.xml", "d62f21d81f78aee084c222a654172b9958630df579bd07ce1eb5ed018bf777c5" },
+            { "xsi-nil-false-byte-aligned.exi", "xsi-nil-false.expected.xml", "fe68089848b90ee56d62dd05c11fe2a95a8770d9fc9dc248e93f8c17f1bf9d34" },
+            { "xsi-nil-false-pre-compression.exi", "xsi-nil-false.expected.xml", "15f4ba0facc7c8b87dd464dae39da754e0c31576ce7461cab53c5d0904ad9a1c" },
+            { "xsi-nil-false-compression.exi", "xsi-nil-false.expected.xml", "8d3f0279b8df14ac55f04f776231866031d9ac097e0cf784c0653de728371b1e" },
+        };
+        for (SIZE_T index = 0; index < sizeof(fixtures) / sizeof(fixtures[0]); ++index) {
+            Expect(
+                DecodeExiFixture(
+                    fixtures[index].Name,
+                    fixtures[index].Expected,
+                    fixtures[index].Sha256),
+                "EXIficient offline EXI corpus decodes with recorded SHA-256");
+        }
+        const Fixture invalidFixtures[] = {
+            { "xsi-nil-invalid-content-bit-packed.exi", nullptr, "6e9f499077e5c67f7b70f4bbaf23d99e55f183be107252904dc3ea165e9b6eef" },
+            { "xsi-nil-invalid-content-byte-aligned.exi", nullptr, "d02e783e92f4c939e5edefbde2c148ec447d383c20069ddc6c6e6b434f22ee1e" },
+            { "xsi-nil-invalid-content-pre-compression.exi", nullptr, "05c0bf819082e05d4ce9ee7f7fdb402c64e7ab3140b9eff2c4afb62af55f1d2c" },
+            { "xsi-nil-invalid-content-compression.exi", nullptr, "137cbe6891347d70ff0aa92faded51f02d7c2c2b8deca2bad7d4fbebdf890ba3" },
+        };
+        for (SIZE_T index = 0;
+             index < sizeof(invalidFixtures) / sizeof(invalidFixtures[0]);
+             ++index) {
+            Expect(
+                RejectExiFixture(invalidFixtures[index].Name, invalidFixtures[index].Sha256),
+                "EXI xsi:nil=true content is rejected with recorded SHA-256");
+        }
+    }
 }
 
 int main()
@@ -1206,6 +1375,7 @@ int main()
     TestPreservedLexicalBooleanValue();
     TestPreservedLexicalRestrictedCharacterSets();
     TestXsiNilBuiltInGrammar();
+    TestOfflineExificientCorpus();
 
     if (g_failed) {
         return 1;

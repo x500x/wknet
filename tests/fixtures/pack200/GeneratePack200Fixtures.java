@@ -1,5 +1,6 @@
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FileOutputStream;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
 import java.util.jar.JarOutputStream;
@@ -11,10 +12,124 @@ import org.apache.commons.compress.java.util.jar.Pack200;
 import org.apache.commons.compress.harmony.pack200.Archive;
 import org.apache.commons.compress.harmony.pack200.PackingOptions;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Attribute;
+import org.objectweb.asm.ByteVector;
 import org.objectweb.asm.Label;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Type;
 
 public final class GeneratePack200Fixtures {
+    private static class RawAttribute extends Attribute {
+        private final byte[] contents;
+
+        RawAttribute(String name, byte[] contents) {
+            super(name);
+            this.contents = contents;
+        }
+
+        @Override
+        protected ByteVector write(
+                ClassWriter classWriter,
+                byte[] code,
+                int codeLength,
+                int maxStack,
+                int maxLocals) {
+            ByteVector output = new ByteVector(contents.length);
+            output.putByteArray(contents, 0, contents.length);
+            return output;
+        }
+    }
+
+    private static final class RawCodeAttribute extends RawAttribute {
+        RawCodeAttribute(String name, byte[] contents) {
+            super(name, contents);
+        }
+
+        @Override
+        public boolean isCodeAttribute() {
+            return true;
+        }
+    }
+
+    private static final class ReferenceAttribute extends Attribute {
+        ReferenceAttribute() {
+            super("ReferenceCustom");
+        }
+
+        private static void putU2(ByteVector output, int value) {
+            output.putShort(value);
+        }
+
+        @Override
+        protected ByteVector write(
+                ClassWriter classWriter,
+                byte[] code,
+                int codeLength,
+                int maxStack,
+                int maxLocals) {
+            ByteVector output = new ByteVector(32);
+            putU2(output, classWriter.newConst(Integer.valueOf(0x12345678)));
+            putU2(output, classWriter.newConst(Long.valueOf(0x1122334455667788L)));
+            putU2(output, classWriter.newConst(Float.valueOf(1.5f)));
+            putU2(output, classWriter.newConst(Double.valueOf(2.5d)));
+            putU2(output, classWriter.newConst("pack-string"));
+            putU2(output, classWriter.newConst(Type.getType("Ljava/lang/String;")));
+            putU2(output, classWriter.newClass("java/lang/String"));
+            putU2(output, classWriter.newUTF8("Ljava/lang/String;"));
+            putU2(output, classWriter.newNameType("length", "()I"));
+            putU2(output, classWriter.newField("java/lang/System", "out", "Ljava/io/PrintStream;"));
+            putU2(output, classWriter.newMethod("java/lang/String", "length", "()I", false));
+            putU2(output, classWriter.newMethod("java/util/List", "size", "()I", true));
+            putU2(output, classWriter.newUTF8("pack-utf8"));
+            putU2(output, 0);
+            putU2(output, classWriter.newUTF8("any-utf8"));
+            putU2(output, classWriter.newField("java/lang/System", "out", "Ljava/io/PrintStream;"));
+            return output;
+        }
+    }
+
+    private static final class FieldReferenceAttribute extends Attribute {
+        FieldReferenceAttribute() {
+            super("FieldCustom");
+        }
+
+        @Override
+        protected ByteVector write(
+                ClassWriter classWriter,
+                byte[] code,
+                int codeLength,
+                int maxStack,
+                int maxLocals) {
+            ByteVector output = new ByteVector(4);
+            output.putShort(classWriter.newConst(Integer.valueOf(7)));
+            output.putShort(classWriter.newUTF8("field-utf8"));
+            return output;
+        }
+    }
+
+    private static final class Utf8Attribute extends Attribute {
+        private final String value;
+
+        Utf8Attribute(String name, String value) {
+            super(name);
+            this.value = value;
+        }
+
+        @Override
+        protected ByteVector write(
+                ClassWriter classWriter,
+                byte[] code,
+                int codeLength,
+                int maxStack,
+                int maxLocals) {
+            ByteVector output = new ByteVector(2);
+            output.putShort(classWriter.newUTF8(value));
+            return output;
+        }
+    }
+
     private static byte[] createJar() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (JarOutputStream jar = new JarOutputStream(output)) {
@@ -89,6 +204,131 @@ public final class GeneratePack200Fixtures {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (JarOutputStream jar = new JarOutputStream(output)) {
             JarEntry entry = new JarEntry("sample/Marker.class");
+            entry.setTime(315532800000L);
+            CRC32 crc = new CRC32();
+            crc.update(classBytes);
+            entry.setMethod(ZipEntry.STORED);
+            entry.setSize(classBytes.length);
+            entry.setCompressedSize(classBytes.length);
+            entry.setCrc(crc.getValue());
+            jar.putNextEntry(entry);
+            jar.write(classBytes);
+            jar.closeEntry();
+        }
+        return output.toByteArray();
+    }
+
+    private static byte[] createCustomAttributeJar() throws Exception {
+        ClassWriter classWriter = new ClassWriter(0);
+        classWriter.visit(
+                Opcodes.V1_5,
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER,
+                "sample/CustomAttributes",
+                null,
+                "java/lang/Object",
+                null);
+        for (int index = 0; index < 60; ++index) {
+            classWriter.visitAttribute(new RawAttribute(
+                    String.format("Overflow%02d", index),
+                    new byte[] { (byte) index }));
+        }
+        classWriter.visitAttribute(new RawAttribute(
+                "PackCustom",
+                new byte[] { 0x00, 0x01, 0x01, 0x07, 0x00, 0x00 }));
+        classWriter.visitAttribute(new ReferenceAttribute());
+        classWriter.visitField(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL,
+                "value",
+                "I",
+                null,
+                Integer.valueOf(7)).visitAttribute(new FieldReferenceAttribute());
+        MethodVisitor method = classWriter.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "run",
+                "()V",
+                null,
+                null);
+        method.visitAttribute(new Utf8Attribute("MethodCustom", "method-utf8"));
+        method.visitCode();
+        method.visitInsn(Opcodes.NOP);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitAttribute(new RawCodeAttribute(
+                "CodeCustom",
+                new byte[] {
+                    0x00, 0x00, 0x00, 0x01,
+                    0x00, 0x00, 0x00, 0x01,
+                    0x00, 0x01, (byte) 0xff, (byte) 0xff }));
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        classWriter.visitEnd();
+        byte[] classBytes = classWriter.toByteArray();
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (JarOutputStream jar = new JarOutputStream(output)) {
+            JarEntry entry = new JarEntry("sample/CustomAttributes.class");
+            entry.setTime(315532800000L);
+            CRC32 crc = new CRC32();
+            crc.update(classBytes);
+            entry.setMethod(ZipEntry.STORED);
+            entry.setSize(classBytes.length);
+            entry.setCompressedSize(classBytes.length);
+            entry.setCrc(crc.getValue());
+            jar.putNextEntry(entry);
+            jar.write(classBytes);
+            jar.closeEntry();
+        }
+        return output.toByteArray();
+    }
+
+    private static byte[] createVersionedJar(int classVersion, String className) throws Exception {
+        ClassWriter classWriter = new ClassWriter(0);
+        classWriter.visit(
+                classVersion,
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER,
+                "sample/" + className,
+                null,
+                "java/lang/Object",
+                null);
+        classWriter.visitSource(className + ".java", null);
+        if (classVersion == Opcodes.V1_7) {
+            String owner = "sample/" + className;
+            MethodVisitor bootstrap = classWriter.visitMethod(
+                    Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
+                    "bootstrap",
+                    "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+                    null,
+                    null);
+            bootstrap.visitCode();
+            bootstrap.visitInsn(Opcodes.ACONST_NULL);
+            bootstrap.visitInsn(Opcodes.ARETURN);
+            bootstrap.visitMaxs(1, 3);
+            bootstrap.visitEnd();
+            MethodVisitor run = classWriter.visitMethod(
+                    Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                    "run",
+                    "()Ljava/lang/String;",
+                    null,
+                    null);
+            run.visitCode();
+            run.visitInvokeDynamicInsn(
+                    "run",
+                    "()Ljava/lang/String;",
+                    new Handle(
+                            Opcodes.H_INVOKESTATIC,
+                            owner,
+                            "bootstrap",
+                            "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+                            false));
+            run.visitInsn(Opcodes.ARETURN);
+            run.visitMaxs(1, 0);
+            run.visitEnd();
+        }
+        classWriter.visitEnd();
+        byte[] classBytes = classWriter.toByteArray();
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (JarOutputStream jar = new JarOutputStream(output)) {
+            JarEntry entry = new JarEntry("sample/" + className + ".class");
             entry.setTime(315532800000L);
             CRC32 crc = new CRC32();
             crc.update(classBytes);
@@ -860,6 +1100,19 @@ public final class GeneratePack200Fixtures {
     }
 
     public static void main(String[] args) throws Exception {
+        if (args.length == 2 && "--custom-jar".equals(args[0])) {
+            try (FileOutputStream output = new FileOutputStream(args[1])) {
+                output.write(createCustomAttributeJar());
+            }
+            return;
+        }
+        if (args.length == 4 && "--versioned-jar".equals(args[0])) {
+            int version = Integer.parseInt(args[1]);
+            try (FileOutputStream output = new FileOutputStream(args[3])) {
+                output.write(createVersionedJar(version, args[2]));
+            }
+            return;
+        }
         byte[] jar = createJar();
         byte[] packed = pack(jar);
         byte[] multiJar = createMultiSegmentJar();

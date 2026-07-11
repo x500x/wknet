@@ -41,6 +41,47 @@ namespace
     }
 
     _Must_inspect_result_
+    bool IsXsiNilName(HttpXmlName name) noexcept
+    {
+        constexpr char XsiUri[] = "http://www.w3.org/2001/XMLSchema-instance";
+        constexpr char NilName[] = "nil";
+        return name.Uri.Length == sizeof(XsiUri) - 1 &&
+            name.LocalName.Length == sizeof(NilName) - 1 &&
+            name.Uri.Data != nullptr && name.LocalName.Data != nullptr &&
+            RtlCompareMemory(name.Uri.Data, XsiUri, sizeof(XsiUri) - 1) == sizeof(XsiUri) - 1 &&
+            RtlCompareMemory(name.LocalName.Data, NilName, sizeof(NilName) - 1) == sizeof(NilName) - 1;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS NormalizeXsiNilValue(
+        HttpXmlText value,
+        bool preserveLexical,
+        _Out_ bool* nil,
+        _Out_ HttpXmlText* output) noexcept
+    {
+        if (nil == nullptr || output == nullptr ||
+            (value.Data == nullptr && value.Length != 0)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        static constexpr char TrueValue[] = "true";
+        static constexpr char FalseValue[] = "false";
+        const bool isTrue =
+            (value.Length == 1 && value.Data[0] == '1') ||
+            (value.Length == sizeof(TrueValue) - 1 &&
+                RtlCompareMemory(value.Data, TrueValue, sizeof(TrueValue) - 1) == sizeof(TrueValue) - 1);
+        const bool isFalse =
+            (value.Length == 1 && value.Data[0] == '0') ||
+            (value.Length == sizeof(FalseValue) - 1 &&
+                RtlCompareMemory(value.Data, FalseValue, sizeof(FalseValue) - 1) == sizeof(FalseValue) - 1);
+        if (!isTrue && !isFalse) return STATUS_INVALID_NETWORK_RESPONSE;
+        *nil = isTrue;
+        *output = preserveLexical ? value :
+            (isTrue ? HttpXmlText{ TrueValue, sizeof(TrueValue) - 1 } :
+                HttpXmlText{ FalseValue, sizeof(FalseValue) - 1 });
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
     HttpExiDatatypeKind BuiltInDatatypeForQName(HttpXmlName name) noexcept
     {
         constexpr char XsdUri[] = "http://www.w3.org/2001/XMLSchema";
@@ -1793,7 +1834,8 @@ namespace
         const SIZE_T maxEvents = encodedLength * 8 + 1;
         HeapArray<HttpXmlName> elementStack(maxElementDepth);
         HeapArray<ULONG> elementQNameIds(maxElementDepth);
-        if (!elementStack.IsValid() || !elementQNameIds.IsValid()) {
+        HeapArray<bool> elementNil(maxElementDepth);
+        if (!elementStack.IsValid() || !elementQNameIds.IsValid() || !elementNil.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
         ExiSelfContainedStateStack stateStack = {};
@@ -1827,6 +1869,12 @@ namespace
             }
             UNREFERENCED_PARAMETER(eventCode);
             const HttpExiProduction& production = decodedEvent.Production;
+            if (elementDepth != 0 && elementNil[elementDepth - 1] &&
+                production.Event != HttpExiEventKind::Attribute &&
+                production.Event != HttpExiEventKind::NamespaceDeclaration &&
+                production.Event != HttpExiEventKind::EndElement) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
 
             switch (production.Event) {
             case HttpExiEventKind::StartDocument:
@@ -1914,6 +1962,7 @@ namespace
                         }
                         elementStack[elementDepth] = name;
                         elementQNameIds[elementDepth] = qnameId;
+                        elementNil[elementDepth] = false;
                         ++elementDepth;
                     }
                     status = ApplyGrammarTransition(state, production, qnameId);
@@ -1975,7 +2024,27 @@ namespace
                             return status;
                         }
                     }
-                    if (IsXsiTypeName(name) && !options.PreserveLexicalValues) {
+                    if (IsXsiNilName(name)) {
+                        HttpXmlText value = {};
+                        HttpXmlText normalized = {};
+                        bool nil = false;
+                        status = ReadEventText(input, state, qnameId, &value);
+                        if (NT_SUCCESS(status)) {
+                            status = NormalizeXsiNilValue(
+                                value,
+                                options.PreserveLexicalValues,
+                                &nil,
+                                &normalized);
+                        }
+                        if (NT_SUCCESS(status)) {
+                            status = sink->Attribute(name, normalized);
+                        }
+                        if (NT_SUCCESS(status)) {
+                            if (elementDepth == 0) return STATUS_INVALID_NETWORK_RESPONSE;
+                            elementNil[elementDepth - 1] = nil;
+                        }
+                    }
+                    else if (IsXsiTypeName(name) && !options.PreserveLexicalValues) {
                         HttpXmlName typeName = {};
                         status = ReadQNameEventValue(
                             input,
@@ -2240,6 +2309,12 @@ namespace
         SIZE_T Length = 0;
     };
 
+    struct ReorderedReplayState final
+    {
+        HeapArray<bool> ElementNil = {};
+        SIZE_T ElementDepth = 0;
+    };
+
     _Must_inspect_result_
     NTSTATUS AddReorderedValueEvent(
         _Inout_ HeapArray<ReorderedEvent>* events,
@@ -2353,25 +2428,55 @@ namespace
     NTSTATUS ReplayReorderedEvents(
         const HeapArray<ReorderedEvent>& events,
         SIZE_T eventCount,
+        bool preserveLexicalValues,
+        _Inout_ ReorderedReplayState* replayState,
         _Inout_ ExiXmlEventSink* sink) noexcept
     {
-        if (sink == nullptr || eventCount > events.Count()) {
+        if (sink == nullptr || replayState == nullptr ||
+            !replayState->ElementNil.IsValid() || eventCount > events.Count()) {
             return STATUS_INVALID_PARAMETER;
         }
+        HeapArray<bool>& elementNil = replayState->ElementNil;
+        SIZE_T& elementDepth = replayState->ElementDepth;
         for (SIZE_T index = 0; index < eventCount; ++index) {
             const ReorderedEvent& event = events[index];
             NTSTATUS status = STATUS_SUCCESS;
+            if (elementDepth != 0 && elementNil[elementDepth - 1] &&
+                event.Kind != HttpExiEventKind::Attribute &&
+                event.Kind != HttpExiEventKind::NamespaceDeclaration &&
+                event.Kind != HttpExiEventKind::EndElement) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
             switch (event.Kind) {
             case HttpExiEventKind::StartElement:
+                if (elementDepth >= elementNil.Count()) return STATUS_INVALID_NETWORK_RESPONSE;
                 status = sink->StartElement(event.Name);
+                if (NT_SUCCESS(status)) elementNil[elementDepth++] = false;
                 break;
             case HttpExiEventKind::EndElement:
+                if (elementDepth == 0) return STATUS_INVALID_NETWORK_RESPONSE;
                 status = sink->EndElement(event.Name);
+                if (NT_SUCCESS(status)) --elementDepth;
                 break;
             case HttpExiEventKind::Attribute:
-                status = event.IsQNameValue ?
-                    sink->QNameAttribute(event.Name, event.QNameValue) :
-                    sink->Attribute(event.Name, event.Value);
+                if (event.IsQNameValue) {
+                    status = sink->QNameAttribute(event.Name, event.QNameValue);
+                }
+                else if (IsXsiNilName(event.Name)) {
+                    if (elementDepth == 0) return STATUS_INVALID_NETWORK_RESPONSE;
+                    HttpXmlText normalized = {};
+                    bool nil = false;
+                    status = NormalizeXsiNilValue(
+                        event.Value,
+                        preserveLexicalValues,
+                        &nil,
+                        &normalized);
+                    if (NT_SUCCESS(status)) status = sink->Attribute(event.Name, normalized);
+                    if (NT_SUCCESS(status)) elementNil[elementDepth - 1] = nil;
+                }
+                else {
+                    status = sink->Attribute(event.Name, event.Value);
+                }
                 break;
             case HttpExiEventKind::Characters:
                 status = sink->Characters(event.Value);
@@ -2439,10 +2544,12 @@ namespace
         HeapArray<ReorderedChannel> channels(maxEvents);
         HeapArray<HttpXmlName> elementNames(maxElementDepth);
         HeapArray<ULONG> elementQNameIds(maxElementDepth);
+        ReorderedReplayState replayState = {};
+        NTSTATUS replayStateStatus = replayState.ElementNil.Allocate(maxElementDepth);
         if (!events.IsValid() ||
             !channels.IsValid() ||
             !elementNames.IsValid() ||
-            !elementQNameIds.IsValid()) {
+            !elementQNameIds.IsValid() || !NT_SUCCESS(replayStateStatus)) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
@@ -2869,7 +2976,12 @@ namespace
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
-            const NTSTATUS replayStatus = ReplayReorderedEvents(events, eventCount, sink);
+            const NTSTATUS replayStatus = ReplayReorderedEvents(
+                events,
+                eventCount,
+                options.PreserveLexicalValues,
+                &replayState,
+                sink);
             if (!NT_SUCCESS(replayStatus)) {
                 return replayStatus;
             }
