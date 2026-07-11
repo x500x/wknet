@@ -61,13 +61,14 @@ struct HttpHeader { HttpText Name; HttpText Value; };
 | `zstd` | 内置 Zstandard 解码 |
 | `dcz` | 调用方提供 zstd 字典，缺字典 fail-closed |
 | `aes128gcm` | RFC 8188 keying material 解密，缺 key 或认证失败 fail-closed |
-| `exi` | 已识别 coding token；完整 EXI 解码器待补全，当前 fail-closed |
-| `pack200-gzip` | 已识别 coding token；完整 Pack200 解包与 JAR 重建待补全，当前 fail-closed |
+| `exi` | W3C EXI 1.0 Second Edition 无外部 Schema 流；四种 alignment、Options、保真项、内建 XML Schema 类型、`xsi:type`/`xsi:nil`；输出 Infoset 等价 XML；外部 Schema/strict grammar → `STATUS_NOT_SUPPORTED` |
+| `pack200-gzip` | Java 5–8 格式 `150.7`/`160.1`/`170.1`/`171.0`；裸/gzip、多 segment、class/file/bytecode、自定义 attribute layout（class/field/method/code）、overflow index、常量池与 BCI relocation；输出语义等价 JAR |
 | `identity` | 跳过 |
 
 - 链最多 **2 级**（>2 → `STATUS_NOT_SUPPORTED`），按**反序**解码。
 - **解压炸弹防护**：decoded aggregate 跟随响应/调用方容量，单级膨胀比 ≤64（`MaxDecodeExpansionRatio`），超限 → `STATUS_INVALID_NETWORK_RESPONSE`。
 - 未知 coding → `STATUS_NOT_SUPPORTED`。
+- EXI 与 Pack200 专项测试使用离线真实语料，并校验 `SHA256SUMS` 与 provenance。
 
 ### 传输编码 `Transfer-Encoding`（`HttpTransferCoding`）
 

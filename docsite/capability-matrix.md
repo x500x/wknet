@@ -9,7 +9,7 @@
 - body 框定：Content-Length / chunked / close-delimited；**无 body 状态**：1xx、204、**205**、304，及 HEAD 响应。
 - chunked：块数 ≤8192、chunk-size 行 ≤32、严格 chunk 扩展语法校验；trailer 校验并拒绝禁止字段（`Content-Length`/`Transfer-Encoding`/`Host`/`Authorization`/`Proxy-Authorization`/`Cookie`/`Set-Cookie`）。
 - `206 Partial Content` / `Content-Range` 提供只读解析（`HttpResponse::IsPartialContent` / `GetContentRange`）；请求侧提供 `Range` 与条件请求 typed helper。绑定 RFC 9111 cache 后，Range 请求与 `206` 响应参与自动验证、切片命中和 partial 合并。
-- `Content-Encoding` 解码：`gzip`（校验 CRC32+ISIZE+头 CRC16）、`deflate`（自动识别 zlib 包装并校验 Adler-32，底层用内核 `RtlDecompressBufferEx`，带运行时探测）、`br`（内置 Brotli）、`compress`（完整 LZW `.Z`）、`zstd`（内置 Zstandard 解码）、`dcz`（调用方提供 zstd 字典）、`aes128gcm`（RFC 8188 keying material 解密）、`identity`；最多 2 级链，反序解码。`exi` 与 `pack200-gzip` 已识别并接入安全拒绝路径，完整解码器补全前不提供子集成功实现。
+- `Content-Encoding`：`gzip`、`deflate`、`br`、`compress`、`zstd`、`dcz`、`aes128gcm`、`exi`、`pack200-gzip`、`identity`；最多 2 级，反序解码。EXI 支持无外部 Schema 的四种 alignment、Options、保真项、内建类型和 `xsi:type`/`xsi:nil`；Pack200 支持 Java 5–8 稳定格式及 JAR 语义重建。外部 Schema/strict EXI 返回 `STATUS_NOT_SUPPORTED`。
 - `Accept-Encoding`：默认自动发送 `gzip, deflate, br, zstd, identity`（deflate 运行时不可用则 `br, identity`）；typed preferences 支持 qvalue、`identity;q=0`、`*;q=0`、重复项拒绝，并驱动响应 `Content-Encoding` fail-closed 校验。
 - **解压炸弹防护**：decoded aggregate 跟随响应/调用方容量，单级膨胀比 ≤64（`MaxDecodeExpansionRatio`）。
 - 中间 1xx（除 101）静默吞掉重解析；`SendFlagExpectContinue` 显式开启 `Expect: 100-continue`，覆盖 100 后发送 body、final/417 不发送 body、超时后发送 body 与断连错误；自动 redirect、keep-alive 连接池复用。
