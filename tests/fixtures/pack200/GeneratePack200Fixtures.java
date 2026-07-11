@@ -103,6 +103,58 @@ public final class GeneratePack200Fixtures {
         return output.toByteArray();
     }
 
+    private static byte[] createInnerClassJar() throws Exception {
+        ClassWriter outerWriter = new ClassWriter(0);
+        outerWriter.visit(
+                Opcodes.V1_5,
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER,
+                "sample/Outer",
+                null,
+                "java/lang/Object",
+                null);
+        outerWriter.visitInnerClass(
+                "sample/Outer$Inner",
+                "sample/Outer",
+                "Inner",
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC);
+        outerWriter.visitEnd();
+
+        ClassWriter innerWriter = new ClassWriter(0);
+        innerWriter.visit(
+                Opcodes.V1_5,
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER,
+                "sample/Outer$Inner",
+                null,
+                "java/lang/Object",
+                null);
+        innerWriter.visitInnerClass(
+                "sample/Outer$Inner",
+                "sample/Outer",
+                "Inner",
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC);
+        innerWriter.visitEnd();
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (JarOutputStream jar = new JarOutputStream(output)) {
+            byte[][] classes = { outerWriter.toByteArray(), innerWriter.toByteArray() };
+            String[] names = { "sample/Outer.class", "sample/Outer$Inner.class" };
+            for (int index = 0; index < classes.length; ++index) {
+                JarEntry entry = new JarEntry(names[index]);
+                entry.setTime(315532800000L);
+                CRC32 crc = new CRC32();
+                crc.update(classes[index]);
+                entry.setMethod(ZipEntry.STORED);
+                entry.setSize(classes[index].length);
+                entry.setCompressedSize(classes[index].length);
+                entry.setCrc(crc.getValue());
+                jar.putNextEntry(entry);
+                jar.write(classes[index]);
+                jar.closeEntry();
+            }
+        }
+        return output.toByteArray();
+    }
+
     private static byte[] createAbstractMethodJar() throws Exception {
         ClassWriter classWriter = new ClassWriter(0);
         classWriter.visit(
@@ -456,6 +508,7 @@ public final class GeneratePack200Fixtures {
         return output.toByteArray();
     }
 
+
     private static byte[] createMethodReferenceJar() throws Exception {
         ClassWriter classWriter = new ClassWriter(0);
         classWriter.visit(
@@ -645,6 +698,47 @@ public final class GeneratePack200Fixtures {
         return output.toByteArray();
     }
 
+    private static byte[] createSignatureJar() throws Exception {
+        ClassWriter classWriter = new ClassWriter(0);
+        classWriter.visit(
+                Opcodes.V1_5,
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT | Opcodes.ACC_SUPER,
+                "sample/Generic",
+                "<T:Ljava/lang/Object;>Ljava/lang/Object;",
+                "java/lang/Object",
+                null);
+        classWriter.visitField(
+                Opcodes.ACC_PUBLIC,
+                "value",
+                "Ljava/lang/Object;",
+                "TT;",
+                null).visitEnd();
+        classWriter.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                "identity",
+                "(Ljava/lang/Object;)Ljava/lang/Object;",
+                "(TT;)TT;",
+                null).visitEnd();
+        classWriter.visitEnd();
+        byte[] classBytes = classWriter.toByteArray();
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (JarOutputStream jar = new JarOutputStream(output)) {
+            JarEntry entry = new JarEntry("sample/Generic.class");
+            entry.setTime(315532800000L);
+            CRC32 crc = new CRC32();
+            crc.update(classBytes);
+            entry.setMethod(ZipEntry.STORED);
+            entry.setSize(classBytes.length);
+            entry.setCompressedSize(classBytes.length);
+            entry.setCrc(crc.getValue());
+            jar.putNextEntry(entry);
+            jar.write(classBytes);
+            jar.closeEntry();
+        }
+        return output.toByteArray();
+    }
+
     private static byte[] gzip(byte[] bytes) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(output)) {
@@ -671,6 +765,8 @@ public final class GeneratePack200Fixtures {
         byte[] multiPacked = pack(multiJar, 1);
         byte[] classOnlyJar = createClassOnlyJar();
         byte[] classOnlyPacked = pack(classOnlyJar);
+        byte[] innerClassJar = createInnerClassJar();
+        byte[] innerClassPacked = pack(innerClassJar);
         byte[] abstractMethodJar = createAbstractMethodJar();
         byte[] abstractMethodPacked = pack(abstractMethodJar);
         byte[] memberOnlyJar = createMemberOnlyJar();
@@ -697,6 +793,8 @@ public final class GeneratePack200Fixtures {
         byte[] declaredExceptionsPacked = pack(declaredExceptionsJar);
         byte[] sourceFileJar = createSourceFileJar();
         byte[] sourceFilePacked = pack(sourceFileJar);
+        byte[] signatureJar = createSignatureJar();
+        byte[] signaturePacked = pack(signatureJar);
         print("file_only_jar", jar);
         print("file_only_pack", packed);
         print("file_only_pack_gzip", gzip(packed));
@@ -706,6 +804,9 @@ public final class GeneratePack200Fixtures {
         print("class_only_jar", classOnlyJar);
         print("class_only_pack", classOnlyPacked);
         print("class_only_pack_gzip", gzip(classOnlyPacked));
+        print("inner_class_jar", innerClassJar);
+        print("inner_class_pack", innerClassPacked);
+        print("inner_class_pack_gzip", gzip(innerClassPacked));
         print("abstract_method_jar", abstractMethodJar);
         print("abstract_method_pack", abstractMethodPacked);
         print("abstract_method_pack_gzip", gzip(abstractMethodPacked));
@@ -745,5 +846,8 @@ public final class GeneratePack200Fixtures {
         print("source_file_jar", sourceFileJar);
         print("source_file_pack", sourceFilePacked);
         print("source_file_pack_gzip", gzip(sourceFilePacked));
+        print("signature_jar", signatureJar);
+        print("signature_pack", signaturePacked);
+        print("signature_pack_gzip", gzip(signaturePacked));
     }
 }

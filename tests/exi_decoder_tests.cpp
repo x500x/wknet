@@ -996,6 +996,135 @@ namespace
                 messages[index]);
         }
     }
+
+    void TestSchemaLessDatatypeRepresentationMapIsConsumed()
+    {
+        const unsigned char encoded[] = {
+            0xa0, 0x04, 0x80, 0x09, 0x94, 0x02, 0x23, 0x48,
+            0x2b, 0x93, 0x7b, 0x7b, 0xa6, 0x10, 0x62, 0x64,
+            0x5c, 0x66, 0x68, 0x60
+        };
+        const char expected[] = "<root>12.340</root>";
+        char output[96] = {};
+        SIZE_T outputLength = 0;
+        const NTSTATUS status = DecodeExiContent(
+            encoded,
+            sizeof(encoded),
+            output,
+            sizeof(output),
+            &outputLength);
+        Expect(
+            NT_SUCCESS(status) &&
+                outputLength == sizeof(expected) - 1 &&
+                memcmp(output, expected, sizeof(expected) - 1) == 0,
+            "EXI schema-less stream consumes and ignores datatype representation map");
+    }
+
+    void TestPreservedLexicalBooleanValue()
+    {
+        const unsigned char encoded[] = {
+            0xa0, 0x09, 0x29, 0x00, 0xa4, 0x15, 0xc9, 0xbd,
+            0xbd, 0xd1, 0x39, 0x40, 0x37, 0x87, 0x36, 0x41,
+            0x60, 0x10, 0xd7, 0x87, 0x36, 0x43, 0xa6, 0x26,
+            0xf6, 0xf6, 0xc6, 0x56, 0x16, 0xe0, 0x1a, 0x80
+        };
+        const char expected[] =
+            "<root xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
+            "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" "
+            "xsi:type=\"xsd:boolean\">1</root>";
+        char output[256] = {};
+        SIZE_T outputLength = 0;
+        const NTSTATUS status = DecodeExiContent(
+            encoded,
+            sizeof(encoded),
+            output,
+            sizeof(output),
+            &outputLength);
+        Expect(
+            NT_SUCCESS(status) &&
+                outputLength == sizeof(expected) - 1 &&
+                memcmp(output, expected, sizeof(expected) - 1) == 0,
+            "EXI lexicalValues preserves the boolean lexical form instead of canonicalizing it");
+    }
+
+    void TestPreservedLexicalRestrictedCharacterSets()
+    {
+        const unsigned char decimalValue[] = {
+            0xa0, 0x09, 0x29, 0x00, 0xa4, 0x15, 0xc9, 0xbd, 0xbd, 0xd1,
+            0x39, 0x40, 0x37, 0x87, 0x36, 0x41, 0x60, 0x10, 0xd7, 0x87,
+            0x36, 0x43, 0xa6, 0x46, 0x56, 0x36, 0x96, 0xd6, 0x16, 0xc0,
+            0x59, 0x0e, 0x74, 0x19, 0x2a, 0x39, 0xc0
+        };
+        const unsigned char doubleValue[] = {
+            0xa0, 0x09, 0x29, 0x00, 0xa4, 0x15, 0xc9, 0xbd, 0xbd, 0xd1,
+            0x39, 0x40, 0x37, 0x87, 0x36, 0x41, 0x60, 0x10, 0xc7, 0x87,
+            0x36, 0x43, 0xa6, 0x46, 0xf7, 0x56, 0x26, 0xc6, 0x50, 0x31,
+            0x67, 0x49, 0x00
+        };
+        const unsigned char dateTimeValue[] = {
+            0xa0, 0x09, 0x29, 0x00, 0xa4, 0x15, 0xc9, 0xbd, 0xbd, 0xd1,
+            0x39, 0x40, 0x37, 0x87, 0x36, 0x41, 0x60, 0x10, 0xe7, 0x87,
+            0x36, 0x43, 0xa6, 0x46, 0x17, 0x46, 0x55, 0x46, 0x96, 0xd6,
+            0x50, 0xb2, 0x4e, 0x95, 0x94, 0xec, 0x29, 0xdb, 0x23, 0xba,
+            0x27, 0x7c, 0x4f, 0x09, 0x80
+        };
+        const unsigned char integerValue[] = {
+            0xa0, 0x09, 0x29, 0x00, 0xa4, 0x15, 0xc9, 0xbd, 0xbd, 0xd1,
+            0x39, 0x40, 0x37, 0x87, 0x36, 0x41, 0x60, 0x10, 0xd7, 0x87,
+            0x36, 0x43, 0xa6, 0x96, 0xe7, 0x46, 0x56, 0x76, 0x57, 0x20,
+            0x41, 0x0c, 0x63, 0x29, 0x00
+        };
+        const unsigned char base64Value[] = {
+            0xa0, 0x09, 0x29, 0x00, 0xa4, 0x15, 0xc9, 0xbd, 0xbd, 0xd1,
+            0x39, 0x40, 0x37, 0x87, 0x36, 0x41, 0x60, 0x11, 0x27, 0x87,
+            0x36, 0x43, 0xa6, 0x26, 0x17, 0x36, 0x53, 0x63, 0x44, 0x26,
+            0x96, 0xe6, 0x17, 0x27, 0x90, 0x51, 0x12, 0x25, 0x49, 0x85,
+            0x82, 0x40, 0x80
+        };
+        const unsigned char hexValue[] = {
+            0xa0, 0x09, 0x29, 0x00, 0xa4, 0x15, 0xc9, 0xbd, 0xbd, 0xd1,
+            0x39, 0x40, 0x37, 0x87, 0x36, 0x41, 0x60, 0x10, 0xf7, 0x87,
+            0x36, 0x43, 0xa6, 0x86, 0x57, 0x84, 0x26, 0x96, 0xe6, 0x17,
+            0x27, 0x90, 0x31, 0x09, 0x9c, 0x80
+        };
+        const unsigned char* streams[] = {
+            decimalValue, doubleValue, dateTimeValue, integerValue, base64Value, hexValue
+        };
+        const SIZE_T lengths[] = {
+            sizeof(decimalValue), sizeof(doubleValue), sizeof(dateTimeValue),
+            sizeof(integerValue), sizeof(base64Value), sizeof(hexValue)
+        };
+        const char* typeNames[] = {
+            "decimal", "double", "dateTime", "integer", "base64Binary", "hexBinary"
+        };
+        const char* values[] = {
+            "+001.2300", "-INF", "2024-05-06T07:08:09Z", "+00042", "AAEC/w==", "00ff"
+        };
+        for (SIZE_T index = 0; index < sizeof(streams) / sizeof(streams[0]); ++index) {
+            char expected[320] = {};
+            const int expectedLength = snprintf(
+                expected,
+                sizeof(expected),
+                "<root xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
+                "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" "
+                "xsi:type=\"xsd:%s\">%s</root>",
+                typeNames[index],
+                values[index]);
+            char output[320] = {};
+            SIZE_T outputLength = 0;
+            const NTSTATUS status = DecodeExiContent(
+                streams[index],
+                lengths[index],
+                output,
+                sizeof(output),
+                &outputLength);
+            Expect(
+                expectedLength > 0 && NT_SUCCESS(status) &&
+                    outputLength == static_cast<SIZE_T>(expectedLength) &&
+                    memcmp(output, expected, outputLength) == 0,
+                "EXI lexicalValues decodes the built-in restricted character set");
+        }
+    }
 }
 
 int main()
@@ -1020,6 +1149,9 @@ int main()
     TestXsiTypeQNameValue();
     TestSelfContainedElementsResetAndRestoreState();
     TestBuiltInXmlSchemaTypedValues();
+    TestSchemaLessDatatypeRepresentationMapIsConsumed();
+    TestPreservedLexicalBooleanValue();
+    TestPreservedLexicalRestrictedCharacterSets();
 
     if (g_failed) {
         return 1;

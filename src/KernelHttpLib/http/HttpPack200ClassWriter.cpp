@@ -252,6 +252,65 @@ namespace http
         return status;
     }
 
+    NTSTATUS HttpPack200ClassWriter::AddMethodHandle(
+        UCHAR referenceKind,
+        USHORT referenceIndex,
+        USHORT* index) noexcept
+    {
+        if (!begun_ || headerFinished_ || referenceKind < 1 || referenceKind > 9 ||
+            referenceIndex == 0 || index == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        NTSTATUS status = ReserveConstantPoolIndex(index);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = AppendByte(15);
+        if (NT_SUCCESS(status)) {
+            status = AppendByte(referenceKind);
+        }
+        if (NT_SUCCESS(status)) {
+            status = AppendBe16(referenceIndex);
+        }
+        return status;
+    }
+
+    NTSTATUS HttpPack200ClassWriter::AddMethodType(
+        USHORT descriptorIndex,
+        USHORT* index) noexcept
+    {
+        if (!begun_ || headerFinished_ || descriptorIndex == 0 || index == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        NTSTATUS status = ReserveConstantPoolIndex(index);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = AppendByte(16);
+        if (NT_SUCCESS(status)) {
+            status = AppendBe16(descriptorIndex);
+        }
+        return status;
+    }
+
+    NTSTATUS HttpPack200ClassWriter::AddInvokeDynamic(
+        USHORT bootstrapMethodIndex,
+        USHORT nameAndTypeIndex,
+        USHORT* index) noexcept
+    {
+        if (!begun_ || headerFinished_ || nameAndTypeIndex == 0 || index == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        NTSTATUS status = ReserveConstantPoolIndex(index);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = AppendByte(18);
+        if (NT_SUCCESS(status)) status = AppendBe16(bootstrapMethodIndex);
+        if (NT_SUCCESS(status)) status = AppendBe16(nameAndTypeIndex);
+        return status;
+    }
+
     NTSTATUS HttpPack200ClassWriter::FinishHeader(
         USHORT accessFlags,
         USHORT thisClass,
@@ -270,6 +329,18 @@ namespace http
             0,
             0,
             0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            nullptr,
+            0,
+            0,
+            nullptr,
+            0,
             classLength);
     }
 
@@ -285,6 +356,18 @@ namespace http
         SIZE_T methodCount,
         USHORT sourceFileAttributeNameIndex,
         USHORT sourceFileIndex,
+        USHORT signatureAttributeNameIndex,
+        USHORT signatureIndex,
+        USHORT deprecatedAttributeNameIndex,
+        USHORT enclosingMethodAttributeNameIndex,
+        USHORT enclosingClassIndex,
+        USHORT enclosingMethodIndex,
+        USHORT bootstrapMethodsAttributeNameIndex,
+        const HttpPack200BootstrapMethod* bootstrapMethods,
+        SIZE_T bootstrapMethodCount,
+        USHORT innerClassesAttributeNameIndex,
+        const HttpPack200InnerClass* innerClasses,
+        SIZE_T innerClassCount,
         SIZE_T* classLength) noexcept
     {
         if (!begun_ ||
@@ -298,6 +381,15 @@ namespace http
             (fields == nullptr && fieldCount != 0) ||
             (methods == nullptr && methodCount != 0) ||
             ((sourceFileAttributeNameIndex == 0) != (sourceFileIndex == 0)) ||
+            ((signatureAttributeNameIndex == 0) != (signatureIndex == 0)) ||
+            ((enclosingMethodAttributeNameIndex == 0) != (enclosingClassIndex == 0)) ||
+            (enclosingMethodAttributeNameIndex == 0 && enclosingMethodIndex != 0) ||
+            ((bootstrapMethodsAttributeNameIndex == 0) != (bootstrapMethodCount == 0)) ||
+            (bootstrapMethods == nullptr && bootstrapMethodCount != 0) ||
+            bootstrapMethodCount > 0xffffUL ||
+            ((innerClassesAttributeNameIndex == 0) != (innerClassCount == 0)) ||
+            (innerClasses == nullptr && innerClassCount != 0) ||
+            innerClassCount > 0xffffUL ||
             constantPoolCount_ != maxConstantPoolEntries_) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -337,7 +429,12 @@ namespace http
                 return STATUS_INVALID_PARAMETER;
             }
             const bool hasConstantValue = fields[index].ConstantValueAttributeNameIndex != 0;
+            const bool hasSignature = fields[index].SignatureAttributeNameIndex != 0;
+            const bool hasDeprecated = fields[index].DeprecatedAttributeNameIndex != 0;
             if (hasConstantValue != (fields[index].ConstantValueIndex != 0)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (hasSignature != (fields[index].SignatureIndex != 0)) {
                 return STATUS_INVALID_PARAMETER;
             }
             status = AppendBe16(fields[index].AccessFlags);
@@ -348,7 +445,8 @@ namespace http
                 status = AppendBe16(fields[index].DescriptorIndex);
             }
             if (NT_SUCCESS(status)) {
-                status = AppendBe16(hasConstantValue ? 1 : 0);
+                status = AppendBe16(static_cast<USHORT>((hasConstantValue ? 1 : 0) +
+                    (hasSignature ? 1 : 0) + (hasDeprecated ? 1 : 0)));
             }
             if (!NT_SUCCESS(status)) {
                 return status;
@@ -365,6 +463,17 @@ namespace http
                     return status;
                 }
             }
+            if (hasSignature) {
+                status = AppendBe16(fields[index].SignatureAttributeNameIndex);
+                if (NT_SUCCESS(status)) status = AppendBe32(2);
+                if (NT_SUCCESS(status)) status = AppendBe16(fields[index].SignatureIndex);
+                if (!NT_SUCCESS(status)) return status;
+            }
+            if (hasDeprecated) {
+                status = AppendBe16(fields[index].DeprecatedAttributeNameIndex);
+                if (NT_SUCCESS(status)) status = AppendBe32(0);
+                if (!NT_SUCCESS(status)) return status;
+            }
         }
 
         status = AppendBe16(static_cast<USHORT>(methodCount));
@@ -377,6 +486,8 @@ namespace http
             }
             const bool hasCode = methods[index].CodeAttributeNameIndex != 0;
             const bool hasExceptions = methods[index].ExceptionsAttributeNameIndex != 0;
+            const bool hasSignature = methods[index].SignatureAttributeNameIndex != 0;
+            const bool hasDeprecated = methods[index].DeprecatedAttributeNameIndex != 0;
             if ((!hasCode && (methods[index].Code != nullptr || methods[index].CodeLength != 0)) ||
                 (hasCode && (methods[index].Code == nullptr || methods[index].CodeLength == 0)) ||
                 (!hasCode && methods[index].ExceptionHandlerCount != 0) ||
@@ -387,6 +498,7 @@ namespace http
                 (methods[index].DeclaredExceptionIndexes == nullptr &&
                     methods[index].DeclaredExceptionCount != 0) ||
                 methods[index].DeclaredExceptionCount > 0xffffUL ||
+                hasSignature != (methods[index].SignatureIndex != 0) ||
                 methods[index].ExceptionHandlerCount >
                     (0xffffffffULL - 12ULL - methods[index].CodeLength) / 8ULL) {
                 return STATUS_INVALID_PARAMETER;
@@ -400,7 +512,8 @@ namespace http
             }
             if (NT_SUCCESS(status)) {
                 status = AppendBe16(static_cast<USHORT>(
-                    (hasCode ? 1 : 0) + (hasExceptions ? 1 : 0)));
+                    (hasCode ? 1 : 0) + (hasExceptions ? 1 : 0) +
+                    (hasSignature ? 1 : 0) + (hasDeprecated ? 1 : 0)));
             }
             if (!NT_SUCCESS(status)) {
                 return status;
@@ -485,10 +598,29 @@ namespace http
                     return status;
                 }
             }
+            if (hasSignature) {
+                status = AppendBe16(methods[index].SignatureAttributeNameIndex);
+                if (NT_SUCCESS(status)) status = AppendBe32(2);
+                if (NT_SUCCESS(status)) status = AppendBe16(methods[index].SignatureIndex);
+                if (!NT_SUCCESS(status)) return status;
+            }
+            if (hasDeprecated) {
+                status = AppendBe16(methods[index].DeprecatedAttributeNameIndex);
+                if (NT_SUCCESS(status)) status = AppendBe32(0);
+                if (!NT_SUCCESS(status)) return status;
+            }
         }
 
         const bool hasSourceFile = sourceFileAttributeNameIndex != 0;
-        status = AppendBe16(hasSourceFile ? 1 : 0);
+        const bool hasSignature = signatureAttributeNameIndex != 0;
+        const bool hasDeprecated = deprecatedAttributeNameIndex != 0;
+        const bool hasEnclosingMethod = enclosingMethodAttributeNameIndex != 0;
+        const bool hasBootstrapMethods = bootstrapMethodsAttributeNameIndex != 0;
+        const bool hasInnerClasses = innerClassesAttributeNameIndex != 0;
+        status = AppendBe16(static_cast<USHORT>((hasSourceFile ? 1 : 0) +
+            (hasSignature ? 1 : 0) + (hasBootstrapMethods ? 1 : 0) +
+            (hasInnerClasses ? 1 : 0) + (hasDeprecated ? 1 : 0) +
+            (hasEnclosingMethod ? 1 : 0)));
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -499,6 +631,85 @@ namespace http
             }
             if (NT_SUCCESS(status)) {
                 status = AppendBe16(sourceFileIndex);
+            }
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+        if (hasSignature) {
+            status = AppendBe16(signatureAttributeNameIndex);
+            if (NT_SUCCESS(status)) status = AppendBe32(2);
+            if (NT_SUCCESS(status)) status = AppendBe16(signatureIndex);
+            if (!NT_SUCCESS(status)) return status;
+        }
+        if (hasDeprecated) {
+            status = AppendBe16(deprecatedAttributeNameIndex);
+            if (NT_SUCCESS(status)) status = AppendBe32(0);
+            if (!NT_SUCCESS(status)) return status;
+        }
+        if (hasEnclosingMethod) {
+            status = AppendBe16(enclosingMethodAttributeNameIndex);
+            if (NT_SUCCESS(status)) status = AppendBe32(4);
+            if (NT_SUCCESS(status)) status = AppendBe16(enclosingClassIndex);
+            if (NT_SUCCESS(status)) status = AppendBe16(enclosingMethodIndex);
+            if (!NT_SUCCESS(status)) return status;
+        }
+        if (hasBootstrapMethods) {
+            if (bootstrapMethodCount > 0xffffUL ||
+                (bootstrapMethods == nullptr && bootstrapMethodCount != 0)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            SIZE_T attributeLength = 2;
+            for (SIZE_T index = 0; index < bootstrapMethodCount; ++index) {
+                if (bootstrapMethods[index].MethodHandleIndex == 0 ||
+                    bootstrapMethods[index].ArgumentCount > 0xffffUL ||
+                    (bootstrapMethods[index].ArgumentIndexes == nullptr &&
+                        bootstrapMethods[index].ArgumentCount != 0) ||
+                    attributeLength > 0xffffffffULL - 4ULL ||
+                    bootstrapMethods[index].ArgumentCount >
+                        (0xffffffffULL - attributeLength - 4ULL) / 2ULL) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                attributeLength += 4 + bootstrapMethods[index].ArgumentCount * 2;
+            }
+            status = AppendBe16(bootstrapMethodsAttributeNameIndex);
+            if (NT_SUCCESS(status)) status = AppendBe32(static_cast<ULONG>(attributeLength));
+            if (NT_SUCCESS(status)) status = AppendBe16(static_cast<USHORT>(bootstrapMethodCount));
+            for (SIZE_T index = 0; NT_SUCCESS(status) && index < bootstrapMethodCount; ++index) {
+                status = AppendBe16(bootstrapMethods[index].MethodHandleIndex);
+                if (NT_SUCCESS(status)) {
+                    status = AppendBe16(static_cast<USHORT>(bootstrapMethods[index].ArgumentCount));
+                }
+                for (SIZE_T argumentIndex = 0;
+                    NT_SUCCESS(status) && argumentIndex < bootstrapMethods[index].ArgumentCount;
+                    ++argumentIndex) {
+                    if (bootstrapMethods[index].ArgumentIndexes[argumentIndex] == 0) {
+                        return STATUS_INVALID_PARAMETER;
+                    }
+                    status = AppendBe16(bootstrapMethods[index].ArgumentIndexes[argumentIndex]);
+                }
+            }
+            if (!NT_SUCCESS(status)) return status;
+        }
+        if (hasInnerClasses) {
+            if (innerClassCount > (0xffffffffULL - 2ULL) / 8ULL) {
+                return STATUS_INTEGER_OVERFLOW;
+            }
+            status = AppendBe16(innerClassesAttributeNameIndex);
+            if (NT_SUCCESS(status)) {
+                status = AppendBe32(static_cast<ULONG>(2 + innerClassCount * 8));
+            }
+            if (NT_SUCCESS(status)) {
+                status = AppendBe16(static_cast<USHORT>(innerClassCount));
+            }
+            for (SIZE_T index = 0; NT_SUCCESS(status) && index < innerClassCount; ++index) {
+                if (innerClasses[index].InnerClassInfoIndex == 0) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                status = AppendBe16(innerClasses[index].InnerClassInfoIndex);
+                if (NT_SUCCESS(status)) status = AppendBe16(innerClasses[index].OuterClassInfoIndex);
+                if (NT_SUCCESS(status)) status = AppendBe16(innerClasses[index].InnerNameIndex);
+                if (NT_SUCCESS(status)) status = AppendBe16(innerClasses[index].AccessFlags);
             }
             if (!NT_SUCCESS(status)) {
                 return status;

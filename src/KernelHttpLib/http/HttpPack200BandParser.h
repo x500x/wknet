@@ -68,5 +68,24 @@ namespace http
         const HttpPack200BandCodec& codec,
         SIZE_T attributeLayoutCount,
         _Inout_ HttpPack200AttributeBands* bands) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS HttpPack200ReadAttributeDefinitionBands(
+        _Inout_ HttpPack200BandReader* reader,
+        _Inout_ HttpPack200BandReader* bandHeaderReader,
+        _Inout_ HttpPack200CodecArena* arena,
+        SIZE_T definitionCount,
+        SIZE_T utf8Count,
+        _Inout_ HttpPack200AttributeDefinitionBands* bands) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS HttpPack200ReadInnerClassBands(
+        _Inout_ HttpPack200BandReader* reader,
+        _Inout_ HttpPack200BandReader* bandHeaderReader,
+        _Inout_ HttpPack200CodecArena* arena,
+        SIZE_T innerClassCount,
+        SIZE_T classCount,
+        SIZE_T utf8Count,
+        _Inout_ HttpPack200InnerClassBands* bands) noexcept;
 }
 }

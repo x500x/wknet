@@ -21,7 +21,11 @@ using KernelHttp::http::HttpPack200BandReader;
 using KernelHttp::http::HttpPack200CpBands;
 using KernelHttp::http::HttpPack200CpCounts;
 using KernelHttp::http::HttpPack200ClassBands;
+using KernelHttp::http::HttpPack200CodeBands;
+using KernelHttp::http::HttpPack200RelocationKind;
 using KernelHttp::http::HttpPack200ClassWriter;
+using KernelHttp::http::HttpPack200BootstrapMethod;
+using KernelHttp::http::HttpPack200ClassMember;
 using KernelHttp::http::HttpPack200FileBands;
 using KernelHttp::http::HttpPack200Coding;
 using KernelHttp::http::HttpPack200CodecArena;
@@ -29,6 +33,9 @@ using KernelHttp::http::HttpPack200DecodeBand;
 using KernelHttp::http::HttpPack200DecodeBandWithMeta;
 using KernelHttp::http::HttpPack200ParseMetaCodec;
 using KernelHttp::http::HttpPack200ReadCpBands;
+using KernelHttp::http::HttpPack200ReadAttributeDefinitionBands;
+using KernelHttp::http::HttpPack200ReadInnerClassBands;
+using KernelHttp::http::HttpPack200ReadBytecodeBands;
 using KernelHttp::http::HttpPack200ReadClassBandsWithMeta;
 using KernelHttp::http::HttpPack200ReadFileBands;
 using KernelHttp::http::HttpPack200JarWriter;
@@ -47,6 +54,8 @@ namespace
             printf("FAIL: %s\n", message);
         }
     }
+
+    SIZE_T CountBytes(const char* data, SIZE_T length, const char* needle, SIZE_T needleLength);
 
     void TestBhsdContinuationUsesFullByteValue()
     {
@@ -321,6 +330,220 @@ namespace
             "Pack200 numeric constant-pool bands decode in specification order");
     }
 
+    void TestJava7ConstantPoolBands()
+    {
+        const unsigned char encoded[] = {
+            1, 'I',
+            42,
+            1,
+            2,
+            0, 0,
+            0, 0,
+            2, 0,
+            0,
+            0, 1, 0,
+            0, 0
+        };
+        HttpPack200BandReader reader(encoded, sizeof(encoded));
+        HttpPack200BandReader bandHeaders(nullptr, 0);
+        HttpPack200CodecArena arena = {};
+        NTSTATUS status = arena.Initialize(64);
+        Expect(NT_SUCCESS(status), "Pack200 Java 7 constant-pool codec arena initializes");
+
+        HttpPack200CpCounts counts = {};
+        counts.Utf8 = 2;
+        counts.Int = 1;
+        counts.Class = 1;
+        counts.Signature = 1;
+        counts.Descriptor = 1;
+        counts.Field = 1;
+        counts.MethodHandle = 1;
+        counts.MethodType = 1;
+        counts.BootstrapMethod = 1;
+        counts.InvokeDynamic = 1;
+        HttpPack200CpBands bands = {};
+        if (NT_SUCCESS(status)) {
+            status = HttpPack200ReadCpBands(
+                &reader,
+                &bandHeaders,
+                &arena,
+                counts,
+                &bands);
+        }
+        Expect(
+            NT_SUCCESS(status) &&
+                reader.Remaining() == 0 &&
+                bands.MethodHandleCount() == 1 &&
+                bands.MethodHandleReferenceKinds()[0] == 1 &&
+                bands.MethodHandleMemberIndexes()[0] == 0 &&
+                bands.MethodTypeSignatureIndexes()[0] == 0 &&
+                bands.BootstrapMethodReferenceIndexes()[0] == 0 &&
+                bands.BootstrapMethodArgumentCounts()[0] == 1 &&
+                bands.BootstrapMethodArgumentIndexes()[0] == 0 &&
+                bands.InvokeDynamicBootstrapIndexes()[0] == 0 &&
+                bands.InvokeDynamicDescriptorIndexes()[0] == 0,
+            "Pack200 Java 7 extra constant-pool bands decode in specification order");
+    }
+
+    void TestAttributeDefinitionAndInnerClassBands()
+    {
+        const unsigned char attributeBytes[] = { 4, 1, 2 };
+        HttpPack200BandReader attributeReader(attributeBytes, sizeof(attributeBytes));
+        HttpPack200BandReader emptyHeaders(nullptr, 0);
+        HttpPack200CodecArena arena = {};
+        NTSTATUS status = arena.Initialize(32);
+        KernelHttp::http::HttpPack200AttributeDefinitionBands definitions = {};
+        if (NT_SUCCESS(status)) {
+            status = HttpPack200ReadAttributeDefinitionBands(
+                &attributeReader,
+                &emptyHeaders,
+                &arena,
+                1,
+                3,
+                &definitions);
+        }
+        Expect(
+            NT_SUCCESS(status) && attributeReader.Remaining() == 0 &&
+                definitions.Headers()[0] == 4 &&
+                definitions.NameIndexes()[0] == 1 &&
+                definitions.LayoutIndexes()[0] == 2,
+            "Pack200 attribute definition header, name and layout bands decode");
+
+        const unsigned char innerBytes[] = { 1, 0xc1, 0xfd, 0x0c, 2, 4 };
+        HttpPack200BandReader innerReader(innerBytes, sizeof(innerBytes));
+        HttpPack200BandReader innerHeaders(nullptr, 0);
+        KernelHttp::http::HttpPack200InnerClassBands inner = {};
+        status = HttpPack200ReadInnerClassBands(
+            &innerReader,
+            &innerHeaders,
+            &arena,
+            1,
+            4,
+            4,
+            &inner);
+        Expect(
+            NT_SUCCESS(status) && innerReader.Remaining() == 0 &&
+                inner.ThisClassIndexes()[0] == 1 &&
+                inner.Flags()[0] == 0x00010001UL &&
+                inner.OuterClassIndexes()[0] == 1 &&
+                inner.NameIndexes()[0] == 2,
+            "Pack200 global inner-class bands decode explicit outer and name references");
+    }
+
+    void TestJava7AndJava8BytecodeReferenceBands()
+    {
+        const unsigned char encoded[] = {
+            240, 241, 186, 242, 243, 177, 0xff,
+            0, 2,
+            0, 2,
+            0
+        };
+        HttpPack200BandReader reader(encoded, sizeof(encoded));
+        HttpPack200BandReader headers(nullptr, 0);
+        HttpPack200CodecArena arena = {};
+        NTSTATUS status = arena.Initialize(64);
+        HttpPack200CodeBands bands = {};
+        if (NT_SUCCESS(status)) {
+            status = HttpPack200ReadBytecodeBands(
+                &reader,
+                &headers,
+                &arena,
+                1,
+                &bands);
+        }
+        const unsigned char expected[] = {
+            18, 0,
+            19, 0, 0,
+            186, 0, 0, 0, 0,
+            183, 0, 0,
+            184, 0, 0,
+            177
+        };
+        Expect(
+            NT_SUCCESS(status) && reader.Remaining() == 0 &&
+                bands.CodeCount() == 1 && bands.RelocationCount() == 5 &&
+                bands.CodeLengths()[0] == sizeof(expected) &&
+                memcmp(bands.CodeBytes(), expected, sizeof(expected)) == 0 &&
+                bands.Relocations()[0].Kind == HttpPack200RelocationKind::LoadableValue &&
+                bands.Relocations()[0].ReferenceIndex == 0 &&
+                bands.Relocations()[1].Kind == HttpPack200RelocationKind::LoadableValue &&
+                bands.Relocations()[1].ReferenceIndex == 1 &&
+                bands.Relocations()[2].Kind == HttpPack200RelocationKind::InvokeDynamic &&
+                bands.Relocations()[3].Kind == HttpPack200RelocationKind::InterfaceMethod &&
+                bands.Relocations()[4].Kind == HttpPack200RelocationKind::InterfaceMethod,
+            "Pack200 qldc, invokedynamic and Java 8 interface invoke bands reconstruct bytecodes");
+    }
+
+    SIZE_T CountBytes(const char* data, SIZE_T length, const char* needle, SIZE_T needleLength)
+    {
+        if (data == nullptr || needle == nullptr || needleLength == 0 || needleLength > length) {
+            return 0;
+        }
+        SIZE_T count = 0;
+        for (SIZE_T offset = 0; offset <= length - needleLength; ++offset) {
+            if (memcmp(data + offset, needle, needleLength) == 0) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    void TestInnerClassPack200Interoperability()
+    {
+        const unsigned char packed[] = {
+            0xca, 0xfe, 0xd0, 0x0d, 0x07, 0x96, 0xd4, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x04, 0x00, 0x03,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x31, 0x02, 0x00, 0x18, 0x10, 0x0c, 0x06, 0x6a, 0x61,
+            0x76, 0x61, 0x2f, 0x6c, 0x61, 0x6e, 0x67, 0x2f, 0x4f, 0x62, 0x6a, 0x65, 0x63, 0x74, 0x73, 0x61,
+            0x6d, 0x70, 0x6c, 0x65, 0x2f, 0x4f, 0x75, 0x74, 0x65, 0x72, 0x24, 0x49, 0x6e, 0x6e, 0x65, 0x72,
+            0x01, 0x01, 0x01, 0x02, 0x09, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x21,
+            0x21, 0x00, 0x00, 0x00, 0x00, 0xc0, 0xf1, 0xdf, 0xe4, 0x22, 0x00, 0x02, 0x02
+        };
+        char jar[4096] = {};
+        SIZE_T jarLength = 0;
+        const NTSTATUS status = DecodePack200GzipContent(
+            packed,
+            sizeof(packed),
+            jar,
+            sizeof(jar),
+            &jarLength);
+        Expect(
+            NT_SUCCESS(status) &&
+                CountBytes(jar, jarLength, "sample/Outer.class", 18) >= 2 &&
+                CountBytes(jar, jarLength, "sample/Outer$Inner.class", 24) >= 2 &&
+                CountBytes(jar, jarLength, "InnerClasses", 12) >= 2,
+            "Pack200 global inner-class tuples rebuild InnerClasses attributes in both class files");
+    }
+
+    void TestSignatureAttributePack200Interoperability()
+    {
+        const unsigned char packed[] = {
+            0xca, 0xfe, 0xd0, 0x0d, 0x07, 0x96, 0xd4, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x0a, 0x00, 0x02,
+            0x05, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x31, 0x01, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x06, 0x07, 0x08, 0x02, 0x03, 0x08, 0x10, 0x0e, 0x05, 0x28, 0x4c, 0x3b, 0x29, 0x4c, 0x3b,
+            0x54, 0x54, 0x3b, 0x29, 0x54, 0x54, 0x3b, 0x3c, 0x54, 0x3a, 0x4c, 0x3b, 0x3e, 0x4c, 0x3b, 0x4c,
+            0x3b, 0x54, 0x54, 0x3b, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x6a, 0x61, 0x76, 0x61,
+            0x2f, 0x6c, 0x61, 0x6e, 0x67, 0x2f, 0x4f, 0x62, 0x6a, 0x65, 0x63, 0x74, 0x73, 0x61, 0x6d, 0x70,
+            0x6c, 0x65, 0x2f, 0x47, 0x65, 0x6e, 0x65, 0x72, 0x69, 0x63, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x07,
+            0x01, 0x0a, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x05, 0x01, 0x03, 0x02,
+            0x00, 0x00, 0x02, 0x02, 0x00, 0xc1, 0xfd, 0x7c, 0x00, 0x01, 0xc1, 0xcd, 0x7d, 0x03, 0xe1, 0xcd,
+            0x7d, 0x02, 0x00, 0x00, 0xc0, 0xf1, 0xdf, 0xe4, 0x22, 0x02
+        };
+        char jar[4096] = {};
+        SIZE_T jarLength = 0;
+        const NTSTATUS status = DecodePack200GzipContent(
+            packed,
+            sizeof(packed),
+            jar,
+            sizeof(jar),
+            &jarLength);
+        Expect(
+            NT_SUCCESS(status) &&
+                CountBytes(jar, jarLength, "Signature", 9) >= 1 &&
+                CountBytes(jar, jarLength, "<T:Ljava/lang/Object;>Ljava/lang/Object;", 40) >= 1 &&
+                CountBytes(jar, jarLength, "(TT;)TT;", 8) >= 1,
+            "Pack200 class, field and method Signature layouts rebuild classfile attributes");
+    }
+
     void TestMinimalClassBands()
     {
         const unsigned char encoded[] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0xc1, 0x15 };
@@ -352,6 +575,69 @@ namespace
                 bands.MethodCounts()[0] == 0 &&
                 bands.FlagsLow()[0] == 0x0601,
             "Pack200 minimal class bands decode in specification order");
+    }
+
+    void TestDeprecatedAttributeFlags()
+    {
+        const unsigned char encoded[] = {
+            0x02, 0x00, 0x00, 0x00, 0x00, 0xc1, 0xd5, 0xfd, 0x00
+        };
+        HttpPack200BandReader reader(encoded, sizeof(encoded));
+        HttpPack200BandReader bandHeaders(nullptr, 0);
+        HttpPack200CodecArena arena = {};
+        NTSTATUS status = arena.Initialize(64);
+        HttpPack200ClassBands bands = {};
+        if (NT_SUCCESS(status)) {
+            status = HttpPack200ReadClassBandsWithMeta(
+                &reader,
+                &bandHeaders,
+                &arena,
+                1,
+                false,
+                false,
+                false,
+                false,
+                false,
+                &bands);
+        }
+        Expect(
+            NT_SUCCESS(status) && reader.Remaining() == 0 &&
+                bands.FlagsLow()[0] == ((1UL << 20) | 0x0601UL),
+            "Pack200 class Deprecated layout flag is accepted without extra bands");
+    }
+
+    void TestEnclosingMethodAttributeBands()
+    {
+        const unsigned char encoded[] = {
+            0x02, 0x00, 0x00, 0x00, 0x00,
+            0xc1, 0xd5, 0x3d,
+            0x01,
+            0x00
+        };
+        HttpPack200BandReader reader(encoded, sizeof(encoded));
+        HttpPack200BandReader bandHeaders(nullptr, 0);
+        HttpPack200CodecArena arena = {};
+        NTSTATUS status = arena.Initialize(64);
+        HttpPack200ClassBands bands = {};
+        if (NT_SUCCESS(status)) {
+            status = HttpPack200ReadClassBandsWithMeta(
+                &reader,
+                &bandHeaders,
+                &arena,
+                1,
+                false,
+                false,
+                false,
+                false,
+                false,
+                &bands);
+        }
+        Expect(
+            NT_SUCCESS(status) && reader.Remaining() == 0 &&
+                bands.FlagsLow()[0] == ((1UL << 18) | 0x0601UL) &&
+                bands.EnclosingMethodClassIndexes()[0] == 1 &&
+                bands.EnclosingMethodDescriptorIndexes()[0] == 0,
+            "Pack200 EnclosingMethod class and nullable descriptor bands decode in order");
     }
 
     void TestClassOnlyBandSequence()
@@ -457,6 +743,283 @@ namespace
         Expect(
             NT_SUCCESS(classStatus) && classLength == 65,
             "Pack200 minimal class writer rebuilds the reference interface classfile");
+    }
+
+    void TestClassWriterMethodHandleAndMethodTypeConstants()
+    {
+        char classBytes[256] = {};
+        HttpPack200ClassWriter writer(classBytes, sizeof(classBytes));
+        NTSTATUS status = writer.Begin(0, 51, 9);
+        USHORT classNameUtf8 = 0;
+        USHORT classIndex = 0;
+        USHORT methodNameUtf8 = 0;
+        USHORT descriptorUtf8 = 0;
+        USHORT nameAndType = 0;
+        USHORT methodReference = 0;
+        USHORT methodHandle = 0;
+        USHORT methodType = 0;
+        if (NT_SUCCESS(status)) {
+            status = writer.AddUtf8({ "sample/Owner", 12 }, &classNameUtf8);
+        }
+        if (NT_SUCCESS(status)) status = writer.AddClass(classNameUtf8, &classIndex);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "target", 6 }, &methodNameUtf8);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "()V", 3 }, &descriptorUtf8);
+        if (NT_SUCCESS(status)) {
+            status = writer.AddNameAndType(methodNameUtf8, descriptorUtf8, &nameAndType);
+        }
+        if (NT_SUCCESS(status)) {
+            status = writer.AddMethodref(classIndex, nameAndType, &methodReference);
+        }
+        if (NT_SUCCESS(status)) {
+            status = writer.AddMethodHandle(6, methodReference, &methodHandle);
+        }
+        if (NT_SUCCESS(status)) {
+            status = writer.AddMethodType(descriptorUtf8, &methodType);
+        }
+        SIZE_T classLength = 0;
+        if (NT_SUCCESS(status)) {
+            status = writer.FinishHeader(0x0021, classIndex, classIndex, &classLength);
+        }
+        Expect(
+            NT_SUCCESS(status) && classLength != 0 && methodHandle == 7 && methodType == 8 &&
+                CountBytes(classBytes, classLength, "\x0f\x06", 2) == 1 &&
+                CountBytes(classBytes, classLength, "\x10", 1) >= 1,
+            "Pack200 class writer emits CONSTANT_MethodHandle and CONSTANT_MethodType entries");
+    }
+
+    void TestClassWriterInvokeDynamicAndBootstrapMethods()
+    {
+        char classBytes[256] = {};
+        HttpPack200ClassWriter writer(classBytes, sizeof(classBytes));
+        NTSTATUS status = writer.Begin(0, 51, 15);
+        USHORT classNameUtf8 = 0;
+        USHORT classIndex = 0;
+        USHORT bootstrapNameUtf8 = 0;
+        USHORT bootstrapDescriptorUtf8 = 0;
+        USHORT bootstrapNameAndType = 0;
+        USHORT bootstrapReference = 0;
+        USHORT bootstrapHandle = 0;
+        USHORT callNameUtf8 = 0;
+        USHORT callDescriptorUtf8 = 0;
+        USHORT callNameAndType = 0;
+        USHORT invokeDynamic = 0;
+        USHORT attributeName = 0;
+        USHORT argumentUtf8 = 0;
+        USHORT argumentString = 0;
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "sample/Owner", 12 }, &classNameUtf8);
+        if (NT_SUCCESS(status)) status = writer.AddClass(classNameUtf8, &classIndex);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "bootstrap", 9 }, &bootstrapNameUtf8);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "()V", 3 }, &bootstrapDescriptorUtf8);
+        if (NT_SUCCESS(status)) {
+            status = writer.AddNameAndType(
+                bootstrapNameUtf8,
+                bootstrapDescriptorUtf8,
+                &bootstrapNameAndType);
+        }
+        if (NT_SUCCESS(status)) {
+            status = writer.AddMethodref(
+                classIndex,
+                bootstrapNameAndType,
+                &bootstrapReference);
+        }
+        if (NT_SUCCESS(status)) {
+            status = writer.AddMethodHandle(6, bootstrapReference, &bootstrapHandle);
+        }
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "call", 4 }, &callNameUtf8);
+        if (NT_SUCCESS(status)) {
+            status = writer.AddUtf8(
+                { "()Ljava/lang/String;", 20 },
+                &callDescriptorUtf8);
+        }
+        if (NT_SUCCESS(status)) {
+            status = writer.AddNameAndType(
+                callNameUtf8,
+                callDescriptorUtf8,
+                &callNameAndType);
+        }
+        if (NT_SUCCESS(status)) {
+            status = writer.AddInvokeDynamic(0, callNameAndType, &invokeDynamic);
+        }
+        if (NT_SUCCESS(status)) {
+            status = writer.AddUtf8({ "BootstrapMethods", 16 }, &attributeName);
+        }
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "argument", 8 }, &argumentUtf8);
+        if (NT_SUCCESS(status)) status = writer.AddString(argumentUtf8, &argumentString);
+
+        const USHORT arguments[] = { argumentString };
+        const HttpPack200BootstrapMethod bootstrapMethods[] = {
+            { bootstrapHandle, arguments, 1 }
+        };
+        SIZE_T classLength = 0;
+        if (NT_SUCCESS(status)) {
+            status = writer.FinishClass(
+                0x0021,
+                classIndex,
+                classIndex,
+                nullptr,
+                0,
+                nullptr,
+                0,
+                nullptr,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                attributeName,
+                bootstrapMethods,
+                1,
+                0,
+                nullptr,
+                0,
+                &classLength);
+        }
+        const unsigned char expectedMethodHandle[] = { 0x0f, 0x06, 0x00, 0x06 };
+        const unsigned char expectedInvokeDynamic[] = { 0x12, 0x00, 0x00, 0x00, 0x0a };
+        const unsigned char expectedClassTail[] = {
+            0x00, 0x21, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x0c,
+            0x00, 0x00, 0x00, 0x08, 0x00, 0x01, 0x00, 0x07,
+            0x00, 0x01, 0x00, 0x0e
+        };
+        Expect(
+            NT_SUCCESS(status) && classLength == 161 && bootstrapHandle == 7 &&
+                callNameAndType == 10 && invokeDynamic == 11 && attributeName == 12 &&
+                argumentString == 14 &&
+                memcmp(classBytes + 56, expectedMethodHandle, sizeof(expectedMethodHandle)) == 0 &&
+                memcmp(classBytes + 95, expectedInvokeDynamic, sizeof(expectedInvokeDynamic)) == 0 &&
+                memcmp(classBytes + 133, expectedClassTail, sizeof(expectedClassTail)) == 0,
+            "Pack200 class writer emits CONSTANT_InvokeDynamic and BootstrapMethods attributes");
+    }
+
+    void TestClassWriterDeprecatedAttributes()
+    {
+        char classBytes[256] = {};
+        HttpPack200ClassWriter writer(classBytes, sizeof(classBytes));
+        NTSTATUS status = writer.Begin(0, 49, 8);
+        USHORT className = 0;
+        USHORT classIndex = 0;
+        HttpPack200ClassMember field = {};
+        HttpPack200ClassMember method = {};
+        USHORT deprecatedName = 0;
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "sample/Old", 10 }, &className);
+        if (NT_SUCCESS(status)) status = writer.AddClass(className, &classIndex);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "value", 5 }, &field.NameIndex);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "I", 1 }, &field.DescriptorIndex);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "run", 3 }, &method.NameIndex);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "()V", 3 }, &method.DescriptorIndex);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "Deprecated", 10 }, &deprecatedName);
+        field.DeprecatedAttributeNameIndex = deprecatedName;
+        method.DeprecatedAttributeNameIndex = deprecatedName;
+        SIZE_T classLength = 0;
+        if (NT_SUCCESS(status)) {
+            status = writer.FinishClass(
+                0x0021,
+                classIndex,
+                classIndex,
+                nullptr,
+                0,
+                &field,
+                1,
+                &method,
+                1,
+                0,
+                0,
+                0,
+                0,
+                deprecatedName,
+                0,
+                0,
+                0,
+                0,
+                nullptr,
+                0,
+                0,
+                nullptr,
+                0,
+                &classLength);
+        }
+        const char deprecatedAttribute[] = { 0x00, 0x07, 0x00, 0x00, 0x00, 0x00 };
+        Expect(
+            NT_SUCCESS(status) && classLength != 0 &&
+                CountBytes(
+                    classBytes,
+                    classLength,
+                    deprecatedAttribute,
+                    sizeof(deprecatedAttribute)) == 3,
+            "Pack200 class writer emits class, field and method Deprecated attributes");
+    }
+
+    void TestClassWriterEnclosingMethodAttribute()
+    {
+        char classBytes[256] = {};
+        HttpPack200ClassWriter writer(classBytes, sizeof(classBytes));
+        NTSTATUS status = writer.Begin(0, 49, 9);
+        USHORT className = 0;
+        USHORT classIndex = 0;
+        USHORT enclosingClassName = 0;
+        USHORT enclosingClass = 0;
+        USHORT methodName = 0;
+        USHORT methodDescriptor = 0;
+        USHORT enclosingMethod = 0;
+        USHORT attributeName = 0;
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "sample/Local", 12 }, &className);
+        if (NT_SUCCESS(status)) status = writer.AddClass(className, &classIndex);
+        if (NT_SUCCESS(status)) {
+            status = writer.AddUtf8({ "sample/Owner", 12 }, &enclosingClassName);
+        }
+        if (NT_SUCCESS(status)) status = writer.AddClass(enclosingClassName, &enclosingClass);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "make", 4 }, &methodName);
+        if (NT_SUCCESS(status)) status = writer.AddUtf8({ "()V", 3 }, &methodDescriptor);
+        if (NT_SUCCESS(status)) {
+            status = writer.AddNameAndType(methodName, methodDescriptor, &enclosingMethod);
+        }
+        if (NT_SUCCESS(status)) {
+            status = writer.AddUtf8({ "EnclosingMethod", 15 }, &attributeName);
+        }
+        SIZE_T classLength = 0;
+        if (NT_SUCCESS(status)) {
+            status = writer.FinishClass(
+                0x0021,
+                classIndex,
+                classIndex,
+                nullptr,
+                0,
+                nullptr,
+                0,
+                nullptr,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                attributeName,
+                enclosingClass,
+                enclosingMethod,
+                0,
+                nullptr,
+                0,
+                0,
+                nullptr,
+                0,
+                &classLength);
+        }
+        const char expectedAttribute[] = {
+            0x00, 0x08, 0x00, 0x00, 0x00, 0x04, 0x00, 0x04, 0x00, 0x07
+        };
+        Expect(
+            NT_SUCCESS(status) && classLength != 0 &&
+                CountBytes(
+                    classBytes,
+                    classLength,
+                    expectedAttribute,
+                    sizeof(expectedAttribute)) == 1,
+            "Pack200 class writer emits EnclosingMethod class and NameAndType indexes");
     }
 
     USHORT ReadLe16(const unsigned char* value)
@@ -1769,8 +2332,19 @@ int main()
     TestPopulationMetaCoding();
     TestBandEscapeUsesSeparateBandHeaders();
     TestConstantPoolNumericBands();
+    TestJava7ConstantPoolBands();
+    TestAttributeDefinitionAndInnerClassBands();
+    TestJava7AndJava8BytecodeReferenceBands();
+    TestInnerClassPack200Interoperability();
+    TestSignatureAttributePack200Interoperability();
     TestMinimalClassBands();
+    TestDeprecatedAttributeFlags();
+    TestEnclosingMethodAttributeBands();
     TestClassOnlyBandSequence();
+    TestClassWriterMethodHandleAndMethodTypeConstants();
+    TestClassWriterInvokeDynamicAndBootstrapMethods();
+    TestClassWriterDeprecatedAttributes();
+    TestClassWriterEnclosingMethodAttribute();
     TestJarWriterRawDeflateEntry();
     TestFileOnlyPack200Interoperability();
     TestClassOnlyPack200Interoperability();

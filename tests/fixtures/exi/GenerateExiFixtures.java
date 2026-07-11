@@ -376,6 +376,56 @@ public final class GenerateExiFixtures {
         return output.toByteArray();
     }
 
+    private static byte[] encodeSchemaLessDatatypeRepresentationMap() throws Exception {
+        EXIFactory factory = DefaultEXIFactory.newInstance();
+        factory.setCodingMode(CodingMode.BIT_PACKED);
+        factory.setDatatypeRepresentationMap(
+                new QName[] { new QName("http://www.w3.org/2001/XMLSchema", "decimal") },
+                new QName[] { new QName("http://www.w3.org/2009/exi", "string") });
+
+        EncodingOptions encodingOptions = EncodingOptions.createDefault();
+        encodingOptions.setOption(EncodingOptions.INCLUDE_OPTIONS);
+        factory.setEncodingOptions(encodingOptions);
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        EXIBodyEncoder body = factory.createEXIStreamEncoder().encodeHeader(output);
+        body.encodeStartDocument();
+        body.encodeStartElement("", "root", null);
+        body.encodeCharacters(new StringValue("12.340"));
+        body.encodeEndElement();
+        body.encodeEndDocument();
+        body.flush();
+        return output.toByteArray();
+    }
+
+    private static byte[] encodeLexicalValue(String xsdType, String lexicalValue) throws Exception {
+        EXIFactory factory = DefaultEXIFactory.newInstance();
+        factory.setCodingMode(CodingMode.BIT_PACKED);
+        factory.getFidelityOptions().setFidelity(FidelityOptions.FEATURE_PREFIX, true);
+        factory.getFidelityOptions().setFidelity(FidelityOptions.FEATURE_LEXICAL_VALUE, true);
+        factory.setGrammars(GrammarFactory.newInstance().createXSDTypesOnlyGrammars());
+
+        EncodingOptions encodingOptions = EncodingOptions.createDefault();
+        encodingOptions.setOption(EncodingOptions.INCLUDE_OPTIONS);
+        encodingOptions.setOption(EncodingOptions.INCLUDE_SCHEMA_ID);
+        factory.setEncodingOptions(encodingOptions);
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        EXIBodyEncoder body = factory.createEXIStreamEncoder().encodeHeader(output);
+        body.encodeStartDocument();
+        body.encodeStartElement("", "root", null);
+        body.encodeNamespaceDeclaration("http://www.w3.org/2001/XMLSchema-instance", "xsi");
+        body.encodeNamespaceDeclaration("http://www.w3.org/2001/XMLSchema", "xsd");
+        body.encodeAttributeXsiType(
+                new QNameValue("http://www.w3.org/2001/XMLSchema", xsdType, "xsd"),
+                "xsi");
+        body.encodeCharacters(new StringValue(lexicalValue));
+        body.encodeEndElement();
+        body.encodeEndDocument();
+        body.flush();
+        return output.toByteArray();
+    }
+
     private static void print(String name, byte[] bytes) {
         System.out.print(name + " = {");
         for (int index = 0; index < bytes.length; ++index) {
@@ -432,6 +482,14 @@ public final class GenerateExiFixtures {
         print("xsi_nil_bit_packed", encodeXsiNil(CodingMode.BIT_PACKED));
         print("xsi_nil_pre_compression", encodeXsiNil(CodingMode.PRE_COMPRESSION));
         print("schema_less_schema_id_nil", encodeSchemaLessSchemaIdNil());
+        print("schema_less_drmap", encodeSchemaLessDatatypeRepresentationMap());
+        print("lexical_boolean", encodeLexicalValue("boolean", "1"));
+        print("lexical_decimal", encodeLexicalValue("decimal", "+001.2300"));
+        print("lexical_double", encodeLexicalValue("double", "-INF"));
+        print("lexical_date_time", encodeLexicalValue("dateTime", "2024-05-06T07:08:09Z"));
+        print("lexical_integer", encodeLexicalValue("integer", "+00042"));
+        print("lexical_base64", encodeLexicalValue("base64Binary", "AAEC/w=="));
+        print("lexical_hex", encodeLexicalValue("hexBinary", "00ff"));
         print("typed_integer", encodeTypedValue(
                 CodingMode.BIT_PACKED,
                 "integer",

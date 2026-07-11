@@ -21,6 +21,10 @@ namespace http
         ULONG Field = 0;
         ULONG Method = 0;
         ULONG InterfaceMethod = 0;
+        ULONG MethodHandle = 0;
+        ULONG MethodType = 0;
+        ULONG BootstrapMethod = 0;
+        ULONG InvokeDynamic = 0;
     };
 
     class HttpPack200CpBands final
@@ -66,6 +70,18 @@ namespace http
 
         _Must_inspect_result_
         SIZE_T InterfaceMethodCount() const noexcept;
+
+        _Must_inspect_result_
+        SIZE_T MethodHandleCount() const noexcept;
+
+        _Must_inspect_result_
+        SIZE_T MethodTypeCount() const noexcept;
+
+        _Must_inspect_result_
+        SIZE_T BootstrapMethodCount() const noexcept;
+
+        _Must_inspect_result_
+        SIZE_T InvokeDynamicCount() const noexcept;
 
         _Ret_maybenull_
         ULONG* Utf8SuffixLengths() noexcept;
@@ -214,6 +230,24 @@ namespace http
         _Ret_maybenull_
         const ULONG* InterfaceMethodDescriptorIndexes() const noexcept;
 
+        _Ret_maybenull_ ULONG* MethodHandleReferenceKinds() noexcept;
+        _Ret_maybenull_ const ULONG* MethodHandleReferenceKinds() const noexcept;
+        _Ret_maybenull_ ULONG* MethodHandleMemberIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* MethodHandleMemberIndexes() const noexcept;
+        _Ret_maybenull_ ULONG* MethodTypeSignatureIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* MethodTypeSignatureIndexes() const noexcept;
+        _Ret_maybenull_ ULONG* BootstrapMethodReferenceIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* BootstrapMethodReferenceIndexes() const noexcept;
+        _Ret_maybenull_ ULONG* BootstrapMethodArgumentCounts() noexcept;
+        _Ret_maybenull_ const ULONG* BootstrapMethodArgumentCounts() const noexcept;
+        _Ret_maybenull_ ULONG* BootstrapMethodArgumentIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* BootstrapMethodArgumentIndexes() const noexcept;
+        _Must_inspect_result_ NTSTATUS AllocateBootstrapMethodArgumentIndexes(SIZE_T count) noexcept;
+        _Ret_maybenull_ ULONG* InvokeDynamicBootstrapIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* InvokeDynamicBootstrapIndexes() const noexcept;
+        _Ret_maybenull_ ULONG* InvokeDynamicDescriptorIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* InvokeDynamicDescriptorIndexes() const noexcept;
+
     private:
         HeapArray<ULONG> utf8SuffixLengths_ = {};
         HeapArray<ULONG> utf8CharOffsets_ = {};
@@ -240,6 +274,14 @@ namespace http
         HeapArray<ULONG> methodDescriptorIndexes_ = {};
         HeapArray<ULONG> interfaceMethodClassIndexes_ = {};
         HeapArray<ULONG> interfaceMethodDescriptorIndexes_ = {};
+        HeapArray<ULONG> methodHandleReferenceKinds_ = {};
+        HeapArray<ULONG> methodHandleMemberIndexes_ = {};
+        HeapArray<ULONG> methodTypeSignatureIndexes_ = {};
+        HeapArray<ULONG> bootstrapMethodReferenceIndexes_ = {};
+        HeapArray<ULONG> bootstrapMethodArgumentCounts_ = {};
+        HeapArray<ULONG> bootstrapMethodArgumentIndexes_ = {};
+        HeapArray<ULONG> invokeDynamicBootstrapIndexes_ = {};
+        HeapArray<ULONG> invokeDynamicDescriptorIndexes_ = {};
     };
 
     class HttpPack200FileBands final
@@ -314,6 +356,14 @@ namespace http
         _Ret_maybenull_
         const ULONG* SourceFileIndexes() const noexcept;
 
+        _Ret_maybenull_ ULONG* EnclosingMethodClassIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* EnclosingMethodClassIndexes() const noexcept;
+        _Ret_maybenull_ ULONG* EnclosingMethodDescriptorIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* EnclosingMethodDescriptorIndexes() const noexcept;
+
+        _Ret_maybenull_ ULONG* ClassSignatureIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* ClassSignatureIndexes() const noexcept;
+
         _Must_inspect_result_
         NTSTATUS AllocateMemberBands(SIZE_T fieldCount, SIZE_T methodCount) noexcept;
 
@@ -350,6 +400,9 @@ namespace http
         _Ret_maybenull_
         const ULONG* FieldConstantValueIndexes() const noexcept;
 
+        _Ret_maybenull_ ULONG* FieldSignatureIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* FieldSignatureIndexes() const noexcept;
+
         _Ret_maybenull_
         ULONG* MethodDescriptorIndexes() noexcept;
 
@@ -370,6 +423,9 @@ namespace http
 
         _Ret_maybenull_
         const ULONG* MethodExceptionCounts() const noexcept;
+
+        _Ret_maybenull_ ULONG* MethodSignatureIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* MethodSignatureIndexes() const noexcept;
 
         _Must_inspect_result_
         NTSTATUS AllocateMethodExceptionIndexes(SIZE_T count) noexcept;
@@ -438,14 +494,19 @@ namespace http
         HeapArray<ULONG> flagsLow_ = {};
         HeapArray<ULONG> flagsHigh_ = {};
         HeapArray<ULONG> sourceFileIndexes_ = {};
+        HeapArray<ULONG> enclosingMethodClassIndexes_ = {};
+        HeapArray<ULONG> enclosingMethodDescriptorIndexes_ = {};
+        HeapArray<ULONG> classSignatureIndexes_ = {};
         HeapArray<ULONG> fieldDescriptorIndexes_ = {};
         HeapArray<ULONG> fieldFlagsLow_ = {};
         HeapArray<ULONG> fieldFlagsHigh_ = {};
         HeapArray<ULONG> fieldConstantValueIndexes_ = {};
+        HeapArray<ULONG> fieldSignatureIndexes_ = {};
         HeapArray<ULONG> methodDescriptorIndexes_ = {};
         HeapArray<ULONG> methodFlagsLow_ = {};
         HeapArray<ULONG> methodFlagsHigh_ = {};
         HeapArray<ULONG> methodExceptionCounts_ = {};
+        HeapArray<ULONG> methodSignatureIndexes_ = {};
         HeapArray<ULONG> methodExceptionClassIndexes_ = {};
         HeapArray<ULONG> methodCodeIndexes_ = {};
         HeapArray<ULONG> codeMaxStacks_ = {};
@@ -469,9 +530,13 @@ namespace http
         Float,
         Long,
         Double,
+        LoadableValue,
+        MethodHandle,
+        MethodType,
         Field,
         Method,
-        InterfaceMethod
+        InterfaceMethod,
+        InvokeDynamic
     };
 
     struct HttpPack200CodeRelocation final
@@ -573,6 +638,60 @@ namespace http
 
     private:
         HeapArray<ULONG> layoutNameIndexes_ = {};
+    };
+
+    class HttpPack200AttributeDefinitionBands final
+    {
+    public:
+        _Must_inspect_result_
+        NTSTATUS Initialize(SIZE_T definitionCount) noexcept;
+
+        void Reset() noexcept;
+
+        _Ret_maybenull_ ULONG* Headers() noexcept;
+        _Ret_maybenull_ ULONG* NameIndexes() noexcept;
+        _Ret_maybenull_ ULONG* LayoutIndexes() noexcept;
+
+        _Must_inspect_result_
+        SIZE_T Count() const noexcept;
+
+    private:
+        HeapArray<ULONG> headers_ = {};
+        HeapArray<ULONG> nameIndexes_ = {};
+        HeapArray<ULONG> layoutIndexes_ = {};
+    };
+
+    class HttpPack200InnerClassBands final
+    {
+    public:
+        _Must_inspect_result_
+        NTSTATUS Initialize(SIZE_T innerClassCount) noexcept;
+
+        void Reset() noexcept;
+
+        _Ret_maybenull_ ULONG* ThisClassIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* ThisClassIndexes() const noexcept;
+        _Ret_maybenull_ ULONG* Flags() noexcept;
+        _Ret_maybenull_ const ULONG* Flags() const noexcept;
+        _Ret_maybenull_ ULONG* OuterClassIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* OuterClassIndexes() const noexcept;
+        _Ret_maybenull_ ULONG* NameIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* NameIndexes() const noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AllocateExplicitBands(SIZE_T explicitCount) noexcept;
+
+        _Must_inspect_result_
+        SIZE_T Count() const noexcept;
+
+        _Must_inspect_result_
+        SIZE_T ExplicitCount() const noexcept;
+
+    private:
+        HeapArray<ULONG> thisClassIndexes_ = {};
+        HeapArray<ULONG> flags_ = {};
+        HeapArray<ULONG> outerClassIndexes_ = {};
+        HeapArray<ULONG> nameIndexes_ = {};
     };
 }
 }

@@ -111,6 +111,15 @@ namespace http
         _Out_ HttpXmlText* value) noexcept;
 
     _Must_inspect_result_
+    NTSTATUS HttpExiReadRestrictedValueString(
+        _Inout_ HttpExiBitInput* input,
+        _Inout_ HttpExiValueTable* valueTable,
+        ULONG qnameId,
+        _In_reads_(characterCount) const ULONG* characters,
+        SIZE_T characterCount,
+        _Out_ HttpXmlText* value) noexcept;
+
+    _Must_inspect_result_
     NTSTATUS HttpExiReadStringTableReference(
         _Inout_ HttpExiBitInput* input,
         const HttpExiStringTable& valueTable,

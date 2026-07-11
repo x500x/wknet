@@ -22,6 +22,9 @@ namespace http
         USHORT DescriptorIndex = 0;
         USHORT ConstantValueAttributeNameIndex = 0;
         USHORT ConstantValueIndex = 0;
+        USHORT SignatureAttributeNameIndex = 0;
+        USHORT SignatureIndex = 0;
+        USHORT DeprecatedAttributeNameIndex = 0;
         USHORT CodeAttributeNameIndex = 0;
         USHORT MaxStack = 0;
         USHORT MaxLocals = 0;
@@ -32,6 +35,21 @@ namespace http
         USHORT ExceptionsAttributeNameIndex = 0;
         const USHORT* DeclaredExceptionIndexes = nullptr;
         SIZE_T DeclaredExceptionCount = 0;
+    };
+
+    struct HttpPack200InnerClass final
+    {
+        USHORT InnerClassInfoIndex = 0;
+        USHORT OuterClassInfoIndex = 0;
+        USHORT InnerNameIndex = 0;
+        USHORT AccessFlags = 0;
+    };
+
+    struct HttpPack200BootstrapMethod final
+    {
+        USHORT MethodHandleIndex = 0;
+        const USHORT* ArgumentIndexes = nullptr;
+        SIZE_T ArgumentCount = 0;
     };
 
     class HttpPack200ClassWriter final
@@ -79,6 +97,18 @@ namespace http
             _Out_ USHORT* index) noexcept;
 
         _Must_inspect_result_
+        NTSTATUS AddMethodHandle(UCHAR referenceKind, USHORT referenceIndex, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddMethodType(USHORT descriptorIndex, _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS AddInvokeDynamic(
+            USHORT bootstrapMethodIndex,
+            USHORT nameAndTypeIndex,
+            _Out_ USHORT* index) noexcept;
+
+        _Must_inspect_result_
         NTSTATUS FinishHeader(
             USHORT accessFlags,
             USHORT thisClass,
@@ -98,6 +128,18 @@ namespace http
             SIZE_T methodCount,
             USHORT sourceFileAttributeNameIndex,
             USHORT sourceFileIndex,
+            USHORT signatureAttributeNameIndex,
+            USHORT signatureIndex,
+            USHORT deprecatedAttributeNameIndex,
+            USHORT enclosingMethodAttributeNameIndex,
+            USHORT enclosingClassIndex,
+            USHORT enclosingMethodIndex,
+            USHORT bootstrapMethodsAttributeNameIndex,
+            _In_reads_(bootstrapMethodCount) const HttpPack200BootstrapMethod* bootstrapMethods,
+            SIZE_T bootstrapMethodCount,
+            USHORT innerClassesAttributeNameIndex,
+            _In_reads_(innerClassCount) const HttpPack200InnerClass* innerClasses,
+            SIZE_T innerClassCount,
             _Out_ SIZE_T* classLength) noexcept;
 
     private:

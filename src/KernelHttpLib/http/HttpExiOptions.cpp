@@ -1,4 +1,5 @@
 #include "HttpExiOptions.h"
+#include "HttpExiQNameReader.h"
 #include "HttpExiStringTable.h"
 
 namespace KernelHttp
@@ -41,6 +42,7 @@ namespace
         CharactersUnsigned,
         CharactersString,
         AttributeXsiNil,
+        StartElementGeneric,
         EndDocument,
         Unsupported
     };
@@ -90,6 +92,147 @@ namespace
     constexpr OptionProduction Unsupported() noexcept
     {
         return { OptionEvent::Unsupported, OptionElement::None, 0, 0 };
+    }
+
+    constexpr OptionProduction GenericStart(UCHAR childGrammar, UCHAR nextGrammar) noexcept
+    {
+        return { OptionEvent::StartElementGeneric, OptionElement::None, childGrammar, nextGrammar };
+    }
+
+    constexpr HttpXmlText LiteralText(const char* data, SIZE_T length) noexcept
+    {
+        return { data, length };
+    }
+
+    _Must_inspect_result_
+    NTSTATUS AddOptionQName(
+        _Inout_ HttpExiStringTable* localNames,
+        _Inout_ HttpExiQNameTable* qnames,
+        ULONG uriId,
+        const char* name,
+        SIZE_T nameLength) noexcept
+    {
+        ULONG localNameId = 0;
+        NTSTATUS status = localNames->Add(LiteralText(name, nameLength), &localNameId);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        HttpExiQNameEntry entry = {};
+        entry.UriId = uriId;
+        entry.LocalNameId = localNameId;
+        entry.PrefixId = 0xffffffffUL;
+        ULONG ignored = 0;
+        return qnames->Add(entry, &ignored);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS InitializeOptionNameTables(
+        _Inout_ HttpExiStringTable* uris,
+        _Inout_ HttpExiStringTable* localNames,
+        _Inout_ HttpExiStringTable* prefixes,
+        _Inout_ HttpExiQNameTable* qnames) noexcept
+    {
+        if (uris == nullptr || localNames == nullptr || prefixes == nullptr || qnames == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        constexpr char Empty[] = "";
+        constexpr char XmlUri[] = "http://www.w3.org/XML/1998/namespace";
+        constexpr char XsiUri[] = "http://www.w3.org/2001/XMLSchema-instance";
+        constexpr char XsdUri[] = "http://www.w3.org/2001/XMLSchema";
+        constexpr char ExiUri[] = "http://www.w3.org/2009/exi";
+        constexpr const char* XmlNames[] = { "base", "id", "lang", "space" };
+        constexpr const char* XsiNames[] = { "nil", "type" };
+        constexpr const char* XsdNames[] = {
+            "ENTITIES", "ENTITY", "ID", "IDREF", "IDREFS", "NCName",
+            "NMTOKEN", "NMTOKENS", "NOTATION", "Name", "QName",
+            "anySimpleType", "anyType", "anyURI", "base64Binary", "boolean",
+            "byte", "date", "dateTime", "decimal", "double", "duration",
+            "float", "gDay", "gMonth", "gMonthDay", "gYear", "gYearMonth",
+            "hexBinary", "int", "integer", "language", "long", "negativeInteger",
+            "nonNegativeInteger", "nonPositiveInteger", "normalizedString",
+            "positiveInteger", "short", "string", "time", "token", "unsignedByte",
+            "unsignedInt", "unsignedLong", "unsignedShort"
+        };
+        constexpr const char* ExiNames[] = {
+            "alignment", "base64Binary", "blockSize", "boolean", "byte",
+            "comments", "common", "compression", "datatypeRepresentationMap",
+            "date", "dateTime", "decimal", "double", "dtd", "fragment", "gDay",
+            "gMonth", "gMonthDay", "gYear", "gYearMonth", "header", "hexBinary",
+            "ieeeBinary32", "ieeeBinary64", "integer", "lesscommon", "lexicalValues",
+            "pis", "pre-compress", "prefixes", "preserve", "schemaId",
+            "selfContained", "strict", "string", "time", "uncommon",
+            "valueMaxLength", "valuePartitionCapacity"
+        };
+
+        NTSTATUS status = uris->Initialize(8, 256);
+        if (NT_SUCCESS(status)) status = localNames->Initialize(128, 2048);
+        if (NT_SUCCESS(status)) status = prefixes->Initialize(4, 16);
+        if (NT_SUCCESS(status)) status = qnames->Initialize(128);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        const HttpXmlText uriValues[] = {
+            LiteralText(Empty, 0),
+            LiteralText(XmlUri, sizeof(XmlUri) - 1),
+            LiteralText(XsiUri, sizeof(XsiUri) - 1),
+            LiteralText(XsdUri, sizeof(XsdUri) - 1),
+            LiteralText(ExiUri, sizeof(ExiUri) - 1)
+        };
+        for (SIZE_T index = 0; index < sizeof(uriValues) / sizeof(uriValues[0]); ++index) {
+            ULONG uriId = 0;
+            status = uris->Add(uriValues[index], &uriId);
+            if (!NT_SUCCESS(status) || uriId != index) {
+                return NT_SUCCESS(status) ? STATUS_INVALID_NETWORK_RESPONSE : status;
+            }
+        }
+        const HttpXmlText prefixValues[] = {
+            LiteralText(Empty, 0), LiteralText("xml", 3), LiteralText("xsi", 3)
+        };
+        for (SIZE_T index = 0; index < sizeof(prefixValues) / sizeof(prefixValues[0]); ++index) {
+            ULONG prefixId = 0;
+            status = prefixes->Add(prefixValues[index], &prefixId);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            HttpExiQNameEntry association = {};
+            association.UriId = static_cast<ULONG>(index);
+            association.LocalNameId = 0xffffffffUL;
+            association.PrefixId = prefixId;
+            ULONG ignored = 0;
+            status = qnames->Add(association, &ignored);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+        const struct NameGroup final {
+            ULONG UriId;
+            const char* const* Names;
+            SIZE_T Count;
+        } groups[] = {
+            { 1, XmlNames, sizeof(XmlNames) / sizeof(XmlNames[0]) },
+            { 2, XsiNames, sizeof(XsiNames) / sizeof(XsiNames[0]) },
+            { 3, XsdNames, sizeof(XsdNames) / sizeof(XsdNames[0]) },
+            { 4, ExiNames, sizeof(ExiNames) / sizeof(ExiNames[0]) }
+        };
+        for (SIZE_T groupIndex = 0; groupIndex < sizeof(groups) / sizeof(groups[0]); ++groupIndex) {
+            for (SIZE_T nameIndex = 0; nameIndex < groups[groupIndex].Count; ++nameIndex) {
+                const char* name = groups[groupIndex].Names[nameIndex];
+                SIZE_T length = 0;
+                while (name[length] != '\0') {
+                    ++length;
+                }
+                status = AddOptionQName(
+                    localNames,
+                    qnames,
+                    groups[groupIndex].UriId,
+                    name,
+                    length);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+        }
+        return STATUS_SUCCESS;
     }
 
     _Must_inspect_result_
@@ -189,10 +332,16 @@ namespace
             else return false;
             return true;
         case 16:
+            if (code != 0) return false;
+            *production = GenericStart(6, 17);
+            return true;
         case 17:
+            if (code != 0) return false;
+            *production = GenericStart(6, 18);
+            return true;
         case 18:
             if (code != 0) return false;
-            *production = Unsupported();
+            *production = End();
             return true;
         case 20:
             if (code == 0) *production = Start(OptionElement::Preserve, 21, 27);
@@ -399,7 +548,7 @@ namespace
             options->HasSchemaId = true;
             break;
         case OptionElement::DatatypeRepresentationMap:
-            return STATUS_NOT_SUPPORTED;
+            break;
         default:
             break;
         }
@@ -434,6 +583,23 @@ namespace
         if (!NT_SUCCESS(status)) {
             return status;
         }
+        HttpExiStringTable optionUris = {};
+        HttpExiStringTable optionLocalNames = {};
+        HttpExiStringTable optionPrefixes = {};
+        HttpExiQNameTable optionQNames = {};
+        status = InitializeOptionNameTables(
+            &optionUris,
+            &optionLocalNames,
+            &optionPrefixes,
+            &optionQNames);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        HttpExiNameTables optionNames = {};
+        optionNames.Uris = &optionUris;
+        optionNames.LocalNames = &optionLocalNames;
+        optionNames.Prefixes = &optionPrefixes;
+        optionNames.QNames = &optionQNames;
 
         SIZE_T depth = 1;
         stack[0].ContinuationGrammar = 38;
@@ -466,6 +632,31 @@ namespace
                 ++depth;
                 grammar = production.ChildGrammar;
                 currentElement = production.Element;
+                break;
+
+            case OptionEvent::StartElementGeneric:
+                {
+                    if (currentElement != OptionElement::DatatypeRepresentationMap) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    ULONG ignoredQNameId = 0;
+                    HttpXmlName ignoredName = {};
+                    status = HttpExiReadQNameLiteral(
+                        input,
+                        &optionNames,
+                        false,
+                        &ignoredQNameId,
+                        &ignoredName);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                    ULONG endElementCode = 0;
+                    if (!input->ReadBits(2, &endElementCode) ||
+                        (endElementCode != 0 && endElementCode != 2)) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    grammar = production.NextGrammar;
+                }
                 break;
 
             case OptionEvent::EndElement:

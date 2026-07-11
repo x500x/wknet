@@ -620,6 +620,77 @@ namespace
         return valueTable->AddLiteral(qnameId, codePointLength, literal, value);
     }
 
+    NTSTATUS HttpExiReadRestrictedValueString(
+        HttpExiBitInput* input,
+        HttpExiValueTable* valueTable,
+        ULONG qnameId,
+        const ULONG* characters,
+        SIZE_T characterCount,
+        HttpXmlText* value) noexcept
+    {
+        if (input == nullptr || valueTable == nullptr || value == nullptr ||
+            characters == nullptr || characterCount == 0 || characterCount >= 0xffffffffULL) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        *value = {};
+
+        ULONG marker = 0;
+        if (!input->ReadUnsignedInteger(&marker)) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (marker == 0) {
+            return valueTable->ReadLocal(input, qnameId, value);
+        }
+        if (marker == 1) {
+            return valueTable->ReadGlobal(input, value);
+        }
+
+        const ULONG codePointLength = marker - 2;
+        if (codePointLength == 0) {
+            return STATUS_SUCCESS;
+        }
+        const SIZE_T maxSize = static_cast<SIZE_T>(~static_cast<SIZE_T>(0));
+        if (static_cast<SIZE_T>(codePointLength) > maxSize / 4) {
+            return STATUS_INTEGER_OVERFLOW;
+        }
+        UCHAR width = 0;
+        if (!HttpExiBitsForProductionCount(static_cast<ULONG>(characterCount + 1), &width)) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        HeapArray<char> bytes(static_cast<SIZE_T>(codePointLength) * 4);
+        if (!bytes.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        SIZE_T byteLength = 0;
+        for (ULONG index = 0; index < codePointLength; ++index) {
+            ULONG selector = 0;
+            if ((width != 0 && !input->ReadBits(width, &selector)) ||
+                selector > characterCount) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            ULONG codePoint = 0;
+            if (selector == characterCount) {
+                if (!input->ReadUnsignedInteger(&codePoint)) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+            }
+            else {
+                codePoint = characters[selector];
+            }
+            if (!AppendUtf8CodePoint(
+                    codePoint,
+                    bytes.Get(),
+                    static_cast<SIZE_T>(codePointLength) * 4,
+                    &byteLength)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+        }
+        HttpXmlText literal = {};
+        literal.Data = bytes.Get();
+        literal.Length = byteLength;
+        return valueTable->AddLiteral(qnameId, codePointLength, literal, value);
+    }
+
     NTSTATUS HttpExiReadStringTableReference(
         HttpExiBitInput* input,
         const HttpExiStringTable& valueTable,

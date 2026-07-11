@@ -1142,6 +1142,158 @@ namespace
         return HttpExiReadValueString(input, state->ValueTable(), qnameId, value);
     }
 
+    constexpr ULONG BooleanLexicalCharacters[] = {
+        0x09, 0x0a, 0x0d, 0x20, '0', '1', 'a', 'e', 'f', 'l', 'r', 's', 't', 'u'
+    };
+    constexpr ULONG Base64LexicalCharacters[] = {
+        0x09, 0x0a, 0x0d, 0x20, '+', '/',
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '=',
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+        'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+        'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'
+    };
+    constexpr ULONG HexLexicalCharacters[] = {
+        0x09, 0x0a, 0x0d, 0x20,
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'A', 'B', 'C', 'D', 'E', 'F', 'a', 'b', 'c', 'd', 'e', 'f'
+    };
+    constexpr ULONG DateTimeLexicalCharacters[] = {
+        0x09, 0x0a, 0x0d, 0x20, '+', '-', '.',
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', 'T', 'Z'
+    };
+    constexpr ULONG DecimalLexicalCharacters[] = {
+        0x09, 0x0a, 0x0d, 0x20, '+', '-', '.',
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+    };
+    constexpr ULONG FloatLexicalCharacters[] = {
+        0x09, 0x0a, 0x0d, 0x20, '+', '-', '.',
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'E', 'F', 'I', 'N', 'a', 'e'
+    };
+    constexpr ULONG IntegerLexicalCharacters[] = {
+        0x09, 0x0a, 0x0d, 0x20, '+', '-',
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+    };
+
+    _Must_inspect_result_
+    NTSTATUS ReadLexicalEventText(
+        _Inout_ HttpExiBitInput* input,
+        _Inout_ ExiDecodeState* state,
+        ULONG qnameId,
+        HttpExiDatatypeKind datatype,
+        _Out_ HttpXmlText* value) noexcept
+    {
+        if (state == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        const ULONG* characters = nullptr;
+        SIZE_T characterCount = 0;
+        switch (datatype) {
+        case HttpExiDatatypeKind::Boolean:
+            characters = BooleanLexicalCharacters;
+            characterCount = sizeof(BooleanLexicalCharacters) / sizeof(BooleanLexicalCharacters[0]);
+            break;
+        case HttpExiDatatypeKind::Base64Binary:
+            characters = Base64LexicalCharacters;
+            characterCount = sizeof(Base64LexicalCharacters) / sizeof(Base64LexicalCharacters[0]);
+            break;
+        case HttpExiDatatypeKind::HexBinary:
+            characters = HexLexicalCharacters;
+            characterCount = sizeof(HexLexicalCharacters) / sizeof(HexLexicalCharacters[0]);
+            break;
+        case HttpExiDatatypeKind::GYear:
+        case HttpExiDatatypeKind::GYearMonth:
+        case HttpExiDatatypeKind::Date:
+        case HttpExiDatatypeKind::DateTime:
+        case HttpExiDatatypeKind::GMonth:
+        case HttpExiDatatypeKind::GMonthDay:
+        case HttpExiDatatypeKind::GDay:
+        case HttpExiDatatypeKind::Time:
+            characters = DateTimeLexicalCharacters;
+            characterCount = sizeof(DateTimeLexicalCharacters) / sizeof(DateTimeLexicalCharacters[0]);
+            break;
+        case HttpExiDatatypeKind::Decimal:
+            characters = DecimalLexicalCharacters;
+            characterCount = sizeof(DecimalLexicalCharacters) / sizeof(DecimalLexicalCharacters[0]);
+            break;
+        case HttpExiDatatypeKind::Float:
+            characters = FloatLexicalCharacters;
+            characterCount = sizeof(FloatLexicalCharacters) / sizeof(FloatLexicalCharacters[0]);
+            break;
+        case HttpExiDatatypeKind::Integer:
+        case HttpExiDatatypeKind::Byte:
+        case HttpExiDatatypeKind::Short:
+        case HttpExiDatatypeKind::Int:
+        case HttpExiDatatypeKind::Long:
+        case HttpExiDatatypeKind::UnsignedByte:
+        case HttpExiDatatypeKind::UnsignedShort:
+        case HttpExiDatatypeKind::UnsignedInt:
+        case HttpExiDatatypeKind::UnsignedLong:
+        case HttpExiDatatypeKind::NonNegativeInteger:
+        case HttpExiDatatypeKind::PositiveInteger:
+            characters = IntegerLexicalCharacters;
+            characterCount = sizeof(IntegerLexicalCharacters) / sizeof(IntegerLexicalCharacters[0]);
+            break;
+        case HttpExiDatatypeKind::String:
+        case HttpExiDatatypeKind::None:
+        default:
+            return ReadEventText(input, state, qnameId, value);
+        }
+        return HttpExiReadRestrictedValueString(
+            input,
+            state->ValueTable(),
+            qnameId,
+            characters,
+            characterCount,
+            value);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS ResolveLexicalQName(
+        const HttpExiNameTables& tables,
+        HttpXmlText lexical,
+        _Out_ HttpXmlName* name) noexcept
+    {
+        if (tables.Uris == nullptr || tables.Prefixes == nullptr || tables.QNames == nullptr ||
+            name == nullptr || lexical.Data == nullptr || lexical.Length == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        *name = {};
+        SIZE_T colon = lexical.Length;
+        for (SIZE_T index = 0; index < lexical.Length; ++index) {
+            if (lexical.Data[index] == ':') {
+                if (colon != lexical.Length || index == 0 || index + 1 == lexical.Length) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                colon = index;
+            }
+        }
+        name->LocalName.Data = lexical.Data + (colon == lexical.Length ? 0 : colon + 1);
+        name->LocalName.Length = lexical.Length - (colon == lexical.Length ? 0 : colon + 1);
+        if (colon == lexical.Length) {
+            return tables.Uris->Get(0, &name->Uri) ? STATUS_SUCCESS : STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        name->Prefix.Data = lexical.Data;
+        name->Prefix.Length = colon;
+        ULONG prefixId = 0;
+        if (!tables.Prefixes->Find(name->Prefix, &prefixId)) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        bool found = false;
+        ULONG uriId = 0;
+        for (SIZE_T index = 0; index < tables.QNames->Count(); ++index) {
+            HttpExiQNameEntry entry = {};
+            if (tables.QNames->Get(static_cast<ULONG>(index), &entry) &&
+                entry.LocalNameId == 0xffffffffUL && entry.PrefixId == prefixId) {
+                uriId = entry.UriId;
+                found = true;
+            }
+        }
+        return found && tables.Uris->Get(uriId, &name->Uri) ?
+            STATUS_SUCCESS : STATUS_INVALID_NETWORK_RESPONSE;
+    }
+
     _Must_inspect_result_
     NTSTATUS ReadStructureText(
         _Inout_ HttpExiBitInput* input,
@@ -1843,6 +1995,15 @@ namespace
                         if (NT_SUCCESS(status)) {
                             status = sink->Attribute(name, value);
                         }
+                        if (NT_SUCCESS(status) && IsXsiTypeName(name) &&
+                            options.PreserveLexicalValues && options.BuiltInSchemaTypesOnly) {
+                            HttpXmlName typeName = {};
+                            const HttpExiNameTables tables = state->NameTables();
+                            status = ResolveLexicalQName(tables, value, &typeName);
+                            if (NT_SUCCESS(status)) {
+                                selectedDatatype = BuiltInDatatypeForQName(typeName);
+                            }
+                        }
                     }
                     if (!NT_SUCCESS(status)) {
                         return status;
@@ -1900,13 +2061,20 @@ namespace
                         return STATUS_INVALID_NETWORK_RESPONSE;
                     }
                     HeapArray<char> typedStorage = {};
-                    if (currentGrammar == HttpExiGrammarKind::SchemaSimpleTypeContent &&
-                        !options.PreserveLexicalValues) {
+                    if (currentGrammar == HttpExiGrammarKind::SchemaSimpleTypeContent) {
                         HttpExiDatatypeKind datatype = HttpExiDatatypeKind::None;
                         if (!state->CurrentDatatype(&datatype)) {
                             return STATUS_INVALID_NETWORK_RESPONSE;
                         }
-                        if (datatype == HttpExiDatatypeKind::String) {
+                        if (options.PreserveLexicalValues) {
+                            status = ReadLexicalEventText(
+                                input,
+                                state,
+                                elementQNameIds[elementDepth - 1],
+                                datatype,
+                                &value);
+                        }
+                        else if (datatype == HttpExiDatatypeKind::String) {
                             status = ReadEventText(
                                 input,
                                 state,
