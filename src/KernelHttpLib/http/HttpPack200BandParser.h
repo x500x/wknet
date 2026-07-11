@@ -3,6 +3,7 @@
 #include <KernelHttp/http/HttpTypes.h>
 #include "HttpPack200Bands.h"
 #include "HttpPack200Codec.h"
+#include "HttpPack200AttributeLayout.h"
 
 namespace KernelHttp
 {
@@ -45,7 +46,10 @@ namespace http
         bool haveMethodFlagsHigh,
         bool allCodeHasFlags,
         bool haveCodeFlagsHigh,
-        _Inout_ HttpPack200ClassBands* bands) noexcept;
+        _Inout_ HttpPack200ClassBands* bands,
+        _In_opt_ const HttpPack200CpBands* cpBands = nullptr,
+        _In_opt_ const HttpPack200AttributeDefinitionBands* attributeDefinitions = nullptr,
+        _Inout_opt_ HttpPack200CustomAttributeStore* customAttributes = nullptr) noexcept;
 
     _Must_inspect_result_
     NTSTATUS HttpPack200ReadCodeBands(

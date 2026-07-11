@@ -1389,7 +1389,9 @@ namespace
         if (!NT_SUCCESS(status)) return status;
         status = AllocateUlongBand(&nameIndexes_, definitionCount);
         if (!NT_SUCCESS(status)) return status;
-        return AllocateUlongBand(&layoutIndexes_, definitionCount);
+        status = AllocateUlongBand(&layoutIndexes_, definitionCount);
+        if (!NT_SUCCESS(status)) return status;
+        return AllocateUlongBand(&indexes_, definitionCount);
     }
 
     void HttpPack200AttributeDefinitionBands::Reset() noexcept
@@ -1397,12 +1399,55 @@ namespace
         headers_.Reset();
         nameIndexes_.Reset();
         layoutIndexes_.Reset();
+        indexes_.Reset();
     }
 
     ULONG* HttpPack200AttributeDefinitionBands::Headers() noexcept { return headers_.Get(); }
+    const ULONG* HttpPack200AttributeDefinitionBands::Headers() const noexcept { return headers_.Get(); }
     ULONG* HttpPack200AttributeDefinitionBands::NameIndexes() noexcept { return nameIndexes_.Get(); }
+    const ULONG* HttpPack200AttributeDefinitionBands::NameIndexes() const noexcept { return nameIndexes_.Get(); }
     ULONG* HttpPack200AttributeDefinitionBands::LayoutIndexes() noexcept { return layoutIndexes_.Get(); }
+    const ULONG* HttpPack200AttributeDefinitionBands::LayoutIndexes() const noexcept { return layoutIndexes_.Get(); }
+    ULONG* HttpPack200AttributeDefinitionBands::Indexes() noexcept { return indexes_.Get(); }
+    const ULONG* HttpPack200AttributeDefinitionBands::Indexes() const noexcept { return indexes_.Get(); }
     SIZE_T HttpPack200AttributeDefinitionBands::Count() const noexcept { return headers_.Count(); }
+
+    NTSTATUS HttpPack200AttributeDefinitionBands::ResolveIndexes(bool haveClassFlagsHigh) noexcept
+    {
+        ULONG overflowIndex = haveClassFlagsHigh ? 63UL : 32UL;
+        for (SIZE_T definitionIndex = 0; definitionIndex < Count(); ++definitionIndex) {
+            const ULONG encodedIndex = Headers()[definitionIndex] >> 2;
+            if (encodedIndex == 0) {
+                if (overflowIndex == 0xffffffffUL) return STATUS_INTEGER_OVERFLOW;
+                Indexes()[definitionIndex] = overflowIndex++;
+            }
+            else {
+                Indexes()[definitionIndex] = encodedIndex - 1;
+            }
+            for (SIZE_T prior = 0; prior < definitionIndex; ++prior) {
+                if ((Headers()[prior] & 0x03UL) == (Headers()[definitionIndex] & 0x03UL) &&
+                    Indexes()[prior] == Indexes()[definitionIndex]) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+            }
+        }
+        return STATUS_SUCCESS;
+    }
+
+    bool HttpPack200AttributeDefinitionBands::Find(
+        SIZE_T context,
+        SIZE_T index,
+        SIZE_T* definitionIndex) const noexcept
+    {
+        if (definitionIndex == nullptr || context > 3) return false;
+        for (SIZE_T candidate = 0; candidate < Count(); ++candidate) {
+            if ((Headers()[candidate] & 0x03UL) == context && Indexes()[candidate] == index) {
+                *definitionIndex = candidate;
+                return true;
+            }
+        }
+        return false;
+    }
 
     NTSTATUS HttpPack200InnerClassBands::Initialize(SIZE_T innerClassCount) noexcept
     {

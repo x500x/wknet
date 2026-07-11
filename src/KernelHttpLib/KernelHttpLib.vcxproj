@@ -65,6 +65,7 @@
     <ClCompile Include="http\HttpExiStringTable.cpp" />
     <ClCompile Include="http\HttpExiValueDecoder.cpp" />
     <ClCompile Include="http\HttpPack200BandCodec.cpp" />
+    <ClCompile Include="http\HttpPack200AttributeLayout.cpp" />
     <ClCompile Include="http\HttpPack200BandParser.cpp" />
     <ClCompile Include="http\HttpPack200Bands.cpp" />
     <ClCompile Include="http\HttpPack200ClassWriter.cpp" />
@@ -197,6 +198,7 @@
     <ClInclude Include="http\HttpExiStringTable.h" />
     <ClInclude Include="http\HttpExiValueDecoder.h" />
     <ClInclude Include="http\HttpPack200BandCodec.h" />
+    <ClInclude Include="http\HttpPack200AttributeLayout.h" />
     <ClInclude Include="http\HttpPack200BandParser.h" />
     <ClInclude Include="http\HttpPack200Bands.h" />
     <ClInclude Include="http\HttpPack200ClassWriter.h" />

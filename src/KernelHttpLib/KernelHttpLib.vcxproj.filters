@@ -170,6 +170,9 @@
     <ClCompile Include="http\HttpPack200BandCodec.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
+    <ClCompile Include="http\HttpPack200AttributeLayout.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
     <ClCompile Include="http\HttpPack200BandParser.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
@@ -482,6 +485,9 @@
       <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="http\HttpPack200BandCodec.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200AttributeLayout.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="http\HttpPack200BandParser.h">

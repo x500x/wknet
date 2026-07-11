@@ -768,8 +768,19 @@ namespace http
         void Reset() noexcept;
 
         _Ret_maybenull_ ULONG* Headers() noexcept;
+        _Ret_maybenull_ const ULONG* Headers() const noexcept;
         _Ret_maybenull_ ULONG* NameIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* NameIndexes() const noexcept;
         _Ret_maybenull_ ULONG* LayoutIndexes() noexcept;
+        _Ret_maybenull_ const ULONG* LayoutIndexes() const noexcept;
+        _Ret_maybenull_ ULONG* Indexes() noexcept;
+        _Ret_maybenull_ const ULONG* Indexes() const noexcept;
+
+        _Must_inspect_result_
+        NTSTATUS ResolveIndexes(bool haveClassFlagsHigh) noexcept;
+
+        _Must_inspect_result_
+        bool Find(SIZE_T context, SIZE_T index, _Out_ SIZE_T* definitionIndex) const noexcept;
 
         _Must_inspect_result_
         SIZE_T Count() const noexcept;
@@ -778,6 +789,7 @@ namespace http
         HeapArray<ULONG> headers_ = {};
         HeapArray<ULONG> nameIndexes_ = {};
         HeapArray<ULONG> layoutIndexes_ = {};
+        HeapArray<ULONG> indexes_ = {};
     };
 
     class HttpPack200InnerClassBands final

@@ -133,6 +133,10 @@ namespace
             previousValue_ = static_cast<LONG>(signedValue);
         }
 
+        if (coding.S == 0 && coding.D == 0) {
+            *value = static_cast<LONG>(static_cast<ULONG>(decodedValue));
+            return true;
+        }
         if (signedValue < static_cast<LONGLONG>(-2147483647L) - 1 ||
             signedValue > static_cast<LONGLONG>(2147483647L)) {
             return false;
