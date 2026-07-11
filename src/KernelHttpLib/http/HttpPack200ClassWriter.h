@@ -15,6 +15,28 @@ namespace http
         USHORT CatchTypeIndex = 0;
     };
 
+    struct HttpPack200LineNumber final
+    {
+        USHORT StartPc = 0;
+        USHORT LineNumber = 0;
+    };
+
+    struct HttpPack200LocalVariable final
+    {
+        USHORT StartPc = 0;
+        USHORT Length = 0;
+        USHORT NameIndex = 0;
+        USHORT TypeIndex = 0;
+        USHORT Slot = 0;
+    };
+
+    struct HttpPack200RawAttribute final
+    {
+        USHORT NameIndex = 0;
+        const UCHAR* Data = nullptr;
+        SIZE_T Length = 0;
+    };
+
     struct HttpPack200ClassMember final
     {
         USHORT AccessFlags = 0;
@@ -32,9 +54,22 @@ namespace http
         SIZE_T CodeLength = 0;
         const HttpPack200ExceptionHandler* ExceptionHandlers = nullptr;
         SIZE_T ExceptionHandlerCount = 0;
+        USHORT LineNumberTableAttributeNameIndex = 0;
+        const HttpPack200LineNumber* LineNumbers = nullptr;
+        SIZE_T LineNumberCount = 0;
+        USHORT LocalVariableTableAttributeNameIndex = 0;
+        const HttpPack200LocalVariable* LocalVariables = nullptr;
+        SIZE_T LocalVariableCount = 0;
+        USHORT LocalVariableTypeTableAttributeNameIndex = 0;
+        const HttpPack200LocalVariable* LocalVariableTypes = nullptr;
+        SIZE_T LocalVariableTypeCount = 0;
         USHORT ExceptionsAttributeNameIndex = 0;
         const USHORT* DeclaredExceptionIndexes = nullptr;
         SIZE_T DeclaredExceptionCount = 0;
+        const HttpPack200RawAttribute* Attributes = nullptr;
+        SIZE_T AttributeCount = 0;
+        const HttpPack200RawAttribute* CodeAttributes = nullptr;
+        SIZE_T CodeAttributeCount = 0;
     };
 
     struct HttpPack200InnerClass final
@@ -140,6 +175,8 @@ namespace http
             USHORT innerClassesAttributeNameIndex,
             _In_reads_(innerClassCount) const HttpPack200InnerClass* innerClasses,
             SIZE_T innerClassCount,
+            _In_reads_opt_(classAttributeCount) const HttpPack200RawAttribute* classAttributes,
+            SIZE_T classAttributeCount,
             _Out_ SIZE_T* classLength) noexcept;
 
     private:

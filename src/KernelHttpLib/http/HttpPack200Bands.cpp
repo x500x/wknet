@@ -628,7 +628,15 @@ namespace
         if (!NT_SUCCESS(status)) {
             return status;
         }
-        return AllocateUlongBand(&classSignatureIndexes_, classCount);
+        status = AllocateUlongBand(&classSignatureIndexes_, classCount);
+        if (!NT_SUCCESS(status)) return status;
+        status = AllocateUlongBand(&classMinorVersions_, classCount);
+        if (!NT_SUCCESS(status)) return status;
+        status = AllocateUlongBand(&classMajorVersions_, classCount);
+        if (!NT_SUCCESS(status)) return status;
+        status = AllocateUlongBand(&localInnerClassCounts_, classCount);
+        if (!NT_SUCCESS(status)) return status;
+        return AllocateUlongBand(&localInnerClassOffsets_, classCount);
     }
 
     void HttpPack200ClassBands::Reset() noexcept
@@ -645,6 +653,14 @@ namespace
         enclosingMethodClassIndexes_.Reset();
         enclosingMethodDescriptorIndexes_.Reset();
         classSignatureIndexes_.Reset();
+        classMinorVersions_.Reset();
+        classMajorVersions_.Reset();
+        localInnerClassCounts_.Reset();
+        localInnerClassOffsets_.Reset();
+        localInnerClassIndexes_.Reset();
+        localInnerClassFlags_.Reset();
+        localInnerClassOuterIndexes_.Reset();
+        localInnerClassNameIndexes_.Reset();
         fieldDescriptorIndexes_.Reset();
         fieldFlagsLow_.Reset();
         fieldFlagsHigh_.Reset();
@@ -660,6 +676,35 @@ namespace
         codeMaxStacks_.Reset();
         codeMaxNonArgumentLocals_.Reset();
         codeHandlerCounts_.Reset();
+        codeFlagsLow_.Reset();
+        codeFlagsHigh_.Reset();
+        lineNumberCounts_.Reset();
+        lineNumberOffsets_.Reset();
+        lineNumberBcis_.Reset();
+        lineNumbers_.Reset();
+        localVariableCounts_.Reset();
+        localVariableOffsets_.Reset();
+        localVariableBcis_.Reset();
+        localVariableSpans_.Reset();
+        localVariableNameIndexes_.Reset();
+        localVariableTypeIndexes_.Reset();
+        localVariableSlots_.Reset();
+        localVariableTypeCounts_.Reset();
+        localVariableTypeOffsets_.Reset();
+        localVariableTypeBcis_.Reset();
+        localVariableTypeSpans_.Reset();
+        localVariableTypeNameIndexes_.Reset();
+        localVariableTypeSignatureIndexes_.Reset();
+        localVariableTypeSlots_.Reset();
+        classVisibleAnnotations_.Reset();
+        classInvisibleAnnotations_.Reset();
+        fieldVisibleAnnotations_.Reset();
+        fieldInvisibleAnnotations_.Reset();
+        methodVisibleAnnotations_.Reset();
+        methodInvisibleAnnotations_.Reset();
+        methodVisibleParameterAnnotations_.Reset();
+        methodInvisibleParameterAnnotations_.Reset();
+        methodAnnotationDefaults_.Reset();
         handlerStartIndexes_.Reset();
         handlerEndOffsets_.Reset();
         handlerCatchOffsets_.Reset();
@@ -743,6 +788,26 @@ namespace
 
     ULONG* HttpPack200ClassBands::ClassSignatureIndexes() noexcept { return classSignatureIndexes_.Get(); }
     const ULONG* HttpPack200ClassBands::ClassSignatureIndexes() const noexcept { return classSignatureIndexes_.Get(); }
+    ULONG* HttpPack200ClassBands::ClassMinorVersions() noexcept { return classMinorVersions_.Get(); }
+    const ULONG* HttpPack200ClassBands::ClassMinorVersions() const noexcept { return classMinorVersions_.Get(); }
+    ULONG* HttpPack200ClassBands::ClassMajorVersions() noexcept { return classMajorVersions_.Get(); }
+    const ULONG* HttpPack200ClassBands::ClassMajorVersions() const noexcept { return classMajorVersions_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalInnerClassCounts() noexcept { return localInnerClassCounts_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalInnerClassOffsets() noexcept { return localInnerClassOffsets_.Get(); }
+    NTSTATUS HttpPack200ClassBands::AllocateLocalInnerClasses(SIZE_T count) noexcept
+    {
+        localInnerClassIndexes_.Reset(); localInnerClassFlags_.Reset();
+        localInnerClassOuterIndexes_.Reset(); localInnerClassNameIndexes_.Reset();
+        NTSTATUS status = AllocateUlongBand(&localInnerClassIndexes_, count);
+        if (NT_SUCCESS(status)) status = AllocateUlongBand(&localInnerClassFlags_, count);
+        if (NT_SUCCESS(status)) status = AllocateUlongBand(&localInnerClassOuterIndexes_, count);
+        if (NT_SUCCESS(status)) status = AllocateUlongBand(&localInnerClassNameIndexes_, count);
+        return status;
+    }
+    ULONG* HttpPack200ClassBands::LocalInnerClassIndexes() noexcept { return localInnerClassIndexes_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalInnerClassFlags() noexcept { return localInnerClassFlags_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalInnerClassOuterIndexes() noexcept { return localInnerClassOuterIndexes_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalInnerClassNameIndexes() noexcept { return localInnerClassNameIndexes_.Get(); }
 
     NTSTATUS HttpPack200ClassBands::AllocateMemberBands(
         SIZE_T fieldCount,
@@ -925,6 +990,14 @@ namespace
         codeMaxStacks_.Reset();
         codeMaxNonArgumentLocals_.Reset();
         codeHandlerCounts_.Reset();
+        codeFlagsLow_.Reset();
+        codeFlagsHigh_.Reset();
+        lineNumberCounts_.Reset();
+        lineNumberOffsets_.Reset();
+        localVariableCounts_.Reset();
+        localVariableOffsets_.Reset();
+        localVariableTypeCounts_.Reset();
+        localVariableTypeOffsets_.Reset();
         NTSTATUS status = AllocateUlongBand(&codeMaxStacks_, codeCount);
         if (!NT_SUCCESS(status)) {
             return status;
@@ -933,7 +1006,39 @@ namespace
         if (!NT_SUCCESS(status)) {
             return status;
         }
-        return AllocateUlongBand(&codeHandlerCounts_, codeCount);
+        status = AllocateUlongBand(&codeHandlerCounts_, codeCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = AllocateUlongBand(&codeFlagsLow_, codeCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = AllocateUlongBand(&codeFlagsHigh_, codeCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = AllocateUlongBand(&lineNumberCounts_, codeCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = AllocateUlongBand(&lineNumberOffsets_, codeCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = AllocateUlongBand(&localVariableCounts_, codeCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = AllocateUlongBand(&localVariableOffsets_, codeCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = AllocateUlongBand(&localVariableTypeCounts_, codeCount);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        return AllocateUlongBand(&localVariableTypeOffsets_, codeCount);
     }
 
     ULONG* HttpPack200ClassBands::MethodCodeIndexes() noexcept
@@ -970,6 +1075,76 @@ namespace
     {
         return codeHandlerCounts_.Get();
     }
+
+    ULONG* HttpPack200ClassBands::CodeFlagsLow() noexcept { return codeFlagsLow_.Get(); }
+    const ULONG* HttpPack200ClassBands::CodeFlagsLow() const noexcept { return codeFlagsLow_.Get(); }
+    ULONG* HttpPack200ClassBands::CodeFlagsHigh() noexcept { return codeFlagsHigh_.Get(); }
+
+    ULONG* HttpPack200ClassBands::LineNumberCounts() noexcept { return lineNumberCounts_.Get(); }
+    ULONG* HttpPack200ClassBands::LineNumberOffsets() noexcept { return lineNumberOffsets_.Get(); }
+    NTSTATUS HttpPack200ClassBands::AllocateLineNumbers(SIZE_T count) noexcept
+    {
+        lineNumberBcis_.Reset();
+        lineNumbers_.Reset();
+        NTSTATUS status = AllocateUlongBand(&lineNumberBcis_, count);
+        return NT_SUCCESS(status) ? AllocateUlongBand(&lineNumbers_, count) : status;
+    }
+    ULONG* HttpPack200ClassBands::LineNumberBcis() noexcept { return lineNumberBcis_.Get(); }
+    ULONG* HttpPack200ClassBands::LineNumbers() noexcept { return lineNumbers_.Get(); }
+
+    ULONG* HttpPack200ClassBands::LocalVariableCounts() noexcept { return localVariableCounts_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalVariableOffsets() noexcept { return localVariableOffsets_.Get(); }
+    NTSTATUS HttpPack200ClassBands::AllocateLocalVariables(SIZE_T count) noexcept
+    {
+        localVariableBcis_.Reset();
+        localVariableSpans_.Reset();
+        localVariableNameIndexes_.Reset();
+        localVariableTypeIndexes_.Reset();
+        localVariableSlots_.Reset();
+        NTSTATUS status = AllocateUlongBand(&localVariableBcis_, count);
+        if (NT_SUCCESS(status) && count != 0) status = localVariableSpans_.Allocate(count);
+        if (NT_SUCCESS(status)) status = AllocateUlongBand(&localVariableNameIndexes_, count);
+        if (NT_SUCCESS(status)) status = AllocateUlongBand(&localVariableTypeIndexes_, count);
+        if (NT_SUCCESS(status)) status = AllocateUlongBand(&localVariableSlots_, count);
+        return status;
+    }
+    ULONG* HttpPack200ClassBands::LocalVariableBcis() noexcept { return localVariableBcis_.Get(); }
+    LONG* HttpPack200ClassBands::LocalVariableSpans() noexcept { return localVariableSpans_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalVariableNameIndexes() noexcept { return localVariableNameIndexes_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalVariableTypeIndexes() noexcept { return localVariableTypeIndexes_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalVariableSlots() noexcept { return localVariableSlots_.Get(); }
+
+    ULONG* HttpPack200ClassBands::LocalVariableTypeCounts() noexcept { return localVariableTypeCounts_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalVariableTypeOffsets() noexcept { return localVariableTypeOffsets_.Get(); }
+    NTSTATUS HttpPack200ClassBands::AllocateLocalVariableTypes(SIZE_T count) noexcept
+    {
+        localVariableTypeBcis_.Reset();
+        localVariableTypeSpans_.Reset();
+        localVariableTypeNameIndexes_.Reset();
+        localVariableTypeSignatureIndexes_.Reset();
+        localVariableTypeSlots_.Reset();
+        NTSTATUS status = AllocateUlongBand(&localVariableTypeBcis_, count);
+        if (NT_SUCCESS(status) && count != 0) status = localVariableTypeSpans_.Allocate(count);
+        if (NT_SUCCESS(status)) status = AllocateUlongBand(&localVariableTypeNameIndexes_, count);
+        if (NT_SUCCESS(status)) status = AllocateUlongBand(&localVariableTypeSignatureIndexes_, count);
+        if (NT_SUCCESS(status)) status = AllocateUlongBand(&localVariableTypeSlots_, count);
+        return status;
+    }
+    ULONG* HttpPack200ClassBands::LocalVariableTypeBcis() noexcept { return localVariableTypeBcis_.Get(); }
+    LONG* HttpPack200ClassBands::LocalVariableTypeSpans() noexcept { return localVariableTypeSpans_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalVariableTypeNameIndexes() noexcept { return localVariableTypeNameIndexes_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalVariableTypeSignatureIndexes() noexcept { return localVariableTypeSignatureIndexes_.Get(); }
+    ULONG* HttpPack200ClassBands::LocalVariableTypeSlots() noexcept { return localVariableTypeSlots_.Get(); }
+
+    HttpPack200MetadataBands* HttpPack200ClassBands::ClassVisibleAnnotations() noexcept { return &classVisibleAnnotations_; }
+    HttpPack200MetadataBands* HttpPack200ClassBands::ClassInvisibleAnnotations() noexcept { return &classInvisibleAnnotations_; }
+    HttpPack200MetadataBands* HttpPack200ClassBands::FieldVisibleAnnotations() noexcept { return &fieldVisibleAnnotations_; }
+    HttpPack200MetadataBands* HttpPack200ClassBands::FieldInvisibleAnnotations() noexcept { return &fieldInvisibleAnnotations_; }
+    HttpPack200MetadataBands* HttpPack200ClassBands::MethodVisibleAnnotations() noexcept { return &methodVisibleAnnotations_; }
+    HttpPack200MetadataBands* HttpPack200ClassBands::MethodInvisibleAnnotations() noexcept { return &methodInvisibleAnnotations_; }
+    HttpPack200MetadataBands* HttpPack200ClassBands::MethodVisibleParameterAnnotations() noexcept { return &methodVisibleParameterAnnotations_; }
+    HttpPack200MetadataBands* HttpPack200ClassBands::MethodInvisibleParameterAnnotations() noexcept { return &methodInvisibleParameterAnnotations_; }
+    HttpPack200MetadataBands* HttpPack200ClassBands::MethodAnnotationDefaults() noexcept { return &methodAnnotationDefaults_; }
 
     SIZE_T HttpPack200ClassBands::CodeCount() const noexcept
     {

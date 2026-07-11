@@ -271,6 +271,107 @@ public final class GeneratePack200Fixtures {
         return output.toByteArray();
     }
 
+    private static byte[] createDebugCodeJar() throws Exception {
+        ClassWriter classWriter = new ClassWriter(0);
+        classWriter.visit(
+                Opcodes.V1_5,
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER,
+                "sample/DebugInfo",
+                "<T:Ljava/lang/Object;>Ljava/lang/Object;",
+                "java/lang/Object",
+                null);
+        org.objectweb.asm.MethodVisitor method = classWriter.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "echo",
+                "(Ljava/lang/Object;)Ljava/lang/Object;",
+                "(TT;)TT;",
+                null);
+        Label start = new Label();
+        Label end = new Label();
+        method.visitCode();
+        method.visitLabel(start);
+        method.visitLineNumber(42, start);
+        method.visitVarInsn(Opcodes.ALOAD, 0);
+        method.visitInsn(Opcodes.ARETURN);
+        method.visitLabel(end);
+        method.visitLocalVariable("value", "Ljava/lang/Object;", "TT;", start, end, 0);
+        method.visitMaxs(1, 1);
+        method.visitEnd();
+        classWriter.visitEnd();
+        byte[] classBytes = classWriter.toByteArray();
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (JarOutputStream jar = new JarOutputStream(output)) {
+            JarEntry entry = new JarEntry("sample/DebugInfo.class");
+            entry.setTime(315532800000L);
+            CRC32 crc = new CRC32();
+            crc.update(classBytes);
+            entry.setMethod(ZipEntry.STORED);
+            entry.setSize(classBytes.length);
+            entry.setCompressedSize(classBytes.length);
+            entry.setCrc(crc.getValue());
+            jar.putNextEntry(entry);
+            jar.write(classBytes);
+            jar.closeEntry();
+        }
+        return output.toByteArray();
+    }
+
+    private static byte[] createAnnotationJar() throws Exception {
+        ClassWriter classWriter = new ClassWriter(0);
+        classWriter.visit(
+                Opcodes.V1_5,
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER,
+                "sample/Annotated",
+                null,
+                "java/lang/Object",
+                null);
+        org.objectweb.asm.AnnotationVisitor annotation =
+                classWriter.visitAnnotation("Lsample/Marker;", true);
+        annotation.visit("value", "class");
+        annotation.visitEnd();
+        org.objectweb.asm.FieldVisitor field = classWriter.visitField(
+                Opcodes.ACC_PUBLIC, "field", "I", null, null);
+        annotation = field.visitAnnotation("Lsample/Marker;", true);
+        annotation.visit("value", "field");
+        annotation.visitEnd();
+        field.visitEnd();
+        org.objectweb.asm.MethodVisitor method = classWriter.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "method",
+                "(I)V",
+                null,
+                null);
+        annotation = method.visitAnnotation("Lsample/Marker;", true);
+        annotation.visit("value", "method");
+        annotation.visitEnd();
+        annotation = method.visitParameterAnnotation(0, "Lsample/Marker;", true);
+        annotation.visit("value", "parameter");
+        annotation.visitEnd();
+        method.visitCode();
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 1);
+        method.visitEnd();
+        classWriter.visitEnd();
+        byte[] classBytes = classWriter.toByteArray();
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (JarOutputStream jar = new JarOutputStream(output)) {
+            JarEntry entry = new JarEntry("sample/Annotated.class");
+            entry.setTime(315532800000L);
+            CRC32 crc = new CRC32();
+            crc.update(classBytes);
+            entry.setMethod(ZipEntry.STORED);
+            entry.setSize(classBytes.length);
+            entry.setCompressedSize(classBytes.length);
+            entry.setCrc(crc.getValue());
+            jar.putNextEntry(entry);
+            jar.write(classBytes);
+            jar.closeEntry();
+        }
+        return output.toByteArray();
+    }
+
     private static byte[] createBranchCodeJar() throws Exception {
         ClassWriter classWriter = new ClassWriter(0);
         classWriter.visit(
@@ -773,6 +874,10 @@ public final class GeneratePack200Fixtures {
         byte[] memberOnlyPacked = pack(memberOnlyJar);
         byte[] simpleCodeJar = createSimpleCodeJar();
         byte[] simpleCodePacked = pack(simpleCodeJar);
+        byte[] debugCodeJar = createDebugCodeJar();
+        byte[] debugCodePacked = pack(debugCodeJar);
+        byte[] annotationJar = createAnnotationJar();
+        byte[] annotationPacked = pack(annotationJar);
         byte[] branchCodeJar = createBranchCodeJar();
         byte[] branchCodePacked = pack(branchCodeJar);
         byte[] tableSwitchJar = createTableSwitchJar();
@@ -816,6 +921,12 @@ public final class GeneratePack200Fixtures {
         print("simple_code_jar", simpleCodeJar);
         print("simple_code_pack", simpleCodePacked);
         print("simple_code_pack_gzip", gzip(simpleCodePacked));
+        print("debug_code_jar", debugCodeJar);
+        print("debug_code_pack", debugCodePacked);
+        print("debug_code_pack_gzip", gzip(debugCodePacked));
+        print("annotation_jar", annotationJar);
+        print("annotation_pack", annotationPacked);
+        print("annotation_pack_gzip", gzip(annotationPacked));
         print("branch_code_jar", branchCodeJar);
         print("branch_code_pack", branchCodePacked);
         print("branch_code_pack_gzip", gzip(branchCodePacked));

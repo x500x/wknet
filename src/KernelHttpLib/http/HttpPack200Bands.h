@@ -315,6 +315,39 @@ namespace http
         HeapArray<ULONG> options_ = {};
     };
 
+    struct HttpPack200MetadataBands final
+    {
+        void Reset() noexcept
+        {
+            ParamCounts.Reset(); AnnotationCounts.Reset(); TypeIndexes.Reset(); PairCounts.Reset();
+            NameIndexes.Reset(); Tags.Reset(); IntegerIndexes.Reset(); DoubleIndexes.Reset();
+            FloatIndexes.Reset(); LongIndexes.Reset(); ClassSignatureIndexes.Reset();
+            EnumTypeIndexes.Reset(); EnumNameIndexes.Reset(); StringIndexes.Reset();
+            ArrayCounts.Reset(); NestedTypeIndexes.Reset(); NestedPairCounts.Reset();
+            NestedNameIndexes.Reset(); OccurrenceCount = 0;
+        }
+
+        SIZE_T OccurrenceCount = 0;
+        HeapArray<ULONG> ParamCounts = {};
+        HeapArray<ULONG> AnnotationCounts = {};
+        HeapArray<ULONG> TypeIndexes = {};
+        HeapArray<ULONG> PairCounts = {};
+        HeapArray<ULONG> NameIndexes = {};
+        HeapArray<ULONG> Tags = {};
+        HeapArray<ULONG> IntegerIndexes = {};
+        HeapArray<ULONG> DoubleIndexes = {};
+        HeapArray<ULONG> FloatIndexes = {};
+        HeapArray<ULONG> LongIndexes = {};
+        HeapArray<ULONG> ClassSignatureIndexes = {};
+        HeapArray<ULONG> EnumTypeIndexes = {};
+        HeapArray<ULONG> EnumNameIndexes = {};
+        HeapArray<ULONG> StringIndexes = {};
+        HeapArray<ULONG> ArrayCounts = {};
+        HeapArray<ULONG> NestedTypeIndexes = {};
+        HeapArray<ULONG> NestedPairCounts = {};
+        HeapArray<ULONG> NestedNameIndexes = {};
+    };
+
     class HttpPack200ClassBands final
     {
     public:
@@ -363,6 +396,17 @@ namespace http
 
         _Ret_maybenull_ ULONG* ClassSignatureIndexes() noexcept;
         _Ret_maybenull_ const ULONG* ClassSignatureIndexes() const noexcept;
+        _Ret_maybenull_ ULONG* ClassMinorVersions() noexcept;
+        _Ret_maybenull_ const ULONG* ClassMinorVersions() const noexcept;
+        _Ret_maybenull_ ULONG* ClassMajorVersions() noexcept;
+        _Ret_maybenull_ const ULONG* ClassMajorVersions() const noexcept;
+        _Ret_maybenull_ ULONG* LocalInnerClassCounts() noexcept;
+        _Ret_maybenull_ ULONG* LocalInnerClassOffsets() noexcept;
+        _Must_inspect_result_ NTSTATUS AllocateLocalInnerClasses(SIZE_T count) noexcept;
+        _Ret_maybenull_ ULONG* LocalInnerClassIndexes() noexcept;
+        _Ret_maybenull_ ULONG* LocalInnerClassFlags() noexcept;
+        _Ret_maybenull_ ULONG* LocalInnerClassOuterIndexes() noexcept;
+        _Ret_maybenull_ ULONG* LocalInnerClassNameIndexes() noexcept;
 
         _Must_inspect_result_
         NTSTATUS AllocateMemberBands(SIZE_T fieldCount, SIZE_T methodCount) noexcept;
@@ -463,6 +507,44 @@ namespace http
         _Ret_maybenull_
         ULONG* CodeHandlerCounts() noexcept;
 
+        _Ret_maybenull_ ULONG* CodeFlagsLow() noexcept;
+        _Ret_maybenull_ const ULONG* CodeFlagsLow() const noexcept;
+        _Ret_maybenull_ ULONG* CodeFlagsHigh() noexcept;
+
+        _Ret_maybenull_ ULONG* LineNumberCounts() noexcept;
+        _Ret_maybenull_ ULONG* LineNumberOffsets() noexcept;
+        _Must_inspect_result_ NTSTATUS AllocateLineNumbers(SIZE_T count) noexcept;
+        _Ret_maybenull_ ULONG* LineNumberBcis() noexcept;
+        _Ret_maybenull_ ULONG* LineNumbers() noexcept;
+
+        _Ret_maybenull_ ULONG* LocalVariableCounts() noexcept;
+        _Ret_maybenull_ ULONG* LocalVariableOffsets() noexcept;
+        _Must_inspect_result_ NTSTATUS AllocateLocalVariables(SIZE_T count) noexcept;
+        _Ret_maybenull_ ULONG* LocalVariableBcis() noexcept;
+        _Ret_maybenull_ LONG* LocalVariableSpans() noexcept;
+        _Ret_maybenull_ ULONG* LocalVariableNameIndexes() noexcept;
+        _Ret_maybenull_ ULONG* LocalVariableTypeIndexes() noexcept;
+        _Ret_maybenull_ ULONG* LocalVariableSlots() noexcept;
+
+        _Ret_maybenull_ ULONG* LocalVariableTypeCounts() noexcept;
+        _Ret_maybenull_ ULONG* LocalVariableTypeOffsets() noexcept;
+        _Must_inspect_result_ NTSTATUS AllocateLocalVariableTypes(SIZE_T count) noexcept;
+        _Ret_maybenull_ ULONG* LocalVariableTypeBcis() noexcept;
+        _Ret_maybenull_ LONG* LocalVariableTypeSpans() noexcept;
+        _Ret_maybenull_ ULONG* LocalVariableTypeNameIndexes() noexcept;
+        _Ret_maybenull_ ULONG* LocalVariableTypeSignatureIndexes() noexcept;
+        _Ret_maybenull_ ULONG* LocalVariableTypeSlots() noexcept;
+
+        HttpPack200MetadataBands* ClassVisibleAnnotations() noexcept;
+        HttpPack200MetadataBands* ClassInvisibleAnnotations() noexcept;
+        HttpPack200MetadataBands* FieldVisibleAnnotations() noexcept;
+        HttpPack200MetadataBands* FieldInvisibleAnnotations() noexcept;
+        HttpPack200MetadataBands* MethodVisibleAnnotations() noexcept;
+        HttpPack200MetadataBands* MethodInvisibleAnnotations() noexcept;
+        HttpPack200MetadataBands* MethodVisibleParameterAnnotations() noexcept;
+        HttpPack200MetadataBands* MethodInvisibleParameterAnnotations() noexcept;
+        HttpPack200MetadataBands* MethodAnnotationDefaults() noexcept;
+
         _Must_inspect_result_
         SIZE_T CodeCount() const noexcept;
 
@@ -497,6 +579,14 @@ namespace http
         HeapArray<ULONG> enclosingMethodClassIndexes_ = {};
         HeapArray<ULONG> enclosingMethodDescriptorIndexes_ = {};
         HeapArray<ULONG> classSignatureIndexes_ = {};
+        HeapArray<ULONG> classMinorVersions_ = {};
+        HeapArray<ULONG> classMajorVersions_ = {};
+        HeapArray<ULONG> localInnerClassCounts_ = {};
+        HeapArray<ULONG> localInnerClassOffsets_ = {};
+        HeapArray<ULONG> localInnerClassIndexes_ = {};
+        HeapArray<ULONG> localInnerClassFlags_ = {};
+        HeapArray<ULONG> localInnerClassOuterIndexes_ = {};
+        HeapArray<ULONG> localInnerClassNameIndexes_ = {};
         HeapArray<ULONG> fieldDescriptorIndexes_ = {};
         HeapArray<ULONG> fieldFlagsLow_ = {};
         HeapArray<ULONG> fieldFlagsHigh_ = {};
@@ -512,6 +602,35 @@ namespace http
         HeapArray<ULONG> codeMaxStacks_ = {};
         HeapArray<ULONG> codeMaxNonArgumentLocals_ = {};
         HeapArray<ULONG> codeHandlerCounts_ = {};
+        HeapArray<ULONG> codeFlagsLow_ = {};
+        HeapArray<ULONG> codeFlagsHigh_ = {};
+        HeapArray<ULONG> lineNumberCounts_ = {};
+        HeapArray<ULONG> lineNumberOffsets_ = {};
+        HeapArray<ULONG> lineNumberBcis_ = {};
+        HeapArray<ULONG> lineNumbers_ = {};
+        HeapArray<ULONG> localVariableCounts_ = {};
+        HeapArray<ULONG> localVariableOffsets_ = {};
+        HeapArray<ULONG> localVariableBcis_ = {};
+        HeapArray<LONG> localVariableSpans_ = {};
+        HeapArray<ULONG> localVariableNameIndexes_ = {};
+        HeapArray<ULONG> localVariableTypeIndexes_ = {};
+        HeapArray<ULONG> localVariableSlots_ = {};
+        HeapArray<ULONG> localVariableTypeCounts_ = {};
+        HeapArray<ULONG> localVariableTypeOffsets_ = {};
+        HeapArray<ULONG> localVariableTypeBcis_ = {};
+        HeapArray<LONG> localVariableTypeSpans_ = {};
+        HeapArray<ULONG> localVariableTypeNameIndexes_ = {};
+        HeapArray<ULONG> localVariableTypeSignatureIndexes_ = {};
+        HeapArray<ULONG> localVariableTypeSlots_ = {};
+        HttpPack200MetadataBands classVisibleAnnotations_ = {};
+        HttpPack200MetadataBands classInvisibleAnnotations_ = {};
+        HttpPack200MetadataBands fieldVisibleAnnotations_ = {};
+        HttpPack200MetadataBands fieldInvisibleAnnotations_ = {};
+        HttpPack200MetadataBands methodVisibleAnnotations_ = {};
+        HttpPack200MetadataBands methodInvisibleAnnotations_ = {};
+        HttpPack200MetadataBands methodVisibleParameterAnnotations_ = {};
+        HttpPack200MetadataBands methodInvisibleParameterAnnotations_ = {};
+        HttpPack200MetadataBands methodAnnotationDefaults_ = {};
         HeapArray<ULONG> handlerStartIndexes_ = {};
         HeapArray<LONG> handlerEndOffsets_ = {};
         HeapArray<LONG> handlerCatchOffsets_ = {};

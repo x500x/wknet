@@ -480,7 +480,9 @@ public final class GenerateExiFixtures {
                 "boolean",
                 BooleanValue.BOOLEAN_VALUE_TRUE));
         print("xsi_nil_bit_packed", encodeXsiNil(CodingMode.BIT_PACKED));
+        print("xsi_nil_byte_packed", encodeXsiNil(CodingMode.BYTE_PACKED));
         print("xsi_nil_pre_compression", encodeXsiNil(CodingMode.PRE_COMPRESSION));
+        print("xsi_nil_compression", encodeXsiNil(CodingMode.COMPRESSION));
         print("schema_less_schema_id_nil", encodeSchemaLessSchemaIdNil());
         print("schema_less_drmap", encodeSchemaLessDatatypeRepresentationMap());
         print("lexical_boolean", encodeLexicalValue("boolean", "1"));

@@ -1125,6 +1125,59 @@ namespace
                 "EXI lexicalValues decodes the built-in restricted character set");
         }
     }
+
+    void TestXsiNilBuiltInGrammar()
+    {
+        const unsigned char bitPacked[] = {
+            0xa0, 0x09, 0xe4, 0x02, 0x90, 0x57, 0x26, 0xf6, 0xf7, 0x44,
+            0xe2, 0xc0, 0x00, 0xce, 0x8e, 0x4e, 0xac, 0xb0
+        };
+        const unsigned char preCompression[] = {
+            0xa0, 0x00, 0xc0, 0xf2, 0x01, 0x40, 0x01, 0x05, 0x72, 0x6f,
+            0x6f, 0x74, 0x02, 0x03, 0x01, 0x00, 0x01, 0x03, 0x00, 0x00,
+            0x01, 0x00, 0x06, 0x74, 0x72, 0x75, 0x65
+        };
+        const unsigned char byteAligned[] = {
+            0xa0, 0x00, 0x40, 0xf2, 0x01, 0x40, 0x01, 0x05, 0x72, 0x6f,
+            0x6f, 0x74, 0x02, 0x03, 0x01, 0x00, 0x01, 0x03, 0x00, 0x00,
+            0x06, 0x74, 0x72, 0x75, 0x65, 0x01, 0x00
+        };
+        const unsigned char compression[] = {
+            0xa0, 0x09, 0xe0, 0x80, 0xa0, 0x63, 0x64, 0x2d, 0xca, 0xcf,
+            0x2f, 0x61, 0x62, 0x66, 0x64, 0x60, 0x64, 0x66, 0x60, 0x60,
+            0x64, 0x60, 0x2b, 0x29, 0x2a, 0x4d, 0x05, 0x00
+        };
+        const unsigned char* streams[] = {
+            bitPacked, byteAligned, preCompression, compression
+        };
+        const SIZE_T lengths[] = {
+            sizeof(bitPacked), sizeof(byteAligned), sizeof(preCompression), sizeof(compression)
+        };
+        const char expected[] =
+            "<root xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
+            "xsi:nil=\"true\"></root>";
+        const char* messages[] = {
+            "EXI bit-packed xsi:nil built-in grammar decodes",
+            "EXI byte-aligned xsi:nil built-in grammar decodes",
+            "EXI pre-compression xsi:nil value channel decodes",
+            "EXI compression xsi:nil value channel decodes"
+        };
+        for (SIZE_T index = 0; index < sizeof(streams) / sizeof(streams[0]); ++index) {
+            char output[192] = {};
+            SIZE_T outputLength = 0;
+            const NTSTATUS status = DecodeExiContent(
+                streams[index],
+                lengths[index],
+                output,
+                sizeof(output),
+                &outputLength);
+            Expect(
+                NT_SUCCESS(status) &&
+                    outputLength == sizeof(expected) - 1 &&
+                    memcmp(output, expected, sizeof(expected) - 1) == 0,
+                messages[index]);
+        }
+    }
 }
 
 int main()
@@ -1152,6 +1205,7 @@ int main()
     TestSchemaLessDatatypeRepresentationMapIsConsumed();
     TestPreservedLexicalBooleanValue();
     TestPreservedLexicalRestrictedCharacterSets();
+    TestXsiNilBuiltInGrammar();
 
     if (g_failed) {
         return 1;

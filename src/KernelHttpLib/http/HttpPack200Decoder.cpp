@@ -760,6 +760,283 @@ namespace
     }
 
     _Must_inspect_result_
+    struct MetadataCursor final
+    {
+        SIZE_T Param = 0, Annotation = 0, Type = 0, Pair = 0, Name = 0, Tag = 0;
+        SIZE_T Integer = 0, Double = 0, Float = 0, Long = 0, Class = 0;
+        SIZE_T Enum = 0, String = 0, Array = 0, NestedType = 0, NestedPair = 0, NestedName = 0;
+    };
+
+    struct MetadataFrame final
+    {
+        SIZE_T Remaining = 0;
+        bool Annotation = false;
+        bool NestedNames = false;
+        bool WaitingForChild = false;
+    };
+
+    class MetadataByteWriter final
+    {
+    public:
+        MetadataByteWriter(UCHAR* data, SIZE_T capacity) noexcept : data_(data), capacity_(capacity) {}
+        NTSTATUS Byte(UCHAR value) noexcept
+        {
+            if (length_ >= capacity_) return STATUS_BUFFER_TOO_SMALL;
+            data_[length_++] = value;
+            return STATUS_SUCCESS;
+        }
+        NTSTATUS Be16(USHORT value) noexcept
+        {
+            NTSTATUS status = Byte(static_cast<UCHAR>(value >> 8));
+            return NT_SUCCESS(status) ? Byte(static_cast<UCHAR>(value)) : status;
+        }
+        SIZE_T Length() const noexcept { return length_; }
+        const UCHAR* Current() const noexcept { return data_ + length_; }
+    private:
+        UCHAR* data_ = nullptr;
+        SIZE_T capacity_ = 0;
+        SIZE_T length_ = 0;
+    };
+
+    NTSTATUS AddMetadataUtf8(
+        const HttpPack200CpBands& cpBands,
+        ULONG sourceIndex,
+        bool signature,
+        HttpPack200ClassWriter* writer,
+        HeapArray<char>* signatureStorage,
+        SIZE_T* poolSlots,
+        _Out_ USHORT* outputIndex) noexcept
+    {
+        if (poolSlots == nullptr || outputIndex == nullptr) return STATUS_INVALID_PARAMETER;
+        if (!CheckedAddSize(*poolSlots, 1, poolSlots)) return STATUS_INTEGER_OVERFLOW;
+        *outputIndex = 1;
+        if (writer == nullptr) return STATUS_SUCCESS;
+        HttpXmlText value = {};
+        NTSTATUS status = STATUS_SUCCESS;
+        if (signature) {
+            status = ExpandSignature(cpBands, sourceIndex, signatureStorage, &value);
+        }
+        else if (!cpBands.GetUtf8(sourceIndex, &value)) {
+            status = STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        return NT_SUCCESS(status) ? writer->AddUtf8(value, outputIndex) : status;
+    }
+
+    NTSTATUS AddMetadataScalar(
+        UCHAR tag,
+        const HttpPack200MetadataBands& bands,
+        MetadataCursor* cursor,
+        const HttpPack200CpBands& cpBands,
+        HttpPack200ClassWriter* writer,
+        HeapArray<char>* signatureStorage,
+        MetadataByteWriter* output,
+        SIZE_T* poolSlots) noexcept
+    {
+        USHORT cpIndex = 0;
+        NTSTATUS status = STATUS_SUCCESS;
+        switch (tag) {
+        case 'B': case 'C': case 'I': case 'S': case 'Z':
+            if (cursor->Integer >= bands.IntegerIndexes.Count() ||
+                bands.IntegerIndexes[cursor->Integer] >= cpBands.IntCount()) return STATUS_INVALID_NETWORK_RESPONSE;
+            if (!CheckedAddSize(*poolSlots, 1, poolSlots)) return STATUS_INTEGER_OVERFLOW;
+            if (writer != nullptr) status = writer->AddInteger(
+                cpBands.IntBits()[bands.IntegerIndexes[cursor->Integer]], &cpIndex);
+            else cpIndex = 1;
+            ++cursor->Integer;
+            break;
+        case 'D':
+            if (cursor->Double >= bands.DoubleIndexes.Count() ||
+                bands.DoubleIndexes[cursor->Double] >= cpBands.DoubleCount()) return STATUS_INVALID_NETWORK_RESPONSE;
+            if (!CheckedAddSize(*poolSlots, 2, poolSlots)) return STATUS_INTEGER_OVERFLOW;
+            if (writer != nullptr) {
+                const ULONG source = bands.DoubleIndexes[cursor->Double];
+                status = writer->AddDouble(cpBands.DoubleHighBits()[source], cpBands.DoubleLowBits()[source], &cpIndex);
+            } else cpIndex = 1;
+            ++cursor->Double;
+            break;
+        case 'F':
+            if (cursor->Float >= bands.FloatIndexes.Count() ||
+                bands.FloatIndexes[cursor->Float] >= cpBands.FloatCount()) return STATUS_INVALID_NETWORK_RESPONSE;
+            if (!CheckedAddSize(*poolSlots, 1, poolSlots)) return STATUS_INTEGER_OVERFLOW;
+            if (writer != nullptr) status = writer->AddFloat(
+                cpBands.FloatBits()[bands.FloatIndexes[cursor->Float]], &cpIndex);
+            else cpIndex = 1;
+            ++cursor->Float;
+            break;
+        case 'J':
+            if (cursor->Long >= bands.LongIndexes.Count() ||
+                bands.LongIndexes[cursor->Long] >= cpBands.LongCount()) return STATUS_INVALID_NETWORK_RESPONSE;
+            if (!CheckedAddSize(*poolSlots, 2, poolSlots)) return STATUS_INTEGER_OVERFLOW;
+            if (writer != nullptr) {
+                const ULONG source = bands.LongIndexes[cursor->Long];
+                status = writer->AddLong(cpBands.LongHighBits()[source], cpBands.LongLowBits()[source], &cpIndex);
+            } else cpIndex = 1;
+            ++cursor->Long;
+            break;
+        case 'c':
+            if (cursor->Class >= bands.ClassSignatureIndexes.Count()) return STATUS_INVALID_NETWORK_RESPONSE;
+            status = AddMetadataUtf8(cpBands, bands.ClassSignatureIndexes[cursor->Class++], true,
+                writer, signatureStorage, poolSlots, &cpIndex);
+            break;
+        case 's':
+            if (cursor->String >= bands.StringIndexes.Count()) return STATUS_INVALID_NETWORK_RESPONSE;
+            status = AddMetadataUtf8(cpBands, bands.StringIndexes[cursor->String++], false,
+                writer, signatureStorage, poolSlots, &cpIndex);
+            break;
+        case 'e':
+            if (cursor->Enum >= bands.EnumTypeIndexes.Count() ||
+                cursor->Enum >= bands.EnumNameIndexes.Count()) return STATUS_INVALID_NETWORK_RESPONSE;
+            status = AddMetadataUtf8(cpBands, bands.EnumTypeIndexes[cursor->Enum], true,
+                writer, signatureStorage, poolSlots, &cpIndex);
+            if (NT_SUCCESS(status) && output != nullptr) status = output->Be16(cpIndex);
+            if (NT_SUCCESS(status)) status = AddMetadataUtf8(
+                cpBands, bands.EnumNameIndexes[cursor->Enum], false,
+                writer, signatureStorage, poolSlots, &cpIndex);
+            ++cursor->Enum;
+            break;
+        default:
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (NT_SUCCESS(status) && output != nullptr) status = output->Be16(cpIndex);
+        return status;
+    }
+
+    NTSTATUS EmitMetadataValues(
+        SIZE_T valueCount,
+        bool annotationNames,
+        bool nestedNames,
+        const HttpPack200MetadataBands& bands,
+        MetadataCursor* cursor,
+        const HttpPack200CpBands& cpBands,
+        HttpPack200ClassWriter* writer,
+        HeapArray<char>* signatureStorage,
+        MetadataByteWriter* output,
+        SIZE_T* poolSlots) noexcept
+    {
+        HeapArray<MetadataFrame> frames(bands.Tags.Count() + 2);
+        if (!frames.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
+        SIZE_T depth = 1;
+        frames[0].Remaining = valueCount;
+        frames[0].Annotation = annotationNames;
+        frames[0].NestedNames = nestedNames;
+        while (depth != 0) {
+            MetadataFrame& frame = frames[depth - 1];
+            if (frame.Remaining == 0) {
+                --depth;
+                if (depth != 0 && frames[depth - 1].WaitingForChild) {
+                    frames[depth - 1].WaitingForChild = false;
+                    --frames[depth - 1].Remaining;
+                }
+                continue;
+            }
+            if (frame.WaitingForChild) return STATUS_INVALID_NETWORK_RESPONSE;
+            if (frame.Annotation) {
+                const HeapArray<ULONG>& names = frame.NestedNames ? bands.NestedNameIndexes : bands.NameIndexes;
+                SIZE_T* nameIndex = frame.NestedNames ? &cursor->NestedName : &cursor->Name;
+                if (*nameIndex >= names.Count()) return STATUS_INVALID_NETWORK_RESPONSE;
+                USHORT cpIndex = 0;
+                NTSTATUS status = AddMetadataUtf8(cpBands, names[(*nameIndex)++], false,
+                    writer, signatureStorage, poolSlots, &cpIndex);
+                if (!NT_SUCCESS(status)) return status;
+                if (output != nullptr && !NT_SUCCESS(status = output->Be16(cpIndex))) return status;
+            }
+            if (cursor->Tag >= bands.Tags.Count()) return STATUS_INVALID_NETWORK_RESPONSE;
+            const UCHAR tag = static_cast<UCHAR>(bands.Tags[cursor->Tag++]);
+            NTSTATUS status = output == nullptr ? STATUS_SUCCESS : output->Byte(tag);
+            if (!NT_SUCCESS(status)) return status;
+            if (tag == '[') {
+                if (cursor->Array >= bands.ArrayCounts.Count() || depth >= frames.Count()) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                const ULONG count = bands.ArrayCounts[cursor->Array++];
+                if (count > 0xffffUL) return STATUS_INVALID_NETWORK_RESPONSE;
+                if (output != nullptr && !NT_SUCCESS(status = output->Be16(static_cast<USHORT>(count)))) return status;
+                frame.WaitingForChild = true;
+                frames[depth++] = { count, false, false, false };
+                continue;
+            }
+            if (tag == '@') {
+                if (cursor->NestedType >= bands.NestedTypeIndexes.Count() ||
+                    cursor->NestedPair >= bands.NestedPairCounts.Count() || depth >= frames.Count()) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                USHORT typeIndex = 0;
+                status = AddMetadataUtf8(cpBands, bands.NestedTypeIndexes[cursor->NestedType++], false,
+                    writer, signatureStorage, poolSlots, &typeIndex);
+                const ULONG pairCount = bands.NestedPairCounts[cursor->NestedPair++];
+                if (!NT_SUCCESS(status) || pairCount > 0xffffUL) return NT_SUCCESS(status) ? STATUS_INVALID_NETWORK_RESPONSE : status;
+                if (output != nullptr) {
+                    status = output->Be16(typeIndex);
+                    if (NT_SUCCESS(status)) status = output->Be16(static_cast<USHORT>(pairCount));
+                    if (!NT_SUCCESS(status)) return status;
+                }
+                frame.WaitingForChild = true;
+                frames[depth++] = { pairCount, true, true, false };
+                continue;
+            }
+            status = AddMetadataScalar(tag, bands, cursor, cpBands, writer,
+                signatureStorage, output, poolSlots);
+            if (!NT_SUCCESS(status)) return status;
+            --frame.Remaining;
+        }
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS EmitAnnotationAttribute(
+        bool parameterAnnotations,
+        bool annotationDefault,
+        const HttpPack200MetadataBands& bands,
+        MetadataCursor* cursor,
+        const HttpPack200CpBands& cpBands,
+        HttpPack200ClassWriter* writer,
+        HeapArray<char>* signatureStorage,
+        MetadataByteWriter* output,
+        SIZE_T* poolSlots) noexcept
+    {
+        if (annotationDefault) {
+            return EmitMetadataValues(1, false, false, bands, cursor, cpBands,
+                writer, signatureStorage, output, poolSlots);
+        }
+        SIZE_T parameterCount = 1;
+        if (parameterAnnotations) {
+            if (cursor->Param >= bands.ParamCounts.Count()) return STATUS_INVALID_NETWORK_RESPONSE;
+            parameterCount = bands.ParamCounts[cursor->Param++];
+            if (parameterCount > 255) return STATUS_INVALID_NETWORK_RESPONSE;
+            if (output != nullptr) {
+                NTSTATUS status = output->Byte(static_cast<UCHAR>(parameterCount));
+                if (!NT_SUCCESS(status)) return status;
+            }
+        }
+        for (SIZE_T parameterIndex = 0; parameterIndex < parameterCount; ++parameterIndex) {
+            if (cursor->Annotation >= bands.AnnotationCounts.Count()) return STATUS_INVALID_NETWORK_RESPONSE;
+            const ULONG annotationCount = bands.AnnotationCounts[cursor->Annotation++];
+            if (annotationCount > 0xffffUL) return STATUS_INVALID_NETWORK_RESPONSE;
+            if (output != nullptr) {
+                NTSTATUS status = output->Be16(static_cast<USHORT>(annotationCount));
+                if (!NT_SUCCESS(status)) return status;
+            }
+            for (SIZE_T annotationIndex = 0; annotationIndex < annotationCount; ++annotationIndex) {
+                if (cursor->Type >= bands.TypeIndexes.Count() || cursor->Pair >= bands.PairCounts.Count()) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                USHORT typeIndex = 0;
+                NTSTATUS status = AddMetadataUtf8(cpBands, bands.TypeIndexes[cursor->Type++], true,
+                    writer, signatureStorage, poolSlots, &typeIndex);
+                const ULONG pairCount = bands.PairCounts[cursor->Pair++];
+                if (!NT_SUCCESS(status) || pairCount > 0xffffUL) return NT_SUCCESS(status) ? STATUS_INVALID_NETWORK_RESPONSE : status;
+                if (output != nullptr) {
+                    status = output->Be16(typeIndex);
+                    if (NT_SUCCESS(status)) status = output->Be16(static_cast<USHORT>(pairCount));
+                    if (!NT_SUCCESS(status)) return status;
+                }
+                status = EmitMetadataValues(pairCount, true, false, bands, cursor, cpBands,
+                    writer, signatureStorage, output, poolSlots);
+                if (!NT_SUCCESS(status)) return status;
+            }
+        }
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS BuildClassFile(
         const HttpPack200CpBands& cpBands,
         const HttpPack200InnerClassBands& innerClassBands,
@@ -832,11 +1109,24 @@ namespace
 
         SIZE_T relevantInnerClassCount = 0;
         SIZE_T relevantInnerClassPoolEntries = 0;
+        const ULONG* localInnerCounts = classBands->LocalInnerClassCounts();
+        const ULONG* localInnerOffsets = classBands->LocalInnerClassOffsets();
+        const bool hasLocalInnerClasses = (flags[classIndex] & (1UL << 23)) != 0;
+        if (localInnerCounts == nullptr || localInnerOffsets == nullptr) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (hasLocalInnerClasses) {
+            relevantInnerClassCount = localInnerCounts[classIndex];
+            if (relevantInnerClassCount > static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) / 5) {
+                return STATUS_INTEGER_OVERFLOW;
+            }
+            relevantInnerClassPoolEntries = relevantInnerClassCount * 5;
+        }
         SIZE_T explicitInnerClassIndex = 0;
         const ULONG* innerThisClasses = innerClassBands.ThisClassIndexes();
         const ULONG* innerFlags = innerClassBands.Flags();
         const ULONG* innerOuterClasses = innerClassBands.OuterClassIndexes();
-        for (SIZE_T index = 0; index < innerClassBands.Count(); ++index) {
+        for (SIZE_T index = 0; !hasLocalInnerClasses && index < innerClassBands.Count(); ++index) {
             if (innerThisClasses == nullptr || innerFlags == nullptr ||
                 innerThisClasses[index] >= cpBands.ClassCount()) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
@@ -911,7 +1201,7 @@ namespace
                 }
             }
         }
-        if (explicitInnerClassIndex != innerClassBands.ExplicitCount()) {
+        if (!hasLocalInnerClasses && explicitInnerClassIndex != innerClassBands.ExplicitCount()) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 
@@ -996,6 +1286,9 @@ namespace
 
         SIZE_T classHandlerCount = 0;
         SIZE_T typedHandlerCount = 0;
+        SIZE_T classLineNumberCount = 0;
+        SIZE_T classLocalVariableCount = 0;
+        SIZE_T classLocalVariableTypeCount = 0;
         ULONG* handlerStarts = classBands->HandlerStartIndexes();
         LONG* handlerEnds = classBands->HandlerEndOffsets();
         LONG* handlerCatches = classBands->HandlerCatchOffsets();
@@ -1043,6 +1336,20 @@ namespace
             }
             if (codeIndex >= classBands->CodeCount()) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            if (!CheckedAddSize(
+                    classLineNumberCount,
+                    classBands->LineNumberCounts()[codeIndex],
+                    &classLineNumberCount) ||
+                !CheckedAddSize(
+                    classLocalVariableCount,
+                    classBands->LocalVariableCounts()[codeIndex],
+                    &classLocalVariableCount) ||
+                !CheckedAddSize(
+                    classLocalVariableTypeCount,
+                    classBands->LocalVariableTypeCounts()[codeIndex],
+                    &classLocalVariableTypeCount)) {
+                return STATUS_INTEGER_OVERFLOW;
             }
             SIZE_T handlerOffset = 0;
             for (SIZE_T priorCode = 0; priorCode < codeIndex; ++priorCode) {
@@ -1226,6 +1533,74 @@ namespace
             }
         }
 
+        HeapArray<MetadataCursor> metadataCursors(9);
+        HeapArray<SIZE_T> metadataOccurrenceCounts(9);
+        if (!metadataCursors.IsValid() || !metadataOccurrenceCounts.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        HeapArray<HttpPack200MetadataBands*> metadataGroups(9);
+        HeapArray<ULONG> metadataFlags(9);
+        if (!metadataGroups.IsValid() || !metadataFlags.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        metadataGroups[0] = classBands->ClassVisibleAnnotations();
+        metadataGroups[1] = classBands->ClassInvisibleAnnotations();
+        metadataGroups[2] = classBands->FieldVisibleAnnotations();
+        metadataGroups[3] = classBands->FieldInvisibleAnnotations();
+        metadataGroups[4] = classBands->MethodVisibleAnnotations();
+        metadataGroups[5] = classBands->MethodInvisibleAnnotations();
+        metadataGroups[6] = classBands->MethodVisibleParameterAnnotations();
+        metadataGroups[7] = classBands->MethodInvisibleParameterAnnotations();
+        metadataGroups[8] = classBands->MethodAnnotationDefaults();
+        metadataFlags[0] = 1UL << 21; metadataFlags[1] = 1UL << 22;
+        metadataFlags[2] = 1UL << 21; metadataFlags[3] = 1UL << 22;
+        metadataFlags[4] = 1UL << 21; metadataFlags[5] = 1UL << 22;
+        metadataFlags[6] = 1UL << 23; metadataFlags[7] = 1UL << 24;
+        metadataFlags[8] = 1UL << 25;
+        SIZE_T metadataPoolSlots = 0;
+        SIZE_T metadataAttributeNameCount = 0;
+        for (SIZE_T groupIndex = 0; groupIndex < 9; ++groupIndex) {
+            const ULONG* ownerFlags = groupIndex < 2 ? flags :
+                (groupIndex < 4 ? fieldFlags : methodFlags);
+            const SIZE_T ownerOffset = groupIndex < 2 ? classIndex :
+                (groupIndex < 4 ? fieldOffset : methodOffset);
+            const SIZE_T ownerCount = groupIndex < 2 ? 1 :
+                (groupIndex < 4 ? fieldCount : methodCount);
+            if (ownerFlags == nullptr && ownerOffset + ownerCount != 0) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            SIZE_T priorOccurrences = 0;
+            for (SIZE_T ownerIndex = 0; ownerIndex < ownerOffset; ++ownerIndex) {
+                if ((ownerFlags[ownerIndex] & metadataFlags[groupIndex]) != 0) ++priorOccurrences;
+            }
+            SIZE_T currentOccurrences = 0;
+            for (SIZE_T ownerIndex = 0; ownerIndex < ownerCount; ++ownerIndex) {
+                if ((ownerFlags[ownerOffset + ownerIndex] & metadataFlags[groupIndex]) != 0) ++currentOccurrences;
+            }
+            metadataOccurrenceCounts[groupIndex] = currentOccurrences;
+            MetadataCursor cursor = {};
+            SIZE_T ignoredSlots = 0;
+            for (SIZE_T occurrence = 0; occurrence < priorOccurrences; ++occurrence) {
+                const NTSTATUS metadataStatus = EmitAnnotationAttribute(
+                    groupIndex == 6 || groupIndex == 7,
+                    groupIndex == 8,
+                    *metadataGroups[groupIndex], &cursor, cpBands, nullptr,
+                    nullptr, nullptr, &ignoredSlots);
+                if (!NT_SUCCESS(metadataStatus)) return metadataStatus;
+            }
+            metadataCursors[groupIndex] = cursor;
+            MetadataCursor probe = cursor;
+            for (SIZE_T occurrence = 0; occurrence < currentOccurrences; ++occurrence) {
+                const NTSTATUS metadataStatus = EmitAnnotationAttribute(
+                    groupIndex == 6 || groupIndex == 7,
+                    groupIndex == 8,
+                    *metadataGroups[groupIndex], &probe, cpBands, nullptr,
+                    nullptr, nullptr, &metadataPoolSlots);
+                if (!NT_SUCCESS(metadataStatus)) return metadataStatus;
+            }
+            if (currentOccurrences != 0) ++metadataAttributeNameCount;
+        }
+
         SIZE_T constantPoolCount = 5;
         SIZE_T additionalCount = 0;
         SIZE_T memberCount = 0;
@@ -1235,6 +1610,22 @@ namespace
             !CheckedAddSize(interfaceCount * 2, memberCount * 2, &additionalCount) ||
             !CheckedAddSize(constantPoolCount, additionalCount, &constantPoolCount) ||
             (classCodeCount != 0 && !CheckedAddSize(constantPoolCount, 1, &constantPoolCount)) ||
+            (classLineNumberCount != 0 &&
+                !CheckedAddSize(constantPoolCount, 1, &constantPoolCount)) ||
+            (classLocalVariableCount != 0 &&
+                !CheckedAddSize(constantPoolCount, 1, &constantPoolCount)) ||
+            (classLocalVariableTypeCount != 0 &&
+                !CheckedAddSize(constantPoolCount, 1, &constantPoolCount)) ||
+            classLocalVariableCount > static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) / 2 ||
+            classLocalVariableTypeCount > static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) / 2 ||
+            !CheckedAddSize(
+                constantPoolCount,
+                classLocalVariableCount * 2,
+                &constantPoolCount) ||
+            !CheckedAddSize(
+                constantPoolCount,
+                classLocalVariableTypeCount * 2,
+                &constantPoolCount) ||
             !CheckedAddSize(constantPoolCount, relocationPoolEntryCount, &constantPoolCount) ||
             typedHandlerCount > static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) / 2 ||
             !CheckedAddSize(constantPoolCount, typedHandlerCount * 2, &constantPoolCount) ||
@@ -1258,6 +1649,8 @@ namespace
             (hasDeprecatedAttribute &&
                 !CheckedAddSize(constantPoolCount, 1, &constantPoolCount)) ||
             !CheckedAddSize(constantPoolCount, signatureAttributeCount, &constantPoolCount) ||
+            !CheckedAddSize(constantPoolCount, metadataPoolSlots, &constantPoolCount) ||
+            !CheckedAddSize(constantPoolCount, metadataAttributeNameCount, &constantPoolCount) ||
             (relevantInnerClassCount != 0 &&
                 !CheckedAddSize(constantPoolCount, 1, &constantPoolCount)) ||
             !CheckedAddSize(
@@ -1269,10 +1662,27 @@ namespace
             return STATUS_INTEGER_OVERFLOW;
         }
 
+        USHORT effectiveMinorVersion = minorVersion;
+        USHORT effectiveMajorVersion = majorVersion;
+        const ULONG* classMinorVersions = classBands->ClassMinorVersions();
+        const ULONG* classMajorVersions = classBands->ClassMajorVersions();
+        if (classMinorVersions == nullptr || classMajorVersions == nullptr) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (classMinorVersions[classIndex] != 0xffffffffUL) {
+            if (classMajorVersions[classIndex] == 0xffffffffUL ||
+                classMinorVersions[classIndex] > 0xffffUL ||
+                classMajorVersions[classIndex] > 0xffffUL) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            effectiveMinorVersion = static_cast<USHORT>(classMinorVersions[classIndex]);
+            effectiveMajorVersion = static_cast<USHORT>(classMajorVersions[classIndex]);
+        }
+
         HttpPack200ClassWriter writer(storage->Get(), storage->Count());
         NTSTATUS status = writer.Begin(
-            minorVersion,
-            majorVersion,
+            effectiveMinorVersion,
+            effectiveMajorVersion,
             static_cast<USHORT>(constantPoolCount));
         USHORT thisUtf8 = 0;
         USHORT thisClass = 0;
@@ -1315,6 +1725,9 @@ namespace
         HeapArray<HttpPack200ClassMember> fields = {};
         HeapArray<HttpPack200ClassMember> methods = {};
         HeapArray<HttpPack200ExceptionHandler> exceptionHandlers = {};
+        HeapArray<HttpPack200LineNumber> lineNumbers = {};
+        HeapArray<HttpPack200LocalVariable> localVariables = {};
+        HeapArray<HttpPack200LocalVariable> localVariableTypes = {};
         HeapArray<USHORT> declaredExceptions = {};
         HeapArray<HttpPack200BootstrapMethod> bootstrapMethods = {};
         HeapArray<USHORT> bootstrapArguments = {};
@@ -1326,6 +1739,15 @@ namespace
         }
         if (NT_SUCCESS(status) && classHandlerCount != 0) {
             status = exceptionHandlers.Allocate(classHandlerCount);
+        }
+        if (NT_SUCCESS(status) && classLineNumberCount != 0) {
+            status = lineNumbers.Allocate(classLineNumberCount);
+        }
+        if (NT_SUCCESS(status) && classLocalVariableCount != 0) {
+            status = localVariables.Allocate(classLocalVariableCount);
+        }
+        if (NT_SUCCESS(status) && classLocalVariableTypeCount != 0) {
+            status = localVariableTypes.Allocate(classLocalVariableTypeCount);
         }
         if (NT_SUCCESS(status) && classDeclaredExceptionCount != 0) {
             status = declaredExceptions.Allocate(classDeclaredExceptionCount);
@@ -1444,6 +1866,7 @@ namespace
                             &fields[index].ConstantValueIndex);
                     }
                 }
+
             }
         }
         if (NT_SUCCESS(status) && constantValueFieldCount != 0) {
@@ -1459,6 +1882,9 @@ namespace
             }
         }
         SIZE_T classHandlerIndex = 0;
+        SIZE_T classLineNumberIndex = 0;
+        SIZE_T classLocalVariableIndex = 0;
+        SIZE_T classLocalVariableTypeIndex = 0;
         SIZE_T classDeclaredExceptionIndex = 0;
         for (SIZE_T index = 0; NT_SUCCESS(status) && index < methodCount; ++index) {
             const ULONG descriptorIndex = methodDescriptors[methodOffset + index];
@@ -1599,6 +2025,109 @@ namespace
                         }
                     }
                 }
+
+                const SIZE_T lineOffset = classBands->LineNumberOffsets()[codeIndex];
+                const SIZE_T lineCount = classBands->LineNumberCounts()[codeIndex];
+                methods[index].LineNumbers = lineCount == 0 ?
+                    nullptr : lineNumbers.Get() + classLineNumberIndex;
+                methods[index].LineNumberCount = lineCount;
+                for (SIZE_T entryIndex = 0; entryIndex < lineCount; ++entryIndex) {
+                    const SIZE_T sourceIndex = lineOffset + entryIndex;
+                    ULONG startPc = 0;
+                    if (!codeBands->GetInstructionOffset(
+                            codeIndex,
+                            classBands->LineNumberBcis()[sourceIndex],
+                            &startPc) ||
+                        startPc > 0xffffUL ||
+                        classBands->LineNumbers()[sourceIndex] > 0xffffUL) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    HttpPack200LineNumber& entry = lineNumbers[classLineNumberIndex++];
+                    entry.StartPc = static_cast<USHORT>(startPc);
+                    entry.LineNumber = static_cast<USHORT>(classBands->LineNumbers()[sourceIndex]);
+                }
+
+                auto buildLocalVariables = [&](SIZE_T sourceOffset,
+                                               SIZE_T count,
+                                               ULONG* bcis,
+                                               LONG* spans,
+                                               ULONG* names,
+                                               ULONG* types,
+                                               ULONG* slots,
+                                               bool typeTable,
+                                               HeapArray<HttpPack200LocalVariable>* storage,
+                                               SIZE_T* storageIndex) noexcept -> NTSTATUS {
+                    HttpPack200LocalVariable* output = count == 0 ?
+                        nullptr : storage->Get() + *storageIndex;
+                    if (typeTable) {
+                        methods[index].LocalVariableTypes = output;
+                        methods[index].LocalVariableTypeCount = count;
+                    }
+                    else {
+                        methods[index].LocalVariables = output;
+                        methods[index].LocalVariableCount = count;
+                    }
+                    for (SIZE_T entryIndex = 0; entryIndex < count; ++entryIndex) {
+                        const SIZE_T sourceIndex = sourceOffset + entryIndex;
+                        const LONGLONG startInstruction = bcis[sourceIndex];
+                        const LONGLONG endInstruction = startInstruction + spans[sourceIndex];
+                        if (startInstruction < 0 || endInstruction < startInstruction ||
+                            names[sourceIndex] >= cpBands.Utf8Count() ||
+                            types[sourceIndex] >= cpBands.SignatureCount() ||
+                            slots[sourceIndex] > 0xffffUL) {
+                            return STATUS_INVALID_NETWORK_RESPONSE;
+                        }
+                        ULONG startPc = 0;
+                        ULONG endPc = 0;
+                        if (!codeBands->GetInstructionOffset(
+                                codeIndex, static_cast<SIZE_T>(startInstruction), &startPc) ||
+                            !codeBands->GetInstructionOffset(
+                                codeIndex, static_cast<SIZE_T>(endInstruction), &endPc) ||
+                            startPc > endPc || endPc > 0xffffUL) {
+                            return STATUS_INVALID_NETWORK_RESPONSE;
+                        }
+                        HttpXmlText localName = {};
+                        HttpXmlText localType = {};
+                        if (!cpBands.GetUtf8(names[sourceIndex], &localName)) {
+                            return STATUS_INVALID_NETWORK_RESPONSE;
+                        }
+                        NTSTATUS localStatus = ExpandSignature(
+                            cpBands, types[sourceIndex], &signatureStorage, &localType);
+                        HttpPack200LocalVariable& entry = (*storage)[(*storageIndex)++];
+                        if (NT_SUCCESS(localStatus)) localStatus = writer.AddUtf8(localName, &entry.NameIndex);
+                        if (NT_SUCCESS(localStatus)) localStatus = writer.AddUtf8(localType, &entry.TypeIndex);
+                        if (!NT_SUCCESS(localStatus)) return localStatus;
+                        entry.StartPc = static_cast<USHORT>(startPc);
+                        entry.Length = static_cast<USHORT>(endPc - startPc);
+                        entry.Slot = static_cast<USHORT>(slots[sourceIndex]);
+                    }
+                    return STATUS_SUCCESS;
+                };
+
+                status = buildLocalVariables(
+                    classBands->LocalVariableOffsets()[codeIndex],
+                    classBands->LocalVariableCounts()[codeIndex],
+                    classBands->LocalVariableBcis(),
+                    classBands->LocalVariableSpans(),
+                    classBands->LocalVariableNameIndexes(),
+                    classBands->LocalVariableTypeIndexes(),
+                    classBands->LocalVariableSlots(),
+                    false,
+                    &localVariables,
+                    &classLocalVariableIndex);
+                if (!NT_SUCCESS(status)) return status;
+                status = buildLocalVariables(
+                    classBands->LocalVariableTypeOffsets()[codeIndex],
+                    classBands->LocalVariableTypeCounts()[codeIndex],
+                    classBands->LocalVariableTypeBcis(),
+                    classBands->LocalVariableTypeSpans(),
+                    classBands->LocalVariableTypeNameIndexes(),
+                    classBands->LocalVariableTypeSignatureIndexes(),
+                    classBands->LocalVariableTypeSlots(),
+                    true,
+                    &localVariableTypes,
+                    &classLocalVariableTypeIndex);
+                if (!NT_SUCCESS(status)) return status;
             }
             const SIZE_T declaredExceptionCount = methodExceptionCounts[methodOffset + index];
             if (classDeclaredExceptionIndex > classDeclaredExceptionCount ||
@@ -1638,7 +2167,10 @@ namespace
             }
         }
         if (classHandlerIndex != classHandlerCount ||
-            classDeclaredExceptionIndex != classDeclaredExceptionCount) {
+            classDeclaredExceptionIndex != classDeclaredExceptionCount ||
+            classLineNumberIndex != classLineNumberCount ||
+            classLocalVariableIndex != classLocalVariableCount ||
+            classLocalVariableTypeIndex != classLocalVariableTypeCount) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
         if (NT_SUCCESS(status) && classCodeCount != 0) {
@@ -1652,6 +2184,32 @@ namespace
                     }
                 }
             }
+        }
+        auto assignCodeAttributeName = [&](const char* name, SIZE_T length,
+                                           SIZE_T kind) noexcept -> NTSTATUS {
+            USHORT attributeNameIndex = 0;
+            NTSTATUS localStatus = writer.AddUtf8({ name, length }, &attributeNameIndex);
+            for (SIZE_T methodIndex = 0; NT_SUCCESS(localStatus) && methodIndex < methodCount; ++methodIndex) {
+                if (kind == 0 && methods[methodIndex].LineNumberCount != 0) {
+                    methods[methodIndex].LineNumberTableAttributeNameIndex = attributeNameIndex;
+                }
+                else if (kind == 1 && methods[methodIndex].LocalVariableCount != 0) {
+                    methods[methodIndex].LocalVariableTableAttributeNameIndex = attributeNameIndex;
+                }
+                else if (kind == 2 && methods[methodIndex].LocalVariableTypeCount != 0) {
+                    methods[methodIndex].LocalVariableTypeTableAttributeNameIndex = attributeNameIndex;
+                }
+            }
+            return localStatus;
+        };
+        if (NT_SUCCESS(status) && classLineNumberCount != 0) {
+            status = assignCodeAttributeName("LineNumberTable", 15, 0);
+        }
+        if (NT_SUCCESS(status) && classLocalVariableCount != 0) {
+            status = assignCodeAttributeName("LocalVariableTable", 18, 1);
+        }
+        if (NT_SUCCESS(status) && classLocalVariableTypeCount != 0) {
+            status = assignCodeAttributeName("LocalVariableTypeTable", 22, 2);
         }
         if (NT_SUCCESS(status) && classDeclaredExceptionCount != 0) {
             const HttpXmlText exceptionsName = { "Exceptions", 10 };
@@ -2397,8 +2955,103 @@ namespace
         }
         SIZE_T storedInnerClassIndex = 0;
         explicitInnerClassIndex = 0;
+        if (hasLocalInnerClasses) {
+            const ULONG* localIndexes = classBands->LocalInnerClassIndexes();
+            const ULONG* localFlags = classBands->LocalInnerClassFlags();
+            const ULONG* localOuters = classBands->LocalInnerClassOuterIndexes();
+            const ULONG* localNames = classBands->LocalInnerClassNameIndexes();
+            const SIZE_T localOffset = localInnerOffsets[classIndex];
+            if (relevantInnerClassCount != 0 &&
+                (localIndexes == nullptr || localFlags == nullptr ||
+                    localOuters == nullptr || localNames == nullptr)) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            for (SIZE_T localIndex = 0;
+                NT_SUCCESS(status) && localIndex < relevantInnerClassCount;
+                ++localIndex) {
+                const SIZE_T sourceIndex = localOffset + localIndex;
+                const ULONG innerReference = localIndexes[sourceIndex];
+                if (innerReference >= cpBands.ClassCount()) return STATUS_INVALID_NETWORK_RESPONSE;
+                HttpXmlText innerName = {};
+                HttpXmlText outerName = {};
+                HttpXmlText simpleName = {};
+                if (!cpBands.GetUtf8(classNameIndexes[innerReference], &innerName)) {
+                    return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                ULONG tupleFlags = localFlags[sourceIndex];
+                if (tupleFlags != 0) {
+                    const ULONG outerReference = localOuters[sourceIndex];
+                    const ULONG nameReference = localNames[sourceIndex];
+                    if (outerReference > cpBands.ClassCount() || nameReference > cpBands.Utf8Count()) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    if (outerReference != 0 &&
+                        !cpBands.GetUtf8(classNameIndexes[outerReference - 1], &outerName)) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    if (nameReference != 0 && !cpBands.GetUtf8(nameReference - 1, &simpleName)) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                }
+                else {
+                    SIZE_T globalExplicitIndex = 0;
+                    bool found = false;
+                    for (SIZE_T globalIndex = 0; globalIndex < innerClassBands.Count(); ++globalIndex) {
+                        if (innerThisClasses[globalIndex] == innerReference) {
+                            tupleFlags = innerFlags[globalIndex];
+                            if ((tupleFlags & 0x00010000UL) != 0) {
+                                const ULONG outerReference = innerOuterClasses[globalExplicitIndex];
+                                const ULONG nameReference = innerClassBands.NameIndexes()[globalExplicitIndex];
+                                if (outerReference != 0 &&
+                                    !cpBands.GetUtf8(classNameIndexes[outerReference - 1], &outerName)) {
+                                    return STATUS_INVALID_NETWORK_RESPONSE;
+                                }
+                                if (nameReference != 0 &&
+                                    !cpBands.GetUtf8(nameReference - 1, &simpleName)) {
+                                    return STATUS_INVALID_NETWORK_RESPONSE;
+                                }
+                            }
+                            else {
+                                SIZE_T separator = innerName.Length;
+                                for (SIZE_T charIndex = innerName.Length; charIndex > 0; --charIndex) {
+                                    const UCHAR character = static_cast<UCHAR>(innerName.Data[charIndex - 1]);
+                                    if (character == '/' || character == '.') break;
+                                    if (character <= 0x2dU) { separator = charIndex - 1; break; }
+                                }
+                                if (separator < innerName.Length) {
+                                    outerName = { innerName.Data, separator };
+                                    SIZE_T nameOffset = separator + 1;
+                                    while (nameOffset < innerName.Length &&
+                                        innerName.Data[nameOffset] >= '0' && innerName.Data[nameOffset] <= '9') ++nameOffset;
+                                    if (nameOffset < innerName.Length) {
+                                        simpleName = { innerName.Data + nameOffset, innerName.Length - nameOffset };
+                                    }
+                                }
+                            }
+                            found = true;
+                            break;
+                        }
+                        if ((innerFlags[globalIndex] & 0x00010000UL) != 0) ++globalExplicitIndex;
+                    }
+                    if (!found) return STATUS_INVALID_NETWORK_RESPONSE;
+                }
+                HttpPack200InnerClass& stored = innerClasses[storedInnerClassIndex++];
+                USHORT innerUtf8Index = 0;
+                status = writer.AddUtf8(innerName, &innerUtf8Index);
+                if (NT_SUCCESS(status)) status = writer.AddClass(innerUtf8Index, &stored.InnerClassInfoIndex);
+                if (NT_SUCCESS(status) && outerName.Length != 0) {
+                    USHORT outerUtf8Index = 0;
+                    status = writer.AddUtf8(outerName, &outerUtf8Index);
+                    if (NT_SUCCESS(status)) status = writer.AddClass(outerUtf8Index, &stored.OuterClassInfoIndex);
+                }
+                if (NT_SUCCESS(status) && simpleName.Length != 0) {
+                    status = writer.AddUtf8(simpleName, &stored.InnerNameIndex);
+                }
+                stored.AccessFlags = static_cast<USHORT>(tupleFlags & 0xffffUL);
+            }
+        }
         for (SIZE_T index = 0;
-            NT_SUCCESS(status) && index < innerClassBands.Count();
+            !hasLocalInnerClasses && NT_SUCCESS(status) && index < innerClassBands.Count();
             ++index) {
             HttpXmlText innerName = {};
             if (!cpBands.GetUtf8(classNameIndexes[innerThisClasses[index]], &innerName)) {
@@ -2486,6 +3139,99 @@ namespace
             const HttpXmlText attributeName = { "InnerClasses", 12 };
             status = writer.AddUtf8(attributeName, &innerClassesAttributeNameIndex);
         }
+        SIZE_T metadataAttributeCount = 0;
+        for (SIZE_T groupIndex = 0; groupIndex < 9; ++groupIndex) {
+            if (!CheckedAddSize(
+                    metadataAttributeCount,
+                    metadataOccurrenceCounts[groupIndex],
+                    &metadataAttributeCount)) {
+                return STATUS_INTEGER_OVERFLOW;
+            }
+        }
+        HeapArray<HttpPack200RawAttribute> metadataAttributes = {};
+        HeapArray<UCHAR> metadataBytes = {};
+        HeapArray<USHORT> metadataNameIndexes(9);
+        if (!metadataNameIndexes.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
+        if (metadataAttributeCount != 0) {
+            status = metadataAttributes.Allocate(metadataAttributeCount);
+            if (NT_SUCCESS(status)) status = metadataBytes.Allocate(storage->Count());
+            if (!NT_SUCCESS(status)) return status;
+        }
+        HeapArray<HttpXmlText> metadataNames(9);
+        if (!metadataNames.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
+        metadataNames[0] = { "RuntimeVisibleAnnotations", 25 };
+        metadataNames[1] = { "RuntimeInvisibleAnnotations", 27 };
+        metadataNames[2] = metadataNames[0]; metadataNames[3] = metadataNames[1];
+        metadataNames[4] = metadataNames[0]; metadataNames[5] = metadataNames[1];
+        metadataNames[6] = { "RuntimeVisibleParameterAnnotations", 34 };
+        metadataNames[7] = { "RuntimeInvisibleParameterAnnotations", 36 };
+        metadataNames[8] = { "AnnotationDefault", 17 };
+        for (SIZE_T groupIndex = 0; groupIndex < 9; ++groupIndex) {
+            metadataNameIndexes[groupIndex] = 0;
+            if (metadataOccurrenceCounts[groupIndex] != 0) {
+                status = writer.AddUtf8(metadataNames[groupIndex], &metadataNameIndexes[groupIndex]);
+                if (!NT_SUCCESS(status)) return status;
+            }
+        }
+        MetadataByteWriter metadataWriter(metadataBytes.Get(), metadataBytes.Count());
+        SIZE_T metadataAttributeIndex = 0;
+        auto emitMetadataAttribute = [&](SIZE_T groupIndex) noexcept -> NTSTATUS {
+            if (metadataAttributeIndex >= metadataAttributes.Count()) return STATUS_INVALID_NETWORK_RESPONSE;
+            const SIZE_T start = metadataWriter.Length();
+            SIZE_T emittedPoolSlots = 0;
+            NTSTATUS localStatus = EmitAnnotationAttribute(
+                groupIndex == 6 || groupIndex == 7,
+                groupIndex == 8,
+                *metadataGroups[groupIndex], &metadataCursors[groupIndex], cpBands,
+                &writer, &signatureStorage, &metadataWriter, &emittedPoolSlots);
+            if (!NT_SUCCESS(localStatus)) return localStatus;
+            HttpPack200RawAttribute& attribute = metadataAttributes[metadataAttributeIndex++];
+            attribute.NameIndex = metadataNameIndexes[groupIndex];
+            attribute.Data = metadataBytes.Get() + start;
+            attribute.Length = metadataWriter.Length() - start;
+            return STATUS_SUCCESS;
+        };
+
+        const HttpPack200RawAttribute* classRawAttributes = nullptr;
+        SIZE_T classRawAttributeCount = 0;
+        if ((flags[classIndex] & (1UL << 21)) != 0 ||
+            (flags[classIndex] & (1UL << 22)) != 0) {
+            classRawAttributes = metadataAttributes.Get() + metadataAttributeIndex;
+            if ((flags[classIndex] & (1UL << 21)) != 0) {
+                status = emitMetadataAttribute(0); ++classRawAttributeCount;
+            }
+            if (NT_SUCCESS(status) && (flags[classIndex] & (1UL << 22)) != 0) {
+                status = emitMetadataAttribute(1); ++classRawAttributeCount;
+            }
+            if (!NT_SUCCESS(status)) return status;
+        }
+        for (SIZE_T fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
+            const ULONG memberFlags = fieldFlags[fieldOffset + fieldIndex];
+            const SIZE_T start = metadataAttributeIndex;
+            if ((memberFlags & (1UL << 21)) != 0) status = emitMetadataAttribute(2);
+            if (NT_SUCCESS(status) && (memberFlags & (1UL << 22)) != 0) status = emitMetadataAttribute(3);
+            if (!NT_SUCCESS(status)) return status;
+            fields[fieldIndex].Attributes = metadataAttributeIndex == start ?
+                nullptr : metadataAttributes.Get() + start;
+            fields[fieldIndex].AttributeCount = metadataAttributeIndex - start;
+        }
+        for (SIZE_T methodIndex = 0; methodIndex < methodCount; ++methodIndex) {
+            const ULONG memberFlags = methodFlags[methodOffset + methodIndex];
+            const SIZE_T start = metadataAttributeIndex;
+            for (SIZE_T groupIndex = 4; groupIndex < 9; ++groupIndex) {
+                if ((memberFlags & (1UL << (groupIndex + 17))) != 0) {
+                    status = emitMetadataAttribute(groupIndex);
+                    if (!NT_SUCCESS(status)) return status;
+                }
+            }
+            methods[methodIndex].Attributes = metadataAttributeIndex == start ?
+                nullptr : metadataAttributes.Get() + start;
+            methods[methodIndex].AttributeCount = metadataAttributeIndex - start;
+        }
+        if (metadataAttributeIndex != metadataAttributeCount) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
         USHORT classSignatureIndex = 0;
         if (NT_SUCCESS(status) && hasClassSignature) {
             HttpXmlText classSignature = {};
@@ -2523,6 +3269,8 @@ namespace
                 innerClassesAttributeNameIndex,
                 innerClasses.Get(),
                 relevantInnerClassCount,
+                classRawAttributes,
+                classRawAttributeCount,
                 classLength);
         }
         if (!NT_SUCCESS(status)) {

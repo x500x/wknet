@@ -990,6 +990,107 @@ namespace
         return DecodeUlongBand(reader, codec, bands->SuperClassIndexes(), classCount);
     }
 
+    NTSTATUS ReadMetadataBands(
+        HttpPack200BandReader* reader,
+        HttpPack200BandReader* bandHeaderReader,
+        HttpPack200CodecArena* arena,
+        SIZE_T occurrenceCount,
+        SIZE_T backwardCallCount,
+        bool parameterAnnotations,
+        bool annotationDefault,
+        HttpPack200MetadataBands* bands) noexcept
+    {
+        if (reader == nullptr || bandHeaderReader == nullptr || arena == nullptr || bands == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        bands->Reset();
+        bands->OccurrenceCount = occurrenceCount;
+        auto allocate = [](HeapArray<ULONG>* values, SIZE_T count) noexcept -> NTSTATUS {
+            values->Reset();
+            return count == 0 ? STATUS_SUCCESS : values->Allocate(count);
+        };
+        auto decode = [&](HeapArray<ULONG>* values, SIZE_T count,
+                          HttpPack200CodingKind coding) noexcept -> NTSTATUS {
+            NTSTATUS status = allocate(values, count);
+            return NT_SUCCESS(status) ? DecodeRawUlongBandWithMeta(
+                reader, bandHeaderReader, arena, coding, values->Get(), count) : status;
+        };
+        auto sum = [](const HeapArray<ULONG>& values, SIZE_T* total) noexcept -> bool {
+            *total = 0;
+            for (SIZE_T index = 0; index < values.Count(); ++index) {
+                if (!CheckedAddSize(*total, values[index], total)) return false;
+            }
+            return true;
+        };
+
+        SIZE_T annotationRecordCount = occurrenceCount;
+        NTSTATUS status = STATUS_SUCCESS;
+        if (parameterAnnotations) {
+            status = decode(&bands->ParamCounts, occurrenceCount, HttpPack200CodingKind::Byte1);
+            if (!NT_SUCCESS(status) || !sum(bands->ParamCounts, &annotationRecordCount)) {
+                return NT_SUCCESS(status) ? STATUS_INTEGER_OVERFLOW : status;
+            }
+        }
+
+        SIZE_T annotationCount = 0;
+        SIZE_T pairCount = occurrenceCount;
+        if (!annotationDefault) {
+            status = decode(
+                &bands->AnnotationCounts, annotationRecordCount, HttpPack200CodingKind::Unsigned5);
+            if (!NT_SUCCESS(status) || !sum(bands->AnnotationCounts, &annotationCount)) {
+                return NT_SUCCESS(status) ? STATUS_INTEGER_OVERFLOW : status;
+            }
+            status = decode(&bands->TypeIndexes, annotationCount, HttpPack200CodingKind::Unsigned5);
+            if (NT_SUCCESS(status)) {
+                status = decode(&bands->PairCounts, annotationCount, HttpPack200CodingKind::Unsigned5);
+            }
+            if (!NT_SUCCESS(status) || !sum(bands->PairCounts, &pairCount)) {
+                return NT_SUCCESS(status) ? STATUS_INTEGER_OVERFLOW : status;
+            }
+            status = decode(&bands->NameIndexes, pairCount, HttpPack200CodingKind::Unsigned5);
+            if (!NT_SUCCESS(status)) return status;
+        }
+
+        SIZE_T tagCount = 0;
+        if (!CheckedAddSize(pairCount, backwardCallCount, &tagCount)) {
+            return STATUS_INTEGER_OVERFLOW;
+        }
+        status = decode(&bands->Tags, tagCount, HttpPack200CodingKind::Byte1);
+        if (!NT_SUCCESS(status)) return status;
+        SIZE_T integerCount = 0, doubleCount = 0, floatCount = 0, longCount = 0;
+        SIZE_T classCount = 0, enumCount = 0, stringCount = 0, arrayCount = 0, nestedCount = 0;
+        for (SIZE_T index = 0; index < tagCount; ++index) {
+            switch (bands->Tags[index]) {
+            case 'B': case 'C': case 'I': case 'S': case 'Z': ++integerCount; break;
+            case 'D': ++doubleCount; break;
+            case 'F': ++floatCount; break;
+            case 'J': ++longCount; break;
+            case 'c': ++classCount; break;
+            case 'e': ++enumCount; break;
+            case 's': ++stringCount; break;
+            case '[': ++arrayCount; break;
+            case '@': ++nestedCount; break;
+            default: return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+        }
+        if (NT_SUCCESS(status)) status = decode(&bands->IntegerIndexes, integerCount, HttpPack200CodingKind::Unsigned5);
+        if (NT_SUCCESS(status)) status = decode(&bands->DoubleIndexes, doubleCount, HttpPack200CodingKind::Unsigned5);
+        if (NT_SUCCESS(status)) status = decode(&bands->FloatIndexes, floatCount, HttpPack200CodingKind::Unsigned5);
+        if (NT_SUCCESS(status)) status = decode(&bands->LongIndexes, longCount, HttpPack200CodingKind::Unsigned5);
+        if (NT_SUCCESS(status)) status = decode(&bands->ClassSignatureIndexes, classCount, HttpPack200CodingKind::Unsigned5);
+        if (NT_SUCCESS(status)) status = decode(&bands->EnumTypeIndexes, enumCount, HttpPack200CodingKind::Unsigned5);
+        if (NT_SUCCESS(status)) status = decode(&bands->EnumNameIndexes, enumCount, HttpPack200CodingKind::Unsigned5);
+        if (NT_SUCCESS(status)) status = decode(&bands->StringIndexes, stringCount, HttpPack200CodingKind::Unsigned5);
+        if (NT_SUCCESS(status)) status = decode(&bands->ArrayCounts, arrayCount, HttpPack200CodingKind::Unsigned5);
+        if (NT_SUCCESS(status)) status = decode(&bands->NestedTypeIndexes, nestedCount, HttpPack200CodingKind::Unsigned5);
+        if (NT_SUCCESS(status)) status = decode(&bands->NestedPairCounts, nestedCount, HttpPack200CodingKind::Unsigned5);
+        SIZE_T nestedPairCount = 0;
+        if (!NT_SUCCESS(status) || !sum(bands->NestedPairCounts, &nestedPairCount)) {
+            return NT_SUCCESS(status) ? STATUS_INTEGER_OVERFLOW : status;
+        }
+        return decode(&bands->NestedNameIndexes, nestedPairCount, HttpPack200CodingKind::Unsigned5);
+    }
+
     NTSTATUS HttpPack200ReadClassBandsWithMeta(
         HttpPack200BandReader* reader,
         HttpPack200BandReader* bandHeaderReader,
@@ -1129,8 +1230,12 @@ namespace
         constexpr ULONG FieldConstantValueFlag = 1UL << 17;
         constexpr ULONG FieldSignatureFlag = 1UL << 19;
         constexpr ULONG FieldDeprecatedFlag = 1UL << 20;
+        constexpr ULONG FieldVisibleAnnotationsFlag = 1UL << 21;
+        constexpr ULONG FieldInvisibleAnnotationsFlag = 1UL << 22;
         SIZE_T constantValueCount = 0;
         SIZE_T fieldSignatureCount = 0;
+        SIZE_T fieldVisibleAnnotationCount = 0;
+        SIZE_T fieldInvisibleAnnotationCount = 0;
         ULONG* fieldConstantValues = bands->FieldConstantValueIndexes();
         ULONG* fieldSignatures = bands->FieldSignatureIndexes();
         if (fieldCount != 0 && (fieldConstantValues == nullptr || fieldSignatures == nullptr)) {
@@ -1141,7 +1246,8 @@ namespace
             fieldSignatures[fieldIndex] = 0xffffffffUL;
             if ((bands->FieldFlagsLow()[fieldIndex] &
                     ~(0xffffUL | FieldConstantValueFlag | FieldSignatureFlag |
-                        FieldDeprecatedFlag)) != 0 ||
+                        FieldDeprecatedFlag | FieldVisibleAnnotationsFlag |
+                        FieldInvisibleAnnotationsFlag)) != 0 ||
                 bands->FieldFlagsHigh()[fieldIndex] != 0) {
                 return STATUS_NOT_SUPPORTED;
             }
@@ -1153,7 +1259,25 @@ namespace
                 !CheckedAddSize(fieldSignatureCount, 1, &fieldSignatureCount)) {
                 return STATUS_INTEGER_OVERFLOW;
             }
+            if ((bands->FieldFlagsLow()[fieldIndex] & FieldVisibleAnnotationsFlag) != 0) {
+                ++fieldVisibleAnnotationCount;
+            }
+            if ((bands->FieldFlagsLow()[fieldIndex] & FieldInvisibleAnnotationsFlag) != 0) {
+                ++fieldInvisibleAnnotationCount;
+            }
         }
+        const SIZE_T fieldMetadataCallCount =
+            (fieldVisibleAnnotationCount != 0 ? 1 : 0) +
+            (fieldInvisibleAnnotationCount != 0 ? 1 : 0);
+        HeapArray<ULONG> fieldMetadataCalls = {};
+        if (fieldMetadataCallCount != 0) {
+            status = fieldMetadataCalls.Allocate(fieldMetadataCallCount);
+            if (!NT_SUCCESS(status)) return status;
+        }
+        status = DecodeRawUlongBandWithMeta(
+            reader, bandHeaderReader, arena, HttpPack200CodingKind::Unsigned5,
+            fieldMetadataCalls.Get(), fieldMetadataCallCount);
+        if (!NT_SUCCESS(status)) return status;
         HeapArray<ULONG> constantValues = {};
         if (constantValueCount != 0) {
             status = constantValues.Allocate(constantValueCount);
@@ -1200,6 +1324,19 @@ namespace
                 fieldSignatures[fieldIndex] = fieldSignatureValues[fieldSignatureIndex++];
             }
         }
+        SIZE_T fieldMetadataCallIndex = 0;
+        status = ReadMetadataBands(
+            reader, bandHeaderReader, arena, fieldVisibleAnnotationCount,
+            fieldVisibleAnnotationCount == 0 ? 0 : fieldMetadataCalls[fieldMetadataCallIndex++],
+            false, false, bands->FieldVisibleAnnotations());
+        if (!NT_SUCCESS(status)) return status;
+        status = ReadMetadataBands(
+            reader, bandHeaderReader, arena, fieldInvisibleAnnotationCount,
+            fieldInvisibleAnnotationCount == 0 ? 0 : fieldMetadataCalls[fieldMetadataCallIndex++],
+            false, false, bands->FieldInvisibleAnnotations());
+        if (!NT_SUCCESS(status) || fieldMetadataCallIndex != fieldMetadataCallCount) {
+            return NT_SUCCESS(status) ? STATUS_INVALID_NETWORK_RESPONSE : status;
+        }
 
         status = DecodeUlongBandWithMeta(
             reader,
@@ -1240,9 +1377,16 @@ namespace
         constexpr ULONG MethodExceptionsFlag = 1UL << 18;
         constexpr ULONG MethodSignatureFlag = 1UL << 19;
         constexpr ULONG MethodDeprecatedFlag = 1UL << 20;
+        constexpr ULONG MethodVisibleAnnotationsFlag = 1UL << 21;
+        constexpr ULONG MethodInvisibleAnnotationsFlag = 1UL << 22;
+        constexpr ULONG MethodVisibleParameterAnnotationsFlag = 1UL << 23;
+        constexpr ULONG MethodInvisibleParameterAnnotationsFlag = 1UL << 24;
+        constexpr ULONG MethodAnnotationDefaultFlag = 1UL << 25;
         SIZE_T codeCount = 0;
         SIZE_T exceptionMethodCount = 0;
         SIZE_T methodSignatureCount = 0;
+        HeapArray<SIZE_T> methodMetadataCounts(5);
+        if (!methodMetadataCounts.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
         ULONG* methodCodeIndexes = bands->MethodCodeIndexes();
         ULONG* methodExceptionCounts = bands->MethodExceptionCounts();
         ULONG* methodSignatures = bands->MethodSignatureIndexes();
@@ -1257,7 +1401,11 @@ namespace
             methodSignatures[methodIndex] = 0xffffffffUL;
             if ((bands->MethodFlagsLow()[methodIndex] &
                     ~(0xffffUL | MethodCodeFlag | MethodExceptionsFlag | MethodSignatureFlag |
-                        MethodDeprecatedFlag)) != 0 ||
+                        MethodDeprecatedFlag | MethodVisibleAnnotationsFlag |
+                        MethodInvisibleAnnotationsFlag |
+                        MethodVisibleParameterAnnotationsFlag |
+                        MethodInvisibleParameterAnnotationsFlag |
+                        MethodAnnotationDefaultFlag)) != 0 ||
                 bands->MethodFlagsHigh()[methodIndex] != 0) {
                 return STATUS_NOT_SUPPORTED;
             }
@@ -1275,7 +1423,25 @@ namespace
                 !CheckedAddSize(methodSignatureCount, 1, &methodSignatureCount)) {
                 return STATUS_INTEGER_OVERFLOW;
             }
+            if ((bands->MethodFlagsLow()[methodIndex] & MethodVisibleAnnotationsFlag) != 0) ++methodMetadataCounts[0];
+            if ((bands->MethodFlagsLow()[methodIndex] & MethodInvisibleAnnotationsFlag) != 0) ++methodMetadataCounts[1];
+            if ((bands->MethodFlagsLow()[methodIndex] & MethodVisibleParameterAnnotationsFlag) != 0) ++methodMetadataCounts[2];
+            if ((bands->MethodFlagsLow()[methodIndex] & MethodInvisibleParameterAnnotationsFlag) != 0) ++methodMetadataCounts[3];
+            if ((bands->MethodFlagsLow()[methodIndex] & MethodAnnotationDefaultFlag) != 0) ++methodMetadataCounts[4];
         }
+        SIZE_T methodMetadataCallCount = 0;
+        for (SIZE_T metadataIndex = 0; metadataIndex < 5; ++metadataIndex) {
+            if (methodMetadataCounts[metadataIndex] != 0) ++methodMetadataCallCount;
+        }
+        HeapArray<ULONG> methodMetadataCalls = {};
+        if (methodMetadataCallCount != 0) {
+            status = methodMetadataCalls.Allocate(methodMetadataCallCount);
+            if (!NT_SUCCESS(status)) return status;
+        }
+        status = DecodeRawUlongBandWithMeta(
+            reader, bandHeaderReader, arena, HttpPack200CodingKind::Unsigned5,
+            methodMetadataCalls.Get(), methodMetadataCallCount);
+        if (!NT_SUCCESS(status)) return status;
 
         HeapArray<ULONG> exceptionCounts = {};
         if (exceptionMethodCount != 0) {
@@ -1343,6 +1509,27 @@ namespace
                 methodSignatures[methodIndex] = methodSignatureValues[methodSignatureIndex++];
             }
         }
+        HeapArray<HttpPack200MetadataBands*> methodMetadataBands(5);
+        if (!methodMetadataBands.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
+        methodMetadataBands[0] = bands->MethodVisibleAnnotations();
+        methodMetadataBands[1] = bands->MethodInvisibleAnnotations();
+        methodMetadataBands[2] = bands->MethodVisibleParameterAnnotations();
+        methodMetadataBands[3] = bands->MethodInvisibleParameterAnnotations();
+        methodMetadataBands[4] = bands->MethodAnnotationDefaults();
+        SIZE_T methodMetadataCallIndex = 0;
+        for (SIZE_T metadataIndex = 0; metadataIndex < 5; ++metadataIndex) {
+            const SIZE_T count = methodMetadataCounts[metadataIndex];
+            status = ReadMetadataBands(
+                reader, bandHeaderReader, arena, count,
+                count == 0 ? 0 : methodMetadataCalls[methodMetadataCallIndex++],
+                metadataIndex == 2 || metadataIndex == 3,
+                metadataIndex == 4,
+                methodMetadataBands[metadataIndex]);
+            if (!NT_SUCCESS(status)) return status;
+        }
+        if (methodMetadataCallIndex != methodMetadataCallCount) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
 
         status = DecodeRawUlongBandWithMeta(
             reader,
@@ -1370,16 +1557,27 @@ namespace
         constexpr ULONG ClassEnclosingMethodFlag = 1UL << 18;
         constexpr ULONG ClassSignatureFlag = 1UL << 19;
         constexpr ULONG ClassDeprecatedFlag = 1UL << 20;
+        constexpr ULONG ClassVisibleAnnotationsFlag = 1UL << 21;
+        constexpr ULONG ClassInvisibleAnnotationsFlag = 1UL << 22;
+        constexpr ULONG ClassInnerClassesFlag = 1UL << 23;
+        constexpr ULONG ClassFileVersionFlag = 1UL << 24;
         SIZE_T sourceFileCount = 0;
         SIZE_T enclosingMethodCount = 0;
         SIZE_T classSignatureCount = 0;
+        SIZE_T classVisibleAnnotationCount = 0;
+        SIZE_T classInvisibleAnnotationCount = 0;
+        SIZE_T classFileVersionCount = 0;
+        SIZE_T classInnerClassesCount = 0;
         ULONG* sourceFileIndexes = bands->SourceFileIndexes();
         ULONG* enclosingMethodClasses = bands->EnclosingMethodClassIndexes();
         ULONG* enclosingMethodDescriptors = bands->EnclosingMethodDescriptorIndexes();
         ULONG* classSignatures = bands->ClassSignatureIndexes();
+        ULONG* classMinorVersions = bands->ClassMinorVersions();
+        ULONG* classMajorVersions = bands->ClassMajorVersions();
         if (classCount != 0 &&
             (sourceFileIndexes == nullptr || enclosingMethodClasses == nullptr ||
-                enclosingMethodDescriptors == nullptr || classSignatures == nullptr)) {
+                enclosingMethodDescriptors == nullptr || classSignatures == nullptr ||
+                classMinorVersions == nullptr || classMajorVersions == nullptr)) {
             return STATUS_INVALID_PARAMETER;
         }
         for (SIZE_T classIndex = 0; classIndex < classCount; ++classIndex) {
@@ -1387,9 +1585,13 @@ namespace
             enclosingMethodClasses[classIndex] = 0xffffffffUL;
             enclosingMethodDescriptors[classIndex] = 0xffffffffUL;
             classSignatures[classIndex] = 0xffffffffUL;
+            classMinorVersions[classIndex] = 0xffffffffUL;
+            classMajorVersions[classIndex] = 0xffffffffUL;
             if ((bands->FlagsLow()[classIndex] &
                     ~(0xffffUL | ClassSourceFileFlag | ClassEnclosingMethodFlag | ClassSignatureFlag |
-                        ClassDeprecatedFlag)) != 0 ||
+                        ClassDeprecatedFlag | ClassVisibleAnnotationsFlag |
+                        ClassInvisibleAnnotationsFlag | ClassInnerClassesFlag |
+                        ClassFileVersionFlag)) != 0 ||
                 (haveClassFlagsHigh && bands->FlagsHigh()[classIndex] != 0)) {
                 return STATUS_NOT_SUPPORTED;
             }
@@ -1405,7 +1607,31 @@ namespace
                 !CheckedAddSize(classSignatureCount, 1, &classSignatureCount)) {
                 return STATUS_INTEGER_OVERFLOW;
             }
+            if ((bands->FlagsLow()[classIndex] & ClassVisibleAnnotationsFlag) != 0) {
+                ++classVisibleAnnotationCount;
+            }
+            if ((bands->FlagsLow()[classIndex] & ClassInvisibleAnnotationsFlag) != 0) {
+                ++classInvisibleAnnotationCount;
+            }
+            if ((bands->FlagsLow()[classIndex] & ClassFileVersionFlag) != 0) {
+                ++classFileVersionCount;
+            }
+            if ((bands->FlagsLow()[classIndex] & ClassInnerClassesFlag) != 0) {
+                ++classInnerClassesCount;
+            }
         }
+        const SIZE_T classMetadataCallCount =
+            (classVisibleAnnotationCount != 0 ? 1 : 0) +
+            (classInvisibleAnnotationCount != 0 ? 1 : 0);
+        HeapArray<ULONG> classMetadataCalls = {};
+        if (classMetadataCallCount != 0) {
+            status = classMetadataCalls.Allocate(classMetadataCallCount);
+            if (!NT_SUCCESS(status)) return status;
+        }
+        status = DecodeRawUlongBandWithMeta(
+            reader, bandHeaderReader, arena, HttpPack200CodingKind::Unsigned5,
+            classMetadataCalls.Get(), classMetadataCallCount);
+        if (!NT_SUCCESS(status)) return status;
         HeapArray<ULONG> sourceFiles = {};
         if (sourceFileCount != 0) {
             status = sourceFiles.Allocate(sourceFileCount);
@@ -1487,6 +1713,92 @@ namespace
         for (SIZE_T classIndex = 0; classIndex < classCount; ++classIndex) {
             if ((bands->FlagsLow()[classIndex] & ClassSignatureFlag) != 0) {
                 classSignatures[classIndex] = classSignatureValues[classSignatureIndex++];
+            }
+        }
+        SIZE_T classMetadataCallIndex = 0;
+        status = ReadMetadataBands(
+            reader, bandHeaderReader, arena, classVisibleAnnotationCount,
+            classVisibleAnnotationCount == 0 ? 0 : classMetadataCalls[classMetadataCallIndex++],
+            false, false, bands->ClassVisibleAnnotations());
+        if (!NT_SUCCESS(status)) return status;
+        status = ReadMetadataBands(
+            reader, bandHeaderReader, arena, classInvisibleAnnotationCount,
+            classInvisibleAnnotationCount == 0 ? 0 : classMetadataCalls[classMetadataCallIndex++],
+            false, false, bands->ClassInvisibleAnnotations());
+        if (!NT_SUCCESS(status) || classMetadataCallIndex != classMetadataCallCount) {
+            return NT_SUCCESS(status) ? STATUS_INVALID_NETWORK_RESPONSE : status;
+        }
+        HeapArray<ULONG> localInnerCounts = {};
+        if (classInnerClassesCount != 0) {
+            status = localInnerCounts.Allocate(classInnerClassesCount);
+            if (!NT_SUCCESS(status)) return status;
+        }
+        status = DecodeUlongBandWithMeta(
+            reader, bandHeaderReader, arena, HttpPack200CodingKind::Unsigned5,
+            localInnerCounts.Get(), classInnerClassesCount);
+        if (!NT_SUCCESS(status)) return status;
+        SIZE_T localInnerTotal = 0;
+        SIZE_T localInnerCountIndex = 0;
+        for (SIZE_T classIndex = 0; classIndex < classCount; ++classIndex) {
+            bands->LocalInnerClassOffsets()[classIndex] = static_cast<ULONG>(localInnerTotal);
+            bands->LocalInnerClassCounts()[classIndex] = 0;
+            if ((bands->FlagsLow()[classIndex] & ClassInnerClassesFlag) == 0) continue;
+            const ULONG count = localInnerCounts[localInnerCountIndex++];
+            bands->LocalInnerClassCounts()[classIndex] = count;
+            if (!CheckedAddSize(localInnerTotal, count, &localInnerTotal) ||
+                localInnerTotal > 0xffffffffULL) return STATUS_INTEGER_OVERFLOW;
+        }
+        status = bands->AllocateLocalInnerClasses(localInnerTotal);
+        if (!NT_SUCCESS(status)) return status;
+        status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Unsigned5, bands->LocalInnerClassIndexes(), localInnerTotal);
+        if (NT_SUCCESS(status)) status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Unsigned5, bands->LocalInnerClassFlags(), localInnerTotal);
+        if (!NT_SUCCESS(status)) return status;
+        SIZE_T explicitLocalInnerCount = 0;
+        for (SIZE_T index = 0; index < localInnerTotal; ++index) {
+            bands->LocalInnerClassOuterIndexes()[index] = 0xffffffffUL;
+            bands->LocalInnerClassNameIndexes()[index] = 0xffffffffUL;
+            if (bands->LocalInnerClassFlags()[index] != 0) ++explicitLocalInnerCount;
+        }
+        HeapArray<ULONG> explicitOuter = {};
+        HeapArray<ULONG> explicitName = {};
+        if (explicitLocalInnerCount != 0) {
+            status = explicitOuter.Allocate(explicitLocalInnerCount);
+            if (NT_SUCCESS(status)) status = explicitName.Allocate(explicitLocalInnerCount);
+            if (!NT_SUCCESS(status)) return status;
+        }
+        status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Unsigned5, explicitOuter.Get(), explicitLocalInnerCount);
+        if (NT_SUCCESS(status)) status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Unsigned5, explicitName.Get(), explicitLocalInnerCount);
+        if (!NT_SUCCESS(status)) return status;
+        SIZE_T explicitLocalIndex = 0;
+        for (SIZE_T index = 0; index < localInnerTotal; ++index) {
+            if (bands->LocalInnerClassFlags()[index] != 0) {
+                bands->LocalInnerClassOuterIndexes()[index] = explicitOuter[explicitLocalIndex];
+                bands->LocalInnerClassNameIndexes()[index] = explicitName[explicitLocalIndex++];
+            }
+        }
+        HeapArray<ULONG> classMinorVersionValues = {};
+        HeapArray<ULONG> classMajorVersionValues = {};
+        if (classFileVersionCount != 0) {
+            status = classMinorVersionValues.Allocate(classFileVersionCount);
+            if (NT_SUCCESS(status)) status = classMajorVersionValues.Allocate(classFileVersionCount);
+            if (!NT_SUCCESS(status)) return status;
+        }
+        status = DecodeUlongBandWithMeta(
+            reader, bandHeaderReader, arena, HttpPack200CodingKind::Unsigned5,
+            classMinorVersionValues.Get(), classFileVersionCount);
+        if (NT_SUCCESS(status)) status = DecodeUlongBandWithMeta(
+            reader, bandHeaderReader, arena, HttpPack200CodingKind::Unsigned5,
+            classMajorVersionValues.Get(), classFileVersionCount);
+        if (!NT_SUCCESS(status)) return status;
+        SIZE_T classVersionIndex = 0;
+        for (SIZE_T classIndex = 0; classIndex < classCount; ++classIndex) {
+            if ((bands->FlagsLow()[classIndex] & ClassFileVersionFlag) != 0) {
+                classMinorVersions[classIndex] = classMinorVersionValues[classVersionIndex];
+                classMajorVersions[classIndex] = classMajorVersionValues[classVersionIndex++];
             }
         }
 
@@ -1675,11 +1987,130 @@ namespace
         else if (codeFlagsCount != 0) {
             RtlZeroMemory(codeFlagsHigh.Get(), codeFlagsCount * sizeof(ULONG));
         }
-        for (SIZE_T index = 0; index < codeFlagsCount; ++index) {
-            if (codeFlagsLow[index] != 0 || codeFlagsHigh[index] != 0) {
-                return STATUS_NOT_SUPPORTED;
+        SIZE_T flagIndex = 0;
+        for (SIZE_T codeIndex = 0; codeIndex < codeCount; ++codeIndex) {
+            const bool hasFlags = allCodeHasFlags || codeHeaders[codeIndex] == 0;
+            bands->CodeFlagsLow()[codeIndex] = hasFlags ? codeFlagsLow[flagIndex] : 0;
+            bands->CodeFlagsHigh()[codeIndex] = hasFlags ? codeFlagsHigh[flagIndex] : 0;
+            if (hasFlags) {
+                ++flagIndex;
             }
         }
+        if (flagIndex != codeFlagsCount) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        constexpr ULONG LineNumberTableFlag = 1UL << 1;
+        constexpr ULONG LocalVariableTableFlag = 1UL << 2;
+        constexpr ULONG LocalVariableTypeTableFlag = 1UL << 3;
+        constexpr ULONG SupportedCodeFlags =
+            LineNumberTableFlag | LocalVariableTableFlag | LocalVariableTypeTableFlag;
+        SIZE_T lineTableCount = 0;
+        SIZE_T localTableCount = 0;
+        SIZE_T localTypeTableCount = 0;
+        for (SIZE_T codeIndex = 0; codeIndex < codeCount; ++codeIndex) {
+            if ((bands->CodeFlagsLow()[codeIndex] & ~SupportedCodeFlags) != 0 ||
+                bands->CodeFlagsHigh()[codeIndex] != 0) {
+                return STATUS_NOT_SUPPORTED;
+            }
+            if ((bands->CodeFlagsLow()[codeIndex] & LineNumberTableFlag) != 0) ++lineTableCount;
+            if ((bands->CodeFlagsLow()[codeIndex] & LocalVariableTableFlag) != 0) ++localTableCount;
+            if ((bands->CodeFlagsLow()[codeIndex] & LocalVariableTypeTableFlag) != 0) ++localTypeTableCount;
+        }
+
+        HeapArray<ULONG> compactCounts = {};
+        const SIZE_T maximumTableCount =
+            lineTableCount > localTableCount ?
+                (lineTableCount > localTypeTableCount ? lineTableCount : localTypeTableCount) :
+                (localTableCount > localTypeTableCount ? localTableCount : localTypeTableCount);
+        if (maximumTableCount != 0) {
+            status = compactCounts.Allocate(maximumTableCount);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        auto decodeCounts = [&](ULONG flag, SIZE_T tableCount, ULONG* counts, ULONG* offsets,
+                                SIZE_T* total) noexcept -> NTSTATUS {
+            *total = 0;
+            NTSTATUS localStatus = DecodeRawUlongBandWithMeta(
+                reader, bandHeaderReader, arena, HttpPack200CodingKind::Unsigned5,
+                compactCounts.Get(), tableCount);
+            if (!NT_SUCCESS(localStatus)) {
+                return localStatus;
+            }
+            SIZE_T compactIndex = 0;
+            for (SIZE_T codeIndex = 0; codeIndex < codeCount; ++codeIndex) {
+                offsets[codeIndex] = static_cast<ULONG>(*total);
+                counts[codeIndex] = 0;
+                if ((bands->CodeFlagsLow()[codeIndex] & flag) == 0) {
+                    continue;
+                }
+                const ULONG count = compactCounts[compactIndex++];
+                if (*total > 0xffffffffULL ||
+                    !CheckedAddSize(*total, static_cast<SIZE_T>(count), total) ||
+                    *total > 0xffffffffULL) {
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+                counts[codeIndex] = count;
+            }
+            return compactIndex == tableCount ? STATUS_SUCCESS : STATUS_INVALID_NETWORK_RESPONSE;
+        };
+
+        SIZE_T lineCount = 0;
+        status = decodeCounts(
+            LineNumberTableFlag, lineTableCount, bands->LineNumberCounts(),
+            bands->LineNumberOffsets(), &lineCount);
+        if (!NT_SUCCESS(status)) return status;
+        status = bands->AllocateLineNumbers(lineCount);
+        if (!NT_SUCCESS(status)) return status;
+        status = DecodeUlongBandWithMeta(
+            reader, bandHeaderReader, arena, HttpPack200CodingKind::Bci5,
+            bands->LineNumberBcis(), lineCount);
+        if (NT_SUCCESS(status)) {
+            status = DecodeUlongBandWithMeta(
+                reader, bandHeaderReader, arena, HttpPack200CodingKind::Unsigned5,
+                bands->LineNumbers(), lineCount);
+        }
+        if (!NT_SUCCESS(status)) return status;
+
+        SIZE_T localCount = 0;
+        status = decodeCounts(
+            LocalVariableTableFlag, localTableCount, bands->LocalVariableCounts(),
+            bands->LocalVariableOffsets(), &localCount);
+        if (!NT_SUCCESS(status)) return status;
+        status = bands->AllocateLocalVariables(localCount);
+        if (!NT_SUCCESS(status)) return status;
+        status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Bci5, bands->LocalVariableBcis(), localCount);
+        if (NT_SUCCESS(status)) status = DecodeLongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Branch5, bands->LocalVariableSpans(), localCount);
+        if (NT_SUCCESS(status)) status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Unsigned5, bands->LocalVariableNameIndexes(), localCount);
+        if (NT_SUCCESS(status)) status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Unsigned5, bands->LocalVariableTypeIndexes(), localCount);
+        if (NT_SUCCESS(status)) status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Unsigned5, bands->LocalVariableSlots(), localCount);
+        if (!NT_SUCCESS(status)) return status;
+
+        SIZE_T localTypeCount = 0;
+        status = decodeCounts(
+            LocalVariableTypeTableFlag, localTypeTableCount, bands->LocalVariableTypeCounts(),
+            bands->LocalVariableTypeOffsets(), &localTypeCount);
+        if (!NT_SUCCESS(status)) return status;
+        status = bands->AllocateLocalVariableTypes(localTypeCount);
+        if (!NT_SUCCESS(status)) return status;
+        status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Bci5, bands->LocalVariableTypeBcis(), localTypeCount);
+        if (NT_SUCCESS(status)) status = DecodeLongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Branch5, bands->LocalVariableTypeSpans(), localTypeCount);
+        if (NT_SUCCESS(status)) status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Unsigned5, bands->LocalVariableTypeNameIndexes(), localTypeCount);
+        if (NT_SUCCESS(status)) status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Unsigned5, bands->LocalVariableTypeSignatureIndexes(), localTypeCount);
+        if (NT_SUCCESS(status)) status = DecodeUlongBandWithMeta(reader, bandHeaderReader, arena,
+            HttpPack200CodingKind::Unsigned5, bands->LocalVariableTypeSlots(), localTypeCount);
+        if (!NT_SUCCESS(status)) return status;
         return STATUS_SUCCESS;
     }
 

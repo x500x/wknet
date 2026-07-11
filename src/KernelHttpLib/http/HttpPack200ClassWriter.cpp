@@ -341,6 +341,8 @@ namespace http
             0,
             nullptr,
             0,
+            nullptr,
+            0,
             classLength);
     }
 
@@ -368,6 +370,8 @@ namespace http
         USHORT innerClassesAttributeNameIndex,
         const HttpPack200InnerClass* innerClasses,
         SIZE_T innerClassCount,
+        const HttpPack200RawAttribute* classAttributes,
+        SIZE_T classAttributeCount,
         SIZE_T* classLength) noexcept
     {
         if (!begun_ ||
@@ -390,9 +394,14 @@ namespace http
             ((innerClassesAttributeNameIndex == 0) != (innerClassCount == 0)) ||
             (innerClasses == nullptr && innerClassCount != 0) ||
             innerClassCount > 0xffffUL ||
-            constantPoolCount_ != maxConstantPoolEntries_) {
+            (classAttributes == nullptr && classAttributeCount != 0) ||
+            classAttributeCount > 0xffffUL ||
+            constantPoolCount_ > maxConstantPoolEntries_) {
             return STATUS_INVALID_PARAMETER;
         }
+
+        destination_[8] = static_cast<char>(constantPoolCount_ >> 8);
+        destination_[9] = static_cast<char>(constantPoolCount_);
 
         NTSTATUS status = AppendBe16(accessFlags);
         if (!NT_SUCCESS(status)) {
@@ -420,6 +429,31 @@ namespace http
             }
         }
 
+        auto appendRawAttributes = [&](const HttpPack200RawAttribute* attributes,
+                                       SIZE_T count) noexcept -> NTSTATUS {
+            if ((attributes == nullptr && count != 0) || count > 0xffffUL) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            NTSTATUS localStatus = STATUS_SUCCESS;
+            for (SIZE_T attributeIndex = 0;
+                NT_SUCCESS(localStatus) && attributeIndex < count;
+                ++attributeIndex) {
+                const HttpPack200RawAttribute& attribute = attributes[attributeIndex];
+                if (attribute.NameIndex == 0 || attribute.Length > 0xffffffffULL ||
+                    (attribute.Data == nullptr && attribute.Length != 0)) {
+                    return STATUS_INVALID_PARAMETER;
+                }
+                localStatus = AppendBe16(attribute.NameIndex);
+                if (NT_SUCCESS(localStatus)) {
+                    localStatus = AppendBe32(static_cast<ULONG>(attribute.Length));
+                }
+                if (NT_SUCCESS(localStatus)) {
+                    localStatus = AppendBytes(attribute.Data, attribute.Length);
+                }
+            }
+            return localStatus;
+        };
+
         status = AppendBe16(static_cast<USHORT>(fieldCount));
         if (!NT_SUCCESS(status)) {
             return status;
@@ -431,7 +465,11 @@ namespace http
             const bool hasConstantValue = fields[index].ConstantValueAttributeNameIndex != 0;
             const bool hasSignature = fields[index].SignatureAttributeNameIndex != 0;
             const bool hasDeprecated = fields[index].DeprecatedAttributeNameIndex != 0;
-            if (hasConstantValue != (fields[index].ConstantValueIndex != 0)) {
+            const SIZE_T fieldAttributeCount = fields[index].AttributeCount +
+                (hasConstantValue ? 1 : 0) + (hasSignature ? 1 : 0) + (hasDeprecated ? 1 : 0);
+            if (fieldAttributeCount > 0xffffUL ||
+                (fields[index].Attributes == nullptr && fields[index].AttributeCount != 0) ||
+                hasConstantValue != (fields[index].ConstantValueIndex != 0)) {
                 return STATUS_INVALID_PARAMETER;
             }
             if (hasSignature != (fields[index].SignatureIndex != 0)) {
@@ -445,8 +483,7 @@ namespace http
                 status = AppendBe16(fields[index].DescriptorIndex);
             }
             if (NT_SUCCESS(status)) {
-                status = AppendBe16(static_cast<USHORT>((hasConstantValue ? 1 : 0) +
-                    (hasSignature ? 1 : 0) + (hasDeprecated ? 1 : 0)));
+                status = AppendBe16(static_cast<USHORT>(fieldAttributeCount));
             }
             if (!NT_SUCCESS(status)) {
                 return status;
@@ -474,6 +511,8 @@ namespace http
                 if (NT_SUCCESS(status)) status = AppendBe32(0);
                 if (!NT_SUCCESS(status)) return status;
             }
+            status = appendRawAttributes(fields[index].Attributes, fields[index].AttributeCount);
+            if (!NT_SUCCESS(status)) return status;
         }
 
         status = AppendBe16(static_cast<USHORT>(methodCount));
@@ -488,6 +527,38 @@ namespace http
             const bool hasExceptions = methods[index].ExceptionsAttributeNameIndex != 0;
             const bool hasSignature = methods[index].SignatureAttributeNameIndex != 0;
             const bool hasDeprecated = methods[index].DeprecatedAttributeNameIndex != 0;
+            const bool hasLineNumbers = methods[index].LineNumberTableAttributeNameIndex != 0;
+            const bool hasLocalVariables = methods[index].LocalVariableTableAttributeNameIndex != 0;
+            const bool hasLocalVariableTypes =
+                methods[index].LocalVariableTypeTableAttributeNameIndex != 0;
+            ULONGLONG rawCodeAttributeBytes = 0;
+            if (methods[index].CodeAttributes == nullptr &&
+                methods[index].CodeAttributeCount != 0) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            for (SIZE_T attributeIndex = 0;
+                attributeIndex < methods[index].CodeAttributeCount;
+                ++attributeIndex) {
+                const HttpPack200RawAttribute& attribute = methods[index].CodeAttributes[attributeIndex];
+                if (attribute.Length > 0xffffffffULL ||
+                    rawCodeAttributeBytes > 0xffffffffULL - 6ULL - attribute.Length) {
+                    return STATUS_INTEGER_OVERFLOW;
+                }
+                rawCodeAttributeBytes += 6ULL + attribute.Length;
+            }
+            const ULONGLONG lineNumberBytes = hasLineNumbers ?
+                8ULL + methods[index].LineNumberCount * 4ULL : 0ULL;
+            const ULONGLONG localVariableBytes = hasLocalVariables ?
+                8ULL + methods[index].LocalVariableCount * 10ULL : 0ULL;
+            const ULONGLONG localVariableTypeBytes = hasLocalVariableTypes ?
+                8ULL + methods[index].LocalVariableTypeCount * 10ULL : 0ULL;
+            const ULONGLONG codeAttributeLength =
+                static_cast<ULONGLONG>(methods[index].CodeLength) + 12ULL +
+                methods[index].ExceptionHandlerCount * 8ULL +
+                lineNumberBytes + localVariableBytes + localVariableTypeBytes + rawCodeAttributeBytes;
+            const SIZE_T methodAttributeCount = methods[index].AttributeCount +
+                (hasCode ? 1 : 0) + (hasExceptions ? 1 : 0) +
+                (hasSignature ? 1 : 0) + (hasDeprecated ? 1 : 0);
             if ((!hasCode && (methods[index].Code != nullptr || methods[index].CodeLength != 0)) ||
                 (hasCode && (methods[index].Code == nullptr || methods[index].CodeLength == 0)) ||
                 (!hasCode && methods[index].ExceptionHandlerCount != 0) ||
@@ -499,8 +570,20 @@ namespace http
                     methods[index].DeclaredExceptionCount != 0) ||
                 methods[index].DeclaredExceptionCount > 0xffffUL ||
                 hasSignature != (methods[index].SignatureIndex != 0) ||
-                methods[index].ExceptionHandlerCount >
-                    (0xffffffffULL - 12ULL - methods[index].CodeLength) / 8ULL) {
+                hasLineNumbers != (methods[index].LineNumberCount != 0) ||
+                hasLocalVariables != (methods[index].LocalVariableCount != 0) ||
+                hasLocalVariableTypes != (methods[index].LocalVariableTypeCount != 0) ||
+                (methods[index].LineNumbers == nullptr && methods[index].LineNumberCount != 0) ||
+                (methods[index].LocalVariables == nullptr && methods[index].LocalVariableCount != 0) ||
+                (methods[index].LocalVariableTypes == nullptr && methods[index].LocalVariableTypeCount != 0) ||
+                methods[index].LineNumberCount > 0xffffUL ||
+                methods[index].LocalVariableCount > 0xffffUL ||
+                methods[index].LocalVariableTypeCount > 0xffffUL ||
+                methodAttributeCount > 0xffffUL ||
+                methods[index].CodeAttributeCount > 0xffffUL ||
+                (methods[index].Attributes == nullptr && methods[index].AttributeCount != 0) ||
+                (methods[index].CodeAttributes == nullptr && methods[index].CodeAttributeCount != 0) ||
+                codeAttributeLength > 0xffffffffULL) {
                 return STATUS_INVALID_PARAMETER;
             }
             status = AppendBe16(methods[index].AccessFlags);
@@ -511,9 +594,7 @@ namespace http
                 status = AppendBe16(methods[index].DescriptorIndex);
             }
             if (NT_SUCCESS(status)) {
-                status = AppendBe16(static_cast<USHORT>(
-                    (hasCode ? 1 : 0) + (hasExceptions ? 1 : 0) +
-                    (hasSignature ? 1 : 0) + (hasDeprecated ? 1 : 0)));
+                status = AppendBe16(static_cast<USHORT>(methodAttributeCount));
             }
             if (!NT_SUCCESS(status)) {
                 return status;
@@ -521,9 +602,7 @@ namespace http
             if (hasCode) {
                 status = AppendBe16(methods[index].CodeAttributeNameIndex);
                 if (NT_SUCCESS(status)) {
-                    status = AppendBe32(static_cast<ULONG>(
-                        methods[index].CodeLength + 12 +
-                        methods[index].ExceptionHandlerCount * 8));
+                    status = AppendBe32(static_cast<ULONG>(codeAttributeLength));
                 }
                 if (NT_SUCCESS(status)) {
                     status = AppendBe16(methods[index].MaxStack);
@@ -563,8 +642,64 @@ namespace http
                         status = AppendBe16(handler.CatchTypeIndex);
                     }
                 }
+                const USHORT nestedAttributeCount = static_cast<USHORT>(
+                    (hasLineNumbers ? 1 : 0) +
+                    (hasLocalVariables ? 1 : 0) +
+                    (hasLocalVariableTypes ? 1 : 0) + methods[index].CodeAttributeCount);
+                if (NT_SUCCESS(status)) status = AppendBe16(nestedAttributeCount);
+                if (NT_SUCCESS(status) && hasLineNumbers) {
+                    status = AppendBe16(methods[index].LineNumberTableAttributeNameIndex);
+                    if (NT_SUCCESS(status)) status = AppendBe32(static_cast<ULONG>(
+                        2ULL + methods[index].LineNumberCount * 4ULL));
+                    if (NT_SUCCESS(status)) status = AppendBe16(
+                        static_cast<USHORT>(methods[index].LineNumberCount));
+                    for (SIZE_T entryIndex = 0;
+                        NT_SUCCESS(status) && entryIndex < methods[index].LineNumberCount;
+                        ++entryIndex) {
+                        const HttpPack200LineNumber& entry = methods[index].LineNumbers[entryIndex];
+                        if (entry.StartPc >= methods[index].CodeLength) return STATUS_INVALID_PARAMETER;
+                        status = AppendBe16(entry.StartPc);
+                        if (NT_SUCCESS(status)) status = AppendBe16(entry.LineNumber);
+                    }
+                }
+                auto appendLocalVariables = [&](USHORT nameIndex,
+                                                const HttpPack200LocalVariable* entries,
+                                                SIZE_T count) noexcept -> NTSTATUS {
+                    NTSTATUS localStatus = AppendBe16(nameIndex);
+                    if (NT_SUCCESS(localStatus)) localStatus = AppendBe32(
+                        static_cast<ULONG>(2ULL + count * 10ULL));
+                    if (NT_SUCCESS(localStatus)) localStatus = AppendBe16(static_cast<USHORT>(count));
+                    for (SIZE_T entryIndex = 0; NT_SUCCESS(localStatus) && entryIndex < count; ++entryIndex) {
+                        const HttpPack200LocalVariable& entry = entries[entryIndex];
+                        if (entry.NameIndex == 0 || entry.TypeIndex == 0 ||
+                            entry.StartPc > methods[index].CodeLength ||
+                            entry.Length > methods[index].CodeLength - entry.StartPc) {
+                            return STATUS_INVALID_PARAMETER;
+                        }
+                        localStatus = AppendBe16(entry.StartPc);
+                        if (NT_SUCCESS(localStatus)) localStatus = AppendBe16(entry.Length);
+                        if (NT_SUCCESS(localStatus)) localStatus = AppendBe16(entry.NameIndex);
+                        if (NT_SUCCESS(localStatus)) localStatus = AppendBe16(entry.TypeIndex);
+                        if (NT_SUCCESS(localStatus)) localStatus = AppendBe16(entry.Slot);
+                    }
+                    return localStatus;
+                };
+                if (NT_SUCCESS(status) && hasLocalVariables) {
+                    status = appendLocalVariables(
+                        methods[index].LocalVariableTableAttributeNameIndex,
+                        methods[index].LocalVariables,
+                        methods[index].LocalVariableCount);
+                }
+                if (NT_SUCCESS(status) && hasLocalVariableTypes) {
+                    status = appendLocalVariables(
+                        methods[index].LocalVariableTypeTableAttributeNameIndex,
+                        methods[index].LocalVariableTypes,
+                        methods[index].LocalVariableTypeCount);
+                }
                 if (NT_SUCCESS(status)) {
-                    status = AppendBe16(0);
+                    status = appendRawAttributes(
+                        methods[index].CodeAttributes,
+                        methods[index].CodeAttributeCount);
                 }
                 if (!NT_SUCCESS(status)) {
                     return status;
@@ -609,6 +744,8 @@ namespace http
                 if (NT_SUCCESS(status)) status = AppendBe32(0);
                 if (!NT_SUCCESS(status)) return status;
             }
+            status = appendRawAttributes(methods[index].Attributes, methods[index].AttributeCount);
+            if (!NT_SUCCESS(status)) return status;
         }
 
         const bool hasSourceFile = sourceFileAttributeNameIndex != 0;
@@ -617,10 +754,13 @@ namespace http
         const bool hasEnclosingMethod = enclosingMethodAttributeNameIndex != 0;
         const bool hasBootstrapMethods = bootstrapMethodsAttributeNameIndex != 0;
         const bool hasInnerClasses = innerClassesAttributeNameIndex != 0;
-        status = AppendBe16(static_cast<USHORT>((hasSourceFile ? 1 : 0) +
+        const SIZE_T totalClassAttributeCount = classAttributeCount +
+            (hasSourceFile ? 1 : 0) +
             (hasSignature ? 1 : 0) + (hasBootstrapMethods ? 1 : 0) +
             (hasInnerClasses ? 1 : 0) + (hasDeprecated ? 1 : 0) +
-            (hasEnclosingMethod ? 1 : 0)));
+            (hasEnclosingMethod ? 1 : 0);
+        if (totalClassAttributeCount > 0xffffUL) return STATUS_INVALID_PARAMETER;
+        status = AppendBe16(static_cast<USHORT>(totalClassAttributeCount));
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -715,6 +855,8 @@ namespace http
                 return status;
             }
         }
+        status = appendRawAttributes(classAttributes, classAttributeCount);
+        if (!NT_SUCCESS(status)) return status;
         headerFinished_ = true;
         *classLength = length_;
         return STATUS_SUCCESS;
