@@ -2825,10 +2825,15 @@ namespace tls
             _Out_writes_bytes_(destinationCapacity) UCHAR* destination,
             SIZE_T destinationCapacity,
             _Out_ SIZE_T* destinationLength,
+            _Out_ SIZE_T* certificateOffset,
             _Out_ SIZE_T* nextOffset) noexcept
         {
             if (destinationLength != nullptr) {
                 *destinationLength = 0;
+            }
+
+            if (certificateOffset != nullptr) {
+                *certificateOffset = start;
             }
 
             if (nextOffset != nullptr) {
@@ -2838,6 +2843,7 @@ namespace tls
             if (data == nullptr ||
                 destination == nullptr ||
                 destinationLength == nullptr ||
+                certificateOffset == nullptr ||
                 nextOffset == nullptr) {
                 return STATUS_INVALID_PARAMETER;
             }
@@ -2864,6 +2870,9 @@ namespace tls
                 &end)) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
+
+            *certificateOffset = begin;
+            *nextOffset = end + (sizeof(PemCertificateEnd) - 1);
 
             HeapArray<UCHAR> quartet(4);
             HeapArray<bool> padding(4);
@@ -2919,7 +2928,6 @@ namespace tls
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
-            *nextOffset = end + (sizeof(PemCertificateEnd) - 1);
             return STATUS_SUCCESS;
         }
 
@@ -4919,6 +4927,14 @@ namespace tls
         }
 
         _Must_inspect_result_
+        bool IsSkippableAuthorityCertificateStatus(NTSTATUS status) noexcept
+        {
+            return status == STATUS_INVALID_NETWORK_RESPONSE ||
+                status == STATUS_NOT_SUPPORTED ||
+                status == STATUS_BUFFER_TOO_SMALL;
+        }
+
+        _Must_inspect_result_
         NTSTATUS ParsedCertificateMatchesAuthorityBundle(
             _In_opt_ const crypto::CngProviderCache* providerCache,
             _In_ const ParsedCertificate& certificate,
@@ -4963,8 +4979,10 @@ namespace tls
             }
 
             SIZE_T offset = firstPem;
+            SIZE_T certificateIndex = 0;
             while (offset < bundle.DataLength) {
                 SIZE_T derLength = 0;
+                SIZE_T certificateOffset = offset;
                 SIZE_T nextOffset = offset;
                 NTSTATUS status = DecodePemCertificate(
                     bundle.Data,
@@ -4973,17 +4991,41 @@ namespace tls
                     scratch,
                     scratchCapacity,
                     &derLength,
+                    &certificateOffset,
                     &nextOffset);
                 if (status == STATUS_NOT_FOUND) {
                     return STATUS_SUCCESS;
                 }
                 if (!NT_SUCCESS(status)) {
+                    if (nextOffset > offset &&
+                        IsSkippableAuthorityCertificateStatus(status)) {
+                        kprintf(
+                            "CertificateValidator: Authority certificate skipped: index=%Iu offset=%Iu status=0x%08X\r\n",
+                            certificateIndex,
+                            certificateOffset,
+                            static_cast<ULONG>(status));
+                        offset = nextOffset;
+                        ++certificateIndex;
+                        continue;
+                    }
+
                     return status;
                 }
 
                 *anchor = {};
                 status = CertificateValidator::ParseCertificate(scratch, derLength, *anchor);
                 if (!NT_SUCCESS(status)) {
+                    if (IsSkippableAuthorityCertificateStatus(status)) {
+                        kprintf(
+                            "CertificateValidator: Authority certificate skipped: index=%Iu offset=%Iu status=0x%08X\r\n",
+                            certificateIndex,
+                            certificateOffset,
+                            static_cast<ULONG>(status));
+                        offset = nextOffset;
+                        ++certificateIndex;
+                        continue;
+                    }
+
                     return status;
                 }
 
@@ -4993,6 +5035,7 @@ namespace tls
                 }
 
                 offset = nextOffset;
+                ++certificateIndex;
             }
 
             return STATUS_SUCCESS;

@@ -101,7 +101,9 @@ namespace
     constexpr SIZE_T TestMaxDerCertificateLength = 2048;
     constexpr SIZE_T TestMaxRevocationEvidenceLength = 4096;
     constexpr SIZE_T TestMaxCertificateListLength = (TestMaxDerCertificateLength + 3) * 4;
+    constexpr SIZE_T TestMaxAuthorityBundleLength = 2 * 1024 * 1024;
     const char LocalhostCertificatePath[] = "tests\\testdata\\localhost.cert.pem";
+    const char RepositoryCertificateBundlePath[] = "certs\\cacert.pem";
     const char LocalhostOcspGoodPath[] = "tests\\testdata\\revocation\\localhost-ocsp-good.der";
     const char LocalhostOcspRevokedPath[] = "tests\\testdata\\revocation\\localhost-ocsp-revoked.der";
     const char RevocationCaCertificatePath[] = "tests\\testdata\\revocation\\ca.cert.pem";
@@ -123,6 +125,13 @@ namespace
         "tests\\testdata\\tls\\ws-postman-echo-server-key-exchange.bin";
     const char PemCertificateBegin[] = "-----BEGIN CERTIFICATE-----";
     const char PemCertificateEnd[] = "-----END CERTIFICATE-----";
+    const UCHAR InvalidPemAuthorityCertificate[] =
+        "-----BEGIN CERTIFICATE-----\n"
+        "AQID\n"
+        "-----END CERTIFICATE-----\n";
+    const UCHAR UnterminatedPemAuthorityCertificate[] =
+        "-----BEGIN CERTIFICATE-----\n"
+        "AQID\n";
 
     bool g_failed = false;
 
@@ -5712,6 +5721,233 @@ namespace
         Expect(result.Leaf.Der != nullptr && memcmp(result.Leaf.Der, der, derLength) == 0, "external bundle validation returns the leaf certificate");
     }
 
+    void TestCertificateValidationSkipsUnusablePemAuthorityMembers()
+    {
+        UCHAR rootPem[TestMaxPemCertificateLength] = {};
+        UCHAR rootDer[TestMaxDerCertificateLength] = {};
+        UCHAR intermediatePem[TestMaxPemCertificateLength] = {};
+        UCHAR intermediateDer[TestMaxDerCertificateLength] = {};
+        UCHAR leafPem[TestMaxPemCertificateLength] = {};
+        UCHAR leafDer[TestMaxDerCertificateLength] = {};
+        SIZE_T rootPemLength = 0;
+        SIZE_T rootDerLength = 0;
+        SIZE_T intermediatePemLength = 0;
+        SIZE_T intermediateDerLength = 0;
+        SIZE_T leafPemLength = 0;
+        SIZE_T leafDerLength = 0;
+
+        const bool loaded =
+            LoadPemCertificate(PkiRootCertificatePath, rootPem, sizeof(rootPem), &rootPemLength, rootDer, sizeof(rootDer), &rootDerLength) &&
+            LoadPemCertificate(PkiIntermediateCertificatePath, intermediatePem, sizeof(intermediatePem), &intermediatePemLength, intermediateDer, sizeof(intermediateDer), &intermediateDerLength) &&
+            LoadPemCertificate(PkiLeafCertificatePath, leafPem, sizeof(leafPem), &leafPemLength, leafDer, sizeof(leafDer), &leafDerLength);
+        Expect(loaded, "PKI fixtures load for unusable authority member isolation test");
+        if (!loaded) {
+            return;
+        }
+
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T certificateListLength = 0;
+        bool appended = AppendCertificateToList(
+            leafDer,
+            leafDerLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        appended = appended && AppendCertificateToList(
+            intermediateDer,
+            intermediateDerLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(appended, "certificate list builds for unusable authority member isolation test");
+        if (!appended) {
+            return;
+        }
+
+        const SIZE_T invalidPemLength = sizeof(InvalidPemAuthorityCertificate) - 1;
+        HeapArray<UCHAR> combinedBundle(invalidPemLength + rootPemLength);
+        Expect(combinedBundle.IsValid(), "combined authority bundle allocates on heap");
+        if (!combinedBundle.IsValid()) {
+            return;
+        }
+
+        memcpy(combinedBundle.Get(), InvalidPemAuthorityCertificate, invalidPemLength);
+        memcpy(combinedBundle.Get() + invalidPemLength, rootPem, rootPemLength);
+
+        CertificateAuthorityBundle bundle = {};
+        bundle.Data = combinedBundle.Get();
+        bundle.DataLength = combinedBundle.Count();
+
+        CertificateStoreOptions storeOptions = {};
+        storeOptions.AuthorityBundles = &bundle;
+        storeOptions.AuthorityBundleCount = 1;
+
+        CertificateStore store;
+        NTSTATUS status = store.Initialize(storeOptions);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts mixed authority PEM bundle");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 2;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "www.example.test";
+        options.HostNameLength = strlen(options.HostName);
+        options.Store = &store;
+
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_SUCCESS, "unusable PEM authority member does not block a later trusted root");
+
+        bundle.DataLength = invalidPemLength;
+        status = store.Initialize(storeOptions);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts an unusable-only PEM bundle structurally");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "unusable-only PEM bundle does not create certificate trust");
+    }
+
+    void TestCertificateValidationRejectsUnrecoverableAuthorityBundles()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool loaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(loaded, "localhost fixture loads for unrecoverable authority bundle test");
+        if (!loaded) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        CertificateAuthorityBundle bundle = {};
+        bundle.Data = UnterminatedPemAuthorityCertificate;
+        bundle.DataLength = sizeof(UnterminatedPemAuthorityCertificate) - 1;
+
+        CertificateStoreOptions storeOptions = {};
+        storeOptions.AuthorityBundles = &bundle;
+        storeOptions.AuthorityBundleCount = 1;
+
+        CertificateStore store;
+        NTSTATUS status = store.Initialize(storeOptions);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts caller-owned unterminated bundle bytes");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateValidationOptions options = {};
+        options.HostName = "localhost";
+        options.HostNameLength = strlen(options.HostName);
+        options.Store = &store;
+
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_INVALID_NETWORK_RESPONSE, "unterminated PEM authority bundle fails closed");
+
+        const UCHAR invalidDer[] = { 0x01, 0x01, 0x00 };
+        bundle.Data = invalidDer;
+        bundle.DataLength = sizeof(invalidDer);
+        status = store.Initialize(storeOptions);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts caller-owned invalid DER bytes structurally");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_INVALID_NETWORK_RESPONSE, "invalid single DER authority bundle remains a strict failure");
+    }
+
+    void TestCertificateValidationScansRepositoryAuthorityBundle()
+    {
+        UCHAR pem[TestMaxPemCertificateLength] = {};
+        UCHAR der[TestMaxDerCertificateLength] = {};
+        UCHAR certificateList[TestMaxCertificateListLength] = {};
+        SIZE_T pemLength = 0;
+        SIZE_T derLength = 0;
+        SIZE_T certificateListLength = 0;
+
+        const bool certificateLoaded = LoadLocalhostCertificate(
+            pem,
+            sizeof(pem),
+            &pemLength,
+            der,
+            sizeof(der),
+            &derLength,
+            certificateList,
+            sizeof(certificateList),
+            &certificateListLength);
+        Expect(certificateLoaded, "localhost fixture loads for repository authority bundle scan test");
+        if (!certificateLoaded) {
+            return;
+        }
+
+        HeapArray<UCHAR> authorityBundleData(TestMaxAuthorityBundleLength);
+        Expect(authorityBundleData.IsValid(), "repository authority bundle buffer allocates on heap");
+        if (!authorityBundleData.IsValid()) {
+            return;
+        }
+
+        SIZE_T authorityBundleLength = 0;
+        const bool bundleLoaded = ReadFileBytes(
+            RepositoryCertificateBundlePath,
+            authorityBundleData.Get(),
+            authorityBundleData.Count(),
+            &authorityBundleLength);
+        Expect(bundleLoaded, "repository cacert.pem loads for complete authority scan test");
+        if (!bundleLoaded) {
+            return;
+        }
+
+        CertificateAuthorityBundle bundle = {};
+        bundle.Data = authorityBundleData.Get();
+        bundle.DataLength = authorityBundleLength;
+
+        CertificateStoreOptions storeOptions = {};
+        storeOptions.AuthorityBundles = &bundle;
+        storeOptions.AuthorityBundleCount = 1;
+
+        CertificateStore store;
+        NTSTATUS status = store.Initialize(storeOptions);
+        ExpectStatus(status, STATUS_SUCCESS, "certificate store accepts repository authority bundle");
+        if (!NT_SUCCESS(status)) {
+            return;
+        }
+
+        CertificateChainView chain = {};
+        chain.Certificates = certificateList;
+        chain.CertificatesLength = certificateListLength;
+        chain.CertificateCount = 1;
+
+        CertificateValidationOptions options = {};
+        options.HostName = "localhost";
+        options.HostNameLength = strlen(options.HostName);
+        options.Store = &store;
+
+        status = CertificateValidator::ValidateChain(chain, options);
+        ExpectStatus(status, STATUS_TRUST_FAILURE, "repository authority bundle completes scanning without trusting localhost");
+    }
+
     void TestCertificateValidationBuildsUnorderedExternalPath()
     {
         UCHAR rootPem[TestMaxPemCertificateLength] = {};
@@ -7090,6 +7326,9 @@ int main()
     TestCertificateValidationRequiresTrustMaterial();
     TestCertificateValidationPinDoesNotCreateTrust();
     TestCertificateValidationAcceptsExternalPemBundle();
+    TestCertificateValidationSkipsUnusablePemAuthorityMembers();
+    TestCertificateValidationRejectsUnrecoverableAuthorityBundles();
+    TestCertificateValidationScansRepositoryAuthorityBundle();
     TestCertificateValidationBuildsUnorderedExternalPath();
     TestCertificateValidationBacktracksCrossSignedIntermediate();
     TestCertificateValidationAppliesNameConstraints();
