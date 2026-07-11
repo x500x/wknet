@@ -1228,7 +1228,7 @@ namespace client
                     addressIndex);
             }
             kprintf("WebSocketClient address attempt failed: 0x%08X index=%Iu family=%u\r\n",
-                static_cast<ULONG>(status),
+                static_cast<ULONG>(lastStatus),
                 addressIndex,
                 static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
         }

@@ -165,6 +165,8 @@ namespace net
 
         void WaitForIoRundown() noexcept;
 
+        void ReinitializeIoRundown() noexcept;
+
         _Must_inspect_result_
         NTSTATUS PrepareReusableIrp(
             _Inout_ PIRP* reusableIrp,
@@ -178,6 +180,7 @@ namespace net
         const WSK_PROVIDER_CONNECTION_DISPATCH* dispatch_ = nullptr;
         OwnershipState ownershipState_ = OwnershipState::Closed;
         volatile LONG closeIssued_ = 0;
+        bool ioRundownReady_ = true;
         WskBuffer sendScratch_ = {};
         WskBuffer receiveScratch_ = {};
         PIRP sendIrp_ = nullptr;

@@ -4083,6 +4083,52 @@ namespace
         KernelHttp::net::WskTestSetSocketProvider(nullptr, nullptr);
     }
 
+    void TestWskSocketCanReconnectAfterClose() noexcept
+    {
+        FakeWskSocketCapture capture = {};
+        KernelHttp::net::WskTestSocketProvider provider = {};
+        provider.Connect = FakeWskConnect;
+        provider.Send = FakeWskSend;
+        provider.Close = FakeWskClose;
+        KernelHttp::net::WskTestSetSocketProvider(&provider, &capture);
+
+        KernelHttp::net::WskClient client;
+        NTSTATUS status = client.Initialize();
+        Expect(NT_SUCCESS(status), "fake WSK client initializes for socket reuse");
+
+        SOCKADDR_IN remote = {};
+        remote.sin_family = AF_INET;
+        remote.sin_port = HostToNetworkPort(L"443");
+
+        KernelHttp::net::WskSocket socket;
+        status = socket.Connect(client, reinterpret_cast<SOCKADDR*>(&remote));
+        Expect(NT_SUCCESS(status), "first reusable socket connect succeeds");
+
+        SIZE_T sent = 0;
+        status = socket.Send("first", Length("first"), &sent);
+        Expect(NT_SUCCESS(status), "first reusable socket send succeeds");
+        Expect(sent == Length("first"), "first reusable socket send length matches");
+
+        status = socket.Close();
+        Expect(NT_SUCCESS(status), "reusable socket first close succeeds");
+
+        status = socket.Connect(client, reinterpret_cast<SOCKADDR*>(&remote));
+        Expect(NT_SUCCESS(status), "reusable socket reconnect succeeds");
+
+        sent = 0;
+        status = socket.Send("second", Length("second"), &sent);
+        Expect(NT_SUCCESS(status), "reconnected socket send succeeds");
+        Expect(sent == Length("second"), "reconnected socket send length matches");
+
+        status = socket.Close();
+        Expect(NT_SUCCESS(status), "reusable socket final close succeeds");
+        Expect(capture.ConnectCount == 2, "reusable socket connects twice");
+        Expect(capture.SendCount == 2, "reusable socket sends twice");
+        Expect(capture.CloseCount == 2, "reusable socket closes twice");
+
+        KernelHttp::net::WskTestSetSocketProvider(nullptr, nullptr);
+    }
+
     void TestResolveAllSequentialConnectFallback() noexcept
     {
         KernelHttp::net::WskTestClearResolveCache();
@@ -7076,6 +7122,7 @@ int main() noexcept
     TestResolveAllAnyNoMatchQueriesExplicitFamilies();
     TestResolveAllSequentialConnectFallback();
     TestWskFakeProviderCancellationAndCleanup();
+    TestWskSocketCanReconnectAfterClose();
     TestIdleTimeoutSkipsExpiredConnection();
     TestCloseDelimitedResponseDoesNotEnterPool();
     TestHttp10ConnectionReuseRules();

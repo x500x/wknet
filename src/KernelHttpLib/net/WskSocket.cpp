@@ -63,6 +63,8 @@ namespace net
             return STATUS_SUCCESS;
         }
 
+        ioRundownReady_ = false;
+
         if (closeIssued_ == 0) {
             closeIssued_ = 1;
             if (g_testSocketProvider.Close != nullptr) {
@@ -77,6 +79,11 @@ namespace net
     {
         UNREFERENCED_PARAMETER(completionOwnedCleanup);
         return CloseOwnedSocket(WskCloseTimeoutMilliseconds);
+    }
+
+    void WskSocket::ReinitializeIoRundown() noexcept
+    {
+        ioRundownReady_ = true;
     }
 
     NTSTATUS WskSocket::Connect(
@@ -113,6 +120,7 @@ namespace net
             }
 
             socket_ = connectedSocket;
+            ReinitializeIoRundown();
             ownershipState_ = OwnershipState::Active;
             closeIssued_ = 0;
             return STATUS_SUCCESS;
@@ -139,6 +147,9 @@ namespace net
 
         if (socket_ == nullptr || ownershipState_ != OwnershipState::Active) {
             return STATUS_INVALID_CONNECTION;
+        }
+        if (!ioRundownReady_) {
+            return STATUS_DEVICE_NOT_READY;
         }
 
         if (length == 0) {
@@ -221,6 +232,9 @@ namespace net
 
         if (socket_ == nullptr || ownershipState_ != OwnershipState::Active) {
             return STATUS_INVALID_CONNECTION;
+        }
+        if (!ioRundownReady_) {
+            return STATUS_DEVICE_NOT_READY;
         }
 
         if (length == 0) {
@@ -563,6 +577,19 @@ namespace net
 #if !defined(KERNEL_HTTP_USER_MODE_TEST)
         ExWaitForRundownProtectionRelease(&ioRundown_);
 #endif
+        ioRundownReady_ = false;
+    }
+
+    void WskSocket::ReinitializeIoRundown() noexcept
+    {
+        if (ioRundownReady_) {
+            return;
+        }
+
+#if !defined(KERNEL_HTTP_USER_MODE_TEST)
+        ExReInitializeRundownProtection(&ioRundown_);
+#endif
+        ioRundownReady_ = true;
     }
 
     NTSTATUS WskSocket::PrepareReusableIrp(
@@ -791,6 +818,7 @@ namespace net
             }
             else {
                 dispatch_ = static_cast<const WSK_PROVIDER_CONNECTION_DISPATCH*>(socket_->Dispatch);
+                ReinitializeIoRundown();
                 ownershipState_ = OwnershipState::Active;
                 InterlockedExchange(&closeIssued_, 0);
                 WskSyncTrackSocketOpened(socket_);
