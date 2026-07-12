@@ -1,27 +1,27 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/http2/Http2Frame.h>
-#include <KernelHttp/http2/Http2Stream.h>
+#include <wknet/http2/Http2Frame.h>
+#include <wknet/http2/Http2Stream.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::http2::Http2FrameCodec;
-using KernelHttp::http2::Http2FrameHeader;
-using KernelHttp::http2::Http2FrameHeaderLength;
-using KernelHttp::http2::Http2FrameType;
-using KernelHttp::http2::Http2Settings;
-using KernelHttp::http2::Http2SettingId;
-using KernelHttp::http2::Http2ErrorCode;
-using KernelHttp::http2::Http2DefaultMaxFrameSize;
-using KernelHttp::http2::Http2MaxAllowedFrameSize;
-using KernelHttp::http2::Http2InitialWindowSize;
-using KernelHttp::http2::Http2Priority;
-using KernelHttp::http2::Http2Stream;
-using KernelHttp::http2::Http2StreamState;
-namespace Http2FrameFlags = KernelHttp::http2::Http2FrameFlags;
+using wknet::http2::Http2FrameCodec;
+using wknet::http2::Http2FrameHeader;
+using wknet::http2::Http2FrameHeaderLength;
+using wknet::http2::Http2FrameType;
+using wknet::http2::Http2Settings;
+using wknet::http2::Http2SettingId;
+using wknet::http2::Http2ErrorCode;
+using wknet::http2::Http2DefaultMaxFrameSize;
+using wknet::http2::Http2MaxAllowedFrameSize;
+using wknet::http2::Http2InitialWindowSize;
+using wknet::http2::Http2Priority;
+using wknet::http2::Http2Stream;
+using wknet::http2::Http2StreamState;
+namespace Http2FrameFlags = wknet::http2::Http2FrameFlags;
 
 namespace
 {

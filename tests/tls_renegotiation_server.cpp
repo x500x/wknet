@@ -1,5 +1,5 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
 #include <limits.h>

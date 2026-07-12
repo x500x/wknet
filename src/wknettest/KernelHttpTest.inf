@@ -1,0 +1,49 @@
+;
+; wknettest.inf
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%ManufacturerName%
+CatalogFile=wknettest.cat
+DriverVer=05/20/2026,0.1.0.0
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir = 12
+wknettest_CopyFiles = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+wknettest.sys = 1
+
+[DefaultInstall.NTamd64]
+CopyFiles = wknettest_CopyFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService = wknettest,,wknettest_Service_Inst
+
+[DefaultInstall.NTarm64]
+CopyFiles = wknettest_CopyFiles
+
+[DefaultInstall.NTarm64.Services]
+AddService = wknettest,,wknettest_Service_Inst
+
+[wknettest_CopyFiles]
+wknettest.sys
+
+[wknettest_Service_Inst]
+DisplayName = %wknettest.SVCDESC%
+ServiceType = 1
+StartType = 3
+ErrorControl = 1
+ServiceBinary = %12%\wknettest.sys
+
+[Strings]
+ManufacturerName = "wknet"
+DiskName = "wknettest Installation Disk"
+wknettest.SVCDESC = "Kernel HTTP Test Driver"

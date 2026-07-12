@@ -1,29 +1,29 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/tls/TlsCapabilities.h>
-#include <KernelHttp/tls/TlsHandshake12.h>
-#include <KernelHttp/tls/TlsHandshake13.h>
-#include <KernelHttp/tls/TlsPolicy.h>
+#include <wknet/tls/TlsCapabilities.h>
+#include <wknet/tls/TlsHandshake12.h>
+#include <wknet/tls/TlsHandshake13.h>
+#include <wknet/tls/TlsPolicy.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::tls::TlsCipherSuite;
-using KernelHttp::tls::TlsCipherSuiteCapability;
-using KernelHttp::tls::TlsClientHelloOptions;
-using KernelHttp::tls::TlsContext;
-using KernelHttp::tls::TlsHandshake12;
-using KernelHttp::tls::TlsHandshake13;
-using KernelHttp::tls::TlsHandshakeMessageView;
-using KernelHttp::tls::TlsHandshakeType;
-using KernelHttp::tls::TlsNamedGroup;
-using KernelHttp::tls::TlsPolicy;
-using KernelHttp::tls::TlsSignatureScheme;
-using KernelHttp::tls::Tls13ClientHelloOptions;
-using KernelHttp::tls::Tls13KeyShareEntry;
-using KernelHttp::tls::Tls13ServerHelloView;
+using wknet::tls::TlsCipherSuite;
+using wknet::tls::TlsCipherSuiteCapability;
+using wknet::tls::TlsClientHelloOptions;
+using wknet::tls::TlsContext;
+using wknet::tls::TlsHandshake12;
+using wknet::tls::TlsHandshake13;
+using wknet::tls::TlsHandshakeMessageView;
+using wknet::tls::TlsHandshakeType;
+using wknet::tls::TlsNamedGroup;
+using wknet::tls::TlsPolicy;
+using wknet::tls::TlsSignatureScheme;
+using wknet::tls::Tls13ClientHelloOptions;
+using wknet::tls::Tls13KeyShareEntry;
+using wknet::tls::Tls13ServerHelloView;
 
 namespace
 {
@@ -517,7 +517,7 @@ namespace
 
         const UCHAR signature[] = { 0x11, 0x22, 0x33 };
         status = TlsHandshake13::EncodeCertificateVerify(
-            KernelHttp::tls::TlsSignatureScheme::RsaPssRsaeSha256,
+            wknet::tls::TlsSignatureScheme::RsaPssRsaeSha256,
             signature,
             sizeof(signature),
             message,
@@ -540,85 +540,85 @@ namespace
     void TestTls12CipherSuiteMetadata()
     {
         const TlsCipherSuiteCapability* ecdheRsa =
-            KernelHttp::tls::TlsFindCipherSuiteCapability(TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256);
+            wknet::tls::TlsFindCipherSuiteCapability(TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256);
         Expect(ecdheRsa != nullptr, "TLS 1.2 ECDHE_RSA AES-GCM capability exists");
         if (ecdheRsa != nullptr) {
-            Expect(ecdheRsa->Protocol == KernelHttp::tls::TlsProtocol::Tls12, "ECDHE_RSA AES-GCM is TLS 1.2");
+            Expect(ecdheRsa->Protocol == wknet::tls::TlsProtocol::Tls12, "ECDHE_RSA AES-GCM is TLS 1.2");
             Expect(
-                ecdheRsa->Tls12KeyExchange == KernelHttp::tls::Tls12KeyExchangeKind::EcdheRsa,
+                ecdheRsa->Tls12KeyExchange == wknet::tls::Tls12KeyExchangeKind::EcdheRsa,
                 "ECDHE_RSA AES-GCM declares ECDHE_RSA key exchange");
             Expect(
-                ecdheRsa->Authentication == KernelHttp::tls::TlsAuthenticationKind::Rsa,
+                ecdheRsa->Authentication == wknet::tls::TlsAuthenticationKind::Rsa,
                 "ECDHE_RSA AES-GCM declares RSA authentication");
             Expect(
-                ecdheRsa->BulkCipher == KernelHttp::tls::TlsBulkCipherKind::AesGcm,
+                ecdheRsa->BulkCipher == wknet::tls::TlsBulkCipherKind::AesGcm,
                 "ECDHE_RSA AES-GCM declares AES-GCM bulk cipher");
             Expect(
-                ecdheRsa->RecordMac == KernelHttp::tls::TlsRecordMacKind::Aead,
+                ecdheRsa->RecordMac == wknet::tls::TlsRecordMacKind::Aead,
                 "ECDHE_RSA AES-GCM declares AEAD record protection");
             Expect(
-                ecdheRsa->PrfHash == KernelHttp::tls::TlsPrfHashKind::Sha256,
+                ecdheRsa->PrfHash == wknet::tls::TlsPrfHashKind::Sha256,
                 "ECDHE_RSA AES-GCM declares SHA-256 PRF");
             Expect(
-                HasRequiredExtension(*ecdheRsa, KernelHttp::tls::TlsCipherSuiteExtensionExtendedMasterSecret),
+                HasRequiredExtension(*ecdheRsa, wknet::tls::TlsCipherSuiteExtensionExtendedMasterSecret),
                 "TLS 1.2 ECDHE_RSA AES-GCM requires extended_master_secret");
             Expect(
-                HasRequiredExtension(*ecdheRsa, KernelHttp::tls::TlsCipherSuiteExtensionSecureRenegotiation),
+                HasRequiredExtension(*ecdheRsa, wknet::tls::TlsCipherSuiteExtensionSecureRenegotiation),
                 "TLS 1.2 ECDHE_RSA AES-GCM requires secure renegotiation");
             Expect(
-                HasRequiredExtension(*ecdheRsa, KernelHttp::tls::TlsCipherSuiteExtensionSupportedGroups),
+                HasRequiredExtension(*ecdheRsa, wknet::tls::TlsCipherSuiteExtensionSupportedGroups),
                 "TLS 1.2 ECDHE_RSA AES-GCM requires supported_groups");
         }
 
         const TlsCipherSuiteCapability* ecdheEcdsa =
-            KernelHttp::tls::TlsFindCipherSuiteCapability(TlsCipherSuite::TlsEcdheEcdsaWithChaCha20Poly1305Sha256);
+            wknet::tls::TlsFindCipherSuiteCapability(TlsCipherSuite::TlsEcdheEcdsaWithChaCha20Poly1305Sha256);
         Expect(ecdheEcdsa != nullptr, "TLS 1.2 ECDHE_ECDSA ChaCha20-Poly1305 capability exists");
         if (ecdheEcdsa != nullptr) {
             Expect(
-                ecdheEcdsa->Tls12KeyExchange == KernelHttp::tls::Tls12KeyExchangeKind::EcdheEcdsa,
+                ecdheEcdsa->Tls12KeyExchange == wknet::tls::Tls12KeyExchangeKind::EcdheEcdsa,
                 "ECDHE_ECDSA ChaCha20-Poly1305 declares ECDHE_ECDSA key exchange");
             Expect(
-                ecdheEcdsa->Authentication == KernelHttp::tls::TlsAuthenticationKind::Ecdsa,
+                ecdheEcdsa->Authentication == wknet::tls::TlsAuthenticationKind::Ecdsa,
                 "ECDHE_ECDSA ChaCha20-Poly1305 declares ECDSA authentication");
             Expect(
-                ecdheEcdsa->BulkCipher == KernelHttp::tls::TlsBulkCipherKind::ChaCha20Poly1305,
+                ecdheEcdsa->BulkCipher == wknet::tls::TlsBulkCipherKind::ChaCha20Poly1305,
                 "ECDHE_ECDSA ChaCha20-Poly1305 declares ChaCha20-Poly1305 bulk cipher");
         }
 
         const TlsCipherSuiteCapability* dheRsa =
-            KernelHttp::tls::TlsFindCipherSuiteCapability(TlsCipherSuite::TlsDheRsaWithAes256GcmSha384);
+            wknet::tls::TlsFindCipherSuiteCapability(TlsCipherSuite::TlsDheRsaWithAes256GcmSha384);
         Expect(dheRsa != nullptr, "TLS 1.2 DHE_RSA AES-256-GCM capability exists");
         if (dheRsa != nullptr) {
             Expect(
-                dheRsa->Tls12KeyExchange == KernelHttp::tls::Tls12KeyExchangeKind::DheRsa,
+                dheRsa->Tls12KeyExchange == wknet::tls::Tls12KeyExchangeKind::DheRsa,
                 "DHE_RSA AES-256-GCM declares DHE_RSA key exchange");
             Expect(
-                dheRsa->PrfHash == KernelHttp::tls::TlsPrfHashKind::Sha384,
+                dheRsa->PrfHash == wknet::tls::TlsPrfHashKind::Sha384,
                 "DHE_RSA AES-256-GCM declares SHA-384 PRF");
             Expect(
                 TlsHandshake12::PrfHashForCipherSuite(TlsCipherSuite::TlsDheRsaWithAes256GcmSha384) ==
-                    KernelHttp::crypto::HashAlgorithm::Sha384,
+                    wknet::crypto::HashAlgorithm::Sha384,
                 "TLS 1.2 PRF hash reads SHA-384 suite metadata");
         }
 
         const TlsCipherSuiteCapability* rsaCbc =
-            KernelHttp::tls::TlsFindCipherSuiteCapability(TlsCipherSuite::TlsRsaWithAes128CbcSha256);
+            wknet::tls::TlsFindCipherSuiteCapability(TlsCipherSuite::TlsRsaWithAes128CbcSha256);
         Expect(rsaCbc != nullptr, "TLS 1.2 RSA AES-CBC capability exists");
         if (rsaCbc != nullptr) {
             Expect(
-                rsaCbc->Tls12KeyExchange == KernelHttp::tls::Tls12KeyExchangeKind::Rsa,
+                rsaCbc->Tls12KeyExchange == wknet::tls::Tls12KeyExchangeKind::Rsa,
                 "RSA AES-CBC declares RSA key exchange");
             Expect(
-                rsaCbc->Authentication == KernelHttp::tls::TlsAuthenticationKind::Rsa,
+                rsaCbc->Authentication == wknet::tls::TlsAuthenticationKind::Rsa,
                 "RSA AES-CBC declares RSA authentication");
             Expect(
-                rsaCbc->BulkCipher == KernelHttp::tls::TlsBulkCipherKind::AesCbc,
+                rsaCbc->BulkCipher == wknet::tls::TlsBulkCipherKind::AesCbc,
                 "RSA AES-CBC declares AES-CBC bulk cipher");
             Expect(
-                rsaCbc->RecordMac == KernelHttp::tls::TlsRecordMacKind::HmacSha256,
+                rsaCbc->RecordMac == wknet::tls::TlsRecordMacKind::HmacSha256,
                 "RSA AES-CBC declares HMAC-SHA256 record MAC");
             Expect(
-                HasRequiredExtension(*rsaCbc, KernelHttp::tls::TlsCipherSuiteExtensionEncryptThenMac),
+                HasRequiredExtension(*rsaCbc, wknet::tls::TlsCipherSuiteExtensionEncryptThenMac),
                 "TLS 1.2 RSA AES-CBC requires encrypt-then-MAC");
         }
     }
@@ -627,73 +627,73 @@ namespace
     {
         TlsPolicy modern = {};
         Expect(
-            KernelHttp::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256),
+            wknet::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256),
             "modern policy allows TLS 1.2 ECDHE_RSA AES-GCM");
         Expect(
-            KernelHttp::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsEcdheEcdsaWithAes128GcmSha256),
+            wknet::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsEcdheEcdsaWithAes128GcmSha256),
             "modern policy allows TLS 1.2 ECDHE_ECDSA AES-GCM");
         Expect(
-            KernelHttp::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsDheRsaWithAes128GcmSha256),
+            wknet::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsDheRsaWithAes128GcmSha256),
             "modern policy allows TLS 1.2 DHE_RSA AES-GCM");
         Expect(
-            KernelHttp::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsDheRsaWithChaCha20Poly1305Sha256),
+            wknet::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsDheRsaWithChaCha20Poly1305Sha256),
             "modern policy allows TLS 1.2 DHE_RSA ChaCha20-Poly1305");
         Expect(
-            !KernelHttp::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsRsaWithAes128GcmSha256),
+            !wknet::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsRsaWithAes128GcmSha256),
             "modern policy rejects TLS 1.2 RSA key exchange");
         Expect(
-            !KernelHttp::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsEcdheRsaWithAes128CbcSha256),
+            !wknet::tls::TlsPolicyAllowsCipherSuite(modern, TlsCipherSuite::TlsEcdheRsaWithAes128CbcSha256),
             "modern policy rejects TLS 1.2 AES-CBC");
         Expect(
-            !KernelHttp::tls::TlsPolicyAllowsSignatureScheme(modern, TlsSignatureScheme::RsaPkcs1Sha1),
+            !wknet::tls::TlsPolicyAllowsSignatureScheme(modern, TlsSignatureScheme::RsaPkcs1Sha1),
             "modern policy rejects TLS 1.2 rsa_pkcs1_sha1");
         Expect(
-            !KernelHttp::tls::TlsPolicyAllowsSignatureScheme(modern, TlsSignatureScheme::EcdsaSha1),
+            !wknet::tls::TlsPolicyAllowsSignatureScheme(modern, TlsSignatureScheme::EcdsaSha1),
             "modern policy rejects TLS 1.2 ecdsa_sha1");
 
         modern.EnableTls12Sha1Signatures = true;
         ExpectStatus(
-            KernelHttp::tls::TlsValidatePolicy(modern),
+            wknet::tls::TlsValidatePolicy(modern),
             STATUS_INVALID_PARAMETER,
             "modern policy rejects SHA1 signature opt-in");
 
         TlsPolicy compatibility = {};
-        compatibility.Profile = KernelHttp::tls::TlsSecurityProfile::CompatibilityExplicit;
+        compatibility.Profile = wknet::tls::TlsSecurityProfile::CompatibilityExplicit;
         Expect(
-            !KernelHttp::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsRsaWithAes128GcmSha256),
+            !wknet::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsRsaWithAes128GcmSha256),
             "compatibility policy still requires explicit RSA key exchange opt-in");
         Expect(
-            !KernelHttp::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsEcdheRsaWithAes128CbcSha256),
+            !wknet::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsEcdheRsaWithAes128CbcSha256),
             "compatibility policy still requires explicit CBC opt-in");
         Expect(
-            !KernelHttp::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::RsaPkcs1Sha1),
+            !wknet::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::RsaPkcs1Sha1),
             "compatibility policy keeps rsa_pkcs1_sha1 disabled without SHA1 opt-in");
         Expect(
-            !KernelHttp::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::EcdsaSha1),
+            !wknet::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::EcdsaSha1),
             "compatibility policy keeps ecdsa_sha1 disabled without SHA1 opt-in");
 
         compatibility.EnableTls12RsaKeyExchange = true;
         Expect(
-            KernelHttp::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsRsaWithAes128GcmSha256),
+            wknet::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsRsaWithAes128GcmSha256),
             "compatibility policy allows RSA AES-GCM after RSA opt-in");
         Expect(
-            !KernelHttp::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsRsaWithAes128CbcSha256),
+            !wknet::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsRsaWithAes128CbcSha256),
             "compatibility policy keeps RSA AES-CBC disabled without CBC opt-in");
 
         compatibility.EnableTls12Cbc = true;
         Expect(
-            KernelHttp::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsRsaWithAes128CbcSha256),
+            wknet::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsRsaWithAes128CbcSha256),
             "compatibility policy allows RSA AES-CBC after RSA and CBC opt-in");
         Expect(
-            KernelHttp::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsEcdheRsaWithAes128CbcSha256),
+            wknet::tls::TlsPolicyAllowsCipherSuite(compatibility, TlsCipherSuite::TlsEcdheRsaWithAes128CbcSha256),
             "compatibility policy allows ECDHE AES-CBC after CBC opt-in");
 
         compatibility.EnableTls12Sha1Signatures = true;
         Expect(
-            KernelHttp::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::RsaPkcs1Sha1),
+            wknet::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::RsaPkcs1Sha1),
             "compatibility policy allows rsa_pkcs1_sha1 after SHA1 opt-in");
         Expect(
-            KernelHttp::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::EcdsaSha1),
+            wknet::tls::TlsPolicyAllowsSignatureScheme(compatibility, TlsSignatureScheme::EcdsaSha1),
             "compatibility policy allows ecdsa_sha1 after SHA1 opt-in");
     }
 

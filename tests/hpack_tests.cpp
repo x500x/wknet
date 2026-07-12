@@ -1,24 +1,24 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/http2/Hpack.h>
+#include <wknet/http2/Hpack.h>
 
 #include <stdio.h>
 #include <string.h>
 #include <initializer_list>
 
-using KernelHttp::http2::HpackDecoder;
-using KernelHttp::http2::HpackDecodeInteger;
-using KernelHttp::http2::HpackEncodeInteger;
-using KernelHttp::http2::HpackEncoder;
-using KernelHttp::http2::HpackHuffmanDecode;
-using KernelHttp::http2::HpackHuffmanEncode;
-using KernelHttp::http2::HpackHuffmanEncodedLength;
-using KernelHttp::http2::HpackStaticTableSize;
-using KernelHttp::http::HttpHeader;
-using KernelHttp::http::HttpText;
-using KernelHttp::http::MakeText;
+using wknet::http2::HpackDecoder;
+using wknet::http2::HpackDecodeInteger;
+using wknet::http2::HpackEncodeInteger;
+using wknet::http2::HpackEncoder;
+using wknet::http2::HpackHuffmanDecode;
+using wknet::http2::HpackHuffmanEncode;
+using wknet::http2::HpackHuffmanEncodedLength;
+using wknet::http2::HpackStaticTableSize;
+using wknet::http1::HttpHeader;
+using wknet::http1::HttpText;
+using wknet::http1::MakeText;
 
 namespace
 {

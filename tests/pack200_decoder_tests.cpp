@@ -1,56 +1,56 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include "../src/KernelHttpLib/http/HttpPack200BandCodec.h"
-#include "../src/KernelHttpLib/http/HttpPack200AttributeLayout.h"
-#include "../src/KernelHttpLib/http/HttpPack200BandParser.h"
-#include "../src/KernelHttpLib/http/HttpPack200Bands.h"
-#include "../src/KernelHttpLib/http/HttpPack200Codec.h"
-#include "../src/KernelHttpLib/http/HttpPack200Decoder.h"
-#include "../src/KernelHttpLib/http/HttpPack200ClassWriter.h"
-#include "../src/KernelHttpLib/http/HttpPack200JarWriter.h"
-#include "../src/KernelHttpLib/http/HttpDeflateDecoder.h"
-#include <KernelHttp/crypto/CngProvider.h>
+#include "../src/wknetlib/http/HttpPack200BandCodec.h"
+#include "../src/wknetlib/http/HttpPack200AttributeLayout.h"
+#include "../src/wknetlib/http/HttpPack200BandParser.h"
+#include "../src/wknetlib/http/HttpPack200Bands.h"
+#include "../src/wknetlib/http/HttpPack200Codec.h"
+#include "../src/wknetlib/http/HttpPack200Decoder.h"
+#include "../src/wknetlib/http/HttpPack200ClassWriter.h"
+#include "../src/wknetlib/http/HttpPack200JarWriter.h"
+#include "../src/wknetlib/http/HttpDeflateDecoder.h"
+#include <wknet/crypto/CngProvider.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::http::DecodePack200GzipContent;
-using KernelHttp::http::HttpPack200BandCodec;
-using KernelHttp::http::HttpPack200AttributeLayout;
-using KernelHttp::http::HttpPack200AttributeElementKind;
-using KernelHttp::http::HttpPack200AttributeReferenceKind;
-using KernelHttp::http::HttpPack200AttributeValueBands;
-using KernelHttp::http::HttpPack200AttributeRelocation;
-using KernelHttp::http::HttpPack200BandCodecKind;
-using KernelHttp::http::HttpPack200BandReader;
-using KernelHttp::http::HttpPack200CpBands;
-using KernelHttp::http::HttpPack200CpCounts;
-using KernelHttp::http::HttpPack200ClassBands;
-using KernelHttp::http::HttpPack200CodeBands;
-using KernelHttp::http::HttpPack200RelocationKind;
-using KernelHttp::http::HttpPack200ClassWriter;
-using KernelHttp::http::HttpPack200BootstrapMethod;
-using KernelHttp::http::HttpPack200ClassMember;
-using KernelHttp::http::HttpPack200FileBands;
-using KernelHttp::http::HttpPack200Coding;
-using KernelHttp::http::HttpPack200CodecArena;
-using KernelHttp::http::HttpPack200DecodeBand;
-using KernelHttp::http::HttpPack200DecodeBandWithMeta;
-using KernelHttp::http::HttpPack200ParseMetaCodec;
-using KernelHttp::http::HttpPack200ReadCpBands;
-using KernelHttp::http::HttpPack200ReadAttributeDefinitionBands;
-using KernelHttp::http::HttpPack200ReadInnerClassBands;
-using KernelHttp::http::HttpPack200ReadBytecodeBands;
-using KernelHttp::http::HttpPack200ReadClassBandsWithMeta;
-using KernelHttp::http::HttpPack200ReadFileBands;
-using KernelHttp::http::HttpPack200JarWriter;
-using KernelHttp::http::HttpDecodeRawDeflate;
-using KernelHttp::http::HttpXmlText;
-using KernelHttp::HeapArray;
-using KernelHttp::crypto::CngProvider;
-using KernelHttp::crypto::HashAlgorithm;
+using wknet::http1::DecodePack200GzipContent;
+using wknet::http1::HttpPack200BandCodec;
+using wknet::http1::HttpPack200AttributeLayout;
+using wknet::http1::HttpPack200AttributeElementKind;
+using wknet::http1::HttpPack200AttributeReferenceKind;
+using wknet::http1::HttpPack200AttributeValueBands;
+using wknet::http1::HttpPack200AttributeRelocation;
+using wknet::http1::HttpPack200BandCodecKind;
+using wknet::http1::HttpPack200BandReader;
+using wknet::http1::HttpPack200CpBands;
+using wknet::http1::HttpPack200CpCounts;
+using wknet::http1::HttpPack200ClassBands;
+using wknet::http1::HttpPack200CodeBands;
+using wknet::http1::HttpPack200RelocationKind;
+using wknet::http1::HttpPack200ClassWriter;
+using wknet::http1::HttpPack200BootstrapMethod;
+using wknet::http1::HttpPack200ClassMember;
+using wknet::http1::HttpPack200FileBands;
+using wknet::http1::HttpPack200Coding;
+using wknet::http1::HttpPack200CodecArena;
+using wknet::http1::HttpPack200DecodeBand;
+using wknet::http1::HttpPack200DecodeBandWithMeta;
+using wknet::http1::HttpPack200ParseMetaCodec;
+using wknet::http1::HttpPack200ReadCpBands;
+using wknet::http1::HttpPack200ReadAttributeDefinitionBands;
+using wknet::http1::HttpPack200ReadInnerClassBands;
+using wknet::http1::HttpPack200ReadBytecodeBands;
+using wknet::http1::HttpPack200ReadClassBandsWithMeta;
+using wknet::http1::HttpPack200ReadFileBands;
+using wknet::http1::HttpPack200JarWriter;
+using wknet::http1::HttpDecodeRawDeflate;
+using wknet::http1::HttpXmlText;
+using wknet::HeapArray;
+using wknet::crypto::CngProvider;
+using wknet::crypto::HashAlgorithm;
 
 namespace
 {
@@ -211,7 +211,7 @@ namespace
 
     NTSTATUS DecodeAttributeBandFixture(
         void* context,
-        KernelHttp::http::HttpPack200CodingKind,
+        wknet::http1::HttpPack200CodingKind,
         LONG* values,
         SIZE_T valueCount) noexcept
     {
@@ -468,8 +468,8 @@ namespace
         HttpPack200BandReader reader(bytes, sizeof(bytes));
         LONG value = 0;
         Expect(
-            reader.ReadInt(KernelHttp::http::HttpPack200CodingFor(
-                KernelHttp::http::HttpPack200CodingKind::Unsigned5), &value) &&
+            reader.ReadInt(wknet::http1::HttpPack200CodingFor(
+                wknet::http1::HttpPack200CodingKind::Unsigned5), &value) &&
                 static_cast<ULONG>(value) == 0x80000000UL,
             "Pack200 UNSIGNED5 preserves the full 32-bit flags word");
     }
@@ -798,7 +798,7 @@ namespace
         HttpPack200BandReader emptyHeaders(nullptr, 0);
         HttpPack200CodecArena arena = {};
         NTSTATUS status = arena.Initialize(32);
-        KernelHttp::http::HttpPack200AttributeDefinitionBands definitions = {};
+        wknet::http1::HttpPack200AttributeDefinitionBands definitions = {};
         if (NT_SUCCESS(status)) {
             status = HttpPack200ReadAttributeDefinitionBands(
                 &attributeReader,
@@ -822,7 +822,7 @@ namespace
         const unsigned char innerBytes[] = { 1, 0xc1, 0xfd, 0x0c, 2, 4 };
         HttpPack200BandReader innerReader(innerBytes, sizeof(innerBytes));
         HttpPack200BandReader innerHeaders(nullptr, 0);
-        KernelHttp::http::HttpPack200InnerClassBands inner = {};
+        wknet::http1::HttpPack200InnerClassBands inner = {};
         status = HttpPack200ReadInnerClassBands(
             &innerReader,
             &innerHeaders,

@@ -12,14 +12,14 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 
 $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$script:Solution = Join-Path $script:Root 'KernelHttp.sln'
-$script:LibTarget = 'KernelHttpLib'
+$script:Solution = Join-Path $script:Root 'wknet.sln'
+$script:LibTarget = 'wknetlib'
 $script:KernelPlatforms = @('x64', 'ARM64')
 $script:Configurations = @('Debug', 'Release')
 
 function Write-Step {
     param([string]$Message)
-    Write-Host "[kernel-http-lib] $Message"
+    Write-Host "[wknet-lib] $Message"
 }
 
 function Invoke-Checked {
@@ -114,7 +114,7 @@ foreach ($configurationToBuild in $configurationsToBuild) {
 
         Invoke-Checked -FilePath $msbuild -ArgumentList $arguments
 
-        $libPath = Join-Path $script:Root "$platformToBuild\$configurationToBuild\KernelHttpLib.lib"
+        $libPath = Join-Path $script:Root "$platformToBuild\$configurationToBuild\wknetlib.lib"
         if (-not (Test-Path -LiteralPath $libPath)) {
             throw "Library output was not found: $libPath"
         }

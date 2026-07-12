@@ -1,14 +1,14 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/crypto/Ed25519.h>
+#include <wknet/crypto/Ed25519.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::crypto::Ed25519Verify;
-using KernelHttp::crypto::Sha512Compute;
+using wknet::crypto::Ed25519Verify;
+using wknet::crypto::Sha512Compute;
 
 namespace
 {

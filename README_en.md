@@ -42,7 +42,7 @@ KernelHttp separates implemented behavior, default-off capabilities, security re
 |----------|-------------------------|
 | HTTP/1.1 | `Content-Length`, library-generated chunked, true streaming request bodies (`BodyCreateStream` / `KhHttpRequestSetBodySource`), request trailers on the chunked path, `Expect: 100-continue`, explicit opt-in TRACE, typed Range/conditional request helpers, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer validation and read-only API exposure, read-only `206` / `Content-Range` parsing, RFC 3986 relative redirects, CONNECT request construction, HTTPS CONNECT proxy, plaintext HTTP proxy absolute-form, session-enabled HTTP/1.1 pipelining (off by default, FIFO response binding) |
 | HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS including `ENABLE_CONNECT_PROTOCOL`, HEADERS/CONTINUATION, DATA body sources, request/response trailers, explicit per-request PRIORITY, explicit `SendPing`, session-enabled background PING keepalive (off by default), GOAWAY/RST retry semantics, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits, active-stream table, two-stage `BeginRequest` / `ReceiveResponse(streamId)`, RFC 8441 extended CONNECT DATA tunnel, high-level pooled multi-stream reuse |
-| WebSocket | ws/wss handshake, constant-time accept check, caller-supplied opening handshake headers, text/binary send, empty messages, fragment send (`kws::SendContinuation`), receive-fragment callback (`ReceiveOptions.DeliverFragments` / `OnMessage`), control-frame validation, auto-Pong, public Ping/Pong/CloseEx, selected subprotocol query, cross-fragment UTF-8 validation, complete-message aggregation by default, automatic-by-default RFC 8441 WebSocket over HTTP/2 for `wss` (`h2,http/1.1` offer; use `Http11Only` to force HTTP/1.1) |
+| WebSocket | ws/wss handshake, constant-time accept check, caller-supplied opening handshake headers, text/binary send, empty messages, fragment send (`wknet::websocket::SendContinuation`), receive-fragment callback (`ReceiveOptions.DeliverFragments` / `OnMessage`), control-frame validation, auto-Pong, public Ping/Pong/CloseEx, selected subprotocol query, cross-fragment UTF-8 validation, complete-message aggregation by default, automatic-by-default RFC 8441 WebSocket over HTTP/2 for `wss` (`h2,http/1.1` offer; use `Http11Only` to force HTTP/1.1) |
 | TLS and certificates | TLS 1.2/1.3, standard TLS 1.3 cipher suites, TLS 1.2 ECDHE/DHE plus compatibility-profile RSA key exchange, AES-GCM/AES-CBC/ChaCha20-Poly1305, X25519/X448/NIST P curves/FFDHE, RSA-PSS/RSA-PKCS1/ECDSA/Ed25519/Ed448 signature schemes, SNI, ALPN, PSK/session ticket, 0-RTT, reactive KeyUpdate, record padding, client certificates (mTLS), OCSP stapling parse, certificate chain reordering and validation, Name Constraints, certificatePolicies, IDNA, OCSP/CRL DER revocation evidence validation, revocation provider callback, SPKI pin |
 | Pack200 | Java 5–8 stable formats `150.7`/`160.1`/`170.1`/`171.0`; raw/gzip, multiple segments, class/file/bytecode reconstruction, custom attribute layouts in class/field/method/code contexts, overflow indexes, constant-pool and BCI relocation; emits a semantically equivalent JAR; real corpora include SHA-256/provenance |
 | EXI | W3C EXI 1.0 Second Edition streams without an external Schema; all four alignments, Options, fidelity features, built-in XML Schema datatypes, `xsi:type`, and `xsi:nil`; emits Infoset-equivalent XML; external Schema/strict grammar streams return `STATUS_NOT_SUPPORTED` |
@@ -133,7 +133,7 @@ For certificate host validation, IP literals match only iPAddress SAN entries an
 
 2. **Build with Visual Studio**
    
-   Open `KernelHttp.sln`, select configuration and platform:
+   Open `wknet.sln`, select configuration and platform:
    
    | Configuration | Description |
    |---------------|-------------|
@@ -149,7 +149,7 @@ For certificate host validation, IP literals match only iPAddress SAN entries an
 
 3. **Build via Command Line**
    ```powershell
-   # Build KernelHttpLib for all kernel ABIs (x64, ARM64)
+   # Build wknetlib for all kernel ABIs (x64, ARM64)
    pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1
    
    # Build a single ABI
@@ -158,17 +158,17 @@ For certificate host validation, IP literals match only iPAddress SAN entries an
    # The script checks the MSVC/WDK toolchain for each ABI before building
    
    # Debug version
-   msbuild KernelHttp.sln /p:Configuration=Debug /p:Platform=x64
+   msbuild wknet.sln /p:Configuration=Debug /p:Platform=x64
    
    # Release version
-   msbuild KernelHttp.sln /p:Configuration=Release /p:Platform=x64
+   msbuild wknet.sln /p:Configuration=Release /p:Platform=x64
    ```
 
 4. **Get Library Files**
    
    After building, library files are located at:
    ```
-   <Platform>/<Configuration>/KernelHttpLib.lib
+   <Platform>/<Configuration>/wknetlib.lib
    ```
 
 #### step2: Integrate into Your Project
@@ -176,18 +176,18 @@ For certificate host validation, IP literals match only iPAddress SAN entries an
 1. **Include Headers**
    ```cpp
    // Main header entry point (recommended)
-   #include <KernelHttp/KernelHttp.h>
+   #include <wknet/Wknet.h>
    ```
 
 2. **Link Library**
    Add to project properties:
    - Additional Include Directories: `$(SolutionDir)include`
-   - Additional Library Directories: `$(SolutionDir)src\KernelHttpLib\$(Platform)\$(Configuration)\`
-   - Additional Dependencies: `KernelHttpLib.lib`
+   - Additional Library Directories: `$(SolutionDir)src\wknetlib\$(Platform)\$(Configuration)\`
+   - Additional Dependencies: `wknetlib.lib`
 
 3. **Configure Project Dependencies**
-   - Add `KernelHttpLib` project to your solution
-   - Set project dependency to ensure `KernelHttpLib` builds first
+   - Add `wknetlib` project to your solution
+   - Set project dependency to ensure `wknetlib` builds first
 
 ---
 
@@ -197,11 +197,11 @@ Common KernelHttp entry namespaces:
 
 | Namespace | Purpose | Use Case |
 |-----------|---------|----------|
-| `KernelHttp::khttp` | High-level HTTP API | Most application scenarios, rapid development |
-| `KernelHttp::kws` | High-level WebSocket API | ws/wss I/O (header `kws/WebSocket.h`) |
-| `KernelHttp::engine` | Low-level API (`Kh*`) | Performance-critical, special customization, testing |
+| `wknet::khttp` | High-level HTTP API | Most application scenarios, rapid development |
+| `wknet::kws` | High-level WebSocket API | ws/wss I/O (header `kws/WebSocket.h`) |
+| `wknet::session` | Low-level API (`Kh*`) | Performance-critical, special customization, testing |
 
-> ⚠️ All WebSocket calls are in the `kws` namespace (e.g. `kws::Connect`/`kws::SendText`/`kws::Receive`/`kws::Close`), while the session is still `khttp::Session`.
+> ⚠️ All WebSocket calls are in the `kws` namespace (e.g. `wknet::websocket::Connect`/`wknet::websocket::SendText`/`wknet::websocket::Receive`/`wknet::websocket::Close`), while the session is still `wknet::http::Session`.
 
 ### Architecture Layers
 
@@ -232,37 +232,37 @@ For the full API reference, see the **[project Wiki](https://github.com/x500x/kh
 ### 🔥 High-Level API Example
 
 ```cpp
-#include <KernelHttp/KernelHttp.h>
+#include <wknet/Wknet.h>
 
 // Simple HTTP GET request
 NTSTATUS SimpleHttpGet() {
     // Create session
-    khttp::Session* session = nullptr;
-    NTSTATUS status = khttp::SessionCreate(&session);
+    wknet::http::Session* session = nullptr;
+    NTSTATUS status = wknet::http::SessionCreate(&session);
     if (!NT_SUCCESS(status)) {
         return status;
     }
 
     // Send GET request
-    khttp::Response* response = nullptr;
-    status = khttp::GetEx(session, "http://example.com/api", 22, nullptr, nullptr, &response);
+    wknet::http::Response* response = nullptr;
+    status = wknet::http::GetEx(session, "http://example.com/api", 22, nullptr, nullptr, &response);
     
     if (NT_SUCCESS(status)) {
         // Get status code
-        ULONG statusCode = khttp::ResponseStatusCode(response);
+        ULONG statusCode = wknet::http::ResponseStatusCode(response);
         
         // Get response body
-        const UCHAR* body = khttp::ResponseBody(response);
-        SIZE_T bodyLength = khttp::ResponseBodyLength(response);
+        const UCHAR* body = wknet::http::ResponseBody(response);
+        SIZE_T bodyLength = wknet::http::ResponseBodyLength(response);
         
         // Process response...
         
         // Release response
-        khttp::ResponseRelease(response);
+        wknet::http::ResponseRelease(response);
     }
 
     // Close session
-    khttp::SessionClose(session);
+    wknet::http::SessionClose(session);
     return status;
 }
 ```
@@ -270,7 +270,7 @@ NTSTATUS SimpleHttpGet() {
 ### 🔧 Low-Level API Example
 
 ```cpp
-#include <KernelHttp/KernelHttp.h>
+#include <wknet/Wknet.h>
 
 // Fine-grained HTTPS request
 NTSTATUS AdvancedHttpsRequest(net::WskClient& wskClient) {
@@ -297,7 +297,7 @@ NTSTATUS AdvancedHttpsRequest(net::WskClient& wskClient) {
     const char* url = "https://api.example.com/data";
     KhHttpRequestSetUrl(request, url, strlen(url));
     KhHttpRequestSetMethod(request, KhHttpMethod::Get);
-    KhHttpRequestSetHeader(request, "User-Agent", 10, "KernelHttp/1.0", 14);
+    KhHttpRequestSetHeader(request, "User-Agent", 10, "wknet/1.0", 14);
 
     // Send request
     KH_RESPONSE response = nullptr;
@@ -323,41 +323,41 @@ NTSTATUS AdvancedHttpsRequest(net::WskClient& wskClient) {
 ### 🔌 WebSocket example (`kws` namespace)
 
 ```cpp
-#include <KernelHttp/KernelHttp.h>
+#include <wknet/Wknet.h>
 
 NTSTATUS WebSocketEcho() {
-    khttp::Session* session = nullptr;
-    NTSTATUS status = khttp::SessionCreate(&session);
+    wknet::http::Session* session = nullptr;
+    NTSTATUS status = wknet::http::SessionCreate(&session);
     if (!NT_SUCCESS(status)) return status;
 
-    kws::WebSocket* ws = nullptr;             // WebSocket handle lives in the kws namespace
-    status = kws::Connect(session, "wss://echo.example/ws", 21, &ws);
+    wknet::websocket::WebSocket* ws = nullptr;             // WebSocket handle lives in the kws namespace
+    status = wknet::websocket::Connect(session, "wss://echo.example/ws", 21, &ws);
     if (NT_SUCCESS(status)) {
-        kws::SendText(ws, "hello", 5);
+        wknet::websocket::SendText(ws, "hello", 5);
 
-        kws::Message msg = {};
-        if (NT_SUCCESS(kws::Receive(ws, &msg)) && msg.Type == kws::MsgType::Text) {
+        wknet::websocket::Message msg = {};
+        if (NT_SUCCESS(wknet::websocket::Receive(ws, &msg)) && msg.Type == wknet::websocket::MsgType::Text) {
             // use msg.Data / msg.DataLength (valid until the next receive/close)
         }
-        kws::Close(ws);                        // full-duplex: never concurrent with new I/O on the same handle
+        wknet::websocket::Close(ws);                        // full-duplex: never concurrent with new I/O on the same handle
     }
-    khttp::SessionClose(session);
+    wknet::http::SessionClose(session);
     return status;
 }
 ```
 
-> Fragment send via `kws::SendContinuation`; receive-fragment callback via `kws::ReceiveOptions.OnMessage`.
+> Fragment send via `wknet::websocket::SendContinuation`; receive-fragment callback via `wknet::websocket::ReceiveOptions.OnMessage`.
 
 ---
 
 ## 🏗️ Project Structure
 
 ```
-KernelHttp/
+wknet/
 ├── include/                          # Public header files
-│   └── KernelHttp/
-│       ├── KernelHttp.h             # Main header entry point
-│       ├── KernelHttpConfig.h       # Configuration options (timeouts, buffer sizes, etc.)
+│   └── wknet/
+│       ├── Wknet.h             # Main header entry point
+│       ├── WknetConfig.h       # Configuration options (timeouts, buffer sizes, etc.)
 │       ├── client/                  # Client wrappers
 │       │   ├── HttpClient.h         # HTTP/1.1 plaintext client
 │       │   ├── HttpsClient.h        # HTTPS client (TLS + ALPN auto-select HTTP/1.1 or HTTP/2)
@@ -369,7 +369,7 @@ KernelHttp/
 │       │   ├── TlsTransport.h       # TLS transport adapter (ITransport + TlsConnection, auto encrypt/decrypt)
 │       │   ├── WskTransport.h       # WSK transport adapter (ITransport + WskSocket, plaintext transport)
 │       │   └── WorkspaceScratchAllocator.h  # Workspace temporary allocator (resident heap memory)
-│       ├── khttp/                   # High-level API (KernelHttp::khttp)
+│       ├── khttp/                   # High-level API (wknet::khttp)
 │       │   ├── Types.h              # Handle types, enums, config structs, callbacks
 │       │   ├── Session.h            # Session create/close
 │       │   ├── Request.h            # Request construction (URL, method, headers, body)
@@ -379,9 +379,9 @@ KernelHttp/
 │       │   ├── Response.h           # Response read-only access (StatusCode/Body/Header)
 │       │   ├── Detail.h             # Internal bridge interface
 │       │   └── Test.h               # Test utilities
-│       ├── kws/                     # High-level WebSocket API (KernelHttp::kws)
-│       │   └── WebSocket.h          # WebSocket connect/send/fragment/receive/close (kws::Connect, ...)
-│       ├── engine/                  # Low-level API (KernelHttp::engine)
+│       ├── kws/                     # High-level WebSocket API (wknet::kws)
+│       │   └── WebSocket.h          # WebSocket connect/send/fragment/receive/close (wknet::websocket::Connect, ...)
+│       ├── engine/                  # Low-level API (wknet::session)
 │       │   ├── Engine.h             # Complete API definition (Kh* prefix)
 │       │   ├── EngineImpl.h         # Engine implementation
 │       │   ├── EngineInternal.h     # Internal structures (non-public)
@@ -431,7 +431,7 @@ KernelHttp/
 │           ├── Aead.h               # AEAD (GCM/ChaCha20-Poly1305/CCM)
 │           └── KeyExchange.h        # Key exchange (X25519/X448/NIST/FFDHE)
 ├── src/                              # Source code
-│   ├── KernelHttpLib/               # Core static library implementation
+│   ├── wknetlib/               # Core static library implementation
 │   │   ├── client/                  # Client implementation
 │   │   ├── core/                    # Core abstraction implementation
 │   │   ├── crypto/                  # Cryptography implementation
@@ -442,7 +442,7 @@ KernelHttp/
 │   │   ├── net/                     # Network transport (WSK)
 │   │   ├── tls/                     # TLS protocol implementation
 │   │   └── websocket/               # WebSocket implementation
-│   └── KernelHttpTest/              # Test driver project
+│   └── wknettest/              # Test driver project
 │       └── samples/                 # Example code
 ├── tests/                            # Test code
 ├── docs/                             # Planning and audit documents
@@ -475,7 +475,7 @@ Full documentation now lives in the **GitHub Wiki** and an **online docs site** 
 ### Session Configuration
 
 ```cpp
-khttp::SessionConfig config = khttp::DefaultSessionConfig();
+wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
 
 // Response buffer size (default 0 means unlimited and grows on demand from heap)
 config.MaxResponseBytes = 2 * 1024 * 1024;  // 2 MiB
@@ -493,31 +493,31 @@ config.MaxConnsPerHost = 4;
 config.IdleTimeoutMs = 60000;  // 60 seconds
 
 // Response buffer pool type (default NonPaged; kernel path currently requires NonPaged)
-config.ResponsePool = khttp::PoolType::NonPaged;
+config.ResponsePool = wknet::http::PoolType::NonPaged;
 
 // TLS configuration
-config.Tls.MinVersion = khttp::TlsVersion::Tls13;
-config.Tls.MaxVersion = khttp::TlsVersion::Tls13;
-config.Tls.Certificate = khttp::CertPolicy::Verify;
+config.Tls.MinVersion = wknet::http::TlsVersion::Tls13;
+config.Tls.MaxVersion = wknet::http::TlsVersion::Tls13;
+config.Tls.Certificate = wknet::http::CertPolicy::Verify;
 config.Tls.HandshakeTimeoutMs = 120000;  // TLS handshake timeout (default 120 seconds)
 ```
 
 ### Connection Policy
 
 ```cpp
-khttp::SendOptions* options = nullptr;
-khttp::SendOptionsCreate(&options);
+wknet::http::SendOptions* options = nullptr;
+wknet::http::SendOptionsCreate(&options);
 
 // Connection policy
-options->ConnectionPolicy = khttp::ConnPolicy::ReuseOrCreate;  // Reuse or create (default)
-options->ConnectionPolicy = khttp::ConnPolicy::ForceNew;       // Force new connection
-options->ConnectionPolicy = khttp::ConnPolicy::NoPool;         // Don't use pool
+options->ConnectionPolicy = wknet::http::ConnPolicy::ReuseOrCreate;  // Reuse or create (default)
+options->ConnectionPolicy = wknet::http::ConnPolicy::ForceNew;       // Force new connection
+options->ConnectionPolicy = wknet::http::ConnPolicy::NoPool;         // Don't use pool
 
 // Address family
-options->Family = khttp::AddressFamily::Any;                   // System default
-options->Family = khttp::AddressFamily::Ipv4;                  // IPv4 only
-options->Family = khttp::AddressFamily::Ipv6;                  // IPv6 only
-khttp::SendOptionsRelease(options);
+options->Family = wknet::http::AddressFamily::Any;                   // System default
+options->Family = wknet::http::AddressFamily::Ipv4;                  // IPv4 only
+options->Family = wknet::http::AddressFamily::Ipv6;                  // IPv6 only
+wknet::http::SendOptionsRelease(options);
 ```
 
 ---
@@ -545,7 +545,7 @@ pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\high_level_api_tests.exe'
 pwsh -NoLogo -NoProfile -File .\tests\integration\tls_matrix.ps1 -Configuration Debug -Platform x64
 
 # Build library and example driver
-msbuild KernelHttp.sln /m /restore /p:Configuration=Debug /p:Platform=x64
+msbuild wknet.sln /m /restore /p:Configuration=Debug /p:Platform=x64
 ```
 
 ### Test Files
@@ -586,7 +586,7 @@ The project uses Windows NTSTATUS error codes. For detailed information, see [NT
 ### Error Handling Example
 
 ```cpp
-NTSTATUS status = khttp::GetEx(session, url, urlLength, nullptr, nullptr, &response);
+NTSTATUS status = wknet::http::GetEx(session, url, urlLength, nullptr, nullptr, &response);
 if (!NT_SUCCESS(status)) {
     switch (status) {
     case STATUS_IO_TIMEOUT:
@@ -617,28 +617,28 @@ if (!NT_SUCCESS(status)) {
 
 ```cpp
 // ✅ Correct: Ensure resources are released on all paths
-NTSTATUS DoRequest(khttp::Session* session) {
-    khttp::Response* response = nullptr;
-    NTSTATUS status = khttp::GetEx(session, url, urlLen, nullptr, nullptr, &response);
+NTSTATUS DoRequest(wknet::http::Session* session) {
+    wknet::http::Response* response = nullptr;
+    NTSTATUS status = wknet::http::GetEx(session, url, urlLen, nullptr, nullptr, &response);
     
     // Release response even on failure
     if (NT_SUCCESS(status)) {
         // Process response...
     }
     
-    khttp::ResponseRelease(response);  // Accepts nullptr, safe to call unconditionally
+    wknet::http::ResponseRelease(response);  // Accepts nullptr, safe to call unconditionally
     return status;
 }
 
 // ❌ Wrong: Response not released on failure
-NTSTATUS DoRequestWrong(khttp::Session* session) {
-    khttp::Response* response = nullptr;
-    NTSTATUS status = khttp::GetEx(session, url, urlLen, nullptr, nullptr, &response);
+NTSTATUS DoRequestWrong(wknet::http::Session* session) {
+    wknet::http::Response* response = nullptr;
+    NTSTATUS status = wknet::http::GetEx(session, url, urlLen, nullptr, nullptr, &response);
     if (!NT_SUCCESS(status)) {
         return status;  // Leak! response might be non-null
     }
     // ...
-    khttp::ResponseRelease(response);
+    wknet::http::ResponseRelease(response);
     return status;
 }
 ```
@@ -647,32 +647,32 @@ NTSTATUS DoRequestWrong(khttp::Session* session) {
 
 ```cpp
 // ✅ Correct: Use connection pool for reuse
-khttp::SessionConfig config = khttp::DefaultSessionConfig();
+wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
 config.PoolCapacity = 16;        // Increase pool capacity
 config.MaxConnsPerHost = 4;      // Increase per-host connections
 config.IdleTimeoutMs = 120000;   // Extend idle timeout
 
 // ❌ Avoid: Forcing a new connection on every request
-khttp::SendOptions* options = nullptr;
-khttp::SendOptionsCreate(&options);
-options->ConnectionPolicy = khttp::ConnPolicy::ForceNew;
-khttp::SendOptionsRelease(options);
+wknet::http::SendOptions* options = nullptr;
+wknet::http::SendOptionsCreate(&options);
+options->ConnectionPolicy = wknet::http::ConnPolicy::ForceNew;
+wknet::http::SendOptionsRelease(options);
 ```
 
 ### 3. Asynchronous Operations
 
 ```cpp
 // ✅ Correct: Use async to avoid blocking
-khttp::AsyncOp* op = nullptr;
-khttp::AsyncGetEx(session, url, urlLen, nullptr, nullptr, &op);
-khttp::AsyncWait(op, 30000);  // Wait 30 seconds
+wknet::http::AsyncOp* op = nullptr;
+wknet::http::AsyncGetEx(session, url, urlLen, nullptr, nullptr, &op);
+wknet::http::AsyncWait(op, 30000);  // Wait 30 seconds
 
 // Process response...
-khttp::AsyncRelease(op);
-// Driver unload path: khttp::Destroy();
+wknet::http::AsyncRelease(op);
+// Driver unload path: wknet::http::Destroy();
 
 // ❌ Avoid: Long synchronous waits in kernel thread
-khttp::GetEx(session, url, urlLen, nullptr, nullptr, &response);  // May block for a long time
+wknet::http::GetEx(session, url, urlLen, nullptr, nullptr, &response);  // May block for a long time
 ```
 
 ---
@@ -698,10 +698,10 @@ config.MaxResponseBytes = 4 * 1024 * 1024;  // 4 MiB
 config.RequestBufferBytes = 96 * 1024;
 
 // Per-send response limit override
-khttp::SendOptions* options = nullptr;
-khttp::SendOptionsCreate(&options);
+wknet::http::SendOptions* options = nullptr;
+wknet::http::SendOptionsCreate(&options);
 options->MaxResponseBytes = 0;  // 0 means no caller-imposed response body limit
-khttp::SendOptionsRelease(options);
+wknet::http::SendOptionsRelease(options);
 ```
 
 ---
@@ -712,11 +712,11 @@ khttp::SendOptionsRelease(options);
 
 ```cpp
 // Recommended: Use TLS 1.3
-config.Tls.MinVersion = khttp::TlsVersion::Tls13;
-config.Tls.MaxVersion = khttp::TlsVersion::Tls13;
+config.Tls.MinVersion = wknet::http::TlsVersion::Tls13;
+config.Tls.MaxVersion = wknet::http::TlsVersion::Tls13;
 
 // Certificate verification
-config.Tls.Certificate = khttp::CertPolicy::Verify;
+config.Tls.Certificate = wknet::http::CertPolicy::Verify;
 
 // TLS handshake timeout (default 120 seconds)
 config.Tls.HandshakeTimeoutMs = 120000;

@@ -1,99 +1,99 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/tls/TlsContext.h>
-#include <KernelHttp/tls/CertificateStore.h>
-#include <KernelHttp/tls/CertificateValidator.h>
-#include <KernelHttp/tls/TlsCapabilities.h>
-#include <KernelHttp/tls/TlsHandshake12.h>
-#include <KernelHttp/tls/TlsHandshake13.h>
-#include <KernelHttp/tls/TlsConnection.h>
-#include <KernelHttp/tls/TlsPolicy.h>
-#include <KernelHttp/tls/TlsRecord.h>
+#include <wknet/tls/TlsContext.h>
+#include <wknet/tls/CertificateStore.h>
+#include <wknet/tls/CertificateValidator.h>
+#include <wknet/tls/TlsCapabilities.h>
+#include <wknet/tls/TlsHandshake12.h>
+#include <wknet/tls/TlsHandshake13.h>
+#include <wknet/tls/TlsConnection.h>
+#include <wknet/tls/TlsPolicy.h>
+#include <wknet/tls/TlsRecord.h>
 
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-using KernelHttp::crypto::HashAlgorithm;
-using KernelHttp::crypto::AeadAlgorithm;
-using KernelHttp::HeapArray;
-using KernelHttp::tls::CertificateAuthorityBundle;
-using KernelHttp::tls::CertificateChainView;
-using KernelHttp::tls::CertificatePin;
-using KernelHttp::tls::CertificateSha1ThumbprintLength;
-using KernelHttp::tls::CertificateRevocationEntry;
-using KernelHttp::tls::CertificateRevocationMode;
-using KernelHttp::tls::CertificateRevocationProviderQuery;
-using KernelHttp::tls::CertificateRevocationSource;
-using KernelHttp::tls::CertificateRevocationStatus;
-using KernelHttp::tls::CertificateStore;
-using KernelHttp::tls::CertificateStoreOptions;
-using KernelHttp::tls::CertificateTrustAnchor;
-using KernelHttp::tls::CertificateValidationOptions;
-using KernelHttp::tls::CertificateValidationResult;
-using KernelHttp::tls::CertificateValidator;
-using KernelHttp::tls::ParsedCertificate;
-using KernelHttp::tls::TlsAeadCipherState;
-using KernelHttp::tls::TlsAlpnProtocol;
-using KernelHttp::tls::TlsAlert;
-using KernelHttp::tls::TlsAlertDescription;
-using KernelHttp::tls::TlsAlertLevel;
-using KernelHttp::tls::CertificateSha256ThumbprintLength;
-using KernelHttp::tls::TlsCipherSuite;
-using KernelHttp::tls::TlsCertificateListView;
-using KernelHttp::tls::TlsAesGcmExplicitNonceLength;
-using KernelHttp::tls::TlsAesGcmFixedIvLength;
-using KernelHttp::tls::TlsAesGcmTls13IvLength;
-using KernelHttp::tls::TlsAesGcmTagLength;
-using KernelHttp::tls::TlsApplicationBufferLength;
-using KernelHttp::tls::Tls12Session;
-using KernelHttp::tls::Tls12SessionCache;
-using KernelHttp::tls::Tls12CertificateStatusView;
-using KernelHttp::tls::Tls12NewSessionTicketView;
-using KernelHttp::tls::TlsClientHelloOptions;
-using KernelHttp::tls::TlsRecordHeaderLength;
-using KernelHttp::tls::TlsContentType;
-using KernelHttp::tls::TlsContext;
-using KernelHttp::tls::Tls12KeyExchangeKind;
-using KernelHttp::tls::TlsHandshake12;
-using KernelHttp::tls::TlsHandshake13;
-using KernelHttp::tls::TlsHandshakeMessageView;
-using KernelHttp::tls::TlsHandshakeState;
-using KernelHttp::tls::TlsHandshakeType;
-using KernelHttp::tls::TlsMaxPlaintextLength;
-using KernelHttp::tls::Tls13ClientHelloOptions;
-using KernelHttp::tls::Tls13CertificateVerifyInputMaxLength;
-using KernelHttp::tls::Tls13EncryptedExtensionsView;
-using KernelHttp::tls::Tls13KeyShareEntry;
-using KernelHttp::tls::Tls13KeyUpdateRequest;
-using KernelHttp::tls::Tls13KeyUpdateView;
-using KernelHttp::tls::Tls13MaxRecordPaddingLength;
-using KernelHttp::tls::Tls13MaxTicketIdentityLength;
-using KernelHttp::tls::Tls13NewSessionTicketView;
-using KernelHttp::tls::Tls13SessionCache;
-using KernelHttp::tls::Tls13SessionTicket;
-using KernelHttp::tls::Tls13ServerHelloView;
-using KernelHttp::tls::TlsClientConnectionOptions;
-using KernelHttp::tls::TlsConnection;
-using KernelHttp::tls::TlsHandshakeFailureCategory;
-using KernelHttp::tls::TlsMutablePlaintextRecord;
-using KernelHttp::tls::TlsNamedGroup;
-using KernelHttp::tls::TlsPlaintextRecord;
-using KernelHttp::tls::TlsProtocol;
-using KernelHttp::tls::TlsProtocolVersion;
-using KernelHttp::tls::TlsRecordLayer;
-using KernelHttp::tls::TlsRecordView;
-using KernelHttp::tls::TlsServerHelloView;
-using KernelHttp::tls::TlsServerKeyExchangeView;
-using KernelHttp::tls::TlsSignatureScheme;
-using KernelHttp::tls::TlsMasterSecretLength;
-using KernelHttp::tls::TlsSessionSecrets;
-using KernelHttp::tls::TlsPolicy;
-using KernelHttp::tls::TlsSecurityProfile;
-using KernelHttp::tls::TlsTranscriptHash;
-using KernelHttp::tls::TlsVerifyDataLength;
+using wknet::crypto::HashAlgorithm;
+using wknet::crypto::AeadAlgorithm;
+using wknet::HeapArray;
+using wknet::tls::CertificateAuthorityBundle;
+using wknet::tls::CertificateChainView;
+using wknet::tls::CertificatePin;
+using wknet::tls::CertificateSha1ThumbprintLength;
+using wknet::tls::CertificateRevocationEntry;
+using wknet::tls::CertificateRevocationMode;
+using wknet::tls::CertificateRevocationProviderQuery;
+using wknet::tls::CertificateRevocationSource;
+using wknet::tls::CertificateRevocationStatus;
+using wknet::tls::CertificateStore;
+using wknet::tls::CertificateStoreOptions;
+using wknet::tls::CertificateTrustAnchor;
+using wknet::tls::CertificateValidationOptions;
+using wknet::tls::CertificateValidationResult;
+using wknet::tls::CertificateValidator;
+using wknet::tls::ParsedCertificate;
+using wknet::tls::TlsAeadCipherState;
+using wknet::tls::TlsAlpnProtocol;
+using wknet::tls::TlsAlert;
+using wknet::tls::TlsAlertDescription;
+using wknet::tls::TlsAlertLevel;
+using wknet::tls::CertificateSha256ThumbprintLength;
+using wknet::tls::TlsCipherSuite;
+using wknet::tls::TlsCertificateListView;
+using wknet::tls::TlsAesGcmExplicitNonceLength;
+using wknet::tls::TlsAesGcmFixedIvLength;
+using wknet::tls::TlsAesGcmTls13IvLength;
+using wknet::tls::TlsAesGcmTagLength;
+using wknet::tls::TlsApplicationBufferLength;
+using wknet::tls::Tls12Session;
+using wknet::tls::Tls12SessionCache;
+using wknet::tls::Tls12CertificateStatusView;
+using wknet::tls::Tls12NewSessionTicketView;
+using wknet::tls::TlsClientHelloOptions;
+using wknet::tls::TlsRecordHeaderLength;
+using wknet::tls::TlsContentType;
+using wknet::tls::TlsContext;
+using wknet::tls::Tls12KeyExchangeKind;
+using wknet::tls::TlsHandshake12;
+using wknet::tls::TlsHandshake13;
+using wknet::tls::TlsHandshakeMessageView;
+using wknet::tls::TlsHandshakeState;
+using wknet::tls::TlsHandshakeType;
+using wknet::tls::TlsMaxPlaintextLength;
+using wknet::tls::Tls13ClientHelloOptions;
+using wknet::tls::Tls13CertificateVerifyInputMaxLength;
+using wknet::tls::Tls13EncryptedExtensionsView;
+using wknet::tls::Tls13KeyShareEntry;
+using wknet::tls::Tls13KeyUpdateRequest;
+using wknet::tls::Tls13KeyUpdateView;
+using wknet::tls::Tls13MaxRecordPaddingLength;
+using wknet::tls::Tls13MaxTicketIdentityLength;
+using wknet::tls::Tls13NewSessionTicketView;
+using wknet::tls::Tls13SessionCache;
+using wknet::tls::Tls13SessionTicket;
+using wknet::tls::Tls13ServerHelloView;
+using wknet::tls::TlsClientConnectionOptions;
+using wknet::tls::TlsConnection;
+using wknet::tls::TlsHandshakeFailureCategory;
+using wknet::tls::TlsMutablePlaintextRecord;
+using wknet::tls::TlsNamedGroup;
+using wknet::tls::TlsPlaintextRecord;
+using wknet::tls::TlsProtocol;
+using wknet::tls::TlsProtocolVersion;
+using wknet::tls::TlsRecordLayer;
+using wknet::tls::TlsRecordView;
+using wknet::tls::TlsServerHelloView;
+using wknet::tls::TlsServerKeyExchangeView;
+using wknet::tls::TlsSignatureScheme;
+using wknet::tls::TlsMasterSecretLength;
+using wknet::tls::TlsSessionSecrets;
+using wknet::tls::TlsPolicy;
+using wknet::tls::TlsSecurityProfile;
+using wknet::tls::TlsTranscriptHash;
+using wknet::tls::TlsVerifyDataLength;
 
 namespace
 {
@@ -732,7 +732,7 @@ namespace
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "invalid alert level is rejected");
     }
 
-    class ScriptedTlsTransport final : public KernelHttp::core::ITransport
+    class ScriptedTlsTransport final : public wknet::core::ITransport
     {
     public:
         ScriptedTlsTransport(const UCHAR* receiveBytes, SIZE_T receiveLength) noexcept :
@@ -1256,7 +1256,7 @@ namespace
 
         UCHAR mac[32] = {};
         SIZE_T macWritten = 0;
-        status = KernelHttp::crypto::CngProvider::Hmac(
+        status = wknet::crypto::CngProvider::Hmac(
             HashAlgorithm::Sha256,
             readState.MacKey,
             readState.MacKeyLength,
@@ -1428,7 +1428,7 @@ namespace
         UCHAR prk[48] = {};
         SIZE_T prkLength = 0;
 
-        NTSTATUS status = KernelHttp::crypto::CngProvider::HkdfExtract(
+        NTSTATUS status = wknet::crypto::CngProvider::HkdfExtract(
             HashAlgorithm::Sha256,
             salt,
             sizeof(salt),
@@ -1443,7 +1443,7 @@ namespace
 
         const UCHAR info[] = { 't', 'l', 's', '1', '3' };
         UCHAR okm[42] = {};
-        status = KernelHttp::crypto::CngProvider::HkdfExpand(
+        status = wknet::crypto::CngProvider::HkdfExpand(
             HashAlgorithm::Sha256,
             prk,
             prkLength,
@@ -3149,7 +3149,7 @@ namespace
         keyShare.KeyExchange = publicKey;
         keyShare.KeyExchangeLength = sizeof(publicKey);
 
-        const KernelHttp::tls::TlsAlpnProtocol alpn[] = {
+        const wknet::tls::TlsAlpnProtocol alpn[] = {
             { "h2", 2 },
             { "http/1.1", 8 }
         };
@@ -3897,7 +3897,7 @@ namespace
         for (SIZE_T index = 0; index < sizeof(binder); ++index) {
             binder[index] = static_cast<UCHAR>(0xa0 + index);
         }
-        KernelHttp::tls::Tls13PskIdentity identity = {};
+        wknet::tls::Tls13PskIdentity identity = {};
         identity.Identity = identityBytes;
         identity.IdentityLength = sizeof(identityBytes);
         identity.ObfuscatedTicketAge = 1234;
@@ -7174,55 +7174,55 @@ namespace
 
     void TestTlsCapabilityMatrix()
     {
-        Expect(KernelHttp::tls::TlsIsKnownNamedGroup(TlsNamedGroup::X25519), "X25519 is a known named group");
-        Expect(KernelHttp::tls::TlsIsKnownNamedGroup(TlsNamedGroup::X448), "X448 is a known named group");
-        Expect(KernelHttp::tls::TlsIsKnownCipherSuite(TlsCipherSuite::TlsChaCha20Poly1305Sha256), "TLS 1.3 ChaCha20-Poly1305 is known");
-        Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::Ed25519), "Ed25519 is a known signature scheme");
-        Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::Ed448), "Ed448 is a known signature scheme");
-        Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::RsaPkcs1Sha1), "TLS 1.2 rsa_pkcs1_sha1 is known");
-        Expect(KernelHttp::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::EcdsaSha1), "TLS 1.2 ecdsa_sha1 is known");
-        Expect(KernelHttp::tls::TlsIsDefaultEnabledNamedGroup(TlsNamedGroup::X25519), "X25519 is default-enabled");
-        Expect(KernelHttp::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::Ed448), "Ed448 is default-enabled");
-        Expect(!KernelHttp::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::RsaPkcs1Sha1), "rsa_pkcs1_sha1 is not modern-default");
-        Expect(!KernelHttp::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::EcdsaSha1), "ecdsa_sha1 is not modern-default");
-        Expect(!KernelHttp::tls::TlsIsDefaultEnabledTls12KeyExchange(Tls12KeyExchangeKind::Rsa), "TLS 1.2 RSA key exchange is not default-enabled");
+        Expect(wknet::tls::TlsIsKnownNamedGroup(TlsNamedGroup::X25519), "X25519 is a known named group");
+        Expect(wknet::tls::TlsIsKnownNamedGroup(TlsNamedGroup::X448), "X448 is a known named group");
+        Expect(wknet::tls::TlsIsKnownCipherSuite(TlsCipherSuite::TlsChaCha20Poly1305Sha256), "TLS 1.3 ChaCha20-Poly1305 is known");
+        Expect(wknet::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::Ed25519), "Ed25519 is a known signature scheme");
+        Expect(wknet::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::Ed448), "Ed448 is a known signature scheme");
+        Expect(wknet::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::RsaPkcs1Sha1), "TLS 1.2 rsa_pkcs1_sha1 is known");
+        Expect(wknet::tls::TlsIsKnownSignatureScheme(TlsSignatureScheme::EcdsaSha1), "TLS 1.2 ecdsa_sha1 is known");
+        Expect(wknet::tls::TlsIsDefaultEnabledNamedGroup(TlsNamedGroup::X25519), "X25519 is default-enabled");
+        Expect(wknet::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::Ed448), "Ed448 is default-enabled");
+        Expect(!wknet::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::RsaPkcs1Sha1), "rsa_pkcs1_sha1 is not modern-default");
+        Expect(!wknet::tls::TlsIsDefaultEnabledSignatureScheme(TlsSignatureScheme::EcdsaSha1), "ecdsa_sha1 is not modern-default");
+        Expect(!wknet::tls::TlsIsDefaultEnabledTls12KeyExchange(Tls12KeyExchangeKind::Rsa), "TLS 1.2 RSA key exchange is not default-enabled");
     }
 
     void TestTlsPolicyValidation()
     {
         TlsPolicy policy = {};
-        ExpectStatus(KernelHttp::tls::TlsValidatePolicy(policy), STATUS_SUCCESS, "modern default policy validates");
-        Expect(KernelHttp::tls::TlsPolicyAllowsNamedGroup(policy, TlsNamedGroup::X25519), "modern default policy allows X25519");
-        Expect(KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsChaCha20Poly1305Sha256), "modern default policy allows ChaCha20-Poly1305");
-        Expect(!KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128GcmSha256), "modern default policy rejects RSA key exchange");
-        Expect(!KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::RsaPkcs1Sha1), "modern policy rejects rsa_pkcs1_sha1");
-        Expect(!KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "modern policy rejects ecdsa_sha1");
+        ExpectStatus(wknet::tls::TlsValidatePolicy(policy), STATUS_SUCCESS, "modern default policy validates");
+        Expect(wknet::tls::TlsPolicyAllowsNamedGroup(policy, TlsNamedGroup::X25519), "modern default policy allows X25519");
+        Expect(wknet::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsChaCha20Poly1305Sha256), "modern default policy allows ChaCha20-Poly1305");
+        Expect(!wknet::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128GcmSha256), "modern default policy rejects RSA key exchange");
+        Expect(!wknet::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::RsaPkcs1Sha1), "modern policy rejects rsa_pkcs1_sha1");
+        Expect(!wknet::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "modern policy rejects ecdsa_sha1");
 
         policy.EnableTls12RsaKeyExchange = true;
-        ExpectStatus(KernelHttp::tls::TlsValidatePolicy(policy), STATUS_INVALID_PARAMETER, "modern default policy rejects legacy RSA opt-in");
+        ExpectStatus(wknet::tls::TlsValidatePolicy(policy), STATUS_INVALID_PARAMETER, "modern default policy rejects legacy RSA opt-in");
 
         policy = {};
         policy.EnableTls12Sha1Signatures = true;
-        ExpectStatus(KernelHttp::tls::TlsValidatePolicy(policy), STATUS_INVALID_PARAMETER, "modern default policy rejects SHA1 signature opt-in");
+        ExpectStatus(wknet::tls::TlsValidatePolicy(policy), STATUS_INVALID_PARAMETER, "modern default policy rejects SHA1 signature opt-in");
 
         policy = {};
         policy.Profile = TlsSecurityProfile::CompatibilityExplicit;
-        Expect(!KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::RsaPkcs1Sha1), "compatibility policy keeps rsa_pkcs1_sha1 off by default");
-        Expect(!KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "compatibility policy keeps ecdsa_sha1 off by default");
+        Expect(!wknet::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::RsaPkcs1Sha1), "compatibility policy keeps rsa_pkcs1_sha1 off by default");
+        Expect(!wknet::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "compatibility policy keeps ecdsa_sha1 off by default");
         policy.EnableTls12RsaKeyExchange = true;
         policy.EnableTls12Cbc = true;
         policy.EnableTls12Renegotiation = true;
         policy.EnableTls12Sha1Signatures = true;
-        ExpectStatus(KernelHttp::tls::TlsValidatePolicy(policy), STATUS_SUCCESS, "compatibility policy validates");
-        Expect(KernelHttp::tls::TlsPolicyAllowsTls12KeyExchange(policy, Tls12KeyExchangeKind::Rsa), "compatibility policy allows TLS 1.2 RSA");
-        Expect(KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128GcmSha256), "compatibility policy allows RSA GCM");
-        Expect(KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128CbcSha256), "compatibility policy allows RSA CBC");
-        Expect(KernelHttp::tls::TlsPolicyAllowsTls12Renegotiation(policy), "compatibility policy allows renegotiation");
-        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::RsaPkcs1Sha1), "compatibility policy allows rsa_pkcs1_sha1 when explicitly enabled");
-        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "compatibility policy allows ecdsa_sha1 when explicitly enabled");
-        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSecp256r1Sha256), "compatibility policy still allows modern signatures");
-        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::Ed25519), "Ed25519 is offered after software verify implementation");
-        Expect(KernelHttp::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::Ed448), "Ed448 is offered after software verify implementation");
+        ExpectStatus(wknet::tls::TlsValidatePolicy(policy), STATUS_SUCCESS, "compatibility policy validates");
+        Expect(wknet::tls::TlsPolicyAllowsTls12KeyExchange(policy, Tls12KeyExchangeKind::Rsa), "compatibility policy allows TLS 1.2 RSA");
+        Expect(wknet::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128GcmSha256), "compatibility policy allows RSA GCM");
+        Expect(wknet::tls::TlsPolicyAllowsCipherSuite(policy, TlsCipherSuite::TlsRsaWithAes128CbcSha256), "compatibility policy allows RSA CBC");
+        Expect(wknet::tls::TlsPolicyAllowsTls12Renegotiation(policy), "compatibility policy allows renegotiation");
+        Expect(wknet::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::RsaPkcs1Sha1), "compatibility policy allows rsa_pkcs1_sha1 when explicitly enabled");
+        Expect(wknet::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSha1), "compatibility policy allows ecdsa_sha1 when explicitly enabled");
+        Expect(wknet::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::EcdsaSecp256r1Sha256), "compatibility policy still allows modern signatures");
+        Expect(wknet::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::Ed25519), "Ed25519 is offered after software verify implementation");
+        Expect(wknet::tls::TlsPolicyAllowsSignatureScheme(policy, TlsSignatureScheme::Ed448), "Ed448 is offered after software verify implementation");
     }
 }
 

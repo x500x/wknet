@@ -1,27 +1,27 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/crypto/Aead.h>
-#include <KernelHttp/crypto/CngProvider.h>
-#include <KernelHttp/crypto/KeyExchange.h>
+#include <wknet/crypto/Aead.h>
+#include <wknet/crypto/CngProvider.h>
+#include <wknet/crypto/KeyExchange.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::crypto::Aead;
-using KernelHttp::crypto::AeadAlgorithm;
-using KernelHttp::crypto::AeadKey;
-using KernelHttp::crypto::AeadParameters;
-using KernelHttp::crypto::CngKey;
-using KernelHttp::crypto::CngProvider;
-using KernelHttp::crypto::KeyExchange;
-using KernelHttp::crypto::KeyExchangeGroup;
-using KernelHttp::crypto::KeyExchangeKeyPair;
-using KernelHttp::crypto::KeyExchangeFfdhe2048Length;
-using KernelHttp::crypto::KeyExchangeX25519KeyLength;
-using KernelHttp::crypto::KeyExchangeX448KeyLength;
-using KernelHttp::crypto::SignatureAlgorithm;
+using wknet::crypto::Aead;
+using wknet::crypto::AeadAlgorithm;
+using wknet::crypto::AeadKey;
+using wknet::crypto::AeadParameters;
+using wknet::crypto::CngKey;
+using wknet::crypto::CngProvider;
+using wknet::crypto::KeyExchange;
+using wknet::crypto::KeyExchangeGroup;
+using wknet::crypto::KeyExchangeKeyPair;
+using wknet::crypto::KeyExchangeFfdhe2048Length;
+using wknet::crypto::KeyExchangeX25519KeyLength;
+using wknet::crypto::KeyExchangeX448KeyLength;
+using wknet::crypto::SignatureAlgorithm;
 
 namespace
 {

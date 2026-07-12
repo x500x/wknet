@@ -12,7 +12,7 @@
 #ifndef BROTLI_COMMON_TYPES_H_
 #define BROTLI_COMMON_TYPES_H_
 
-#if defined(KERNEL_HTTP_NO_CRT_ALLOC)
+#if defined(WKNET_NO_CRT_ALLOC)
 #ifndef _SIZE_T_DEFINED
 #if defined(_WIN64)
 typedef unsigned __int64 size_t;
@@ -53,7 +53,7 @@ typedef __int64 int64_t;
 #else
 #include <stdint.h>  /* IWYU pragma: export */
 #endif  /* defined(_MSC_VER) && (_MSC_VER < 1600) */
-#endif  /* defined(KERNEL_HTTP_NO_CRT_ALLOC) */
+#endif  /* defined(WKNET_NO_CRT_ALLOC) */
 
 /**
  * A portable @c bool replacement.

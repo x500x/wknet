@@ -1,0 +1,617 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4B04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Source Files\client">
+      <UniqueIdentifier>{9D513525-581D-46E5-BCDB-B06F9F0FC8AA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\core">
+      <UniqueIdentifier>{A82F2D68-30B8-4A4F-B2CF-6AB8E4F3D153}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\crypto">
+      <UniqueIdentifier>{1271C8D8-04BC-4EE0-9A2A-2C4D27E15DBD}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\engine">
+      <UniqueIdentifier>{8D47DFA0-8D10-4A7E-BD38-3EC67D48B7AA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\http">
+      <UniqueIdentifier>{8C7D6B33-B850-4F04-9CC0-F6721F61B7DD}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\http2">
+      <UniqueIdentifier>{9B7EAA2E-6E7E-4B4F-9B6C-28E4C0F3B2B5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\khttp">
+      <UniqueIdentifier>{C8A1D720-C92E-4E2F-91A4-3F4B9C73C0FA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\net">
+      <UniqueIdentifier>{9E3C528F-37D6-45E4-B7D0-B6807149C0D8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\tls">
+      <UniqueIdentifier>{A48746E9-0E01-4F96-9B1D-1DE38B6C3D93}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\websocket">
+      <UniqueIdentifier>{6113F4C7-2EF7-49AB-887E-77C9F19FAD29}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\third_party\brotli">
+      <UniqueIdentifier>{A961B65D-115E-44B3-9E77-3B8D9751446C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\client">
+      <UniqueIdentifier>{45F02825-5476-4470-A5E4-F08068A6F8FE}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\core">
+      <UniqueIdentifier>{1CCEF3A8-5E95-4D78-A8E5-5F055A3A9A37}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\crypto">
+      <UniqueIdentifier>{4F1C3587-045F-47F1-A184-706C5F0E2C2F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\engine">
+      <UniqueIdentifier>{A1A92D02-F456-4D36-963F-3B1C11323D37}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\http">
+      <UniqueIdentifier>{90686895-27C3-470B-B1FF-7CF9562088A3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\http2">
+      <UniqueIdentifier>{2E6B0494-D9B1-4D13-8E4E-5D6D67D1CF11}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\khttp">
+      <UniqueIdentifier>{D9B2E831-DA3F-4F30-A2B5-405C0D84D1FB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\kws">
+      <UniqueIdentifier>{C1083AE5-F39A-4B5C-9E2B-A0C9B2F91841}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\net">
+      <UniqueIdentifier>{F4EE822D-C34A-46DD-9A36-B44C7203571A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\tls">
+      <UniqueIdentifier>{72E92923-B8A6-4D62-B5E2-7D9103C96BA5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\websocket">
+      <UniqueIdentifier>{61867DA1-8B32-4F10-ABAF-FB3DF5C58664}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="WknetConfig.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="client\HttpClient.cpp">
+      <Filter>Source Files\client</Filter>
+    </ClCompile>
+    <ClCompile Include="client\Http2Client.cpp">
+      <Filter>Source Files\client</Filter>
+    </ClCompile>
+    <ClCompile Include="client\HttpsClient.cpp">
+      <Filter>Source Files\client</Filter>
+    </ClCompile>
+    <ClCompile Include="client\WebSocketClient.cpp">
+      <Filter>Source Files\client</Filter>
+    </ClCompile>
+    <ClCompile Include="core\TlsTransport.cpp">
+      <Filter>Source Files\core</Filter>
+    </ClCompile>
+    <ClCompile Include="crypto\Aead.cpp">
+      <Filter>Source Files\crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="crypto\CngProvider.cpp">
+      <Filter>Source Files\crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="crypto\CngProviderCache.cpp">
+      <Filter>Source Files\crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="crypto\Ed25519.cpp">
+      <Filter>Source Files\crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="crypto\Ed448.cpp">
+      <Filter>Source Files\crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="crypto\KeyExchange.cpp">
+      <Filter>Source Files\crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\Engine.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\HttpEngine.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\HttpCache.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\UrlParser.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\WsEngine.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\Async.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\ConnectionPool.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\Workspace.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpContentEncoding.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpCoding.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiDecoder.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiEventReader.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiGrammar.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiGrammarTable.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiOptions.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiQNameReader.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiStringTable.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpExiValueDecoder.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200BandCodec.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200AttributeLayout.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200BandParser.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200Bands.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200ClassWriter.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200Codec.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200Decoder.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpPack200JarWriter.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpXmlWriter.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpCachePolicy.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpParser.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpRequest.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpResponse.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpTransferCoding.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http\HttpTypes.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http2\Hpack.cpp">
+      <Filter>Source Files\http2</Filter>
+    </ClCompile>
+    <ClCompile Include="http2\Http2Connection.cpp">
+      <Filter>Source Files\http2</Filter>
+    </ClCompile>
+    <ClCompile Include="http2\Http2Frame.cpp">
+      <Filter>Source Files\http2</Filter>
+    </ClCompile>
+    <ClCompile Include="http2\Http2Stream.cpp">
+      <Filter>Source Files\http2</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\AsyncOp.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Body.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Cache.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Headers.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Http.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\HttpAsync.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Khttp.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Lifecycle.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Options.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Request.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Response.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\Session.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="khttp\WebSocket.cpp">
+      <Filter>Source Files\khttp</Filter>
+    </ClCompile>
+    <ClCompile Include="net\WskClient.cpp">
+      <Filter>Source Files\net</Filter>
+    </ClCompile>
+    <ClCompile Include="net\WskSocket.cpp">
+      <Filter>Source Files\net</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsContext.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\CertificateStore.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\CertificateValidator.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsCapabilities.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsConnection.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsHandshake12.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsHandshake13.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsPolicy.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsRecord.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="websocket\WebSocketDeflate.cpp">
+      <Filter>Source Files\websocket</Filter>
+    </ClCompile>
+    <ClCompile Include="websocket\WebSocketFrame.cpp">
+      <Filter>Source Files\websocket</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\constants.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\context.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\dictionary.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\platform.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\shared_dictionary.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\transform.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\bit_reader.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\decode.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\huffman.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\prefix.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\state.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\static_init.c">
+      <Filter>Source Files\third_party\brotli</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\include\wknet\Wknet.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\WknetConfig.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\client\HttpClient.h">
+      <Filter>Header Files\client</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\client\Http2Client.h">
+      <Filter>Header Files\client</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\client\HttpsClient.h">
+      <Filter>Header Files\client</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\client\WebSocketClient.h">
+      <Filter>Header Files\client</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\core\IScratchAllocator.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\core\ITransport.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\core\Irql.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\core\TlsTransport.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\core\WorkspaceScratchAllocator.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\core\WskTransport.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\crypto\Aead.h">
+      <Filter>Header Files\crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\crypto\CngProvider.h">
+      <Filter>Header Files\crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\crypto\CngProviderCache.h">
+      <Filter>Header Files\crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\crypto\Ed25519.h">
+      <Filter>Header Files\crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\crypto\Ed448.h">
+      <Filter>Header Files\crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\crypto\KeyExchange.h">
+      <Filter>Header Files\crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\Engine.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\EngineImpl.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\EngineInternal.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\EngineUtils.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\HandleAlloc.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\HandleTypes.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\HttpEngine.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\HttpCache.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\UrlParser.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\WsEngine.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\Async.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\ConnectionPool.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\engine\Workspace.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http1\HttpContentEncoding.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http1\HttpCoding.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http1\HttpCachePolicy.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http1\HttpParser.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http1\HttpRequest.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http1\HttpResponse.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http1\HttpTransferCoding.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http1\HttpTypes.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiDecoder.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpDeflateDecoder.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiEventReader.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiGrammar.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiGrammarTable.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiOptions.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiQNameReader.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiStringTable.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpExiValueDecoder.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200BandCodec.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200AttributeLayout.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200BandParser.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200Bands.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200ClassWriter.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200Codec.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200Decoder.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpPack200JarWriter.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="http\HttpXmlWriter.h">
+      <Filter>Header Files\http</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http2\Hpack.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http2\HpackHuffman.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http2\HpackStaticTable.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http2\Http2Connection.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http2\Http2Frame.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http2\Http2Stream.h">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\AsyncOp.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Body.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Cache.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Detail.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Headers.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Http.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\HttpAsync.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Options.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Request.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Response.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Session.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Test.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\http\Types.h">
+      <Filter>Header Files\khttp</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\websocket\WebSocket.h">
+      <Filter>Header Files\kws</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\net\WskBuffer.h">
+      <Filter>Header Files\net</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\net\WskClient.h">
+      <Filter>Header Files\net</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\net\WskSocket.h">
+      <Filter>Header Files\net</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\tls\TlsContext.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\tls\CertificateStore.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\tls\CertificateValidator.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\tls\TlsCapabilities.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\tls\TlsConnection.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\tls\TlsHandshake12.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\tls\TlsHandshake13.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\tls\TlsPolicy.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\tls\TlsRecord.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\ws\WebSocketDeflate.h">
+      <Filter>Header Files\websocket</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\wknet\ws\WebSocketFrame.h">
+      <Filter>Header Files\websocket</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

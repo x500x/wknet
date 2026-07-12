@@ -1,23 +1,23 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/client/WebSocketClient.h>
+#include <wknet/client/WebSocketClient.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::client::WebSocketClient;
-using KernelHttp::client::WebSocketConnectOptions;
-using KernelHttp::client::WebSocketHandshakeChallenge;
-using KernelHttp::client::WebSocketHandshakeRetryAction;
-using KernelHttp::client::WebSocketIoBuffers;
-using KernelHttp::client::WebSocketTransportMode;
-using KernelHttp::http::HttpHeader;
-using KernelHttp::websocket::WebSocketCodec;
-using KernelHttp::websocket::WebSocketDeflateContext;
-using KernelHttp::websocket::WebSocketFrameHeader;
-using KernelHttp::websocket::WebSocketOpcode;
+using wknet::client::WebSocketClient;
+using wknet::client::WebSocketConnectOptions;
+using wknet::client::WebSocketHandshakeChallenge;
+using wknet::client::WebSocketHandshakeRetryAction;
+using wknet::client::WebSocketIoBuffers;
+using wknet::client::WebSocketTransportMode;
+using wknet::http1::HttpHeader;
+using wknet::ws::WebSocketCodec;
+using wknet::ws::WebSocketDeflateContext;
+using wknet::ws::WebSocketFrameHeader;
+using wknet::ws::WebSocketOpcode;
 
 namespace
 {
@@ -616,7 +616,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -652,7 +652,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -708,7 +708,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -770,7 +770,7 @@ namespace
             banner,
             sizeof(banner) - 1);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -823,7 +823,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -862,7 +862,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -915,7 +915,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -976,7 +976,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1021,7 +1021,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1070,7 +1070,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1108,7 +1108,7 @@ namespace
         server.FailConnectAttempts = 1;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1128,7 +1128,7 @@ namespace
             sizeof(headers) / sizeof(headers[0]));
 
         WebSocketConnectOptions options = MakeConnectOptions();
-        options.AddressFamily = KernelHttp::net::WskAddressFamily::Any;
+        options.AddressFamily = wknet::net::WskAddressFamily::Any;
 
         const NTSTATUS status = client.Connect(wskClient, options, buffers);
         Expect(NT_SUCCESS(status), "websocket connect retries later resolved addresses");
@@ -1145,7 +1145,7 @@ namespace
         server.EchoAfterPing = true;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1216,7 +1216,7 @@ namespace
             second,
             sizeof(second) - 1);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1285,7 +1285,7 @@ namespace
             third,
             sizeof(third));
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1335,7 +1335,7 @@ namespace
             payloadBytes,
             sizeof(payloadBytes) - 1);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1390,7 +1390,7 @@ namespace
             second,
             sizeof(second) - 1);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1429,7 +1429,7 @@ namespace
         server.SelectedSubprotocolLength = strlen(server.SelectedSubprotocol);
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1475,7 +1475,7 @@ namespace
         server.SelectedSubprotocolLength = strlen(server.SelectedSubprotocol);
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1511,7 +1511,7 @@ namespace
         server.SelectedSubprotocolLength = strlen(server.SelectedSubprotocol);
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1542,7 +1542,7 @@ namespace
         server.ResponseExtensionsLength = strlen(server.ResponseExtensions);
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1571,7 +1571,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1610,7 +1610,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1667,7 +1667,7 @@ namespace
         server.ResponseExtensionsLength = strlen(server.ResponseExtensions);
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1706,7 +1706,7 @@ namespace
         server.ResponseExtensionsLength = strlen(server.ResponseExtensions);
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1787,7 +1787,7 @@ namespace
             true,
             true);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1839,7 +1839,7 @@ namespace
             banner,
             sizeof(banner) - 1);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1889,7 +1889,7 @@ namespace
             largeMessage,
             sizeof(largeMessage));
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1937,7 +1937,7 @@ namespace
             oversizedTextHeader,
             sizeof(oversizedTextHeader));
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1996,7 +1996,7 @@ namespace
             oversizedContinuationHeader,
             sizeof(oversizedContinuationHeader));
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2055,7 +2055,7 @@ namespace
             text,
             sizeof(text) - 1);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2119,7 +2119,7 @@ namespace
             text,
             sizeof(text) - 1);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2185,7 +2185,7 @@ namespace
             text,
             sizeof(text) - 1);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2229,7 +2229,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2286,7 +2286,7 @@ namespace
             largeMessage[index] = static_cast<char>('a' + (index % 26));
         }
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2335,7 +2335,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2384,7 +2384,7 @@ namespace
             frame,
             frameLength);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2438,7 +2438,7 @@ namespace
             maskedServerFrame,
             sizeof(maskedServerFrame));
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2517,7 +2517,7 @@ namespace
             closePayload,
             sizeof(closePayload));
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2579,7 +2579,7 @@ namespace
             invalidText,
             sizeof(invalidText));
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2635,7 +2635,7 @@ namespace
             sizeof(second),
             true);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2696,7 +2696,7 @@ namespace
             sizeof(second),
             true);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2766,7 +2766,7 @@ namespace
             0,
             true);
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2841,7 +2841,7 @@ namespace
                 payloads[index],
                 payloadLengths[index]);
 
-            KernelHttp::net::WskClient wskClient;
+            wknet::net::WskClient wskClient;
             WebSocketClient client;
             char request[1024] = {};
             char response[1024] = {};
@@ -2884,7 +2884,7 @@ namespace
         server.ReceiveStatus = STATUS_IO_TIMEOUT;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2928,7 +2928,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2973,7 +2973,7 @@ namespace
         server.CloseStatus = STATUS_CONNECTION_RESET;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3006,7 +3006,7 @@ namespace
         server.CloseStatus = STATUS_INVALID_DEVICE_STATE;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3044,7 +3044,7 @@ namespace
         server.HandshakeReason = reason;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3129,7 +3129,7 @@ namespace
         server.UpgradeWhenHeaderValue = "Basic dGVzdA==";
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3200,7 +3200,7 @@ namespace
         server.UpgradeWhenPath = "/next";
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3240,7 +3240,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3265,8 +3265,8 @@ namespace
         options.TlsServerNameLength = strlen(options.TlsServerName);
         options.UseTls = true;
         options.VerifyCertificate = false;
-        options.MinimumTlsProtocol = KernelHttp::tls::TlsProtocol::Tls13;
-        options.MaximumTlsProtocol = KernelHttp::tls::TlsProtocol::Tls12;
+        options.MinimumTlsProtocol = wknet::tls::TlsProtocol::Tls13;
+        options.MaximumTlsProtocol = wknet::tls::TlsProtocol::Tls12;
 
         const NTSTATUS status = client.Connect(wskClient, options, buffers);
         Expect(status == STATUS_INVALID_PARAMETER, "websocket TLS rejects reversed protocol range");
@@ -3279,7 +3279,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        KernelHttp::net::WskClient wskClient;
+        wknet::net::WskClient wskClient;
         WebSocketClient client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3304,22 +3304,22 @@ namespace
         options.TlsServerNameLength = strlen(options.TlsServerName);
         options.UseTls = true;
         options.VerifyCertificate = false;
-        options.MinimumTlsProtocol = KernelHttp::tls::TlsProtocol::Tls12;
-        options.MaximumTlsProtocol = KernelHttp::tls::TlsProtocol::Tls12;
+        options.MinimumTlsProtocol = wknet::tls::TlsProtocol::Tls12;
+        options.MaximumTlsProtocol = wknet::tls::TlsProtocol::Tls12;
         options.Policy.EnableTls12Sha1Signatures = true;
 
         NTSTATUS status = client.Connect(wskClient, options, buffers);
         Expect(status == STATUS_INVALID_PARAMETER, "websocket rejects SHA1 signature switch on modern TLS policy");
         Expect(!server.Connected, "websocket invalid modern SHA1 policy fails before socket connect");
 
-        options.Policy.Profile = KernelHttp::tls::TlsSecurityProfile::CompatibilityExplicit;
-        status = KernelHttp::tls::TlsValidatePolicy(options.Policy);
+        options.Policy.Profile = wknet::tls::TlsSecurityProfile::CompatibilityExplicit;
+        status = wknet::tls::TlsValidatePolicy(options.Policy);
         Expect(status == STATUS_SUCCESS, "websocket accepts explicit compatibility TLS policy with SHA1 signatures");
         g_server = nullptr;
     }
 }
 
-namespace KernelHttp
+namespace wknet
 {
 namespace net
 {

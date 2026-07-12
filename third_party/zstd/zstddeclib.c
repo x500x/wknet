@@ -46,44 +46,44 @@
 /* TODO: Can't amalgamate ASM function */
 #define ZSTD_DISABLE_ASM 1
 
-#if defined(KERNEL_HTTP_USER_MODE_TEST)
+#if defined(WKNET_USER_MODE_TEST)
 #include <stdlib.h>
 #include <string.h>
 #else
 #include <ntddk.h>
 #endif
 
-static void* KernelHttpZstdMalloc(size_t size)
+static void* WknetZstdMalloc(size_t size)
 {
     if (size == 0) {
         size = 1;
     }
-#if defined(KERNEL_HTTP_USER_MODE_TEST)
+#if defined(WKNET_USER_MODE_TEST)
     return malloc(size);
 #else
     return ExAllocatePool2(POOL_FLAG_NON_PAGED, size, 'ztHK');
 #endif
 }
 
-static void* KernelHttpZstdCalloc(size_t count, size_t size)
+static void* WknetZstdCalloc(size_t count, size_t size)
 {
     if (size != 0 && count > ((size_t)-1) / size) {
         return NULL;
     }
     size_t bytes = count * size;
-    void* memory = KernelHttpZstdMalloc(bytes);
+    void* memory = WknetZstdMalloc(bytes);
     if (memory != NULL) {
         memset(memory, 0, bytes == 0 ? 1 : bytes);
     }
     return memory;
 }
 
-static void KernelHttpZstdFree(void* memory)
+static void WknetZstdFree(void* memory)
 {
     if (memory == NULL) {
         return;
     }
-#if defined(KERNEL_HTTP_USER_MODE_TEST)
+#if defined(WKNET_USER_MODE_TEST)
     free(memory);
 #else
     ExFreePoolWithTag(memory, 'ztHK');
@@ -93,9 +93,9 @@ static void KernelHttpZstdFree(void* memory)
 /* Include zstd_deps.h first with all the options we need enabled. */
 #define ZSTD_DEPS_NEED_MALLOC
 #define ZSTD_DEPS_MALLOC
-#define ZSTD_malloc(s) KernelHttpZstdMalloc(s)
-#define ZSTD_calloc(n,s) KernelHttpZstdCalloc((n), (s))
-#define ZSTD_free(p) KernelHttpZstdFree(p)
+#define ZSTD_malloc(s) WknetZstdMalloc(s)
+#define ZSTD_calloc(n,s) WknetZstdCalloc((n), (s))
+#define ZSTD_free(p) WknetZstdFree(p)
 /**** start inlining common/zstd_deps.h ****/
 /*
  * Copyright (c) Meta Platforms, Inc. and affiliates.

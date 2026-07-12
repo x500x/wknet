@@ -27,21 +27,21 @@
 
 ## 文件结构地图
 
-- 修改：`include/KernelHttp/KernelHttp.h`、`include/KernelHttp/khttp/Types.h`
+- 修改：`include/wknet/Wknet.h`、`include/wknet/http/Types.h`
   - 承载新增公开选项、flags、回调签名和兼容默认值。
-- 修改：`src/KernelHttpLib/engine/Engine.cpp`、`src/KernelHttpLib/engine/HttpEngine.cpp`
+- 修改：`src/wknetlib/engine/Engine.cpp`、`src/wknetlib/engine/HttpEngine.cpp`
   - 承载高层请求构建、连接池、代理、HTTP/1.1/HTTP/2 分发、回调与重试。
-- 修改：`src/KernelHttpLib/http/HttpRequest.cpp`、`include/KernelHttp/http/HttpRequest.h`
+- 修改：`src/wknetlib/http/HttpRequest.cpp`、`include/wknet/http1/HttpRequest.h`
   - 拆出“仅头部构建”和“body 分段写入”能力，服务 `Expect: 100-continue` 与流式上传。
-- 修改：`src/KernelHttpLib/http/HttpParser.cpp`、`src/KernelHttpLib/http/HttpTransferCoding.cpp`、`src/KernelHttpLib/http/HttpContentEncoding.cpp`
+- 修改：`src/wknetlib/http/HttpParser.cpp`、`src/wknetlib/http/HttpTransferCoding.cpp`、`src/wknetlib/http/HttpContentEncoding.cpp`
   - 补强 interim/final response、trailer、增量 body/解码边界测试。
-- 修改：`src/KernelHttpLib/http2/Http2Connection.cpp`、`include/KernelHttp/http2/Http2Connection.h`
+- 修改：`src/wknetlib/http2/Http2Connection.cpp`、`include/wknet/http2/Http2Connection.h`
   - 补 HTTP/2 流式 DATA、请求 trailers、高层复用下的 GOAWAY/RST 重试语义。
-- 修改：`src/KernelHttpLib/client/Http2Client.cpp`、`include/KernelHttp/client/Http2Client.h`
+- 修改：`src/wknetlib/client/Http2Client.cpp`、`include/wknet/client/Http2Client.h`
   - 保持低层 h2/h2c 行为，同时向高层提供明确可控的 h2c/upgrade 入口。
-- 修改：`src/KernelHttpLib/client/WebSocketClient.cpp`、`include/KernelHttp/client/WebSocketClient.h`
+- 修改：`src/wknetlib/client/WebSocketClient.cpp`、`include/wknet/client/WebSocketClient.h`
   - 让 `OnMessage` 可选择按 wire fragment 交付，并保留默认聚合行为。
-- 修改：`src/KernelHttpLib/tls/CertificateValidator.cpp`、`include/KernelHttp/tls/CertificateValidator.h`
+- 修改：`src/wknetlib/tls/CertificateValidator.cpp`、`include/wknet/tls/CertificateValidator.h`
   - 补证书路径候选选择、AKI/SKI、交叉签名、name constraints/policy 的账本测试。
 - 修改：`tests/http_parser_tests.cpp`、`tests/http2_client_tests.cpp`、`tests/websocket_client_tests.cpp`、`tests/tls_handshake_tests.cpp`、`tests/tls_record_tests.cpp`、`tests/khttp_tests.cpp`、`tests/high_level_api_tests.cpp`
   - 所有协议缺口先写失败测试，再实现。
@@ -112,9 +112,9 @@
 ### Task 3: 拆分 HTTP/1.1 header/body 发送模型
 
 **Files:**
-- Modify: `include/KernelHttp/http/HttpRequest.h`
-- Modify: `src/KernelHttpLib/http/HttpRequest.cpp`
-- Modify: `src/KernelHttpLib/engine/HttpEngine.cpp`
+- Modify: `include/wknet/http1/HttpRequest.h`
+- Modify: `src/wknetlib/http/HttpRequest.cpp`
+- Modify: `src/wknetlib/engine/HttpEngine.cpp`
 - Test: `tests/http_parser_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
@@ -139,11 +139,11 @@
 ### Task 4: 实现 `Expect: 100-continue`
 
 **Files:**
-- Modify: `include/KernelHttp/KernelHttp.h`
-- Modify: `include/KernelHttp/khttp/Types.h`
-- Modify: `src/KernelHttpLib/engine/Engine.cpp`
-- Modify: `src/KernelHttpLib/engine/HttpEngine.cpp`
-- Modify: `src/KernelHttpLib/http/HttpParser.cpp`
+- Modify: `include/wknet/Wknet.h`
+- Modify: `include/wknet/http/Types.h`
+- Modify: `src/wknetlib/engine/Engine.cpp`
+- Modify: `src/wknetlib/engine/HttpEngine.cpp`
+- Modify: `src/wknetlib/http/HttpParser.cpp`
 - Test: `tests/http_parser_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
@@ -168,9 +168,9 @@
 ### Task 5: 支持明文 HTTP over proxy
 
 **Files:**
-- Modify: `src/KernelHttpLib/engine/HttpEngine.cpp`
-- Modify: `src/KernelHttpLib/client/ProxyTunnel.cpp`
-- Modify: `include/KernelHttp/engine/ConnectionPool.h`
+- Modify: `src/wknetlib/engine/HttpEngine.cpp`
+- Modify: `src/wknetlib/client/ProxyTunnel.cpp`
+- Modify: `include/wknet/engine/ConnectionPool.h`
 - Test: `tests/khttp_tests.cpp`
 - Test: `tests/high_level_api_tests.cpp`
 
@@ -195,11 +195,11 @@
 ### Task 6: 真流式请求体与响应回调边界
 
 **Files:**
-- Modify: `include/KernelHttp/KernelHttp.h`
-- Modify: `include/KernelHttp/khttp/Types.h`
-- Modify: `src/KernelHttpLib/khttp/Body.cpp`
-- Modify: `src/KernelHttpLib/khttp/Http.cpp`
-- Modify: `src/KernelHttpLib/engine/HttpEngine.cpp`
+- Modify: `include/wknet/Wknet.h`
+- Modify: `include/wknet/http/Types.h`
+- Modify: `src/wknetlib/khttp/Body.cpp`
+- Modify: `src/wknetlib/khttp/Http.cpp`
+- Modify: `src/wknetlib/engine/HttpEngine.cpp`
 - Test: `tests/khttp_tests.cpp`
 - Test: `tests/high_level_api_tests.cpp`
 
@@ -228,10 +228,10 @@
 ### Task 7: HTTP/2 请求 body source 与 trailers
 
 **Files:**
-- Modify: `include/KernelHttp/http2/Http2Connection.h`
-- Modify: `src/KernelHttpLib/http2/Http2Connection.cpp`
-- Modify: `src/KernelHttpLib/client/Http2Client.cpp`
-- Modify: `src/KernelHttpLib/engine/HttpEngine.cpp`
+- Modify: `include/wknet/http2/Http2Connection.h`
+- Modify: `src/wknetlib/http2/Http2Connection.cpp`
+- Modify: `src/wknetlib/client/Http2Client.cpp`
+- Modify: `src/wknetlib/engine/HttpEngine.cpp`
 - Test: `tests/http2_client_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
@@ -256,10 +256,10 @@
 ### Task 8: 高层 h2c 显式入口
 
 **Files:**
-- Modify: `include/KernelHttp/KernelHttp.h`
-- Modify: `include/KernelHttp/khttp/Types.h`
-- Modify: `src/KernelHttpLib/engine/HttpEngine.cpp`
-- Modify: `src/KernelHttpLib/client/Http2Client.cpp`
+- Modify: `include/wknet/Wknet.h`
+- Modify: `include/wknet/http/Types.h`
+- Modify: `src/wknetlib/engine/HttpEngine.cpp`
+- Modify: `src/wknetlib/client/Http2Client.cpp`
 - Test: `tests/http2_client_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
@@ -284,9 +284,9 @@
 ### Task 9: GOAWAY/RST_STREAM 重试语义
 
 **Files:**
-- Modify: `src/KernelHttpLib/http2/Http2Connection.cpp`
-- Modify: `src/KernelHttpLib/engine/HttpEngine.cpp`
-- Modify: `src/KernelHttpLib/engine/ConnectionPool.cpp`
+- Modify: `src/wknetlib/http2/Http2Connection.cpp`
+- Modify: `src/wknetlib/engine/HttpEngine.cpp`
+- Modify: `src/wknetlib/engine/ConnectionPool.cpp`
 - Test: `tests/http2_client_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
@@ -315,10 +315,10 @@
 ### Task 10: wire fragment 回调与文档口径一致
 
 **Files:**
-- Modify: `include/KernelHttp/KernelHttp.h`
-- Modify: `include/KernelHttp/khttp/Types.h`
-- Modify: `src/KernelHttpLib/client/WebSocketClient.cpp`
-- Modify: `src/KernelHttpLib/khttp/WebSocket.cpp`
+- Modify: `include/wknet/Wknet.h`
+- Modify: `include/wknet/http/Types.h`
+- Modify: `src/wknetlib/client/WebSocketClient.cpp`
+- Modify: `src/wknetlib/khttp/WebSocket.cpp`
 - Test: `tests/websocket_frame_tests.cpp`
 - Test: `tests/websocket_client_tests.cpp`
 
@@ -343,7 +343,7 @@
 ### Task 11: WebSocket opening-handshake 完整性审计
 
 **Files:**
-- Modify: `src/KernelHttpLib/client/WebSocketClient.cpp`
+- Modify: `src/wknetlib/client/WebSocketClient.cpp`
 - Modify: `tests/websocket_client_tests.cpp`
 - Modify: `docsite/websocket.md`
 - Modify: `docsite/websocket.en.md`
@@ -369,9 +369,9 @@
 ### Task 12: 证书路径构建补全
 
 **Files:**
-- Modify: `include/KernelHttp/tls/CertificateValidator.h`
-- Modify: `src/KernelHttpLib/tls/CertificateValidator.cpp`
-- Modify: `src/KernelHttpLib/tls/CertificateStore.cpp`
+- Modify: `include/wknet/tls/CertificateValidator.h`
+- Modify: `src/wknetlib/tls/CertificateValidator.cpp`
+- Modify: `src/wknetlib/tls/CertificateStore.cpp`
 - Test: `tests/tls_handshake_tests.cpp`
 - Test: `tests/tls_record_tests.cpp`
 - Add test data under: `tests/testdata/pki/`
@@ -397,9 +397,9 @@
 ### Task 13: TLS post-handshake 与 KeyUpdate 审计
 
 **Files:**
-- Modify: `include/KernelHttp/tls/TlsConnection.h`
-- Modify: `src/KernelHttpLib/tls/TlsConnection.cpp`
-- Modify: `src/KernelHttpLib/tls/TlsRecord.cpp`
+- Modify: `include/wknet/tls/TlsConnection.h`
+- Modify: `src/wknetlib/tls/TlsConnection.cpp`
+- Modify: `src/wknetlib/tls/TlsRecord.cpp`
 - Test: `tests/tls_record_tests.cpp`
 - Test: `tests/tls_interop_matrix_tests.cpp`
 

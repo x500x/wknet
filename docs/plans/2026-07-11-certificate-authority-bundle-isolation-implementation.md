@@ -58,7 +58,7 @@ Expected: 新增的隔离测试至少一项失败，现有测试继续编译。
 ### Task 2: 提供可恢复的 PEM 块边界
 
 **Files:**
-- Modify: `src/KernelHttpLib/tls/CertificateValidator.cpp:2821`
+- Modify: `src/wknetlib/tls/CertificateValidator.cpp:2821`
 
 - [ ] **Step 1: 在发现完整 PEM 结束标记后设置 `nextOffset`**
 
@@ -71,7 +71,7 @@ Expected: 新增的隔离测试至少一项失败，现有测试继续编译。
 ### Task 3: 隔离明确的成员级错误
 
 **Files:**
-- Modify: `src/KernelHttpLib/tls/CertificateValidator.cpp:4930-5000`
+- Modify: `src/wknetlib/tls/CertificateValidator.cpp:4930-5000`
 
 - [ ] **Step 1: 增加成员状态分类帮助函数**
 
@@ -123,7 +123,7 @@ Expected: 全部测试通过，编译警告为零。
 ### Task 5: 最终构建验证
 
 **Files:**
-- Verify: `src/KernelHttpLib/tls/CertificateValidator.cpp`
+- Verify: `src/wknetlib/tls/CertificateValidator.cpp`
 - Verify: `tests/tls_record_tests.cpp`
 - Verify: `docs/memory/certificate-trust-store.md`
 
@@ -145,7 +145,7 @@ Run:
 pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1 -Configuration Debug -Platform x64
 ```
 
-Expected: `x64\Debug\KernelHttpLib.lib` 成功生成，警告视为错误且零警告。
+Expected: `x64\Debug\wknetlib.lib` 成功生成，警告视为错误且零警告。
 
 - [ ] **Step 3: 检查工作区差异**
 

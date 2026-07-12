@@ -1,57 +1,57 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/client/Http2Client.h>
-#include <KernelHttp/client/HttpsClient.h>
-#include <KernelHttp/engine/Workspace.h>
-#include <KernelHttp/http2/Http2Connection.h>
-#include <KernelHttp/net/WskSocket.h>
-#include <KernelHttp/tls/TlsConnection.h>
-#include <KernelHttp/websocket/WebSocketFrame.h>
+#include <wknet/client/Http2Client.h>
+#include <wknet/client/HttpsClient.h>
+#include <wknet/engine/Workspace.h>
+#include <wknet/http2/Http2Connection.h>
+#include <wknet/net/WskSocket.h>
+#include <wknet/tls/TlsConnection.h>
+#include <wknet/ws/WebSocketFrame.h>
 
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::client::BuildHttp2RequestHeaders;
-using KernelHttp::client::Http2ContentLengthBufferLength;
-using KernelHttp::client::Http2MaxHeaderNameLength;
-using KernelHttp::client::Http2MaxRequestHeaders;
-using KernelHttp::client::Http2RequestOptions;
-using KernelHttp::client::Http2TransportMode;
-using KernelHttp::client::HttpsClient;
-using KernelHttp::client::HttpsRequestOptions;
-using KernelHttp::client::HttpsResponseBuffers;
-using KernelHttp::engine::KhWorkspace;
-using KernelHttp::engine::KhWorkspaceAppendResponse;
-using KernelHttp::engine::KhWorkspaceCreate;
-using KernelHttp::engine::KhWorkspaceOptions;
-using KernelHttp::engine::KhWorkspaceRelease;
-using KernelHttp::engine::KhWorkspaceResponseInitialBytes;
-using KernelHttp::http::HttpHeader;
-using KernelHttp::http::HttpMethod;
-using KernelHttp::http::HttpText;
-using KernelHttp::http::MakeText;
-using KernelHttp::http2::Http2Connection;
-using KernelHttp::http2::Http2DefaultMaxFrameSize;
-using KernelHttp::http2::Http2ErrorCode;
-using KernelHttp::http2::Http2FrameCodec;
-using KernelHttp::http2::Http2FrameHeader;
-using KernelHttp::http2::Http2InitialWindowSize;
-using KernelHttp::http2::Http2MaxWindowSize;
-using KernelHttp::http2::Http2Priority;
-using KernelHttp::http2::Http2RequestBody;
-using KernelHttp::http2::Http2RequestBodySource;
-using KernelHttp::http2::Http2ResponseBodySink;
-using KernelHttp::http2::Http2Settings;
-using KernelHttp::http2::Http2Transport;
-using KernelHttp::http2::HpackDecoder;
-using KernelHttp::http2::HpackEncoder;
-using KernelHttp::websocket::WebSocketCodec;
-using KernelHttp::websocket::WebSocketFrameHeader;
-using KernelHttp::websocket::WebSocketOpcode;
-namespace Http2FrameFlags = KernelHttp::http2::Http2FrameFlags;
+using wknet::client::BuildHttp2RequestHeaders;
+using wknet::client::Http2ContentLengthBufferLength;
+using wknet::client::Http2MaxHeaderNameLength;
+using wknet::client::Http2MaxRequestHeaders;
+using wknet::client::Http2RequestOptions;
+using wknet::client::Http2TransportMode;
+using wknet::client::HttpsClient;
+using wknet::client::HttpsRequestOptions;
+using wknet::client::HttpsResponseBuffers;
+using wknet::session::KhWorkspace;
+using wknet::session::KhWorkspaceAppendResponse;
+using wknet::session::KhWorkspaceCreate;
+using wknet::session::KhWorkspaceOptions;
+using wknet::session::KhWorkspaceRelease;
+using wknet::session::KhWorkspaceResponseInitialBytes;
+using wknet::http1::HttpHeader;
+using wknet::http1::HttpMethod;
+using wknet::http1::HttpText;
+using wknet::http1::MakeText;
+using wknet::http2::Http2Connection;
+using wknet::http2::Http2DefaultMaxFrameSize;
+using wknet::http2::Http2ErrorCode;
+using wknet::http2::Http2FrameCodec;
+using wknet::http2::Http2FrameHeader;
+using wknet::http2::Http2InitialWindowSize;
+using wknet::http2::Http2MaxWindowSize;
+using wknet::http2::Http2Priority;
+using wknet::http2::Http2RequestBody;
+using wknet::http2::Http2RequestBodySource;
+using wknet::http2::Http2ResponseBodySink;
+using wknet::http2::Http2Settings;
+using wknet::http2::Http2Transport;
+using wknet::http2::HpackDecoder;
+using wknet::http2::HpackEncoder;
+using wknet::ws::WebSocketCodec;
+using wknet::ws::WebSocketFrameHeader;
+using wknet::ws::WebSocketOpcode;
+namespace Http2FrameFlags = wknet::http2::Http2FrameFlags;
 
 namespace
 {
@@ -105,7 +105,7 @@ namespace
     }
 }
 
-namespace KernelHttp
+namespace wknet
 {
 namespace net
 {
@@ -229,7 +229,7 @@ namespace tls
                 options.AlpnProtocolCount :
                 CapturedAlpnCapacity;
             for (SIZE_T index = 0; index < captureCount; ++index) {
-                const KernelHttp::tls::TlsAlpnProtocol& protocol = options.AlpnProtocols[index];
+                const wknet::tls::TlsAlpnProtocol& protocol = options.AlpnProtocols[index];
                 const SIZE_T copyLength =
                     protocol.NameLength < sizeof(g_httpsClientStub.CapturedAlpn[index].Name) - 1 ?
                     protocol.NameLength :
@@ -368,7 +368,7 @@ namespace
     }
 
     NTSTATUS SendHttpsClientAlpnCapture(
-        const KernelHttp::tls::TlsAlpnProtocol* alpnProtocols,
+        const wknet::tls::TlsAlpnProtocol* alpnProtocols,
         SIZE_T alpnProtocolCount,
         bool preferHttp2,
         USHORT* statusCode)
@@ -408,15 +408,15 @@ namespace
         options.Request.Method = HttpMethod::Get;
         options.Request.Path = MakeText("/");
         options.Request.Host = MakeText("example.test");
-        options.Request.Connection = KernelHttp::http::HttpConnectionDirective::Close;
+        options.Request.Connection = wknet::http1::HttpConnectionDirective::Close;
         options.VerifyCertificate = false;
         options.PreferHttp2 = preferHttp2;
         options.AlpnProtocols = alpnProtocols;
         options.AlpnProtocolCount = alpnProtocolCount;
 
         HttpsClient client;
-        KernelHttp::http::HttpResponse response = {};
-        auto& wskClient = *reinterpret_cast<KernelHttp::net::WskClient*>(0x1);
+        wknet::http1::HttpResponse response = {};
+        auto& wskClient = *reinterpret_cast<wknet::net::WskClient*>(0x1);
         const NTSTATUS status = client.SendRequest(wskClient, options, buffers, response);
         if (NT_SUCCESS(status) && statusCode != nullptr) {
             *statusCode = response.StatusCode;
@@ -955,7 +955,7 @@ namespace
     }
 
     bool AppendRawFrame(
-        KernelHttp::http2::Http2FrameType type,
+        wknet::http2::Http2FrameType type,
         UCHAR flags,
         ULONG streamId,
         const UCHAR* payload,
@@ -991,33 +991,33 @@ namespace
 
     SIZE_T CountSentFrames(
         const ScriptedHttp2Transport& transport,
-        KernelHttp::http2::Http2FrameType type,
+        wknet::http2::Http2FrameType type,
         ULONG streamId)
     {
         const UCHAR* data = transport.SentBytes();
         SIZE_T length = transport.SentLength();
         SIZE_T offset = 0;
 
-        if (length >= KernelHttp::http2::Http2ConnectionPrefaceLength &&
+        if (length >= wknet::http2::Http2ConnectionPrefaceLength &&
             memcmp(
                 data,
-                KernelHttp::http2::Http2ConnectionPreface,
-                KernelHttp::http2::Http2ConnectionPrefaceLength) == 0) {
-            offset = KernelHttp::http2::Http2ConnectionPrefaceLength;
+                wknet::http2::Http2ConnectionPreface,
+                wknet::http2::Http2ConnectionPrefaceLength) == 0) {
+            offset = wknet::http2::Http2ConnectionPrefaceLength;
         }
 
         SIZE_T count = 0;
-        while (offset + KernelHttp::http2::Http2FrameHeaderLength <= length) {
-            KernelHttp::http2::Http2FrameHeader header = {};
+        while (offset + wknet::http2::Http2FrameHeaderLength <= length) {
+            wknet::http2::Http2FrameHeader header = {};
             const NTSTATUS status = Http2FrameCodec::DecodeFrameHeader(
                 data + offset,
-                KernelHttp::http2::Http2FrameHeaderLength,
+                wknet::http2::Http2FrameHeaderLength,
                 &header);
             if (!NT_SUCCESS(status)) {
                 break;
             }
 
-            offset += KernelHttp::http2::Http2FrameHeaderLength;
+            offset += wknet::http2::Http2FrameHeaderLength;
             if (header.Length > length - offset) {
                 break;
             }
@@ -1033,36 +1033,36 @@ namespace
 
     bool FindSentFrame(
         const ScriptedHttp2Transport& transport,
-        KernelHttp::http2::Http2FrameType type,
+        wknet::http2::Http2FrameType type,
         ULONG streamId,
         SIZE_T ordinal,
-        KernelHttp::http2::Http2FrameHeader* foundHeader,
+        wknet::http2::Http2FrameHeader* foundHeader,
         const UCHAR** foundPayload)
     {
         const UCHAR* data = transport.SentBytes();
         SIZE_T length = transport.SentLength();
         SIZE_T offset = 0;
 
-        if (length >= KernelHttp::http2::Http2ConnectionPrefaceLength &&
+        if (length >= wknet::http2::Http2ConnectionPrefaceLength &&
             memcmp(
                 data,
-                KernelHttp::http2::Http2ConnectionPreface,
-                KernelHttp::http2::Http2ConnectionPrefaceLength) == 0) {
-            offset = KernelHttp::http2::Http2ConnectionPrefaceLength;
+                wknet::http2::Http2ConnectionPreface,
+                wknet::http2::Http2ConnectionPrefaceLength) == 0) {
+            offset = wknet::http2::Http2ConnectionPrefaceLength;
         }
 
         SIZE_T matched = 0;
-        while (offset + KernelHttp::http2::Http2FrameHeaderLength <= length) {
-            KernelHttp::http2::Http2FrameHeader header = {};
+        while (offset + wknet::http2::Http2FrameHeaderLength <= length) {
+            wknet::http2::Http2FrameHeader header = {};
             const NTSTATUS status = Http2FrameCodec::DecodeFrameHeader(
                 data + offset,
-                KernelHttp::http2::Http2FrameHeaderLength,
+                wknet::http2::Http2FrameHeaderLength,
                 &header);
             if (!NT_SUCCESS(status)) {
                 return false;
             }
 
-            offset += KernelHttp::http2::Http2FrameHeaderLength;
+            offset += wknet::http2::Http2FrameHeaderLength;
             if (header.Length > length - offset) {
                 return false;
             }
@@ -1095,7 +1095,7 @@ namespace
         const UCHAR* payload = nullptr;
         if (!FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::GoAway,
+                wknet::http2::Http2FrameType::GoAway,
                 0,
                 0,
                 &header,
@@ -1141,7 +1141,7 @@ namespace
         const UCHAR* payload = nullptr;
         if (!FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::Headers,
+                wknet::http2::Http2FrameType::Headers,
                 1,
                 ordinal,
                 &frameHeader,
@@ -1332,7 +1332,7 @@ namespace
         const UCHAR* payload = nullptr;
         Expect(FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::Headers,
+                wknet::http2::Http2FrameType::Headers,
                 1,
                 0,
                 &frameHeader,
@@ -1391,7 +1391,7 @@ namespace
         options.Method = HttpMethod::Get;
         options.Path = MakeText("/httpbin/get");
         options.Authority = MakeText("nghttp2.org");
-        options.UserAgent = MakeText("KernelHttp/0.1");
+        options.UserAgent = MakeText("wknet/0.1");
         options.AcceptEncoding = extraHeaders[1].Value;
         options.ExtraHeaders = extraHeaders;
         options.ExtraHeaderCount = sizeof(extraHeaders) / sizeof(extraHeaders[0]);
@@ -1790,7 +1790,7 @@ namespace
         Expect(AppendResponseHeaders(false, true, script, sizeof(script), &scriptLength),
             "HTTP/2 response headers fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::Data,
+            wknet::http2::Http2FrameType::Data,
             Http2FrameFlags::EndStream,
             1,
             body,
@@ -1839,7 +1839,7 @@ namespace
         Expect(responseBodyLength == sizeof(body), "END_STREAM DATA response body length matches");
         Expect(memcmp(responseBody, body, sizeof(body)) == 0, "END_STREAM DATA response body matches");
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::WindowUpdate, 1) == 0,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::WindowUpdate, 1) == 0,
             "closed stream does not receive WINDOW_UPDATE");
     }
 
@@ -1937,7 +1937,7 @@ namespace
         UCHAR script[128] = {};
         SIZE_T scriptLength = 0;
         Expect(AppendServerSettingsWithMaxConcurrentStreams(
-            KernelHttp::KH_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL + 1,
+            wknet::WKNET_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL + 1,
             script,
             sizeof(script),
             &scriptLength), "HTTP/2 high concurrency server settings fixture builds");
@@ -1951,7 +1951,7 @@ namespace
         }
 
         Expect(
-            connection.MaxConcurrentStreams() == KernelHttp::KH_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL,
+            connection.MaxConcurrentStreams() == wknet::WKNET_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL,
             "HTTP/2 max concurrent streams clamps to local hard limit");
 
         const HttpHeader requestHeaders[] = {
@@ -1964,7 +1964,7 @@ namespace
         Http2ResponseBodySink sink = {};
         sink.Append = IgnoreResponseBodyForTest;
 
-        constexpr ULONG Limit = KernelHttp::KH_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL;
+        constexpr ULONG Limit = wknet::WKNET_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL;
         static HttpHeader responseHeaders[Limit][4] = {};
         static SIZE_T responseHeaderCounts[Limit] = {};
         static SIZE_T responseBodyLengths[Limit] = {};
@@ -2153,7 +2153,7 @@ namespace
             false);
         Expect(NT_SUCCESS(status), "HTTP/2 extended CONNECT sends DATA on tunnel stream");
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Data, 1) == 1,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::Data, 1) == 1,
             "HTTP/2 extended CONNECT emits one DATA frame");
 
         UCHAR receivedTunnelBytes[16] = {};
@@ -2264,7 +2264,7 @@ namespace
         Expect(statusCode == 200, "HTTP/2 large response status is decoded");
         Expect(responseBodyLength == TotalBodyLength, "HTTP/2 large response body length matches");
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::WindowUpdate, 1) >= 2,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::WindowUpdate, 1) >= 2,
             "HTTP/2 large response sends stream WINDOW_UPDATE frames");
     }
 
@@ -2360,7 +2360,7 @@ namespace
             Expect(workspace != nullptr && memcmp(workspace->Response.Data, firstChunk, FirstChunkLength) == 0,
                 "workspace response starts with first chunk");
             Expect(
-                CountSentFrames(transport, KernelHttp::http2::Http2FrameType::WindowUpdate, 1) >= 2,
+                CountSentFrames(transport, wknet::http2::Http2FrameType::WindowUpdate, 1) >= 2,
                 "HTTP/2 workspace sink still sends stream WINDOW_UPDATE frames");
 
             KhWorkspaceRelease(workspace);
@@ -2576,11 +2576,11 @@ namespace
         Expect(status == STATUS_SUCCESS, "HTTP/2 DELETE with body succeeds");
         Expect(statusCode == 200, "HTTP/2 DELETE response status is decoded");
 
-        KernelHttp::http2::Http2FrameHeader headersFrame = {};
+        wknet::http2::Http2FrameHeader headersFrame = {};
         Expect(
             FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::Headers,
+                wknet::http2::Http2FrameType::Headers,
                 1,
                 0,
                 &headersFrame,
@@ -2589,12 +2589,12 @@ namespace
         Expect((headersFrame.Flags & Http2FrameFlags::EndStream) == 0,
             "HTTP/2 DELETE HEADERS keeps stream open for body");
 
-        KernelHttp::http2::Http2FrameHeader dataFrame = {};
+        wknet::http2::Http2FrameHeader dataFrame = {};
         const UCHAR* dataPayload = nullptr;
         Expect(
             FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::Data,
+                wknet::http2::Http2FrameType::Data,
                 1,
                 0,
                 &dataFrame,
@@ -2654,11 +2654,11 @@ namespace
         Expect(status == STATUS_SUCCESS, "HTTP/2 GET without body succeeds");
         Expect(statusCode == 200, "HTTP/2 GET response status is decoded");
 
-        KernelHttp::http2::Http2FrameHeader headersFrame = {};
+        wknet::http2::Http2FrameHeader headersFrame = {};
         Expect(
             FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::Headers,
+                wknet::http2::Http2FrameType::Headers,
                 1,
                 0,
                 &headersFrame,
@@ -2720,7 +2720,7 @@ namespace
 
         Expect(status == STATUS_SUCCESS, "HTTP/2 large upload succeeds after connection WINDOW_UPDATE");
         const SIZE_T dataFrameCount =
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Data, 1);
+            CountSentFrames(transport, wknet::http2::Http2FrameType::Data, 1);
         if (dataFrameCount != 5) {
             printf("HTTP/2 DATA frame count for connection window test: %zu\n", dataFrameCount);
         }
@@ -2782,10 +2782,10 @@ namespace
         Expect(status == STATUS_SUCCESS,
             "HTTP/2 upload succeeds after dynamic SETTINGS_INITIAL_WINDOW_SIZE increase");
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Settings, 0) >= 2,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::Settings, 0) >= 2,
             "HTTP/2 dynamic SETTINGS is acknowledged");
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Data, 1) == 5,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::Data, 1) == 5,
             "HTTP/2 dynamic SETTINGS_INITIAL_WINDOW_SIZE releases exactly one blocked DATA byte");
     }
 
@@ -2856,7 +2856,7 @@ namespace
         Expect(statusCode == 200, "HTTP/2 65536-byte POST response status is decoded");
 
         const SIZE_T dataFrameCount =
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Data, 1);
+            CountSentFrames(transport, wknet::http2::Http2FrameType::Data, 1);
         if (dataFrameCount != 5) {
             printf(
                 "HTTP/2 DATA frame count for 65536-byte POST %s order: %zu\n",
@@ -2865,12 +2865,12 @@ namespace
         }
         Expect(dataFrameCount == 5, dataCountMessage);
 
-        KernelHttp::http2::Http2FrameHeader finalDataFrame = {};
+        wknet::http2::Http2FrameHeader finalDataFrame = {};
         const UCHAR* finalDataPayload = nullptr;
         Expect(
             FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::Data,
+                wknet::http2::Http2FrameType::Data,
                 1,
                 4,
                 &finalDataFrame,
@@ -2964,7 +2964,7 @@ namespace
         Expect(status == STATUS_SUCCESS, "HTTP/2 body source sends through exhausted flow-control windows");
         Expect(sourceContext.ReadCount > 1, "HTTP/2 body source is read incrementally");
         const SIZE_T dataFrameCount =
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Data, 1);
+            CountSentFrames(transport, wknet::http2::Http2FrameType::Data, 1);
         Expect(dataFrameCount > 1, "HTTP/2 body source emits multiple DATA frames");
 
         Http2FrameHeader finalDataFrame = {};
@@ -2972,7 +2972,7 @@ namespace
         Expect(
             FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::Data,
+                wknet::http2::Http2FrameType::Data,
                 1,
                 dataFrameCount - 1,
                 &finalDataFrame,
@@ -3040,7 +3040,7 @@ namespace
             sizeof(nameValueBuffer));
 
         Expect(status == STATUS_SUCCESS, "HTTP/2 request with trailers succeeds");
-        Expect(CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Headers, 1) == 2,
+        Expect(CountSentFrames(transport, wknet::http2::Http2FrameType::Headers, 1) == 2,
             "HTTP/2 request trailers are emitted as a second HEADERS frame");
 
         Http2FrameHeader dataFrame = {};
@@ -3048,7 +3048,7 @@ namespace
         Expect(
             FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::Data,
+                wknet::http2::Http2FrameType::Data,
                 1,
                 0,
                 &dataFrame,
@@ -3062,7 +3062,7 @@ namespace
         Expect(
             FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::Headers,
+                wknet::http2::Http2FrameType::Headers,
                 1,
                 1,
                 &trailerFrame,
@@ -3154,7 +3154,7 @@ namespace
             sizeof(nameValueBuffer));
 
         Expect(status == STATUS_INVALID_PARAMETER, "HTTP/2 request trailers reject pseudo-headers");
-        Expect(CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Headers, 1) == 0,
+        Expect(CountSentFrames(transport, wknet::http2::Http2FrameType::Headers, 1) == 0,
             "HTTP/2 pseudo request trailer rejection happens before request HEADERS are sent");
     }
 
@@ -3248,7 +3248,7 @@ namespace
 
         Expect(status == STATUS_IO_TIMEOUT, "HTTP/2 remains blocked without connection WINDOW_UPDATE");
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Data, 1) == 4,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::Data, 1) == 4,
             "HTTP/2 non-active stream WINDOW_UPDATE does not unlock final DATA byte");
     }
 
@@ -3315,7 +3315,7 @@ namespace
         SIZE_T scriptLength = 0;
         Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::Data,
+            wknet::http2::Http2FrameType::Data,
             0,
             0,
             nullptr,
@@ -3335,7 +3335,7 @@ namespace
         const UCHAR payload[] = { 0 };
         Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 GOAWAY server settings fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::Data,
+            wknet::http2::Http2FrameType::Data,
             0,
             0,
             payload,
@@ -3349,7 +3349,7 @@ namespace
         const NTSTATUS status = SendDefaultRequest(transport, connection);
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 stream zero DATA still fails request");
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::GoAway, 0) == 1,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::GoAway, 0) == 1,
             "HTTP/2 connection-level protocol error sends GOAWAY");
     }
 
@@ -3357,16 +3357,16 @@ namespace
     {
         constexpr SIZE_T PingFrameLength = 17;
         constexpr SIZE_T ScriptCapacity =
-            64 + (KernelHttp::KH_HARD_MAX_CONNECTION_CONTROL_SIGNALS + 1) * PingFrameLength;
+            64 + (wknet::WKNET_HARD_MAX_CONNECTION_CONTROL_SIGNALS + 1) * PingFrameLength;
         static UCHAR script[ScriptCapacity] = {};
         SIZE_T scriptLength = 0;
         const UCHAR pingPayload[8] = {};
 
         Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
             "HTTP/2 control signal flood server settings fixture builds");
-        for (ULONG index = 0; index <= KernelHttp::KH_HARD_MAX_CONNECTION_CONTROL_SIGNALS; ++index) {
+        for (ULONG index = 0; index <= wknet::WKNET_HARD_MAX_CONNECTION_CONTROL_SIGNALS; ++index) {
             Expect(AppendRawFrame(
-                KernelHttp::http2::Http2FrameType::Ping,
+                wknet::http2::Http2FrameType::Ping,
                 Http2FrameFlags::Ack,
                 0,
                 pingPayload,
@@ -3409,7 +3409,7 @@ namespace
         const UCHAR* payload = nullptr;
         Expect(FindSentFrame(
                 transport,
-                KernelHttp::http2::Http2FrameType::Ping,
+                wknet::http2::Http2FrameType::Ping,
                 0,
                 0,
                 &header,
@@ -3429,7 +3429,7 @@ namespace
         Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
             "HTTP/2 PING ACK server settings fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::Ping,
+            wknet::http2::Http2FrameType::Ping,
             Http2FrameFlags::Ack,
             0,
             opaqueData,
@@ -3447,7 +3447,7 @@ namespace
         Expect(NT_SUCCESS(status), "HTTP/2 PING waits for matching ACK");
         Expect(transport.LastReceiveTimeoutMilliseconds == 1234,
             "HTTP/2 PING ACK wait uses caller timeout");
-        Expect(CountSentFrames(transport, KernelHttp::http2::Http2FrameType::Ping, 0) == 1,
+        Expect(CountSentFrames(transport, wknet::http2::Http2FrameType::Ping, 0) == 1,
             "HTTP/2 PING ACK wait emits one active PING");
     }
 
@@ -3460,7 +3460,7 @@ namespace
         Expect(AppendServerSettings(script, sizeof(script), &scriptLength),
             "HTTP/2 mismatched PING ACK server settings fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::Ping,
+            wknet::http2::Http2FrameType::Ping,
             Http2FrameFlags::Ack,
             0,
             wrongOpaqueData,
@@ -3469,7 +3469,7 @@ namespace
             sizeof(script),
             &scriptLength), "HTTP/2 mismatched PING ACK fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::Ping,
+            wknet::http2::Http2FrameType::Ping,
             Http2FrameFlags::Ack,
             0,
             opaqueData,
@@ -3502,7 +3502,7 @@ namespace
 
         status = connection.SendPingAndWaitForAck(transport, opaqueData, 50);
         Expect(status == STATUS_IO_TIMEOUT, "HTTP/2 PING ACK timeout fails closed");
-        Expect(CountSentFrames(transport, KernelHttp::http2::Http2FrameType::GoAway, 0) == 0,
+        Expect(CountSentFrames(transport, wknet::http2::Http2FrameType::GoAway, 0) == 0,
             "HTTP/2 PING ACK timeout does not report SETTINGS timeout");
     }
 
@@ -3549,7 +3549,7 @@ namespace
                 "HTTP/2 HPACK decode error uses COMPRESSION_ERROR");
             Expect(lastStreamId == 1, "HTTP/2 HPACK GOAWAY last_stream_id fixes current stream");
             Expect(
-                CountSentFrames(transport, KernelHttp::http2::Http2FrameType::RstStream, 1) == 0,
+                CountSentFrames(transport, wknet::http2::Http2FrameType::RstStream, 1) == 0,
                 "HTTP/2 HPACK decode error is not stream-local RST_STREAM");
         }
     }
@@ -3561,7 +3561,7 @@ namespace
         const UCHAR payload[] = { 'x' };
         Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 RST server settings fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::Data,
+            wknet::http2::Http2FrameType::Data,
             Http2FrameFlags::EndStream,
             1,
             payload,
@@ -3575,7 +3575,7 @@ namespace
         const NTSTATUS status = SendDefaultRequest(transport, connection);
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 DATA before headers fails request");
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::RstStream, 1) == 1,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::RstStream, 1) == 1,
             "HTTP/2 stream-local protocol error sends RST_STREAM");
     }
 
@@ -3586,7 +3586,7 @@ namespace
         const UCHAR status200[] = { 0x88 };
         Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::Headers,
+            wknet::http2::Http2FrameType::Headers,
             Http2FrameFlags::EndHeaders,
             0,
             status200,
@@ -3606,7 +3606,7 @@ namespace
         const UCHAR cancelPayload[] = { 0, 0, 0, 8 };
         Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::RstStream,
+            wknet::http2::Http2FrameType::RstStream,
             0,
             0,
             cancelPayload,
@@ -3625,21 +3625,21 @@ namespace
 
         const struct Case final
         {
-            KernelHttp::http2::Http2FrameType Type;
+            wknet::http2::Http2FrameType Type;
             UCHAR Flags;
             const UCHAR* Payload;
             SIZE_T PayloadLength;
             const char* Message;
         } cases[] = {
             {
-                KernelHttp::http2::Http2FrameType::Continuation,
+                wknet::http2::Http2FrameType::Continuation,
                 Http2FrameFlags::EndHeaders,
                 nullptr,
                 0,
                 "HTTP/2 connection rejects stream zero CONTINUATION"
             },
             {
-                KernelHttp::http2::Http2FrameType::Priority,
+                wknet::http2::Http2FrameType::Priority,
                 0,
                 priorityPayload,
                 sizeof(priorityPayload),
@@ -3682,7 +3682,7 @@ namespace
         const UCHAR payload[] = { 0 };
         Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::Settings,
+            wknet::http2::Http2FrameType::Settings,
             Http2FrameFlags::Ack,
             0,
             payload,
@@ -3696,7 +3696,7 @@ namespace
         const NTSTATUS status = SendDefaultRequest(transport, connection);
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 rejects SETTINGS ACK with payload");
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::GoAway, 0) == 1,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::GoAway, 0) == 1,
             "HTTP/2 invalid SETTINGS ACK sends GOAWAY");
     }
 
@@ -3789,7 +3789,7 @@ namespace
             const UCHAR payload[] = { 1, 2, 3, 4, 5, 6, 7 };
             Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
             Expect(AppendRawFrame(
-                KernelHttp::http2::Http2FrameType::Ping,
+                wknet::http2::Http2FrameType::Ping,
                 flags,
                 0,
                 payload,
@@ -3803,7 +3803,7 @@ namespace
             const NTSTATUS status = SendDefaultRequest(transport, connection);
             Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 rejects invalid PING payload length");
             Expect(
-                CountSentFrames(transport, KernelHttp::http2::Http2FrameType::GoAway, 0) == 1,
+                CountSentFrames(transport, wknet::http2::Http2FrameType::GoAway, 0) == 1,
                 "HTTP/2 invalid PING sends GOAWAY");
         }
     }
@@ -3815,7 +3815,7 @@ namespace
         const UCHAR promisedStream[] = { 0, 0, 0, 2 };
         Expect(AppendServerSettings(script, sizeof(script), &scriptLength), "HTTP/2 server settings fixture builds");
         Expect(AppendRawFrame(
-            KernelHttp::http2::Http2FrameType::PushPromise,
+            wknet::http2::Http2FrameType::PushPromise,
             Http2FrameFlags::EndHeaders,
             1,
             promisedStream,
@@ -3829,7 +3829,7 @@ namespace
         const NTSTATUS status = SendDefaultRequest(transport, connection);
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 rejects PUSH_PROMISE when ENABLE_PUSH is 0");
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::GoAway, 0) == 1,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::GoAway, 0) == 1,
             "HTTP/2 PUSH_PROMISE protocol error sends GOAWAY");
     }
 
@@ -3854,7 +3854,7 @@ namespace
         const NTSTATUS status = SendDefaultRequest(transport, connection);
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, message);
         Expect(
-            CountSentFrames(transport, KernelHttp::http2::Http2FrameType::RstStream, 1) == 1,
+            CountSentFrames(transport, wknet::http2::Http2FrameType::RstStream, 1) == 1,
             "HTTP/2 malformed response headers send RST_STREAM");
     }
 
@@ -4104,7 +4104,7 @@ namespace
             "Content-Length: 0\r\n"
             "Connection: close\r\n"
             "\r\n";
-        const KernelHttp::tls::TlsAlpnProtocol http11Alpn[] = {
+        const wknet::tls::TlsAlpnProtocol http11Alpn[] = {
             { "http/1.1", sizeof("http/1.1") - 1 }
         };
 
@@ -4177,14 +4177,14 @@ namespace
         options.Request.Method = HttpMethod::Get;
         options.Request.Path = MakeText("/");
         options.Request.Host = MakeText("example.test");
-        options.Request.UserAgent = MakeText("KernelHttp/0.1");
-        options.Request.Connection = KernelHttp::http::HttpConnectionDirective::Close;
+        options.Request.UserAgent = MakeText("wknet/0.1");
+        options.Request.Connection = wknet::http1::HttpConnectionDirective::Close;
         options.VerifyCertificate = false;
         options.PreferHttp2 = false;
 
         HttpsClient client;
-        KernelHttp::http::HttpResponse response = {};
-        auto& wskClient = *reinterpret_cast<KernelHttp::net::WskClient*>(0x1);
+        wknet::http1::HttpResponse response = {};
+        auto& wskClient = *reinterpret_cast<wknet::net::WskClient*>(0x1);
         const NTSTATUS status = client.SendRequest(wskClient, options, buffers, response);
 
         Expect(NT_SUCCESS(status), "HTTPS client proxy CONNECT request succeeds");
@@ -4364,7 +4364,7 @@ namespace
         status = SendDefaultRequest(mismatchTransport, mismatchConnection);
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 rejects mismatched content-length and DATA length");
         Expect(
-            CountSentFrames(mismatchTransport, KernelHttp::http2::Http2FrameType::RstStream, 1) == 1,
+            CountSentFrames(mismatchTransport, wknet::http2::Http2FrameType::RstStream, 1) == 1,
             "HTTP/2 content-length mismatch sends RST_STREAM");
     }
 
@@ -4418,7 +4418,7 @@ namespace
 
             Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "HTTP/2 rejects DATA in HEAD response");
             Expect(
-                CountSentFrames(transport, KernelHttp::http2::Http2FrameType::RstStream, 1) == 1,
+                CountSentFrames(transport, wknet::http2::Http2FrameType::RstStream, 1) == 1,
                 "HTTP/2 HEAD response DATA sends RST_STREAM");
         }
 
@@ -4451,7 +4451,7 @@ namespace
             const NTSTATUS status = SendDefaultRequest(transport, connection);
             Expect(status == STATUS_INVALID_NETWORK_RESPONSE, messages[i]);
             Expect(
-                CountSentFrames(transport, KernelHttp::http2::Http2FrameType::RstStream, 1) == 1,
+                CountSentFrames(transport, wknet::http2::Http2FrameType::RstStream, 1) == 1,
                 "HTTP/2 no-body status DATA sends RST_STREAM");
         }
     }
@@ -4626,7 +4626,7 @@ namespace
             Expect(status == STATUS_INVALID_NETWORK_RESPONSE,
                 "HTTP/2 rejects response trailers before DATA");
             Expect(
-                CountSentFrames(transport, KernelHttp::http2::Http2FrameType::RstStream, 1) == 1,
+                CountSentFrames(transport, wknet::http2::Http2FrameType::RstStream, 1) == 1,
                 "HTTP/2 trailer before DATA sends RST_STREAM");
         }
 
@@ -4658,7 +4658,7 @@ namespace
             Expect(status == STATUS_INVALID_NETWORK_RESPONSE,
                 "HTTP/2 rejects response trailers with pseudo-header");
             Expect(
-                CountSentFrames(transport, KernelHttp::http2::Http2FrameType::RstStream, 1) == 1,
+                CountSentFrames(transport, wknet::http2::Http2FrameType::RstStream, 1) == 1,
                 "HTTP/2 pseudo trailer sends RST_STREAM");
         }
     }

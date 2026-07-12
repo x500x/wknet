@@ -1,14 +1,14 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/crypto/Ed448.h>
+#include <wknet/crypto/Ed448.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::crypto::Ed448Verify;
-using KernelHttp::crypto::Shake256Compute;
+using wknet::crypto::Ed448Verify;
+using wknet::crypto::Shake256Compute;
 
 namespace
 {

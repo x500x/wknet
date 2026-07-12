@@ -1,21 +1,21 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/websocket/WebSocketFrame.h>
+#include <wknet/ws/WebSocketFrame.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::http::HttpHeader;
-using KernelHttp::http::HttpResponse;
-using KernelHttp::http::MakeText;
-using KernelHttp::websocket::WebSocketCodec;
-using KernelHttp::websocket::WebSocketDeflateContext;
-using KernelHttp::websocket::WebSocketFrameHeader;
-using KernelHttp::websocket::WebSocketOpcode;
-using KernelHttp::websocket::PerMessageDeflateNegotiation;
-using KernelHttp::websocket::PerMessageDeflateOptions;
+using wknet::http1::HttpHeader;
+using wknet::http1::HttpResponse;
+using wknet::http1::MakeText;
+using wknet::ws::WebSocketCodec;
+using wknet::ws::WebSocketDeflateContext;
+using wknet::ws::WebSocketFrameHeader;
+using wknet::ws::WebSocketOpcode;
+using wknet::ws::PerMessageDeflateNegotiation;
+using wknet::ws::PerMessageDeflateOptions;
 
 namespace
 {

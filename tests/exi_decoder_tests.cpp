@@ -1,31 +1,31 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include "../src/KernelHttpLib/http/HttpExiEventReader.h"
-#include "../src/KernelHttpLib/http/HttpExiOptions.h"
-#include "../src/KernelHttpLib/http/HttpExiStringTable.h"
-#include "../src/KernelHttpLib/http/HttpExiDecoder.h"
-#include "../src/KernelHttpLib/http/HttpXmlWriter.h"
-#include <KernelHttp/crypto/CngProvider.h>
+#include "../src/wknetlib/http/HttpExiEventReader.h"
+#include "../src/wknetlib/http/HttpExiOptions.h"
+#include "../src/wknetlib/http/HttpExiStringTable.h"
+#include "../src/wknetlib/http/HttpExiDecoder.h"
+#include "../src/wknetlib/http/HttpXmlWriter.h"
+#include <wknet/crypto/CngProvider.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::http::HttpExiBitInput;
-using KernelHttp::http::HttpExiAlignment;
-using KernelHttp::http::HttpExiOptions;
-using KernelHttp::http::HttpExiParseHeader;
-using KernelHttp::http::HttpExiReadLiteralString;
-using KernelHttp::http::HttpExiStringTable;
-using KernelHttp::http::HttpExiValueTable;
-using KernelHttp::http::DecodeExiContent;
-using KernelHttp::http::HttpXmlText;
-using KernelHttp::http::HttpXmlName;
-using KernelHttp::http::HttpXmlWriter;
-using KernelHttp::crypto::CngProvider;
-using KernelHttp::crypto::HashAlgorithm;
-using KernelHttp::HeapArray;
+using wknet::http1::HttpExiBitInput;
+using wknet::http1::HttpExiAlignment;
+using wknet::http1::HttpExiOptions;
+using wknet::http1::HttpExiParseHeader;
+using wknet::http1::HttpExiReadLiteralString;
+using wknet::http1::HttpExiStringTable;
+using wknet::http1::HttpExiValueTable;
+using wknet::http1::DecodeExiContent;
+using wknet::http1::HttpXmlText;
+using wknet::http1::HttpXmlName;
+using wknet::http1::HttpXmlWriter;
+using wknet::crypto::CngProvider;
+using wknet::crypto::HashAlgorithm;
+using wknet::HeapArray;
 
 namespace
 {

@@ -10,7 +10,7 @@ param(
     [switch]$TestDriverScenarios,
     [switch]$KeepService,
 
-    [string]$ServiceName = 'KernelHttpTest',
+    [string]$ServiceName = 'wknettest',
     [string]$DriverPath
 )
 
@@ -25,7 +25,7 @@ $script:HttpsDir = Join-Path $script:OutDir 'https-smoke'
 
 function Write-Step {
     param([string]$Message)
-    Write-Host "[kernel-http] $Message"
+    Write-Host "[wknet] $Message"
 }
 
 function Invoke-Checked {
@@ -108,9 +108,9 @@ function Compile-UserModeTest {
         '/WX',
         '/wd4100',
         '/wd4127',
-        '/D', 'KERNEL_HTTP_USER_MODE_TEST=1',
+        '/D', 'WKNET_USER_MODE_TEST=1',
         '/I', (Join-Path $script:Root 'include'),
-        '/I', (Join-Path $script:Root 'src\KernelHttpTest'),
+        '/I', (Join-Path $script:Root 'src\wknettest'),
         '/I', (Join-Path $script:Root 'third_party\brotli\c\include'),
         ('/Fe:' + $output),
         ('/Fo' + $objectDir + '\'),
@@ -132,13 +132,13 @@ function Invoke-HostRegression {
         -Name 'http_parser_tests' `
         -Source 'tests\http_parser_tests.cpp' `
         -ProjectSources @(
-            'src\KernelHttpLib\http\HttpTypes.cpp',
-            'src\KernelHttpLib\http\HttpRequest.cpp',
-            'src\KernelHttpLib\http\HttpResponse.cpp',
-            'src\KernelHttpLib\http\HttpCoding.cpp',
-            'src\KernelHttpLib\http\HttpContentEncoding.cpp',
-            'src\KernelHttpLib\http\HttpTransferCoding.cpp',
-            'src\KernelHttpLib\http\HttpParser.cpp',
+            'src\wknetlib\http\HttpTypes.cpp',
+            'src\wknetlib\http\HttpRequest.cpp',
+            'src\wknetlib\http\HttpResponse.cpp',
+            'src\wknetlib\http\HttpCoding.cpp',
+            'src\wknetlib\http\HttpContentEncoding.cpp',
+            'src\wknetlib\http\HttpTransferCoding.cpp',
+            'src\wknetlib\http\HttpParser.cpp',
             'third_party\brotli\c\common\constants.c',
             'third_party\brotli\c\common\context.c',
             'third_party\brotli\c\common\dictionary.c',
@@ -157,124 +157,124 @@ function Invoke-HostRegression {
         -Name 'tls_crypto_tests' `
         -Source 'tests\tls_crypto_tests.cpp' `
         -ProjectSources @(
-            'src\KernelHttpLib\http\HttpTypes.cpp',
-            'src\KernelHttpLib\crypto\Aead.cpp',
-            'src\KernelHttpLib\crypto\CngProvider.cpp',
-            'src\KernelHttpLib\crypto\CngProviderCache.cpp',
-            'src\KernelHttpLib\crypto\KeyExchange.cpp'
+            'src\wknetlib\http\HttpTypes.cpp',
+            'src\wknetlib\crypto\Aead.cpp',
+            'src\wknetlib\crypto\CngProvider.cpp',
+            'src\wknetlib\crypto\CngProviderCache.cpp',
+            'src\wknetlib\crypto\KeyExchange.cpp'
         )
 
     Compile-UserModeTest `
         -Name 'tls_handshake_tests' `
         -Source 'tests\tls_handshake_tests.cpp' `
         -ProjectSources @(
-            'src\KernelHttpLib\http\HttpTypes.cpp',
-            'src\KernelHttpLib\crypto\Aead.cpp',
-            'src\KernelHttpLib\crypto\CngProvider.cpp',
-            'src\KernelHttpLib\crypto\CngProviderCache.cpp',
-            'src\KernelHttpLib\crypto\KeyExchange.cpp',
-            'src\KernelHttpLib\tls\CertificateStore.cpp',
-            'src\KernelHttpLib\tls\CertificateValidator.cpp',
-            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
-            'src\KernelHttpLib\tls\TlsConnection.cpp',
-            'src\KernelHttpLib\tls\TlsContext.cpp',
-            'src\KernelHttpLib\tls\TlsHandshake12.cpp',
-            'src\KernelHttpLib\tls\TlsHandshake13.cpp',
-            'src\KernelHttpLib\tls\TlsPolicy.cpp',
-            'src\KernelHttpLib\tls\TlsRecord.cpp'
+            'src\wknetlib\http\HttpTypes.cpp',
+            'src\wknetlib\crypto\Aead.cpp',
+            'src\wknetlib\crypto\CngProvider.cpp',
+            'src\wknetlib\crypto\CngProviderCache.cpp',
+            'src\wknetlib\crypto\KeyExchange.cpp',
+            'src\wknetlib\tls\CertificateStore.cpp',
+            'src\wknetlib\tls\CertificateValidator.cpp',
+            'src\wknetlib\tls\TlsCapabilities.cpp',
+            'src\wknetlib\tls\TlsConnection.cpp',
+            'src\wknetlib\tls\TlsContext.cpp',
+            'src\wknetlib\tls\TlsHandshake12.cpp',
+            'src\wknetlib\tls\TlsHandshake13.cpp',
+            'src\wknetlib\tls\TlsPolicy.cpp',
+            'src\wknetlib\tls\TlsRecord.cpp'
         )
 
     Compile-UserModeTest `
         -Name 'tls_interop_matrix_tests' `
         -Source 'tests\tls_interop_matrix_tests.cpp' `
         -ProjectSources @(
-            'src\KernelHttpLib\http\HttpTypes.cpp',
-            'src\KernelHttpLib\tls\CertificateStore.cpp',
-            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
-            'src\KernelHttpLib\tls\TlsPolicy.cpp'
+            'src\wknetlib\http\HttpTypes.cpp',
+            'src\wknetlib\tls\CertificateStore.cpp',
+            'src\wknetlib\tls\TlsCapabilities.cpp',
+            'src\wknetlib\tls\TlsPolicy.cpp'
         )
 
     Compile-UserModeTest `
         -Name 'tls_record_tests' `
         -Source 'tests\tls_record_tests.cpp' `
         -ProjectSources @(
-            'src\KernelHttpLib\http\HttpTypes.cpp',
-            'src\KernelHttpLib\crypto\Aead.cpp',
-            'src\KernelHttpLib\crypto\CngProvider.cpp',
-            'src\KernelHttpLib\crypto\CngProviderCache.cpp',
-            'src\KernelHttpLib\crypto\KeyExchange.cpp',
-            'src\KernelHttpLib\tls\CertificateStore.cpp',
-            'src\KernelHttpLib\tls\CertificateValidator.cpp',
-            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
-            'src\KernelHttpLib\tls\TlsConnection.cpp',
-            'src\KernelHttpLib\tls\TlsContext.cpp',
-            'src\KernelHttpLib\tls\TlsHandshake12.cpp',
-            'src\KernelHttpLib\tls\TlsHandshake13.cpp',
-            'src\KernelHttpLib\tls\TlsPolicy.cpp',
-            'src\KernelHttpLib\tls\TlsRecord.cpp'
+            'src\wknetlib\http\HttpTypes.cpp',
+            'src\wknetlib\crypto\Aead.cpp',
+            'src\wknetlib\crypto\CngProvider.cpp',
+            'src\wknetlib\crypto\CngProviderCache.cpp',
+            'src\wknetlib\crypto\KeyExchange.cpp',
+            'src\wknetlib\tls\CertificateStore.cpp',
+            'src\wknetlib\tls\CertificateValidator.cpp',
+            'src\wknetlib\tls\TlsCapabilities.cpp',
+            'src\wknetlib\tls\TlsConnection.cpp',
+            'src\wknetlib\tls\TlsContext.cpp',
+            'src\wknetlib\tls\TlsHandshake12.cpp',
+            'src\wknetlib\tls\TlsHandshake13.cpp',
+            'src\wknetlib\tls\TlsPolicy.cpp',
+            'src\wknetlib\tls\TlsRecord.cpp'
         )
 
     Compile-UserModeTest `
         -Name 'http2_client_tests' `
         -Source 'tests\http2_client_tests.cpp' `
         -ProjectSources @(
-            'src\KernelHttpLib\http\HttpTypes.cpp',
-            'src\KernelHttpLib\client\Http2Client.cpp',
-            'src\KernelHttpLib\core\TlsTransport.cpp',
-            'src\KernelHttpLib\engine\Workspace.cpp',
-            'src\KernelHttpLib\http2\Http2Connection.cpp',
-            'src\KernelHttpLib\http2\Http2Frame.cpp',
-            'src\KernelHttpLib\http2\Http2Stream.cpp',
-            'src\KernelHttpLib\http2\Hpack.cpp',
-            'src\KernelHttpLib\tls\TlsContext.cpp',
-            'src\KernelHttpLib\tls\TlsHandshake12.cpp',
-            'src\KernelHttpLib\tls\TlsHandshake13.cpp',
-            'src\KernelHttpLib\tls\TlsRecord.cpp',
-            'src\KernelHttpLib\tls\CertificateStore.cpp',
-            'src\KernelHttpLib\tls\CertificateValidator.cpp',
-            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
-            'src\KernelHttpLib\tls\TlsPolicy.cpp',
-            'src\KernelHttpLib\crypto\Aead.cpp',
-            'src\KernelHttpLib\crypto\CngProvider.cpp',
-            'src\KernelHttpLib\crypto\CngProviderCache.cpp',
-            'src\KernelHttpLib\crypto\KeyExchange.cpp'
+            'src\wknetlib\http\HttpTypes.cpp',
+            'src\wknetlib\client\Http2Client.cpp',
+            'src\wknetlib\core\TlsTransport.cpp',
+            'src\wknetlib\engine\Workspace.cpp',
+            'src\wknetlib\http2\Http2Connection.cpp',
+            'src\wknetlib\http2\Http2Frame.cpp',
+            'src\wknetlib\http2\Http2Stream.cpp',
+            'src\wknetlib\http2\Hpack.cpp',
+            'src\wknetlib\tls\TlsContext.cpp',
+            'src\wknetlib\tls\TlsHandshake12.cpp',
+            'src\wknetlib\tls\TlsHandshake13.cpp',
+            'src\wknetlib\tls\TlsRecord.cpp',
+            'src\wknetlib\tls\CertificateStore.cpp',
+            'src\wknetlib\tls\CertificateValidator.cpp',
+            'src\wknetlib\tls\TlsCapabilities.cpp',
+            'src\wknetlib\tls\TlsPolicy.cpp',
+            'src\wknetlib\crypto\Aead.cpp',
+            'src\wknetlib\crypto\CngProvider.cpp',
+            'src\wknetlib\crypto\CngProviderCache.cpp',
+            'src\wknetlib\crypto\KeyExchange.cpp'
         )
 
     Compile-UserModeTest `
         -Name 'khttp_tests' `
         -Source 'tests\khttp_tests.cpp' `
         -ProjectSources @(
-            'src\KernelHttpLib\khttp\Khttp.cpp',
-            'src\KernelHttpLib\khttp\AsyncOp.cpp',
-            'src\KernelHttpLib\khttp\Http.cpp',
-            'src\KernelHttpLib\khttp\HttpAsync.cpp',
-            'src\KernelHttpLib\khttp\Request.cpp',
-            'src\KernelHttpLib\khttp\Response.cpp',
-            'src\KernelHttpLib\khttp\Session.cpp',
-            'src\KernelHttpLib\khttp\WebSocket.cpp',
-            'src\KernelHttpLib\engine\Engine.cpp',
-            'src\KernelHttpLib\engine\HttpEngine.cpp',
-            'src\KernelHttpLib\engine\UrlParser.cpp',
-            'src\KernelHttpLib\engine\WsEngine.cpp',
-            'src\KernelHttpLib\engine\Async.cpp',
-            'src\KernelHttpLib\engine\ConnectionPool.cpp',
-            'src\KernelHttpLib\engine\Workspace.cpp',
-            'src\KernelHttpLib\net\WskClient.cpp',
-            'src\KernelHttpLib\net\WskSocket.cpp',
-            'src\KernelHttpLib\http\HttpTypes.cpp',
-            'src\KernelHttpLib\http\HttpRequest.cpp',
-            'src\KernelHttpLib\http\HttpResponse.cpp',
-            'src\KernelHttpLib\http\HttpCoding.cpp',
-            'src\KernelHttpLib\http\HttpContentEncoding.cpp',
-            'src\KernelHttpLib\http\HttpTransferCoding.cpp',
-            'src\KernelHttpLib\http\HttpParser.cpp',
-            'src\KernelHttpLib\crypto\CngProvider.cpp',
-            'src\KernelHttpLib\crypto\CngProviderCache.cpp',
-            'src\KernelHttpLib\crypto\KeyExchange.cpp',
-            'src\KernelHttpLib\tls\CertificateStore.cpp',
-            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
-            'src\KernelHttpLib\tls\TlsPolicy.cpp',
-            'src\KernelHttpLib\websocket\WebSocketFrame.cpp',
+            'src\wknetlib\khttp\Khttp.cpp',
+            'src\wknetlib\khttp\AsyncOp.cpp',
+            'src\wknetlib\khttp\Http.cpp',
+            'src\wknetlib\khttp\HttpAsync.cpp',
+            'src\wknetlib\khttp\Request.cpp',
+            'src\wknetlib\khttp\Response.cpp',
+            'src\wknetlib\khttp\Session.cpp',
+            'src\wknetlib\khttp\WebSocket.cpp',
+            'src\wknetlib\engine\Engine.cpp',
+            'src\wknetlib\engine\HttpEngine.cpp',
+            'src\wknetlib\engine\UrlParser.cpp',
+            'src\wknetlib\engine\WsEngine.cpp',
+            'src\wknetlib\engine\Async.cpp',
+            'src\wknetlib\engine\ConnectionPool.cpp',
+            'src\wknetlib\engine\Workspace.cpp',
+            'src\wknetlib\net\WskClient.cpp',
+            'src\wknetlib\net\WskSocket.cpp',
+            'src\wknetlib\http\HttpTypes.cpp',
+            'src\wknetlib\http\HttpRequest.cpp',
+            'src\wknetlib\http\HttpResponse.cpp',
+            'src\wknetlib\http\HttpCoding.cpp',
+            'src\wknetlib\http\HttpContentEncoding.cpp',
+            'src\wknetlib\http\HttpTransferCoding.cpp',
+            'src\wknetlib\http\HttpParser.cpp',
+            'src\wknetlib\crypto\CngProvider.cpp',
+            'src\wknetlib\crypto\CngProviderCache.cpp',
+            'src\wknetlib\crypto\KeyExchange.cpp',
+            'src\wknetlib\tls\CertificateStore.cpp',
+            'src\wknetlib\tls\TlsCapabilities.cpp',
+            'src\wknetlib\tls\TlsPolicy.cpp',
+            'src\wknetlib\websocket\WebSocketFrame.cpp',
             'third_party\brotli\c\common\constants.c',
             'third_party\brotli\c\common\context.c',
             'third_party\brotli\c\common\dictionary.c',
@@ -293,38 +293,38 @@ function Invoke-HostRegression {
         -Name 'high_level_api_tests' `
         -Source 'tests\high_level_api_tests.cpp' `
         -ProjectSources @(
-            'src\KernelHttpLib\khttp\Khttp.cpp',
-            'src\KernelHttpLib\khttp\AsyncOp.cpp',
-            'src\KernelHttpLib\khttp\Http.cpp',
-            'src\KernelHttpLib\khttp\HttpAsync.cpp',
-            'src\KernelHttpLib\khttp\Request.cpp',
-            'src\KernelHttpLib\khttp\Response.cpp',
-            'src\KernelHttpLib\khttp\Session.cpp',
-            'src\KernelHttpLib\khttp\WebSocket.cpp',
-            'src\KernelHttpLib\engine\Engine.cpp',
-            'src\KernelHttpLib\engine\HttpEngine.cpp',
-            'src\KernelHttpLib\engine\UrlParser.cpp',
-            'src\KernelHttpLib\engine\WsEngine.cpp',
-            'src\KernelHttpLib\engine\Async.cpp',
-            'src\KernelHttpLib\engine\ConnectionPool.cpp',
-            'src\KernelHttpLib\engine\Workspace.cpp',
-            'src\KernelHttpTest\samples\AdvancedScenarioSamples.cpp',
-            'src\KernelHttpTest\samples\ExternalTrustStore.cpp',
-            'src\KernelHttpTest\samples\HighLevelApiSamples.cpp',
-            'src\KernelHttpLib\http\HttpTypes.cpp',
-            'src\KernelHttpLib\http\HttpRequest.cpp',
-            'src\KernelHttpLib\http\HttpResponse.cpp',
-            'src\KernelHttpLib\http\HttpCoding.cpp',
-            'src\KernelHttpLib\http\HttpContentEncoding.cpp',
-            'src\KernelHttpLib\http\HttpTransferCoding.cpp',
-            'src\KernelHttpLib\http\HttpParser.cpp',
-            'src\KernelHttpLib\crypto\CngProvider.cpp',
-            'src\KernelHttpLib\crypto\CngProviderCache.cpp',
-            'src\KernelHttpLib\crypto\KeyExchange.cpp',
-            'src\KernelHttpLib\tls\CertificateStore.cpp',
-            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
-            'src\KernelHttpLib\tls\TlsPolicy.cpp',
-            'src\KernelHttpLib\websocket\WebSocketFrame.cpp',
+            'src\wknetlib\khttp\Khttp.cpp',
+            'src\wknetlib\khttp\AsyncOp.cpp',
+            'src\wknetlib\khttp\Http.cpp',
+            'src\wknetlib\khttp\HttpAsync.cpp',
+            'src\wknetlib\khttp\Request.cpp',
+            'src\wknetlib\khttp\Response.cpp',
+            'src\wknetlib\khttp\Session.cpp',
+            'src\wknetlib\khttp\WebSocket.cpp',
+            'src\wknetlib\engine\Engine.cpp',
+            'src\wknetlib\engine\HttpEngine.cpp',
+            'src\wknetlib\engine\UrlParser.cpp',
+            'src\wknetlib\engine\WsEngine.cpp',
+            'src\wknetlib\engine\Async.cpp',
+            'src\wknetlib\engine\ConnectionPool.cpp',
+            'src\wknetlib\engine\Workspace.cpp',
+            'src\wknettest\samples\AdvancedScenarioSamples.cpp',
+            'src\wknettest\samples\ExternalTrustStore.cpp',
+            'src\wknettest\samples\HighLevelApiSamples.cpp',
+            'src\wknetlib\http\HttpTypes.cpp',
+            'src\wknetlib\http\HttpRequest.cpp',
+            'src\wknetlib\http\HttpResponse.cpp',
+            'src\wknetlib\http\HttpCoding.cpp',
+            'src\wknetlib\http\HttpContentEncoding.cpp',
+            'src\wknetlib\http\HttpTransferCoding.cpp',
+            'src\wknetlib\http\HttpParser.cpp',
+            'src\wknetlib\crypto\CngProvider.cpp',
+            'src\wknetlib\crypto\CngProviderCache.cpp',
+            'src\wknetlib\crypto\KeyExchange.cpp',
+            'src\wknetlib\tls\CertificateStore.cpp',
+            'src\wknetlib\tls\TlsCapabilities.cpp',
+            'src\wknetlib\tls\TlsPolicy.cpp',
+            'src\wknetlib\websocket\WebSocketFrame.cpp',
             'third_party\brotli\c\common\constants.c',
             'third_party\brotli\c\common\context.c',
             'third_party\brotli\c\common\dictionary.c',
@@ -343,28 +343,28 @@ function Invoke-HostRegression {
         -Name 'websocket_client_tests' `
         -Source 'tests\websocket_client_tests.cpp' `
         -ProjectSources @(
-            'src\KernelHttpLib\client\WebSocketClient.cpp',
-            'src\KernelHttpLib\http\HttpTypes.cpp',
-            'src\KernelHttpLib\http\HttpRequest.cpp',
-            'src\KernelHttpLib\http\HttpResponse.cpp',
-            'src\KernelHttpLib\http\HttpCoding.cpp',
-            'src\KernelHttpLib\http\HttpParser.cpp',
-            'src\KernelHttpLib\http\HttpTransferCoding.cpp',
-            'src\KernelHttpLib\http\HttpContentEncoding.cpp',
-            'src\KernelHttpLib\websocket\WebSocketFrame.cpp',
-            'src\KernelHttpLib\crypto\Aead.cpp',
-            'src\KernelHttpLib\crypto\CngProvider.cpp',
-            'src\KernelHttpLib\crypto\CngProviderCache.cpp',
-            'src\KernelHttpLib\crypto\KeyExchange.cpp',
-            'src\KernelHttpLib\tls\CertificateStore.cpp',
-            'src\KernelHttpLib\tls\CertificateValidator.cpp',
-            'src\KernelHttpLib\tls\TlsCapabilities.cpp',
-            'src\KernelHttpLib\tls\TlsConnection.cpp',
-            'src\KernelHttpLib\tls\TlsContext.cpp',
-            'src\KernelHttpLib\tls\TlsHandshake12.cpp',
-            'src\KernelHttpLib\tls\TlsHandshake13.cpp',
-            'src\KernelHttpLib\tls\TlsPolicy.cpp',
-            'src\KernelHttpLib\tls\TlsRecord.cpp',
+            'src\wknetlib\client\WebSocketClient.cpp',
+            'src\wknetlib\http\HttpTypes.cpp',
+            'src\wknetlib\http\HttpRequest.cpp',
+            'src\wknetlib\http\HttpResponse.cpp',
+            'src\wknetlib\http\HttpCoding.cpp',
+            'src\wknetlib\http\HttpParser.cpp',
+            'src\wknetlib\http\HttpTransferCoding.cpp',
+            'src\wknetlib\http\HttpContentEncoding.cpp',
+            'src\wknetlib\websocket\WebSocketFrame.cpp',
+            'src\wknetlib\crypto\Aead.cpp',
+            'src\wknetlib\crypto\CngProvider.cpp',
+            'src\wknetlib\crypto\CngProviderCache.cpp',
+            'src\wknetlib\crypto\KeyExchange.cpp',
+            'src\wknetlib\tls\CertificateStore.cpp',
+            'src\wknetlib\tls\CertificateValidator.cpp',
+            'src\wknetlib\tls\TlsCapabilities.cpp',
+            'src\wknetlib\tls\TlsConnection.cpp',
+            'src\wknetlib\tls\TlsContext.cpp',
+            'src\wknetlib\tls\TlsHandshake12.cpp',
+            'src\wknetlib\tls\TlsHandshake13.cpp',
+            'src\wknetlib\tls\TlsPolicy.cpp',
+            'src\wknetlib\tls\TlsRecord.cpp',
             'third_party\brotli\c\common\constants.c',
             'third_party\brotli\c\common\context.c',
             'third_party\brotli\c\common\dictionary.c',
@@ -381,7 +381,7 @@ function Invoke-HostRegression {
 
     if (-not $SkipDriverBuild) {
         $driverBuildArguments = @(
-            (Join-Path $script:Root 'KernelHttp.sln'),
+            (Join-Path $script:Root 'wknet.sln'),
             '/m',
             '/restore',
             "/p:Configuration=$Configuration",
@@ -417,7 +417,7 @@ function Invoke-DriverLoadSmoke {
     }
 
     $candidate = if ([string]::IsNullOrWhiteSpace($DriverPath)) {
-        Join-Path $script:Root "$Platform\$Configuration\KernelHttpTest.sys"
+        Join-Path $script:Root "$Platform\$Configuration\wknettest.sys"
     }
     else {
         $DriverPath

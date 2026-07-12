@@ -1,10 +1,10 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/core/ITransport.h>
-#include <KernelHttp/tls/TlsConnection.h>
-#include <KernelHttp/tls/TlsPolicy.h>
+#include <wknet/core/ITransport.h>
+#include <wknet/tls/TlsConnection.h>
+#include <wknet/tls/TlsPolicy.h>
 
 #include <limits.h>
 #include <stdio.h>
@@ -150,7 +150,7 @@ namespace
         }
     }
 
-    class SocketTransport final : public KernelHttp::core::ITransport
+    class SocketTransport final : public wknet::core::ITransport
     {
     public:
         explicit SocketTransport(const WinsockApi& api) noexcept :
@@ -335,17 +335,17 @@ int main(int argc, char** argv)
             goto Cleanup;
         }
 
-        KernelHttp::tls::TlsConnection connection;
-        KernelHttp::tls::TlsClientConnectionOptions options = {};
+        wknet::tls::TlsConnection connection;
+        wknet::tls::TlsClientConnectionOptions options = {};
         options.ServerName = "localhost";
         options.ServerNameLength = strlen(options.ServerName);
         options.VerifyCertificate = false;
-        options.MinimumProtocol = KernelHttp::tls::TlsProtocol::Tls12;
-        options.MaximumProtocol = KernelHttp::tls::TlsProtocol::Tls12;
-        options.Policy.Profile = KernelHttp::tls::TlsSecurityProfile::CompatibilityExplicit;
+        options.MinimumProtocol = wknet::tls::TlsProtocol::Tls12;
+        options.MaximumProtocol = wknet::tls::TlsProtocol::Tls12;
+        options.Policy.Profile = wknet::tls::TlsSecurityProfile::CompatibilityExplicit;
         options.Policy.EnableTls12Renegotiation = true;
         options.MaxTls12Renegotiations = 1;
-        const KernelHttp::tls::TlsAlpnProtocol alpnProtocols[] = {
+        const wknet::tls::TlsAlpnProtocol alpnProtocols[] = {
             { "h2", sizeof("h2") - 1 },
             { "http/1.1", sizeof("http/1.1") - 1 }
         };
@@ -356,7 +356,7 @@ int main(int argc, char** argv)
 
         status = connection.Connect(transport, options);
         if (!NT_SUCCESS(status)) {
-            const KernelHttp::tls::TlsHandshakeFailure& failure = connection.LastHandshakeFailure();
+            const wknet::tls::TlsHandshakeFailure& failure = connection.LastHandshakeFailure();
             printf(
                 "TLS connect failed: 0x%08X category=%lu detail=0x%08X\n",
                 static_cast<unsigned>(status),
@@ -373,7 +373,7 @@ int main(int argc, char** argv)
         if (clientInitiatedRenegotiation) {
             status = connection.RenegotiateTls12(transport);
             if (!NT_SUCCESS(status)) {
-                const KernelHttp::tls::TlsHandshakeFailure& failure = connection.LastHandshakeFailure();
+                const wknet::tls::TlsHandshakeFailure& failure = connection.LastHandshakeFailure();
                 printf(
                     "TLS client-initiated renegotiation failed: 0x%08X category=%lu detail=0x%08X\n",
                     static_cast<unsigned>(status),
@@ -425,7 +425,7 @@ int main(int argc, char** argv)
                 break;
             }
             if (!NT_SUCCESS(status)) {
-                const KernelHttp::tls::TlsHandshakeFailure& failure = connection.LastHandshakeFailure();
+                const wknet::tls::TlsHandshakeFailure& failure = connection.LastHandshakeFailure();
                 printf(
                     "TLS response receive failed: 0x%08X after=%Iu category=%lu detail=0x%08X alert=%u/%u\n",
                     static_cast<unsigned>(status),

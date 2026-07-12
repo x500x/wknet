@@ -1,93 +1,93 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/http/HttpParser.h>
-#include <KernelHttp/http/HttpRequest.h>
-#include <KernelHttp/http/HttpCachePolicy.h>
-#include <KernelHttp/http/HttpContentEncoding.h>
+#include <wknet/http1/HttpParser.h>
+#include <wknet/http1/HttpRequest.h>
+#include <wknet/http1/HttpCachePolicy.h>
+#include <wknet/http1/HttpContentEncoding.h>
 
-#include "../src/KernelHttpLib/http/HttpXmlWriter.h"
-#include "../src/KernelHttpLib/http/HttpExiEventReader.h"
-#include "../src/KernelHttpLib/http/HttpExiGrammar.h"
-#include "../src/KernelHttpLib/http/HttpExiGrammarTable.h"
-#include "../src/KernelHttpLib/http/HttpExiQNameReader.h"
-#include "../src/KernelHttpLib/http/HttpExiStringTable.h"
-#include "../src/KernelHttpLib/http/HttpExiValueDecoder.h"
-#include "../src/KernelHttpLib/http/HttpPack200BandCodec.h"
-#include "../src/KernelHttpLib/http/HttpPack200BandParser.h"
-#include "../src/KernelHttpLib/http/HttpPack200Bands.h"
-#include "../src/KernelHttpLib/http/HttpPack200ClassWriter.h"
-#include "../src/KernelHttpLib/http/HttpPack200Codec.h"
-#include "../src/KernelHttpLib/http/HttpPack200Decoder.h"
-#include "../src/KernelHttpLib/http/HttpPack200JarWriter.h"
+#include "../src/wknetlib/http/HttpXmlWriter.h"
+#include "../src/wknetlib/http/HttpExiEventReader.h"
+#include "../src/wknetlib/http/HttpExiGrammar.h"
+#include "../src/wknetlib/http/HttpExiGrammarTable.h"
+#include "../src/wknetlib/http/HttpExiQNameReader.h"
+#include "../src/wknetlib/http/HttpExiStringTable.h"
+#include "../src/wknetlib/http/HttpExiValueDecoder.h"
+#include "../src/wknetlib/http/HttpPack200BandCodec.h"
+#include "../src/wknetlib/http/HttpPack200BandParser.h"
+#include "../src/wknetlib/http/HttpPack200Bands.h"
+#include "../src/wknetlib/http/HttpPack200ClassWriter.h"
+#include "../src/wknetlib/http/HttpPack200Codec.h"
+#include "../src/wknetlib/http/HttpPack200Decoder.h"
+#include "../src/wknetlib/http/HttpPack200JarWriter.h"
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::http::HeaderValueHasToken;
-using KernelHttp::http::HttpBodyKind;
-using KernelHttp::http::HttpConnectionDirective;
-using KernelHttp::http::HttpHeader;
-using KernelHttp::http::HttpMethod;
-using KernelHttp::http::HttpParseOptions;
-using KernelHttp::http::HttpParser;
-using KernelHttp::http::HttpRequestBuilder;
-using KernelHttp::http::HttpRequestBodyMode;
-using KernelHttp::http::HttpRequestBuildOptions;
-using KernelHttp::http::HttpResponse;
-using KernelHttp::http::HttpText;
-using KernelHttp::http::MakeText;
-using KernelHttp::http::TextEqualsIgnoreCase;
-using KernelHttp::http::HttpCacheControl;
-using KernelHttp::http::HttpCacheMetadata;
-using KernelHttp::http::HttpByteRange;
-using KernelHttp::http::HttpAcceptEncodingEntry;
-using KernelHttp::http::HttpAcceptEncodingRules;
-using KernelHttp::http::HttpContentEncoding;
-using KernelHttp::http::HttpXmlName;
-using KernelHttp::http::HttpXmlText;
-using KernelHttp::http::HttpXmlWriter;
-using KernelHttp::http::HttpPack200BandReader;
-using KernelHttp::http::HttpPack200AttributeBands;
-using KernelHttp::http::HttpPack200ClassBands;
-using KernelHttp::http::HttpPack200CodeBands;
-using KernelHttp::http::HttpPack200CodingFor;
-using KernelHttp::http::HttpPack200CodingKind;
-using KernelHttp::http::HttpPack200CpBands;
-using KernelHttp::http::HttpPack200CpCounts;
-using KernelHttp::http::HttpPack200FileBands;
-using KernelHttp::http::HttpExiBuiltinProduction;
-using KernelHttp::http::HttpExiBitInput;
-using KernelHttp::http::HttpExiEventKind;
-using KernelHttp::http::HttpExiGrammarKind;
-using KernelHttp::http::HttpExiEventCode;
-using KernelHttp::http::HttpExiGrammarTable;
-using KernelHttp::http::HttpExiLearnedProduction;
-using KernelHttp::http::HttpExiProduction;
-using KernelHttp::http::HttpExiQNameEntry;
-using KernelHttp::http::HttpExiQNameTable;
-using KernelHttp::http::HttpExiNameTables;
-using KernelHttp::http::HttpExiDecimalValue;
-using KernelHttp::http::HttpExiFloatValue;
-using KernelHttp::http::HttpExiStringTable;
-using KernelHttp::http::HttpExiLearnQName;
-using KernelHttp::http::HttpExiReadQNameLiteral;
-using KernelHttp::http::HttpExiResolveQName;
-using KernelHttp::http::HttpPack200ClassWriter;
-using KernelHttp::http::HttpPack200BandCodec;
-using KernelHttp::http::HttpPack200BandCodecKind;
-using KernelHttp::http::HttpPack200CodecArena;
-using KernelHttp::http::HttpPack200DecodeBand;
-using KernelHttp::http::HttpPack200DecodePopulationBand;
-using KernelHttp::http::HttpPack200ParseMetaCodec;
-using KernelHttp::http::HttpPack200ReadAttributeBands;
-using KernelHttp::http::HttpPack200ReadClassBands;
-using KernelHttp::http::HttpPack200ReadCodeBands;
-using KernelHttp::http::HttpPack200ReadCpBands;
-using KernelHttp::http::HttpPack200ReadFileBands;
-using KernelHttp::http::HttpPack200JarWriter;
-using KernelHttp::http::DecodePack200GzipContent;
+using wknet::http1::HeaderValueHasToken;
+using wknet::http1::HttpBodyKind;
+using wknet::http1::HttpConnectionDirective;
+using wknet::http1::HttpHeader;
+using wknet::http1::HttpMethod;
+using wknet::http1::HttpParseOptions;
+using wknet::http1::HttpParser;
+using wknet::http1::HttpRequestBuilder;
+using wknet::http1::HttpRequestBodyMode;
+using wknet::http1::HttpRequestBuildOptions;
+using wknet::http1::HttpResponse;
+using wknet::http1::HttpText;
+using wknet::http1::MakeText;
+using wknet::http1::TextEqualsIgnoreCase;
+using wknet::http1::HttpCacheControl;
+using wknet::http1::HttpCacheMetadata;
+using wknet::http1::HttpByteRange;
+using wknet::http1::HttpAcceptEncodingEntry;
+using wknet::http1::HttpAcceptEncodingRules;
+using wknet::http1::HttpContentEncoding;
+using wknet::http1::HttpXmlName;
+using wknet::http1::HttpXmlText;
+using wknet::http1::HttpXmlWriter;
+using wknet::http1::HttpPack200BandReader;
+using wknet::http1::HttpPack200AttributeBands;
+using wknet::http1::HttpPack200ClassBands;
+using wknet::http1::HttpPack200CodeBands;
+using wknet::http1::HttpPack200CodingFor;
+using wknet::http1::HttpPack200CodingKind;
+using wknet::http1::HttpPack200CpBands;
+using wknet::http1::HttpPack200CpCounts;
+using wknet::http1::HttpPack200FileBands;
+using wknet::http1::HttpExiBuiltinProduction;
+using wknet::http1::HttpExiBitInput;
+using wknet::http1::HttpExiEventKind;
+using wknet::http1::HttpExiGrammarKind;
+using wknet::http1::HttpExiEventCode;
+using wknet::http1::HttpExiGrammarTable;
+using wknet::http1::HttpExiLearnedProduction;
+using wknet::http1::HttpExiProduction;
+using wknet::http1::HttpExiQNameEntry;
+using wknet::http1::HttpExiQNameTable;
+using wknet::http1::HttpExiNameTables;
+using wknet::http1::HttpExiDecimalValue;
+using wknet::http1::HttpExiFloatValue;
+using wknet::http1::HttpExiStringTable;
+using wknet::http1::HttpExiLearnQName;
+using wknet::http1::HttpExiReadQNameLiteral;
+using wknet::http1::HttpExiResolveQName;
+using wknet::http1::HttpPack200ClassWriter;
+using wknet::http1::HttpPack200BandCodec;
+using wknet::http1::HttpPack200BandCodecKind;
+using wknet::http1::HttpPack200CodecArena;
+using wknet::http1::HttpPack200DecodeBand;
+using wknet::http1::HttpPack200DecodePopulationBand;
+using wknet::http1::HttpPack200ParseMetaCodec;
+using wknet::http1::HttpPack200ReadAttributeBands;
+using wknet::http1::HttpPack200ReadClassBands;
+using wknet::http1::HttpPack200ReadCodeBands;
+using wknet::http1::HttpPack200ReadCpBands;
+using wknet::http1::HttpPack200ReadFileBands;
+using wknet::http1::HttpPack200JarWriter;
+using wknet::http1::DecodePack200GzipContent;
 
 namespace
 {
@@ -355,7 +355,7 @@ namespace
         HttpExiBitInput eventInput(eventBytes, sizeof(eventBytes));
         HttpExiEventCode eventCode = {};
         HttpExiProduction production = {};
-        NTSTATUS status = KernelHttp::http::HttpExiReadEventCode(
+        NTSTATUS status = wknet::http1::HttpExiReadEventCode(
             &eventInput,
             HttpExiGrammarKind::ElementContent,
             false,
@@ -378,13 +378,13 @@ namespace
         status = values.Initialize(4, 16);
         Expect(NT_SUCCESS(status), "exi value string table initializes");
         HttpXmlText literal = {};
-        status = KernelHttp::http::HttpExiReadLiteralString(&stringInput, &values, &literal);
+        status = wknet::http1::HttpExiReadLiteralString(&stringInput, &values, &literal);
         Expect(
             NT_SUCCESS(status) && MemoryEqualsLiteral(literal.Data, literal.Length, "abc"),
             "exi literal string reader stores string value");
 
         HttpXmlText referenced = {};
-        status = KernelHttp::http::HttpExiReadStringTableReference(&stringInput, values, &referenced);
+        status = wknet::http1::HttpExiReadStringTableReference(&stringInput, values, &referenced);
         Expect(
             NT_SUCCESS(status) && MemoryEqualsLiteral(referenced.Data, referenced.Length, "abc"),
             "exi string table reference reader returns stored value");
@@ -474,19 +474,19 @@ namespace
         const unsigned char booleanBytes[] = { 0x80 };
         HttpExiBitInput booleanInput(booleanBytes, sizeof(booleanBytes));
         bool booleanValue = false;
-        NTSTATUS status = KernelHttp::http::HttpExiReadBoolean(&booleanInput, &booleanValue);
+        NTSTATUS status = wknet::http1::HttpExiReadBoolean(&booleanInput, &booleanValue);
         Expect(NT_SUCCESS(status) && booleanValue, "exi boolean decoder reads true bit");
 
         const unsigned char integerBytes[] = { 0x82, 0x00 };
         HttpExiBitInput integerInput(integerBytes, sizeof(integerBytes));
         LONG integerValue = 0;
-        status = KernelHttp::http::HttpExiReadInteger(&integerInput, &integerValue);
+        status = wknet::http1::HttpExiReadInteger(&integerInput, &integerValue);
         Expect(NT_SUCCESS(status) && integerValue == -5, "exi integer decoder reads negative magnitude minus one");
 
         const unsigned char decimalBytes[] = { 0x81, 0x01, 0x80 };
         HttpExiBitInput decimalInput(decimalBytes, sizeof(decimalBytes));
         HttpExiDecimalValue decimalValue = {};
-        status = KernelHttp::http::HttpExiReadDecimal(&decimalInput, &decimalValue);
+        status = wknet::http1::HttpExiReadDecimal(&decimalInput, &decimalValue);
         Expect(
             NT_SUCCESS(status) &&
                 decimalValue.Negative &&
@@ -497,7 +497,7 @@ namespace
         const unsigned char floatBytes[] = { 0x02, 0xc0, 0x40 };
         HttpExiBitInput floatInput(floatBytes, sizeof(floatBytes));
         HttpExiFloatValue floatValue = {};
-        status = KernelHttp::http::HttpExiReadFloat(&floatInput, &floatValue);
+        status = wknet::http1::HttpExiReadFloat(&floatInput, &floatValue);
         Expect(
             NT_SUCCESS(status) && floatValue.Mantissa == 5 && floatValue.Exponent == -2,
             "exi float decoder reads mantissa and exponent");
@@ -1019,7 +1019,7 @@ namespace
         options.Method = HttpMethod::Get;
         options.Path = MakeText("/index.html");
         options.Host = MakeText("example.com");
-        options.UserAgent = MakeText("KernelHttp/0.1");
+        options.UserAgent = MakeText("wknet/0.1");
         options.Connection = HttpConnectionDirective::KeepAlive;
         options.ExtraHeaders = extra;
         options.ExtraHeaderCount = 1;
@@ -1033,7 +1033,7 @@ namespace
         const char expected[] =
             "GET /index.html HTTP/1.1\r\n"
             "Host: example.com\r\n"
-            "User-Agent: KernelHttp/0.1\r\n"
+            "User-Agent: wknet/0.1\r\n"
             "Connection: keep-alive\r\n"
             "Accept: */*\r\n"
             "\r\n";
@@ -1052,7 +1052,7 @@ namespace
         options.Method = HttpMethod::Connect;
         options.Path = MakeText("example.com:443");
         options.Host = MakeText("example.com:443");
-        options.UserAgent = MakeText("KernelHttp/0.1");
+        options.UserAgent = MakeText("wknet/0.1");
 
         const NTSTATUS status = HttpRequestBuilder::Build(
             options,
@@ -1063,7 +1063,7 @@ namespace
         const char expected[] =
             "CONNECT example.com:443 HTTP/1.1\r\n"
             "Host: example.com:443\r\n"
-            "User-Agent: KernelHttp/0.1\r\n"
+            "User-Agent: wknet/0.1\r\n"
             "\r\n";
 
         Expect(status == STATUS_SUCCESS, "CONNECT request builds successfully");
@@ -1730,7 +1730,7 @@ namespace
         options.Method = HttpMethod::Put;
         options.Path = MakeText("/put");
         options.Host = MakeText("httpbin.org");
-        options.UserAgent = MakeText("KernelHttp/0.1");
+        options.UserAgent = MakeText("wknet/0.1");
         options.ContentType = MakeText("application/json");
         options.Connection = HttpConnectionDirective::Close;
         options.Body = body;
@@ -1745,7 +1745,7 @@ namespace
         const char expected[] =
             "PUT /put HTTP/1.1\r\n"
             "Host: httpbin.org\r\n"
-            "User-Agent: KernelHttp/0.1\r\n"
+            "User-Agent: wknet/0.1\r\n"
             "Content-Type: application/json\r\n"
             "Content-Length: 16\r\n"
             "Connection: close\r\n"
@@ -1770,7 +1770,7 @@ namespace
         options.Method = HttpMethod::Get;
         options.Path = MakeText("/");
         options.Host = MakeText("www.baidu.com");
-        options.UserAgent = MakeText("KernelHttp/0.1");
+        options.UserAgent = MakeText("wknet/0.1");
         options.Connection = HttpConnectionDirective::Close;
         options.ExtraHeaders = extra;
         options.ExtraHeaderCount = 1;
@@ -1784,7 +1784,7 @@ namespace
         const char expected[] =
             "GET / HTTP/1.1\r\n"
             "Host: www.baidu.com\r\n"
-            "User-Agent: KernelHttp/0.1\r\n"
+            "User-Agent: wknet/0.1\r\n"
             "Connection: close\r\n"
             "Accept: */*\r\n"
             "\r\n";
@@ -1827,7 +1827,7 @@ namespace
         options.Method = HttpMethod::Get;
         options.Path = MakeText("/brotli");
         options.Host = MakeText("httpbin.org");
-        options.UserAgent = MakeText("KernelHttp/0.1");
+        options.UserAgent = MakeText("wknet/0.1");
         options.Connection = HttpConnectionDirective::Close;
         options.ExtraHeaders = extra;
         options.ExtraHeaderCount = sizeof(extra) / sizeof(extra[0]);
@@ -1841,7 +1841,7 @@ namespace
         const char expected[] =
             "GET /brotli HTTP/1.1\r\n"
             "Host: httpbin.org\r\n"
-            "User-Agent: KernelHttp/0.1\r\n"
+            "User-Agent: wknet/0.1\r\n"
             "Connection: close\r\n"
             "Accept: */*\r\n"
             "Accept-Encoding: gzip, deflate, br, zstd, identity\r\n"
@@ -1854,7 +1854,7 @@ namespace
 
     void TestAcceptEncodingQValueParsing()
     {
-        HttpAcceptEncodingEntry entries[KernelHttp::http::HttpMaxAcceptEncodingEntries] = {};
+        HttpAcceptEncodingEntry entries[wknet::http1::HttpMaxAcceptEncodingEntries] = {};
         HttpAcceptEncodingRules rules = {};
         rules.Entries = entries;
         rules.EntryCapacity = sizeof(entries) / sizeof(entries[0]);
@@ -1890,7 +1890,7 @@ namespace
 
     void TestAcceptEncodingRejectsInvalidQValues()
     {
-        HttpAcceptEncodingEntry entries[KernelHttp::http::HttpMaxAcceptEncodingEntries] = {};
+        HttpAcceptEncodingEntry entries[wknet::http1::HttpMaxAcceptEncodingEntries] = {};
         HttpAcceptEncodingRules rules = {};
         rules.Entries = entries;
         rules.EntryCapacity = sizeof(entries) / sizeof(entries[0]);
@@ -1911,7 +1911,7 @@ namespace
 
     void TestAcceptEncodingNegotiation()
     {
-        HttpAcceptEncodingEntry entries[KernelHttp::http::HttpMaxAcceptEncodingEntries] = {};
+        HttpAcceptEncodingEntry entries[wknet::http1::HttpMaxAcceptEncodingEntries] = {};
         HttpAcceptEncodingRules rules = {};
         rules.Entries = entries;
         rules.EntryCapacity = sizeof(entries) / sizeof(entries[0]);
@@ -2193,24 +2193,24 @@ namespace
         HttpHeader headers[] = {
             { MakeText("Content-Encoding"), MakeText("dcz") }
         };
-        KernelHttp::http::HttpCodingExternalMaterial material = {};
-        material.Coding = KernelHttp::http::HttpCoding::DictionaryCompressedZstd;
+        wknet::http1::HttpCodingExternalMaterial material = {};
+        material.Coding = wknet::http1::HttpCoding::DictionaryCompressedZstd;
         material.Dictionary = ZstdDictionary;
         material.DictionaryLength = sizeof(ZstdDictionary);
-        KernelHttp::http::HttpCodingDecodeMaterials materials = {};
+        wknet::http1::HttpCodingDecodeMaterials materials = {};
         materials.Items = &material;
         materials.ItemCount = 1;
 
         char decoded[64] = {};
         char scratch[64] = {};
-        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        wknet::http1::HttpContentDecodeBuffers buffers = {};
         buffers.DecodedBody = decoded;
         buffers.DecodedBodyCapacity = sizeof(decoded);
         buffers.ScratchBody = scratch;
         buffers.ScratchBodyCapacity = sizeof(scratch);
         buffers.Materials = &materials;
 
-        KernelHttp::http::HttpContentDecodeResult result = {};
+        wknet::http1::HttpContentDecodeResult result = {};
         const NTSTATUS status = HttpContentEncoding::Decode(
             headers,
             sizeof(headers) / sizeof(headers[0]),
@@ -2229,11 +2229,11 @@ namespace
             { MakeText("Content-Encoding"), MakeText("dcz") }
         };
         char decoded[64] = {};
-        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        wknet::http1::HttpContentDecodeBuffers buffers = {};
         buffers.DecodedBody = decoded;
         buffers.DecodedBodyCapacity = sizeof(decoded);
 
-        KernelHttp::http::HttpContentDecodeResult result = {};
+        wknet::http1::HttpContentDecodeResult result = {};
         const NTSTATUS status = HttpContentEncoding::Decode(
             headers,
             sizeof(headers) / sizeof(headers[0]),
@@ -2250,24 +2250,24 @@ namespace
         HttpHeader headers[] = {
             { MakeText("Content-Encoding"), MakeText("aes128gcm") }
         };
-        KernelHttp::http::HttpCodingExternalMaterial material = {};
-        material.Coding = KernelHttp::http::HttpCoding::Aes128Gcm;
+        wknet::http1::HttpCodingExternalMaterial material = {};
+        material.Coding = wknet::http1::HttpCoding::Aes128Gcm;
         material.Aes128GcmKeyingMaterial = Aes128GcmIkm;
         material.Aes128GcmKeyingMaterialLength = sizeof(Aes128GcmIkm);
-        KernelHttp::http::HttpCodingDecodeMaterials materials = {};
+        wknet::http1::HttpCodingDecodeMaterials materials = {};
         materials.Items = &material;
         materials.ItemCount = 1;
 
         char decoded[64] = {};
         char scratch[64] = {};
-        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        wknet::http1::HttpContentDecodeBuffers buffers = {};
         buffers.DecodedBody = decoded;
         buffers.DecodedBodyCapacity = sizeof(decoded);
         buffers.ScratchBody = scratch;
         buffers.ScratchBodyCapacity = sizeof(scratch);
         buffers.Materials = &materials;
 
-        KernelHttp::http::HttpContentDecodeResult result = {};
+        wknet::http1::HttpContentDecodeResult result = {};
         const NTSTATUS status = HttpContentEncoding::Decode(
             headers,
             sizeof(headers) / sizeof(headers[0]),
@@ -2286,21 +2286,21 @@ namespace
             { MakeText("Content-Encoding"), MakeText("aes128gcm") }
         };
         unsigned char wrongIkm[sizeof(Aes128GcmIkm)] = {};
-        KernelHttp::http::HttpCodingExternalMaterial material = {};
-        material.Coding = KernelHttp::http::HttpCoding::Aes128Gcm;
+        wknet::http1::HttpCodingExternalMaterial material = {};
+        material.Coding = wknet::http1::HttpCoding::Aes128Gcm;
         material.Aes128GcmKeyingMaterial = wrongIkm;
         material.Aes128GcmKeyingMaterialLength = sizeof(wrongIkm);
-        KernelHttp::http::HttpCodingDecodeMaterials materials = {};
+        wknet::http1::HttpCodingDecodeMaterials materials = {};
         materials.Items = &material;
         materials.ItemCount = 1;
 
         char decoded[64] = {};
-        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        wknet::http1::HttpContentDecodeBuffers buffers = {};
         buffers.DecodedBody = decoded;
         buffers.DecodedBodyCapacity = sizeof(decoded);
         buffers.Materials = &materials;
 
-        KernelHttp::http::HttpContentDecodeResult result = {};
+        wknet::http1::HttpContentDecodeResult result = {};
         const NTSTATUS status = HttpContentEncoding::Decode(
             headers,
             sizeof(headers) / sizeof(headers[0]),
@@ -2318,11 +2318,11 @@ namespace
             { MakeText("Content-Encoding"), MakeText("exi") }
         };
         char decoded[64] = {};
-        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        wknet::http1::HttpContentDecodeBuffers buffers = {};
         buffers.DecodedBody = decoded;
         buffers.DecodedBodyCapacity = sizeof(decoded);
 
-        KernelHttp::http::HttpContentDecodeResult result = {};
+        wknet::http1::HttpContentDecodeResult result = {};
         const NTSTATUS status = HttpContentEncoding::Decode(
             headers,
             sizeof(headers) / sizeof(headers[0]),
@@ -2344,11 +2344,11 @@ namespace
             { MakeText("Content-Encoding"), MakeText("exi") }
         };
         char decoded[64] = {};
-        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        wknet::http1::HttpContentDecodeBuffers buffers = {};
         buffers.DecodedBody = decoded;
         buffers.DecodedBodyCapacity = sizeof(decoded);
 
-        KernelHttp::http::HttpContentDecodeResult result = {};
+        wknet::http1::HttpContentDecodeResult result = {};
         const NTSTATUS status = HttpContentEncoding::Decode(
             headers,
             sizeof(headers) / sizeof(headers[0]),
@@ -2373,11 +2373,11 @@ namespace
             0x24, 0x45, 0x58, 0x49, 0x00
         };
         char decoded[64] = {};
-        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        wknet::http1::HttpContentDecodeBuffers buffers = {};
         buffers.DecodedBody = decoded;
         buffers.DecodedBodyCapacity = sizeof(decoded);
 
-        KernelHttp::http::HttpContentDecodeResult result = {};
+        wknet::http1::HttpContentDecodeResult result = {};
         const NTSTATUS status = HttpContentEncoding::Decode(
             headers,
             sizeof(headers) / sizeof(headers[0]),
@@ -2395,11 +2395,11 @@ namespace
             { MakeText("Content-Encoding"), MakeText("pack200-gzip") }
         };
         char decoded[256] = {};
-        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        wknet::http1::HttpContentDecodeBuffers buffers = {};
         buffers.DecodedBody = decoded;
         buffers.DecodedBodyCapacity = sizeof(decoded);
 
-        KernelHttp::http::HttpContentDecodeResult result = {};
+        wknet::http1::HttpContentDecodeResult result = {};
         const NTSTATUS status = HttpContentEncoding::Decode(
             headers,
             sizeof(headers) / sizeof(headers[0]),
@@ -2480,11 +2480,11 @@ namespace
         memcpy(corrupt, Pack200GzipBody, sizeof(corrupt));
         corrupt[sizeof(corrupt) - 5] ^= 0x7f;
         char decoded[256] = {};
-        KernelHttp::http::HttpContentDecodeBuffers buffers = {};
+        wknet::http1::HttpContentDecodeBuffers buffers = {};
         buffers.DecodedBody = decoded;
         buffers.DecodedBodyCapacity = sizeof(decoded);
 
-        KernelHttp::http::HttpContentDecodeResult result = {};
+        wknet::http1::HttpContentDecodeResult result = {};
         const NTSTATUS status = HttpContentEncoding::Decode(
             headers,
             sizeof(headers) / sizeof(headers[0]),
@@ -3761,7 +3761,7 @@ namespace
 
     void TestContentRangeParsing()
     {
-        using KernelHttp::http::HttpContentRange;
+        using wknet::http1::HttpContentRange;
 
         HttpHeader headers[2] = {};
         headers[0].Name = MakeText("Content-Range");
@@ -3784,7 +3784,7 @@ namespace
 
     void TestContentRangeUnknownAndUnsatisfied()
     {
-        using KernelHttp::http::HttpContentRange;
+        using wknet::http1::HttpContentRange;
 
         {
             HttpHeader headers[1] = {};
@@ -3817,7 +3817,7 @@ namespace
 
     void TestContentRangeRejectsMalformed()
     {
-        using KernelHttp::http::HttpContentRange;
+        using wknet::http1::HttpContentRange;
 
         const char* badValues[] = {
             "bytes 500-499/1234",
@@ -3852,17 +3852,17 @@ namespace
         LONGLONG imf = 0;
         LONGLONG rfc850 = 0;
         LONGLONG asctime = 0;
-        Expect(KernelHttp::http::ParseHttpDate(MakeText("Sun, 06 Nov 1994 08:49:37 GMT"), &imf), "IMF-fixdate parses");
-        Expect(KernelHttp::http::ParseHttpDate(MakeText("Sunday, 06-Nov-94 08:49:37 GMT"), &rfc850), "RFC 850 date parses");
-        Expect(KernelHttp::http::ParseHttpDate(MakeText("Sun Nov  6 08:49:37 1994"), &asctime), "asctime date parses");
+        Expect(wknet::http1::ParseHttpDate(MakeText("Sun, 06 Nov 1994 08:49:37 GMT"), &imf), "IMF-fixdate parses");
+        Expect(wknet::http1::ParseHttpDate(MakeText("Sunday, 06-Nov-94 08:49:37 GMT"), &rfc850), "RFC 850 date parses");
+        Expect(wknet::http1::ParseHttpDate(MakeText("Sun Nov  6 08:49:37 1994"), &asctime), "asctime date parses");
         Expect(imf == rfc850 && imf == asctime, "HTTP date formats normalize to same second");
-        Expect(!KernelHttp::http::ParseHttpDate(MakeText("Sun, 31 Feb 1994 08:49:37 GMT"), &imf), "invalid HTTP date rejects");
+        Expect(!wknet::http1::ParseHttpDate(MakeText("Sun, 31 Feb 1994 08:49:37 GMT"), &imf), "invalid HTTP date rejects");
     }
 
     void TestHttpCacheControlParsing()
     {
         HttpCacheControl control = {};
-        Expect(KernelHttp::http::ParseCacheControl(
+        Expect(wknet::http1::ParseCacheControl(
             MakeText("no-cache, max-age=60, s-maxage=\"30\", private=\"Set-Cookie\", only-if-cached, max-stale=10"),
             &control),
             "Cache-Control parses");
@@ -3877,12 +3877,12 @@ namespace
     void TestHttpCacheRangeParsing()
     {
         HttpByteRange range = {};
-        Expect(KernelHttp::http::ParseSingleByteRange(MakeText("bytes=5-9"), &range), "single byte range parses");
+        Expect(wknet::http1::ParseSingleByteRange(MakeText("bytes=5-9"), &range), "single byte range parses");
         Expect(range.Valid && !range.Suffix && range.First == 5 && range.Last == 9, "byte range bounds are exposed");
-        Expect(KernelHttp::http::ParseSingleByteRange(MakeText("bytes=-128"), &range), "suffix range parses");
+        Expect(wknet::http1::ParseSingleByteRange(MakeText("bytes=-128"), &range), "suffix range parses");
         Expect(range.Valid && range.Suffix && range.SuffixLength == 128, "suffix range length is exposed");
-        Expect(!KernelHttp::http::ParseSingleByteRange(MakeText("bytes=0-1,4-5"), &range), "multi-range is not treated as single range");
-        Expect(!KernelHttp::http::ParseSingleByteRange(MakeText("items=0-1"), &range), "non-byte range rejects");
+        Expect(!wknet::http1::ParseSingleByteRange(MakeText("bytes=0-1,4-5"), &range), "multi-range is not treated as single range");
+        Expect(!wknet::http1::ParseSingleByteRange(MakeText("items=0-1"), &range), "non-byte range rejects");
     }
 
     void TestHttpCacheFreshnessAndValidationPolicy()
@@ -3903,31 +3903,31 @@ namespace
         response.HeaderCount = 4;
 
         HttpCacheMetadata metadata = {};
-        Expect(KernelHttp::http::CollectCacheMetadata(response, &metadata), "cache metadata collects");
+        Expect(wknet::http1::CollectCacheMetadata(response, &metadata), "cache metadata collects");
         Expect(metadata.CacheControl.HasMaxAge && metadata.CacheControl.MaxAgeSeconds == 60, "response max-age is collected");
         Expect(metadata.HasDate && metadata.HasETag, "date and ETag are collected");
-        Expect(KernelHttp::http::FreshnessLifetimeSeconds(metadata, 200, KernelHttp::http::HttpCacheScope::Private) == 60, "freshness lifetime uses max-age");
+        Expect(wknet::http1::FreshnessLifetimeSeconds(metadata, 200, wknet::http1::HttpCacheScope::Private) == 60, "freshness lifetime uses max-age");
 
         HttpCacheMetadata requestMetadata = {};
         bool requiresValidation = true;
-        Expect(KernelHttp::http::CanUseStoredResponse(
+        Expect(wknet::http1::CanUseStoredResponse(
             requestMetadata,
             metadata,
             200,
             metadata.DateSeconds,
             metadata.DateSeconds + 30,
-            KernelHttp::http::HttpCacheScope::Private,
+            wknet::http1::HttpCacheScope::Private,
             &requiresValidation),
             "fresh response is reusable");
         Expect(!requiresValidation, "fresh response does not require validation");
 
-        Expect(KernelHttp::http::CanUseStoredResponse(
+        Expect(wknet::http1::CanUseStoredResponse(
             requestMetadata,
             metadata,
             200,
             metadata.DateSeconds,
             metadata.DateSeconds + 90,
-            KernelHttp::http::HttpCacheScope::Private,
+            wknet::http1::HttpCacheScope::Private,
             &requiresValidation),
             "stale response can be selected for validation");
         Expect(requiresValidation, "stale response requires validation");

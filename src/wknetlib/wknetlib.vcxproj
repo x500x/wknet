@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|ARM64">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="WknetConfig.cpp" />
+    <ClCompile Include="engine\Engine.cpp" />
+    <ClCompile Include="engine\HttpEngine.cpp" />
+    <ClCompile Include="engine\HttpCache.cpp" />
+    <ClCompile Include="engine\UrlParser.cpp" />
+    <ClCompile Include="engine\WsEngine.cpp" />
+    <ClCompile Include="engine\Async.cpp" />
+    <ClCompile Include="engine\ConnectionPool.cpp" />
+    <ClCompile Include="engine\Workspace.cpp" />
+    <ClCompile Include="client\HttpClient.cpp" />
+    <ClCompile Include="client\Http2Client.cpp" />
+    <ClCompile Include="client\HttpsClient.cpp" />
+    <ClCompile Include="client\ProxyTunnel.cpp" />
+    <ClCompile Include="client\WebSocketClient.cpp" />
+    <ClCompile Include="core\TlsTransport.cpp" />
+    <ClCompile Include="crypto\Aead.cpp" />
+    <ClCompile Include="crypto\CngProvider.cpp" />
+    <ClCompile Include="crypto\CngProviderCache.cpp" />
+    <ClCompile Include="crypto\Ed25519.cpp" />
+    <ClCompile Include="crypto\Ed448.cpp" />
+    <ClCompile Include="crypto\KeyExchange.cpp" />
+    <ClCompile Include="khttp\AsyncOp.cpp" />
+    <ClCompile Include="khttp\Body.cpp" />
+    <ClCompile Include="khttp\Cache.cpp" />
+    <ClCompile Include="khttp\Headers.cpp" />
+    <ClCompile Include="khttp\Http.cpp" />
+    <ClCompile Include="khttp\HttpAsync.cpp" />
+    <ClCompile Include="khttp\Khttp.cpp" />
+    <ClCompile Include="khttp\Lifecycle.cpp" />
+    <ClCompile Include="khttp\Options.cpp" />
+    <ClCompile Include="khttp\Request.cpp" />
+    <ClCompile Include="khttp\Response.cpp" />
+    <ClCompile Include="khttp\Session.cpp" />
+    <ClCompile Include="khttp\WebSocket.cpp" />
+    <ClCompile Include="http\HttpCoding.cpp" />
+    <ClCompile Include="http\HttpCachePolicy.cpp" />
+    <ClCompile Include="http\HttpContentEncoding.cpp" />
+    <ClCompile Include="http\HttpExiDecoder.cpp" />
+    <ClCompile Include="http\HttpExiEventReader.cpp" />
+    <ClCompile Include="http\HttpExiGrammar.cpp" />
+    <ClCompile Include="http\HttpExiGrammarTable.cpp" />
+    <ClCompile Include="http\HttpExiOptions.cpp" />
+    <ClCompile Include="http\HttpExiQNameReader.cpp" />
+    <ClCompile Include="http\HttpExiStringTable.cpp" />
+    <ClCompile Include="http\HttpExiValueDecoder.cpp" />
+    <ClCompile Include="http\HttpPack200BandCodec.cpp" />
+    <ClCompile Include="http\HttpPack200AttributeLayout.cpp" />
+    <ClCompile Include="http\HttpPack200BandParser.cpp" />
+    <ClCompile Include="http\HttpPack200Bands.cpp" />
+    <ClCompile Include="http\HttpPack200ClassWriter.cpp" />
+    <ClCompile Include="http\HttpPack200Codec.cpp" />
+    <ClCompile Include="http\HttpPack200Decoder.cpp" />
+    <ClCompile Include="http\HttpPack200JarWriter.cpp" />
+    <ClCompile Include="http\HttpParser.cpp" />
+    <ClCompile Include="http\HttpRequest.cpp" />
+    <ClCompile Include="http\HttpResponse.cpp" />
+    <ClCompile Include="http\HttpTransferCoding.cpp" />
+    <ClCompile Include="http\HttpTypes.cpp" />
+    <ClCompile Include="http\HttpXmlWriter.cpp" />
+    <ClCompile Include="http2\Hpack.cpp" />
+    <ClCompile Include="http2\Http2Connection.cpp" />
+    <ClCompile Include="http2\Http2Frame.cpp" />
+    <ClCompile Include="http2\Http2Stream.cpp" />
+    <ClCompile Include="net\WskClient.cpp" />
+    <ClCompile Include="net\WskSocket.cpp" />
+    <ClCompile Include="tls\TlsContext.cpp" />
+    <ClCompile Include="tls\CertificateStore.cpp" />
+    <ClCompile Include="tls\CertificateValidator.cpp" />
+    <ClCompile Include="tls\TlsCapabilities.cpp" />
+    <ClCompile Include="tls\TlsConnection.cpp" />
+    <ClCompile Include="tls\TlsHandshake12.cpp" />
+    <ClCompile Include="tls\TlsHandshake13.cpp" />
+    <ClCompile Include="tls\TlsPolicy.cpp" />
+    <ClCompile Include="tls\TlsRecord.cpp" />
+    <ClCompile Include="websocket\WebSocketDeflate.cpp" />
+    <ClCompile Include="websocket\WebSocketFrame.cpp" />
+    <ClCompile Include="..\..\third_party\brotli\c\common\constants.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\context.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\dictionary.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\platform.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\shared_dictionary.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\common\transform.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\bit_reader.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\decode.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\huffman.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\prefix.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\state.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\brotli\c\dec\static_init.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="..\..\third_party\zstd\zstddeclib.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4100;4127;4189;4244;4267;4574;4701;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\include\wknet\Wknet.h" />
+    <ClInclude Include="..\..\include\wknet\engine\Engine.h" />
+    <ClInclude Include="..\..\include\wknet\engine\EngineImpl.h" />
+    <ClInclude Include="..\..\include\wknet\engine\EngineInternal.h" />
+    <ClInclude Include="..\..\include\wknet\engine\EngineUtils.h" />
+    <ClInclude Include="..\..\include\wknet\engine\HandleAlloc.h" />
+    <ClInclude Include="..\..\include\wknet\engine\HandleTypes.h" />
+    <ClInclude Include="..\..\include\wknet\engine\HttpEngine.h" />
+    <ClInclude Include="..\..\include\wknet\engine\HttpCache.h" />
+    <ClInclude Include="..\..\include\wknet\engine\UrlParser.h" />
+    <ClInclude Include="..\..\include\wknet\engine\WsEngine.h" />
+    <ClInclude Include="..\..\include\wknet\engine\Async.h" />
+    <ClInclude Include="..\..\include\wknet\engine\ConnectionPool.h" />
+    <ClInclude Include="..\..\include\wknet\engine\Workspace.h" />
+    <ClInclude Include="..\..\include\wknet\client\HttpClient.h" />
+    <ClInclude Include="..\..\include\wknet\client\Http2Client.h" />
+    <ClInclude Include="..\..\include\wknet\client\HttpsClient.h" />
+    <ClInclude Include="..\..\include\wknet\client\WebSocketClient.h" />
+    <ClInclude Include="..\..\include\wknet\core\IScratchAllocator.h" />
+    <ClInclude Include="..\..\include\wknet\core\ITransport.h" />
+    <ClInclude Include="..\..\include\wknet\core\Irql.h" />
+    <ClInclude Include="..\..\include\wknet\core\Lookaside.h" />
+    <ClInclude Include="..\..\include\wknet\core\TlsTransport.h" />
+    <ClInclude Include="..\..\include\wknet\core\WorkspaceScratchAllocator.h" />
+    <ClInclude Include="..\..\include\wknet\core\WskTransport.h" />
+    <ClInclude Include="..\..\include\wknet\crypto\Aead.h" />
+    <ClInclude Include="..\..\include\wknet\crypto\CngProvider.h" />
+    <ClInclude Include="..\..\include\wknet\crypto\CngProviderCache.h" />
+    <ClInclude Include="..\..\include\wknet\crypto\Ed25519.h" />
+    <ClInclude Include="..\..\include\wknet\crypto\Ed448.h" />
+    <ClInclude Include="..\..\include\wknet\crypto\KeyExchange.h" />
+    <ClInclude Include="..\..\include\wknet\http1\HttpCoding.h" />
+    <ClInclude Include="..\..\include\wknet\http1\HttpCachePolicy.h" />
+    <ClInclude Include="..\..\include\wknet\http1\HttpContentEncoding.h" />
+    <ClInclude Include="..\..\include\wknet\http1\HttpParser.h" />
+    <ClInclude Include="..\..\include\wknet\http1\HttpRequest.h" />
+    <ClInclude Include="..\..\include\wknet\http1\HttpResponse.h" />
+    <ClInclude Include="..\..\include\wknet\http1\HttpTransferCoding.h" />
+    <ClInclude Include="..\..\include\wknet\http1\HttpTypes.h" />
+    <ClInclude Include="http\HttpExiDecoder.h" />
+    <ClInclude Include="http\HttpDeflateDecoder.h" />
+    <ClInclude Include="http\HttpExiEventReader.h" />
+    <ClInclude Include="http\HttpExiGrammar.h" />
+    <ClInclude Include="http\HttpExiGrammarTable.h" />
+    <ClInclude Include="http\HttpExiOptions.h" />
+    <ClInclude Include="http\HttpExiQNameReader.h" />
+    <ClInclude Include="http\HttpExiStringTable.h" />
+    <ClInclude Include="http\HttpExiValueDecoder.h" />
+    <ClInclude Include="http\HttpPack200BandCodec.h" />
+    <ClInclude Include="http\HttpPack200AttributeLayout.h" />
+    <ClInclude Include="http\HttpPack200BandParser.h" />
+    <ClInclude Include="http\HttpPack200Bands.h" />
+    <ClInclude Include="http\HttpPack200ClassWriter.h" />
+    <ClInclude Include="http\HttpPack200Codec.h" />
+    <ClInclude Include="http\HttpPack200Decoder.h" />
+    <ClInclude Include="http\HttpPack200JarWriter.h" />
+    <ClInclude Include="http\HttpXmlWriter.h" />
+    <ClInclude Include="..\..\include\wknet\http2\Hpack.h" />
+    <ClInclude Include="..\..\include\wknet\http2\HpackHuffman.h" />
+    <ClInclude Include="..\..\include\wknet\http2\HpackStaticTable.h" />
+    <ClInclude Include="..\..\include\wknet\http2\Http2Connection.h" />
+    <ClInclude Include="..\..\include\wknet\http2\Http2Frame.h" />
+    <ClInclude Include="..\..\include\wknet\http2\Http2Stream.h" />
+    <ClInclude Include="..\..\include\wknet\WknetConfig.h" />
+    <ClInclude Include="..\..\include\wknet\WknetLimits.h" />
+    <ClInclude Include="..\..\include\wknet\net\WskBuffer.h" />
+    <ClInclude Include="..\..\include\wknet\net\WskClient.h" />
+    <ClInclude Include="..\..\include\wknet\net\WskSocket.h" />
+    <ClInclude Include="..\..\include\wknet\http\AsyncOp.h" />
+    <ClInclude Include="..\..\include\wknet\http\Body.h" />
+    <ClInclude Include="..\..\include\wknet\http\Cache.h" />
+    <ClInclude Include="..\..\include\wknet\http\Detail.h" />
+    <ClInclude Include="..\..\include\wknet\http\Headers.h" />
+    <ClInclude Include="..\..\include\wknet\http\Http.h" />
+    <ClInclude Include="..\..\include\wknet\http\HttpAsync.h" />
+    <ClInclude Include="..\..\include\wknet\http\Options.h" />
+    <ClInclude Include="..\..\include\wknet\http\Request.h" />
+    <ClInclude Include="..\..\include\wknet\http\Response.h" />
+    <ClInclude Include="..\..\include\wknet\http\Session.h" />
+    <ClInclude Include="..\..\include\wknet\http\Test.h" />
+    <ClInclude Include="..\..\include\wknet\http\Types.h" />
+    <ClInclude Include="..\..\include\wknet\websocket\WebSocket.h" />
+    <ClInclude Include="..\..\include\wknet\tls\TlsContext.h" />
+    <ClInclude Include="..\..\include\wknet\tls\CertificateStore.h" />
+    <ClInclude Include="..\..\include\wknet\tls\CertificateValidator.h" />
+    <ClInclude Include="..\..\include\wknet\tls\TlsCapabilities.h" />
+    <ClInclude Include="..\..\include\wknet\tls\TlsConnection.h" />
+    <ClInclude Include="..\..\include\wknet\tls\TlsHandshake12.h" />
+    <ClInclude Include="..\..\include\wknet\tls\TlsHandshake13.h" />
+    <ClInclude Include="..\..\include\wknet\tls\TlsPolicy.h" />
+    <ClInclude Include="..\..\include\wknet\tls\TlsRecord.h" />
+    <ClInclude Include="..\..\include\wknet\ws\WebSocketDeflate.h" />
+    <ClInclude Include="..\..\include\wknet\ws\WebSocketFrame.h" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{2F05C2F0-8C5F-4B05-B0D9-F72F40E1D5D6}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <RootNamespace>wknetlib</RootNamespace>
+    <Driver_SpectreMitigation>false</Driver_SpectreMitigation>
+    <Configuration>Debug</Configuration>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <TargetVersion>Windows10</TargetVersion>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <DriverType>WDM</DriverType>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <TargetVersion>Windows10</TargetVersion>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <DriverType>WDM</DriverType>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
+    <TargetVersion>Windows10</TargetVersion>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <DriverType>WDM</DriverType>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
+    <TargetVersion>Windows10</TargetVersion>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <DriverType>WDM</DriverType>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <TargetName>wknetlib</TargetName>
+    <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>EnableAllWarnings</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <DisableSpecificWarnings>4061;4100;4127;4255;4365;4464;4514;4603;4623;4625;4626;4627;4668;4711;4820;4986;4987;5026;5027;5032;5045;5220;5246;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <ExceptionHandling>false</ExceptionHandling>
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <ConformanceMode>true</ConformanceMode>
+      <PreprocessorDefinitions>POOL_NX_OPTIN=1;WKNET_NO_CRT_ALLOC=1;$(WknetExtraDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(ProjectDir)..\..\third_party\brotli\c\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/std:c++17 /source-charset:utf-8 /execution-charset:.936 /Zc:externConstexpr /Zc:inline %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

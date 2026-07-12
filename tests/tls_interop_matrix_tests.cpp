@@ -1,41 +1,41 @@
-#ifndef KERNEL_HTTP_USER_MODE_TEST
-#define KERNEL_HTTP_USER_MODE_TEST 1
+#ifndef WKNET_USER_MODE_TEST
+#define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <KernelHttp/tls/CertificateStore.h>
-#include <KernelHttp/tls/CertificateValidator.h>
-#include <KernelHttp/tls/TlsCapabilities.h>
-#include <KernelHttp/tls/TlsConnection.h>
-#include <KernelHttp/tls/TlsPolicy.h>
+#include <wknet/tls/CertificateStore.h>
+#include <wknet/tls/CertificateValidator.h>
+#include <wknet/tls/TlsCapabilities.h>
+#include <wknet/tls/TlsConnection.h>
+#include <wknet/tls/TlsPolicy.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using KernelHttp::tls::CertificateRevocationEntry;
-using KernelHttp::tls::CertificateRevocationMode;
-using KernelHttp::tls::CertificateRevocationSource;
-using KernelHttp::tls::CertificateRevocationStatus;
-using KernelHttp::tls::CertificateStore;
-using KernelHttp::tls::CertificateStoreOptions;
-using KernelHttp::tls::CertificateValidationOptions;
-using KernelHttp::tls::Tls12KeyExchangeKind;
-using KernelHttp::tls::Tls12SessionCache;
-using KernelHttp::tls::Tls13SessionCache;
-using KernelHttp::tls::TlsBulkCipherKind;
-using KernelHttp::tls::TlsCapabilityDisposition;
-using KernelHttp::tls::TlsCipherSuite;
-using KernelHttp::tls::TlsCipherSuiteCapability;
-using KernelHttp::tls::TlsClientConnectionOptions;
-using KernelHttp::tls::TlsClientCredential;
-using KernelHttp::tls::TlsClientCredentialKeyAlgorithm;
-using KernelHttp::tls::TlsNamedGroup;
-using KernelHttp::tls::TlsNamedGroupKind;
-using KernelHttp::tls::TlsPolicy;
-using KernelHttp::tls::TlsPrfHashKind;
-using KernelHttp::tls::TlsProtocol;
-using KernelHttp::tls::TlsRecordMacKind;
-using KernelHttp::tls::TlsSecurityProfile;
-using KernelHttp::tls::TlsSignatureScheme;
+using wknet::tls::CertificateRevocationEntry;
+using wknet::tls::CertificateRevocationMode;
+using wknet::tls::CertificateRevocationSource;
+using wknet::tls::CertificateRevocationStatus;
+using wknet::tls::CertificateStore;
+using wknet::tls::CertificateStoreOptions;
+using wknet::tls::CertificateValidationOptions;
+using wknet::tls::Tls12KeyExchangeKind;
+using wknet::tls::Tls12SessionCache;
+using wknet::tls::Tls13SessionCache;
+using wknet::tls::TlsBulkCipherKind;
+using wknet::tls::TlsCapabilityDisposition;
+using wknet::tls::TlsCipherSuite;
+using wknet::tls::TlsCipherSuiteCapability;
+using wknet::tls::TlsClientConnectionOptions;
+using wknet::tls::TlsClientCredential;
+using wknet::tls::TlsClientCredentialKeyAlgorithm;
+using wknet::tls::TlsNamedGroup;
+using wknet::tls::TlsNamedGroupKind;
+using wknet::tls::TlsPolicy;
+using wknet::tls::TlsPrfHashKind;
+using wknet::tls::TlsProtocol;
+using wknet::tls::TlsRecordMacKind;
+using wknet::tls::TlsSecurityProfile;
+using wknet::tls::TlsSignatureScheme;
 
 namespace
 {
@@ -190,7 +190,7 @@ namespace
         for (SIZE_T index = 0; index < sizeof(ciphers) / sizeof(ciphers[0]); ++index) {
             const Tls13CipherExpectation& expected = ciphers[index];
             const TlsCipherSuiteCapability* capability =
-                KernelHttp::tls::TlsFindCipherSuiteCapability(expected.Suite);
+                wknet::tls::TlsFindCipherSuiteCapability(expected.Suite);
 
             Expect(capability != nullptr, expected.Name, "cipher suite is present in the matrix");
             if (capability == nullptr) {
@@ -206,7 +206,7 @@ namespace
                 expected.Name,
                 "default disposition matches the public policy table");
             Expect(
-                KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, expected.Suite),
+                wknet::tls::TlsPolicyAllowsCipherSuite(policy, expected.Suite),
                 expected.Name,
                 "modern policy can offer the implemented TLS 1.3 suite");
         }
@@ -230,7 +230,7 @@ namespace
         TlsPolicy policy = {};
         for (SIZE_T index = 0; index < sizeof(groups) / sizeof(groups[0]); ++index) {
             const NamedGroupExpectation& expected = groups[index];
-            const auto* capability = KernelHttp::tls::TlsFindNamedGroupCapability(expected.Group);
+            const auto* capability = wknet::tls::TlsFindNamedGroupCapability(expected.Group);
             Expect(capability != nullptr, expected.Name, "named group is present in the matrix");
             if (capability == nullptr) {
                 continue;
@@ -238,7 +238,7 @@ namespace
 
             Expect(capability->Kind == expected.Kind, expected.Name, "group family metadata matches");
             Expect(
-                KernelHttp::tls::TlsPolicyAllowsNamedGroup(policy, expected.Group),
+                wknet::tls::TlsPolicyAllowsNamedGroup(policy, expected.Group),
                 expected.Name,
                 "modern policy can offer the implemented group");
         }
@@ -247,14 +247,14 @@ namespace
     void TestTls12CapabilityMatrix()
     {
         constexpr ULONG BaseExtensions =
-            KernelHttp::tls::TlsCipherSuiteExtensionExtendedMasterSecret |
-            KernelHttp::tls::TlsCipherSuiteExtensionSecureRenegotiation;
+            wknet::tls::TlsCipherSuiteExtensionExtendedMasterSecret |
+            wknet::tls::TlsCipherSuiteExtensionSecureRenegotiation;
         constexpr ULONG EphemeralExtensions =
             BaseExtensions |
-            KernelHttp::tls::TlsCipherSuiteExtensionSupportedGroups;
+            wknet::tls::TlsCipherSuiteExtensionSupportedGroups;
         constexpr ULONG CbcExtensions =
             EphemeralExtensions |
-            KernelHttp::tls::TlsCipherSuiteExtensionEncryptThenMac;
+            wknet::tls::TlsCipherSuiteExtensionEncryptThenMac;
 
         static const Tls12CipherExpectation suites[] = {
             {
@@ -321,7 +321,7 @@ namespace
                 TlsPrfHashKind::Sha256,
                 false,
                 true,
-                BaseExtensions | KernelHttp::tls::TlsCipherSuiteExtensionEncryptThenMac
+                BaseExtensions | wknet::tls::TlsCipherSuiteExtensionEncryptThenMac
             },
             {
                 "TLS 1.2 ECDHE_RSA CHACHA20_POLY1305_SHA256",
@@ -357,7 +357,7 @@ namespace
         for (SIZE_T index = 0; index < sizeof(suites) / sizeof(suites[0]); ++index) {
             const Tls12CipherExpectation& expected = suites[index];
             const TlsCipherSuiteCapability* capability =
-                KernelHttp::tls::TlsFindCipherSuiteCapability(expected.Suite);
+                wknet::tls::TlsFindCipherSuiteCapability(expected.Suite);
 
             Expect(capability != nullptr, expected.Name, "cipher suite is present in the matrix");
             if (capability == nullptr) {
@@ -371,22 +371,22 @@ namespace
             Expect(capability->PrfHash == expected.PrfHash, expected.Name, "PRF hash metadata matches");
             Expect(HasRequiredExtensions(*capability, expected.RequiredExtensions), expected.Name, "required extension metadata matches");
             Expect(
-                KernelHttp::tls::TlsPolicyAllowsCipherSuite(modern, expected.Suite) == expected.ModernPolicyAllowed,
+                wknet::tls::TlsPolicyAllowsCipherSuite(modern, expected.Suite) == expected.ModernPolicyAllowed,
                 expected.Name,
                 "modern policy decision matches matrix expectation");
             Expect(
-                KernelHttp::tls::TlsPolicyAllowsCipherSuite(compatibility, expected.Suite) ==
+                wknet::tls::TlsPolicyAllowsCipherSuite(compatibility, expected.Suite) ==
                     expected.CompatibilityPolicyAllowed,
                 expected.Name,
                 "compatibility policy decision matches matrix expectation");
         }
 
         Expect(
-            !KernelHttp::tls::TlsPolicyAllowsTls12Renegotiation(modern),
+            !wknet::tls::TlsPolicyAllowsTls12Renegotiation(modern),
             "TLS 1.2 renegotiation",
             "modern policy disables renegotiation");
         Expect(
-            KernelHttp::tls::TlsPolicyAllowsTls12Renegotiation(compatibility),
+            wknet::tls::TlsPolicyAllowsTls12Renegotiation(compatibility),
             "TLS 1.2 renegotiation",
             "compatibility policy enables renegotiation only after explicit opt-in");
     }
@@ -702,7 +702,7 @@ namespace
             const InteropScenario& scenario = scenarios[index];
             const TlsPolicy& policy = scenario.RequiresCompatibilityPolicy ? compatibility : modern;
             const TlsCipherSuiteCapability* capability =
-                KernelHttp::tls::TlsFindCipherSuiteCapability(scenario.Suite);
+                wknet::tls::TlsFindCipherSuiteCapability(scenario.Suite);
 
             Expect(capability != nullptr, scenario.Name, "scenario cipher is implemented");
             if (capability == nullptr) {
@@ -717,20 +717,20 @@ namespace
                     "scenario TLS 1.2 key exchange matches cipher metadata");
             }
             if (scenario.HasGroup) {
-                Expect(KernelHttp::tls::TlsIsKnownNamedGroup(scenario.Group), scenario.Name, "scenario group is implemented");
+                Expect(wknet::tls::TlsIsKnownNamedGroup(scenario.Group), scenario.Name, "scenario group is implemented");
                 Expect(
-                    KernelHttp::tls::TlsPolicyAllowsNamedGroup(policy, scenario.Group),
+                    wknet::tls::TlsPolicyAllowsNamedGroup(policy, scenario.Group),
                     scenario.Name,
                     "scenario policy can offer the named group");
             }
 
             Expect(
-                KernelHttp::tls::TlsPolicyAllowsCipherSuite(policy, scenario.Suite),
+                wknet::tls::TlsPolicyAllowsCipherSuite(policy, scenario.Suite),
                 scenario.Name,
                 "scenario policy can offer the cipher");
             if (scenario.RequiresRenegotiationPolicy) {
                 Expect(
-                    KernelHttp::tls::TlsPolicyAllowsTls12Renegotiation(policy),
+                    wknet::tls::TlsPolicyAllowsTls12Renegotiation(policy),
                     scenario.Name,
                     "scenario has explicit renegotiation policy");
                 sawRenegotiationPolicy = true;

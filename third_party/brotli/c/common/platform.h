@@ -27,13 +27,13 @@
 #include <brotli/port.h>  /* IWYU pragma: export */
 #include <brotli/types.h>  /* IWYU pragma: export */
 
-#if defined(KERNEL_HTTP_NO_CRT_ALLOC)
-void* KernelHttpBrotliMemcpy(void* destination, const void* source, size_t length);
-void* KernelHttpBrotliMemmove(void* destination, const void* source, size_t length);
-void* KernelHttpBrotliMemset(void* destination, int value, size_t length);
-int KernelHttpBrotliMemcmp(const void* left, const void* right, size_t length);
-void* KernelHttpBrotliMalloc(size_t size);
-void KernelHttpBrotliFree(void* address);
+#if defined(WKNET_NO_CRT_ALLOC)
+void* WknetBrotliMemcpy(void* destination, const void* source, size_t length);
+void* WknetBrotliMemmove(void* destination, const void* source, size_t length);
+void* WknetBrotliMemset(void* destination, int value, size_t length);
+int WknetBrotliMemcmp(const void* left, const void* right, size_t length);
+void* WknetBrotliMalloc(size_t size);
+void WknetBrotliFree(void* address);
 #ifndef CHAR_BIT
 #define CHAR_BIT 8
 #endif
@@ -48,13 +48,13 @@ void KernelHttpBrotliFree(void* address);
 #include <intrin.h>
 #endif
 
-#if defined(KERNEL_HTTP_NO_CRT_ALLOC)
-#define memcpy(destination, source, length) KernelHttpBrotliMemcpy((destination), (source), (length))
-#define memmove(destination, source, length) KernelHttpBrotliMemmove((destination), (source), (length))
-#define memset(destination, value, length) KernelHttpBrotliMemset((destination), (value), (length))
-#define memcmp(left, right, length) KernelHttpBrotliMemcmp((left), (right), (length))
-#define malloc(size) KernelHttpBrotliMalloc(size)
-#define free(address) KernelHttpBrotliFree(address)
+#if defined(WKNET_NO_CRT_ALLOC)
+#define memcpy(destination, source, length) WknetBrotliMemcpy((destination), (source), (length))
+#define memmove(destination, source, length) WknetBrotliMemmove((destination), (source), (length))
+#define memset(destination, value, length) WknetBrotliMemset((destination), (value), (length))
+#define memcmp(left, right, length) WknetBrotliMemcmp((left), (right), (length))
+#define malloc(size) WknetBrotliMalloc(size)
+#define free(address) WknetBrotliFree(address)
 #endif
 
 #if defined(BROTLI_ENABLE_LOG) || defined(BROTLI_DEBUG)
@@ -648,7 +648,7 @@ BROTLI_UNUSED_FUNCTION void BrotliSuppressUnusedFunctions(void) {
 #endif
 }
 
-#if defined(KERNEL_HTTP_NO_CRT_ALLOC)
+#if defined(WKNET_NO_CRT_ALLOC)
 #define PREFETCH_L1(ptr) \
   do {                   \
     (void)(ptr);         \

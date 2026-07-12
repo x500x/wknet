@@ -38,7 +38,7 @@ $exePath = Join-Path $binDir "$Test.exe"
 $excludedLibSources = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 @(
     'Http2Client.cpp', 'HttpClient.cpp', 'HttpsClient.cpp',
-    'KernelHttpConfig.cpp', 'WebSocketClient.cpp', 'WskSocket.cpp'
+    'WknetConfig.cpp', 'WebSocketClient.cpp', 'WskSocket.cpp'
 ) | ForEach-Object { [void]$excludedLibSources.Add($_) }
 
 switch ($Test) {
@@ -61,7 +61,7 @@ switch ($Test) {
     }
 }
 
-$libSources = Get-ChildItem -Path (Join-Path $repoRoot 'src\KernelHttpLib') -Recurse -Filter '*.cpp' |
+$libSources = Get-ChildItem -Path (Join-Path $repoRoot 'src\wknetlib') -Recurse -Filter '*.cpp' |
     Where-Object { -not $excludedLibSources.Contains($_.Name) } |
     ForEach-Object { $_.FullName }
 
@@ -75,7 +75,7 @@ if ($Test -eq 'high_level_api_tests') {
         'samples\AdvancedScenarioSamples.cpp',
         'samples\ExternalTrustStore.cpp',
         'samples\HighLevelApiSamples.cpp'
-    ) | ForEach-Object { Join-Path $repoRoot "src\KernelHttpTest\$_" }
+    ) | ForEach-Object { Join-Path $repoRoot "src\wknettest\$_" }
 }
 
 $brotliRoot = Join-Path $repoRoot 'third_party\brotli\c'
@@ -91,14 +91,14 @@ $zstdSources = @(
 
 $includeArgs = @(
     "/I", (Join-Path $repoRoot 'include'),
-    "/I", (Join-Path $repoRoot 'src\KernelHttpTest'),
+    "/I", (Join-Path $repoRoot 'src\wknettest'),
     "/I", (Join-Path $brotliRoot 'include')
 )
 
 $clArgs = @(
     '/nologo', '/source-charset:utf-8', '/execution-charset:.936',
     '/std:c++17', '/EHsc-', '/GR-', '/W4', '/WX', '/wd4100', '/wd4127',
-    '/D', 'KERNEL_HTTP_USER_MODE_TEST=1'
+    '/D', 'WKNET_USER_MODE_TEST=1'
 ) + $includeArgs + @(
     "/Fe:$exePath",
     "/Fo:$objDir\"

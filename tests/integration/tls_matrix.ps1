@@ -175,9 +175,9 @@ function Compile-UserModeTest {
         '/WX',
         '/wd4100',
         '/wd4127',
-        '/D', 'KERNEL_HTTP_USER_MODE_TEST=1',
+        '/D', 'WKNET_USER_MODE_TEST=1',
         '/I', (Join-Path $script:Root 'include'),
-        '/I', (Join-Path $script:Root 'src\KernelHttpTest'),
+        '/I', (Join-Path $script:Root 'src\wknettest'),
         '/I', (Join-Path $script:Root 'third_party\brotli\c\include'),
         ('/Fe:' + $output),
         ('/Fo' + $objectDir + '\'),
@@ -755,10 +755,10 @@ Compile-UserModeTest `
     -Name 'tls_interop_matrix_tests' `
     -Source 'tests\tls_interop_matrix_tests.cpp' `
     -ProjectSources @(
-        'src\KernelHttpLib\http\HttpTypes.cpp',
-        'src\KernelHttpLib\tls\CertificateStore.cpp',
-        'src\KernelHttpLib\tls\TlsCapabilities.cpp',
-        'src\KernelHttpLib\tls\TlsPolicy.cpp'
+        'src\wknetlib\http\HttpTypes.cpp',
+        'src\wknetlib\tls\CertificateStore.cpp',
+        'src\wknetlib\tls\TlsCapabilities.cpp',
+        'src\wknetlib\tls\TlsPolicy.cpp'
     )
 Add-Pass 'tls_interop_matrix_tests'
 
