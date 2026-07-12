@@ -24,7 +24,7 @@
 
 | 条目 | RFC 级别 | 状态 | 代码入口 | 测试入口 | 备注 |
 |------|----------|------|----------|----------|------|
-| 请求行与常用方法 GET/POST/PUT/DELETE/HEAD/OPTIONS/PATCH | MUST | 已实现/已验证 | `src/wknetlib/http/HttpRequest.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | 常用方法默认可用。 |
+| 请求行与常用方法 GET/POST/PUT/DELETE/HEAD/OPTIONS/PATCH | MUST | 已实现/已验证 | `src/wknetlib/http1/HttpRequest.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | 常用方法默认可用。 |
 | TRACE 显式 opt-in | MAY/诊断 | 已实现/已验证 | `HttpRequest.cpp`、`HttpEngine.cpp`、`khttp/Http.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | 需 `SendFlagAllowTrace`；body、trailer、敏感头与带代理凭据路径拒绝。 |
 | Range / 条件请求 typed helper | MAY | 已实现/已验证 | `engine/Engine.cpp`、`khttp/Request.cpp` | `tests/khttp_tests.cpp` | 只生成请求 header；不做分片合并、缓存合并或 RFC9111 cache。 |
 | CONNECT 请求构建 | MUST for proxy/tunnel clients | 已实现/已验证 | `HttpRequestBuilder`、`client/ProxyTunnel.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | HTTPS 代理隧道已接入。 |

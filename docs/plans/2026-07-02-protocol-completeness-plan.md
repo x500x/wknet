@@ -29,11 +29,11 @@
 
 - 修改：`include/wknet/Wknet.h`、`include/wknet/http/Types.h`
   - 承载新增公开选项、flags、回调签名和兼容默认值。
-- 修改：`src/wknetlib/engine/Engine.cpp`、`src/wknetlib/engine/HttpEngine.cpp`
+- 修改：`src/wknetlib/session/Engine.cpp`、`src/wknetlib/session/HttpEngine.cpp`
   - 承载高层请求构建、连接池、代理、HTTP/1.1/HTTP/2 分发、回调与重试。
-- 修改：`src/wknetlib/http/HttpRequest.cpp`、`include/wknet/http1/HttpRequest.h`
+- 修改：`src/wknetlib/http1/HttpRequest.cpp`、`include/wknet/http1/HttpRequest.h`
   - 拆出“仅头部构建”和“body 分段写入”能力，服务 `Expect: 100-continue` 与流式上传。
-- 修改：`src/wknetlib/http/HttpParser.cpp`、`src/wknetlib/http/HttpTransferCoding.cpp`、`src/wknetlib/http/HttpContentEncoding.cpp`
+- 修改：`src/wknetlib/http1/HttpParser.cpp`、`src/wknetlib/http1/HttpTransferCoding.cpp`、`src/wknetlib/http1/HttpContentEncoding.cpp`
   - 补强 interim/final response、trailer、增量 body/解码边界测试。
 - 修改：`src/wknetlib/http2/Http2Connection.cpp`、`include/wknet/http2/Http2Connection.h`
   - 补 HTTP/2 流式 DATA、请求 trailers、高层复用下的 GOAWAY/RST 重试语义。
@@ -113,8 +113,8 @@
 
 **Files:**
 - Modify: `include/wknet/http1/HttpRequest.h`
-- Modify: `src/wknetlib/http/HttpRequest.cpp`
-- Modify: `src/wknetlib/engine/HttpEngine.cpp`
+- Modify: `src/wknetlib/http1/HttpRequest.cpp`
+- Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Test: `tests/http_parser_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
@@ -141,9 +141,9 @@
 **Files:**
 - Modify: `include/wknet/Wknet.h`
 - Modify: `include/wknet/http/Types.h`
-- Modify: `src/wknetlib/engine/Engine.cpp`
-- Modify: `src/wknetlib/engine/HttpEngine.cpp`
-- Modify: `src/wknetlib/http/HttpParser.cpp`
+- Modify: `src/wknetlib/session/Engine.cpp`
+- Modify: `src/wknetlib/session/HttpEngine.cpp`
+- Modify: `src/wknetlib/http1/HttpParser.cpp`
 - Test: `tests/http_parser_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
@@ -168,7 +168,7 @@
 ### Task 5: 支持明文 HTTP over proxy
 
 **Files:**
-- Modify: `src/wknetlib/engine/HttpEngine.cpp`
+- Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Modify: `src/wknetlib/client/ProxyTunnel.cpp`
 - Modify: `include/wknet/engine/ConnectionPool.h`
 - Test: `tests/khttp_tests.cpp`
@@ -197,9 +197,9 @@
 **Files:**
 - Modify: `include/wknet/Wknet.h`
 - Modify: `include/wknet/http/Types.h`
-- Modify: `src/wknetlib/khttp/Body.cpp`
-- Modify: `src/wknetlib/khttp/Http.cpp`
-- Modify: `src/wknetlib/engine/HttpEngine.cpp`
+- Modify: `src/wknetlib/http_api/Body.cpp`
+- Modify: `src/wknetlib/http_api/Http.cpp`
+- Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Test: `tests/khttp_tests.cpp`
 - Test: `tests/high_level_api_tests.cpp`
 
@@ -231,7 +231,7 @@
 - Modify: `include/wknet/http2/Http2Connection.h`
 - Modify: `src/wknetlib/http2/Http2Connection.cpp`
 - Modify: `src/wknetlib/client/Http2Client.cpp`
-- Modify: `src/wknetlib/engine/HttpEngine.cpp`
+- Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Test: `tests/http2_client_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
@@ -258,7 +258,7 @@
 **Files:**
 - Modify: `include/wknet/Wknet.h`
 - Modify: `include/wknet/http/Types.h`
-- Modify: `src/wknetlib/engine/HttpEngine.cpp`
+- Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Modify: `src/wknetlib/client/Http2Client.cpp`
 - Test: `tests/http2_client_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
@@ -285,8 +285,8 @@
 
 **Files:**
 - Modify: `src/wknetlib/http2/Http2Connection.cpp`
-- Modify: `src/wknetlib/engine/HttpEngine.cpp`
-- Modify: `src/wknetlib/engine/ConnectionPool.cpp`
+- Modify: `src/wknetlib/session/HttpEngine.cpp`
+- Modify: `src/wknetlib/session/ConnectionPool.cpp`
 - Test: `tests/http2_client_tests.cpp`
 - Test: `tests/khttp_tests.cpp`
 
@@ -318,7 +318,7 @@
 - Modify: `include/wknet/Wknet.h`
 - Modify: `include/wknet/http/Types.h`
 - Modify: `src/wknetlib/client/WebSocketClient.cpp`
-- Modify: `src/wknetlib/khttp/WebSocket.cpp`
+- Modify: `src/wknetlib/http_api/WebSocket.cpp`
 - Test: `tests/websocket_frame_tests.cpp`
 - Test: `tests/websocket_client_tests.cpp`
 

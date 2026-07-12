@@ -2,11 +2,11 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include "../src/wknetlib/http/HttpExiEventReader.h"
-#include "../src/wknetlib/http/HttpExiOptions.h"
-#include "../src/wknetlib/http/HttpExiStringTable.h"
-#include "../src/wknetlib/http/HttpExiDecoder.h"
-#include "../src/wknetlib/http/HttpXmlWriter.h"
+#include "../src/wknetlib/http1/HttpExiEventReader.h"
+#include "../src/wknetlib/http1/HttpExiOptions.h"
+#include "../src/wknetlib/http1/HttpExiStringTable.h"
+#include "../src/wknetlib/http1/HttpExiDecoder.h"
+#include "../src/wknetlib/http1/HttpXmlWriter.h"
 #include <wknet/crypto/CngProvider.h>
 
 #include <stdio.h>

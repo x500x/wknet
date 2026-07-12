@@ -2,15 +2,15 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include "../src/wknetlib/http/HttpPack200BandCodec.h"
-#include "../src/wknetlib/http/HttpPack200AttributeLayout.h"
-#include "../src/wknetlib/http/HttpPack200BandParser.h"
-#include "../src/wknetlib/http/HttpPack200Bands.h"
-#include "../src/wknetlib/http/HttpPack200Codec.h"
-#include "../src/wknetlib/http/HttpPack200Decoder.h"
-#include "../src/wknetlib/http/HttpPack200ClassWriter.h"
-#include "../src/wknetlib/http/HttpPack200JarWriter.h"
-#include "../src/wknetlib/http/HttpDeflateDecoder.h"
+#include "../src/wknetlib/http1/HttpPack200BandCodec.h"
+#include "../src/wknetlib/http1/HttpPack200AttributeLayout.h"
+#include "../src/wknetlib/http1/HttpPack200BandParser.h"
+#include "../src/wknetlib/http1/HttpPack200Bands.h"
+#include "../src/wknetlib/http1/HttpPack200Codec.h"
+#include "../src/wknetlib/http1/HttpPack200Decoder.h"
+#include "../src/wknetlib/http1/HttpPack200ClassWriter.h"
+#include "../src/wknetlib/http1/HttpPack200JarWriter.h"
+#include "../src/wknetlib/http1/HttpDeflateDecoder.h"
 #include <wknet/crypto/CngProvider.h>
 
 #include <stdio.h>

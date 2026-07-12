@@ -755,7 +755,7 @@ Compile-UserModeTest `
     -Name 'tls_interop_matrix_tests' `
     -Source 'tests\tls_interop_matrix_tests.cpp' `
     -ProjectSources @(
-        'src\wknetlib\http\HttpTypes.cpp',
+        'src\wknetlib\http1\HttpTypes.cpp',
         'src\wknetlib\tls\CertificateStore.cpp',
         'src\wknetlib\tls\TlsCapabilities.cpp',
         'src\wknetlib\tls\TlsPolicy.cpp'

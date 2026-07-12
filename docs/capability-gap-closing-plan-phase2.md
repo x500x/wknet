@@ -86,8 +86,8 @@
 ### 现状
 
 - 低层 `client::HttpsClient` 已支持显式 HTTP/1.1 CONNECT 隧道：`include/wknet/client/HttpsClient.h:23-53` 的 `HttpsRequestOptions`（`ProxyAddress:26`、`ProxyAuthority/Length:27-28`、`ProxyHeaders/Count:29-30`、`RemoteAddress:25` 为目标）；实现见 `HttpsClient.cpp:52-54`（`UsesProxyTunnel`）、`:58-70`（`IsValidProxyTunnelOptions`）、`:74-90`（`BuildProxyConnectRequest`）、`:305`（连接目标选择）、`:327-370`（建隧道 + 读代理响应 + 2xx 校验）、`:411-443`（对**目标**主机再次 TLS）。
-- **关键事实**：`HttpsClient` **未被高层引擎调用**——`src/wknetlib/engine/HttpEngine.cpp` 走 `Http2Client`/`Http2Connection` 与自有传输 / TLS 装配路径；`HttpsClient::SendRequest` 当前仅测试调用（`tests/http2_client_tests.cpp:413-416`）。
-- 高层 `SessionConfig` 已新增 `Proxy`，并由 `src/wknetlib/khttp/Session.cpp` 透传到 `KhSessionOptions`；代理地址、CONNECT authority 与 opaque `Proxy-Authorization` 头均由显式配置提供。
+- **关键事实**：`HttpsClient` **未被高层引擎调用**——`src/wknetlib/session/HttpEngine.cpp` 走 `Http2Client`/`Http2Connection` 与自有传输 / TLS 装配路径；`HttpsClient::SendRequest` 当前仅测试调用（`tests/http2_client_tests.cpp:413-416`）。
+- 高层 `SessionConfig` 已新增 `Proxy`，并由 `src/wknetlib/http_api/Session.cpp` 透传到 `KhSessionOptions`；代理地址、CONNECT authority 与 opaque `Proxy-Authorization` 头均由显式配置提供。
 - 引擎路径已接入代理隧道：HTTPS 请求先连接代理地址、发送 CONNECT 并校验 2xx，再在隧道上针对目标主机执行 TLS；HTTP 明文代理转发当前显式返回 `STATUS_NOT_SUPPORTED`。
 - 连接池键已纳入代理身份，避免不同代理的连接混用；每 host quota 仍按目标 host / scheme / port / address family 计数，防止通过多代理绕过目标主机上限。
 

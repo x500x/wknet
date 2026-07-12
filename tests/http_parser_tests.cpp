@@ -7,20 +7,20 @@
 #include <wknet/http1/HttpCachePolicy.h>
 #include <wknet/http1/HttpContentEncoding.h>
 
-#include "../src/wknetlib/http/HttpXmlWriter.h"
-#include "../src/wknetlib/http/HttpExiEventReader.h"
-#include "../src/wknetlib/http/HttpExiGrammar.h"
-#include "../src/wknetlib/http/HttpExiGrammarTable.h"
-#include "../src/wknetlib/http/HttpExiQNameReader.h"
-#include "../src/wknetlib/http/HttpExiStringTable.h"
-#include "../src/wknetlib/http/HttpExiValueDecoder.h"
-#include "../src/wknetlib/http/HttpPack200BandCodec.h"
-#include "../src/wknetlib/http/HttpPack200BandParser.h"
-#include "../src/wknetlib/http/HttpPack200Bands.h"
-#include "../src/wknetlib/http/HttpPack200ClassWriter.h"
-#include "../src/wknetlib/http/HttpPack200Codec.h"
-#include "../src/wknetlib/http/HttpPack200Decoder.h"
-#include "../src/wknetlib/http/HttpPack200JarWriter.h"
+#include "../src/wknetlib/http1/HttpXmlWriter.h"
+#include "../src/wknetlib/http1/HttpExiEventReader.h"
+#include "../src/wknetlib/http1/HttpExiGrammar.h"
+#include "../src/wknetlib/http1/HttpExiGrammarTable.h"
+#include "../src/wknetlib/http1/HttpExiQNameReader.h"
+#include "../src/wknetlib/http1/HttpExiStringTable.h"
+#include "../src/wknetlib/http1/HttpExiValueDecoder.h"
+#include "../src/wknetlib/http1/HttpPack200BandCodec.h"
+#include "../src/wknetlib/http1/HttpPack200BandParser.h"
+#include "../src/wknetlib/http1/HttpPack200Bands.h"
+#include "../src/wknetlib/http1/HttpPack200ClassWriter.h"
+#include "../src/wknetlib/http1/HttpPack200Codec.h"
+#include "../src/wknetlib/http1/HttpPack200Decoder.h"
+#include "../src/wknetlib/http1/HttpPack200JarWriter.h"
 
 #include <stdio.h>
 #include <string.h>
