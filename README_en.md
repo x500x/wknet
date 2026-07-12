@@ -1,8 +1,8 @@
 <div align="center">
 
-# KernelHttp
+# wknet
 
-**A Pure Kernel-Mode HTTP/HTTPS Client Library for Windows Kernel Drivers**
+**A Pure Kernel-Mode HTTP/HTTPS/WebSocket Client Library for Windows Kernel Drivers**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%20Kernel-0078d4.svg)](https://docs.microsoft.com/en-us/windows-hardware/drivers/)
@@ -17,7 +17,7 @@ English | [简体中文](README.md)
 
 ## 📖 Introduction
 
-KernelHttp is a pure kernel-mode HTTP/HTTPS client library designed specifically for Windows kernel driver development. Built from the ground up, it implements a kernel-friendly client protocol stack: HTTP/1.1, HTTP/2, WebSocket, and TLS 1.2/1.3 handshake, record protection, and certificate validation. Default security behavior and explicit compatibility capabilities are documented below.
+wknet is a pure kernel-mode HTTP/HTTPS client library designed specifically for Windows kernel driver development. Built from the ground up, it implements a kernel-friendly client protocol stack: HTTP/1.1, HTTP/2, WebSocket, and TLS 1.2/1.3 handshake, record protection, and certificate validation. Default security behavior and explicit compatibility capabilities are documented below.
 
 ### ✨ Key Features
 
@@ -27,14 +27,14 @@ KernelHttp is a pure kernel-mode HTTP/HTTPS client library designed specifically
 - **📡 Explicit Capability Matrix**: Supports the client main paths for HTTP/1.1, HTTP/2 (with h2c plaintext upgrade), WebSocket, and TLS 1.2/1.3, with default capabilities separated from explicit compatibility capabilities
 - **🔄 Connection Pool Management**: Built-in connection pool with connection reuse, idle timeout, concurrency protection, and automatic management
 - **⚡ Asynchronous Operations**: Supports async requests with concurrency protection and workspace isolation, avoiding blocking kernel threads
-- **🎯 Two-Layer API**: Provides both high-level simplified API (`khttp`) and low-level fine-grained control API (`engine`)
+- **🎯 Two-Layer API**: Provides product APIs (`wknet::http` / `wknet::websocket` / `wknet::crypto` / `wknet::codec`)
 - **🛡️ Certificate Verification**: Supports Certificate Pinning, Trust Anchors, SPKI hash verification, and TLS 1.3 signature scheme validation
 - **📦 Response Encoding**: Supports `Content-Encoding: gzip/deflate/br/compress/zstd/dcz/aes128gcm/exi/pack200-gzip/identity`; EXI covers EXI 1.0 without an external Schema, Pack200 covers Java 5–8 stable formats, and HTTP/1.1 `Transfer-Encoding` supports `chunked/gzip/deflate/compress` chains
 - **🧱 Heap Memory Management**: Uses `HeapObject<T>` / `HeapArray<T>` for unified heap memory management, high-frequency buffers resident in Workspace
 
 ### Protocol Capability Ledger
 
-KernelHttp separates implemented behavior, default-off capabilities, security refusals, missing/non-goal capabilities, and implementation strategy. This is meant to make the actual gaps visible instead of mixing them with policy choices.
+wknet separates implemented behavior, default-off capabilities, security refusals, missing/non-goal capabilities, and implementation strategy. This is meant to make the actual gaps visible instead of mixing them with policy choices.
 
 **Implemented / Verified Capabilities**
 
@@ -193,24 +193,24 @@ For certificate host validation, IP literals match only iPAddress SAN entries an
 
 ## 📚 API Overview
 
-Common KernelHttp entry namespaces:
+Common wknet entry namespaces:
 
 | Namespace | Purpose | Use Case |
 |-----------|---------|----------|
-| `wknet::khttp` | High-level HTTP API | Most application scenarios, rapid development |
-| `wknet::kws` | High-level WebSocket API | ws/wss I/O (header `kws/WebSocket.h`) |
+| `wknet::http` | High-level HTTP API | Most application scenarios, rapid development |
+| `wknet::websocket` | High-level WebSocket API | ws/wss I/O (header `websocket/WebSocket.h`) |
 | `wknet::session` | Low-level API (`Kh*`) | Performance-critical, special customization, testing |
 
-> ⚠️ All WebSocket calls are in the `kws` namespace (e.g. `wknet::websocket::Connect`/`wknet::websocket::SendText`/`wknet::websocket::Receive`/`wknet::websocket::Close`), while the session is still `wknet::http::Session`.
+> ⚠️ All WebSocket calls are in the `wknet::websocket` namespace (e.g. `wknet::websocket::Connect`/`wknet::websocket::SendText`/`wknet::websocket::Receive`/`wknet::websocket::Close`), while the session is still `wknet::http::Session`.
 
 ### Architecture Layers
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      High-Level API (khttp)                  │
+│                      Product API (wknet::http)                  │
 │  Simple interface, auto resource mgmt, for most scenarios    │
 ├─────────────────────────────────────────────────────────────┤
-│                      Low-Level API (engine)                  │
+│                      Internal session layer (wknet::session)                  │
 │  Fine-grained control, perf optimization, test hooks         │
 ├─────────────────────────────────────────────────────────────┤
 │                    Client Layer (client)                      │
@@ -320,7 +320,7 @@ NTSTATUS AdvancedHttpsRequest(net::WskClient& wskClient) {
 }
 ```
 
-### 🔌 WebSocket example (`kws` namespace)
+### 🔌 WebSocket example (`wknet::websocket`)
 
 ```cpp
 #include <wknet/Wknet.h>
@@ -330,7 +330,7 @@ NTSTATUS WebSocketEcho() {
     NTSTATUS status = wknet::http::SessionCreate(&session);
     if (!NT_SUCCESS(status)) return status;
 
-    wknet::websocket::WebSocket* ws = nullptr;             // WebSocket handle lives in the kws namespace
+    wknet::websocket::WebSocket* ws = nullptr;             // WebSocket handle lives in the `wknet::websocket` namespace
     status = wknet::websocket::Connect(session, "wss://echo.example/ws", 21, &ws);
     if (NT_SUCCESS(status)) {
         wknet::websocket::SendText(ws, "hello", 5);
@@ -369,7 +369,7 @@ wknet/
 │       │   ├── TlsTransport.h       # TLS transport adapter (ITransport + TlsConnection, auto encrypt/decrypt)
 │       │   ├── WskTransport.h       # WSK transport adapter (ITransport + WskSocket, plaintext transport)
 │       │   └── WorkspaceScratchAllocator.h  # Workspace temporary allocator (resident heap memory)
-│       ├── khttp/                   # High-level API (wknet::khttp)
+│       ├── http/                   # High-level API (wknet::http)
 │       │   ├── Types.h              # Handle types, enums, config structs, callbacks
 │       │   ├── Session.h            # Session create/close
 │       │   ├── Request.h            # Request construction (URL, method, headers, body)
@@ -379,9 +379,9 @@ wknet/
 │       │   ├── Response.h           # Response read-only access (StatusCode/Body/Header)
 │       │   ├── Detail.h             # Internal bridge interface
 │       │   └── Test.h               # Test utilities
-│       ├── kws/                     # High-level WebSocket API (wknet::kws)
+│       ├── websocket/                     # High-level WebSocket API (wknet::websocket)
 │       │   └── WebSocket.h          # WebSocket connect/send/fragment/receive/close (wknet::websocket::Connect, ...)
-│       ├── engine/                  # Low-level API (wknet::session)
+│       ├── session/                 # Session orchestration (internal)
 │       │   ├── Engine.h             # Complete API definition (Kh* prefix)
 │       │   ├── EngineImpl.h         # Engine implementation
 │       │   ├── EngineInternal.h     # Internal structures (non-public)
@@ -389,8 +389,8 @@ wknet/
 │       │   ├── ConnectionPool.h     # Connection pool implementation
 │       │   ├── Workspace.h          # Workspace management
 │       │   ├── Async.h              # Async operation implementation
-│       │   ├── HttpEngine.h         # HTTP engine
-│       │   ├── WsEngine.h           # WebSocket engine
+│       │   ├── HttpEngine.cpp       # HTTP send pipeline (internal)
+│       │   ├── WsEngine.cpp         # WS session (internal)
 │       │   ├── UrlParser.h          # URL parser
 │       │   ├── HandleAlloc.h        # Handle allocator
 │       │   └── HandleTypes.h        # Handle type definitions
@@ -435,10 +435,10 @@ wknet/
 │   │   ├── client/                  # Client implementation
 │   │   ├── core/                    # Core abstraction implementation
 │   │   ├── crypto/                  # Cryptography implementation
-│   │   ├── engine/                  # Low-level engine
+│   │   ├── session/                 # Session / pool / send pipeline
 │   │   ├── http/                    # HTTP protocol implementation
 │   │   ├── http2/                   # HTTP/2 protocol implementation
-│   │   ├── khttp/                   # High-level API implementation
+│   │   ├── http/                   # High-level API implementation
 │   │   ├── net/                     # Network transport (WSK)
 │   │   ├── tls/                     # TLS protocol implementation
 │   │   └── websocket/               # WebSocket implementation
@@ -463,8 +463,8 @@ Full documentation now lives in the **GitHub Wiki** and an **online docs site** 
 | Topic | Link |
 |-------|------|
 | Capability Matrix | [Capability Matrix](https://github.com/x500x/khttp/wiki/Capability-Matrix) |
-| High-Level API (khttp/kws) | [High-Level API](https://github.com/x500x/khttp/wiki/High-Level-API) |
-| Low-Level API (engine) | [Low-Level API](https://github.com/x500x/khttp/wiki/Low-Level-API) |
+| Product API (http/websocket/crypto/codec) | [High-Level API](https://github.com/x500x/khttp/wiki/High-Level-API) |
+| Internal session layer (wknet::session) | [Low-Level API](https://github.com/x500x/khttp/wiki/Low-Level-API) |
 | TLS & Certificates | [TLS & Certificates](https://github.com/x500x/khttp/wiki/TLS-and-Certificates) |
 | NTSTATUS Reference | [NTSTATUS Reference](https://github.com/x500x/khttp/wiki/NTSTATUS-Reference) |
 
@@ -562,7 +562,7 @@ msbuild wknet.sln /m /restore /p:Configuration=Debug /p:Platform=x64
 | `tls_interop_matrix_tests.cpp` | TLS capability/policy/interop matrix manifest |
 | `tests/integration/tls_matrix.ps1` | Local OpenSSL/BoringSSL loopback interop matrix |
 | `websocket_frame_tests.cpp` | WebSocket frame processing |
-| `khttp_tests.cpp` | High-level API tests |
+| `khttp_tests.cpp` | Product HTTP API tests |
 | `high_level_api_tests.cpp` | High-level API integration tests |
 | `websocket_client_tests.cpp` | WebSocket client tests |
 
@@ -843,7 +843,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) file for 
 
 For questions or suggestions, please contact us through:
 
-- Submit an [Issue](https://github.com/x500x/khttp/issues) to the project repository
+- Submit an [Issue](https://github.com/x500x/http/issues) to the project repository
 - View project documentation and example code
 - Reference related technical documentation
 
