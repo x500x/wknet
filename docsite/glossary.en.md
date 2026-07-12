@@ -7,7 +7,7 @@
 | **SChannel** | System TLS; **not** used here (TLS is self-implemented) |
 | **IRQL / PASSIVE_LEVEL** | Interrupt Request Level; sync HTTP/WS/TLS/cert paths require `PASSIVE_LEVEL` |
 | **NTSTATUS** | Kernel return code; test with `NT_SUCCESS()` |
-| **ITransport** | Byte-stream transport abstraction (plaintext/TLS) |
+| **Transport** | Opaque byte-stream services for plaintext/TLS |
 | **Workspace** | Session-resident reusable buffers |
 | **HeapObject / HeapArray** | RAII heap wrappers replacing raw new/delete |
 | **Connection pool** | Connection reuse keyed by `session::ConnectionPoolKey` |

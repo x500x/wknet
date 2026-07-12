@@ -1,59 +1,31 @@
 # 传输层
 
-### ITransport（`transport/ITransport.h`）
+### opaque `Transport` 服务
 
-字节流抽象，统一明文与 TLS：
-```cpp
-struct ITransport {
-    virtual NTSTATUS Send(const void* data, SIZE_T len, SIZE_T* sent) = 0;
-    virtual NTSTATUS Receive(void* buf, SIZE_T len, SIZE_T* recv) = 0;
-    virtual NTSTATUS ReceiveWithTimeout(void* buf, SIZE_T len, SIZE_T* recv, ULONG timeoutMs) = 0;
-};
-```
-
-### 适配器
-
-- **WskTransport**（`transport/WskTransport.h`）：包装 `net::WskSocket`，支持取消令牌。明文路径。
-- **TlsTransport**（`transport/TlsTransport.h`）：包装底层 `ITransport` + `tls::TlsConnection`，对字节流自动加解密。
-
-栈：`WskSocket` → `WskTransport`(ITransport) →（HTTPS 时）`TlsTransport`(ITransport) → 协议层。
-
-### Scratch allocator（`transport/IScratchAllocator.h`）
+`transport/Transport.h` 只声明不完整类型 `Transport` 和服务函数：创建明文/回调传输、包装 TLS、收发、超时接收、查询状态与关闭。具体操作表和上下文位于 `TransportPrivate.hpp`，不得跨模块包含。
 
 ```cpp
-struct IScratchAllocator {
-    virtual NTSTATUS Acquire(SIZE_T len, void** buf) = 0;
-    virtual void     Release(void* buf) = 0;
-    virtual NTSTATUS EnsureBuffer(SIZE_T len, void** buf) = 0;
-};
+Transport* transport = nullptr;
+NTSTATUS status = TransportCreateCallbacks(&operations, context, &transport);
+status = TransportSend(transport, data, length, &sent);
+status = TransportReceiveWithTimeout(transport, buffer, capacity, &received, timeoutMs);
+TransportClose(transport);
 ```
-默认实现 `WorkspaceScratchAllocator`（见 [内存模型](memory-model.md)）。
 
-### WSK 网络层（`net/`）
+正式路径为：opaque `WskSocket*` → opaque `Transport*` → HTTPS 时由同一 `Transport*` 服务切换到 opaque `TlsConnection*` → HTTP/1.1、HTTP/2 或 WebSocket 协议层。已删除 `ITransport`、`WskTransport` 和 `TlsTransport`，不保留兼容层。
 
-**WskClient**（`net/WskClient.h`）— WSK 注册与 DNS 解析：
-```cpp
-NTSTATUS Initialize(ULONG waitTimeoutMs = 3000);  void Shutdown();  bool IsInitialized();
-NTSTATUS Resolve(node, service, SOCKADDR_STORAGE*, WskAddressFamily = Any);
-NTSTATUS ResolveAll(node, service, SOCKADDR_STORAGE*, cap, &count, family);  // 最多 8 个
-```
-`WskAddressFamily { Any, Ipv4=4, Ipv6=6 }`。
-- 解析含 **16 条目、5 分钟 TTL 的缓存**（按小写 node/service+family 键，`FAST_MUTEX` 保护）。
-- `AF_UNSPEC` 无结果时回退**显式先 IPv4 后 IPv6** 分别查询再合并。
-- `Shutdown` 前用 `WskSyncWaitForOutstandingContexts(30000)` 排空在途 IRP。
+### Scratch allocator
 
-**WskSocket**（`net/WskSocket.h`）— 连接 socket：
-```cpp
-NTSTATUS Connect(WskClient&, const SOCKADDR* remote, const SOCKADDR* local = nullptr, const WskCancellationToken* = nullptr);
-NTSTATUS Send(...); NTSTATUS Receive(... ULONG timeoutMs = 30000 ...);
-NTSTATUS Disconnect(); NTSTATUS Close(); bool IsConnected();
-```
-- 取消令牌 `WskCancellationToken{ IsCancellationRequested(ctx), Context }` 贯穿连接/收发，下传到 IRP；超时/取消触发取消式关闭。
-- Send/Receive 用**可复用 IRP** + IO rundown 保护；Connect 默认超时 30000ms、Send 30000ms、Receive 用**调用方超时**、Disconnect/Close 用 3000ms。
-- **连接终止中途收到的数据仍随 `STATUS_SUCCESS` 返回**（不丢已收字节）。
+Scratch 分配器属于 `rtl`。默认 `WorkspaceScratchAllocator` 从请求 Workspace 获取堆缓冲；协议聚合缓冲不使用内核栈，高频缓冲常驻并复用。
 
-**WskBuffer**（`net/WskBuffer.h`）— MDL 支撑的池化缓冲：`Allocate`/`EnsureCapacity`/`Prepare`/`SetData`/`CopyTo`/`WskBuf()`。
+### WSK 网络层
 
-### 自定义传输（测试 / 扩展）
+- `WskClient.h` 仅暴露 opaque `WskClient*` 的 Create/Initialize/ResolveAll/Shutdown/Close 服务。
+- `WskSocket.h` 仅暴露 opaque `WskSocket*` 的 Create/Connect/Send/Receive/Close/Destroy 服务。
+- 布局分别位于 `WskClientPrivate.hpp` 与 `WskSocketPrivate.hpp`，只有 `net` 模块可包含。
+- 解析缓存最多 16 条、TTL 5 分钟；`AF_UNSPEC` 无结果时显式查询 IPv4、IPv6。
+- 取消、超时和在途 I/O 排空仍由 WSK 实现负责。
 
-实现 `ITransport` 即可注入自定义传输；`WKNET_USER_MODE_TEST` 窄测试钩子借此做确定性、无真实网络的协议测试。
+### 测试传输
+
+`WKNET_USER_MODE_TEST` 使用 callback backend 注入确定性字节流。测试只依赖 `Transport` 公共内部服务，不实现或继承另一套传输接口。

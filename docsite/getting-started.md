@@ -13,8 +13,8 @@
 
 1. 克隆仓库
    ```bash
-   git clone https://github.com/x500x/khttp.git
-   cd khttp
+   git clone https://github.com/x500x/wknet.git
+   cd wknet
    ```
 2. 用 Visual Studio 打开 `wknet.sln`，选择配置（Debug/Release）与平台（x64/ARM64），按 `Ctrl+Shift+B` 构建。
 3. 或用命令行：

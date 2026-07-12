@@ -208,7 +208,7 @@ function New-SidebarContent {
 
     $translations = Get-NavTranslations -Path $MkDocsPath
     $sidebar = [System.Collections.Generic.List[string]]::new()
-    $sidebar.Add("### KernelHttp Wiki")
+    $sidebar.Add("### wknet Wiki")
     $sidebar.Add("")
 
     foreach ($line in (Get-MkDocsNavLines -Path $MkDocsPath)) {
@@ -284,8 +284,8 @@ Set-Content -LiteralPath (Join-Path -Path $wikiRoot -ChildPath "_Sidebar.md") -V
 
 $footerContent = @(
     "---",
-    "KernelHttp · 纯内核态 HTTP/HTTPS 客户端库 · Pure kernel-mode HTTP/HTTPS client · MIT License ·",
-    "[仓库 / Repo](https://github.com/x500x/khttp) · [Issues](https://github.com/x500x/khttp/issues)",
+    "wknet · 纯内核态 HTTP/HTTPS 客户端库 · Pure kernel-mode HTTP/HTTPS client · MIT License ·",
+    "[仓库 / Repo](https://github.com/x500x/wknet) · [Issues](https://github.com/x500x/wknet/issues)",
     "",
     "This Wiki is generated from `docsite`; edit repository docs and let the docs workflow sync it."
 ) -join "`n"

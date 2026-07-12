@@ -26,12 +26,12 @@
 | `MinVersion` | `TlsVersion` | `Tls12` |
 | `MaxVersion` | `TlsVersion` | `Tls13` |
 | `Certificate` | `CertPolicy` | `Verify` |
-| `Store` | `const tls::CertificateStore*` | `nullptr` |
+| `Store` | `const wknet::http::CertificateStore*` | `nullptr` |
 | `ServerName` / `ServerNameLength` | `const char*` / `SIZE_T` | `nullptr` / 0（SNI） |
 | `Alpn` / `AlpnLength` | `const char*` / `SIZE_T` | `nullptr` / 0 |
 | `PreferHttp2` | `bool` | `true` |
 | `Policy` | `tls::TlsPolicy` | `{}`（ModernDefault） |
-| `ClientCredential` | `const tls::TlsClientCredential*` | `nullptr`（mTLS） |
+| `ClientCredential` | `const wknet::http::TlsClientCredential*` | `nullptr`（mTLS） |
 | `HandshakeTimeoutMs` | `ULONG` | 120000 |
 
 ### 内部会话配置

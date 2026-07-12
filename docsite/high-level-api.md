@@ -252,14 +252,14 @@ struct TlsConfig final {
     TlsVersion MinVersion;
     TlsVersion MaxVersion;
     CertPolicy Certificate;
-    const wknet::tls::CertificateStore* Store;
+    const wknet::http::CertificateStore* Store;
     const char* ServerName;
     SIZE_T ServerNameLength;
     const char* Alpn;
     SIZE_T AlpnLength;
     bool PreferHttp2;
-    wknet::tls::TlsPolicy Policy;
-    const wknet::tls::TlsClientCredential* ClientCredential;
+    wknet::http::TlsPolicy Policy;
+    const wknet::http::TlsClientCredential* ClientCredential;
     ULONG HandshakeTimeoutMs;
     ULONG MaxTls12Renegotiations;
 };

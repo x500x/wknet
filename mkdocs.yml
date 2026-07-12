@@ -1,8 +1,8 @@
 site_name: wknet
 site_description: 面向 Windows 内核驱动的纯内核态 HTTP/HTTPS 客户端库 · A pure kernel-mode HTTP/HTTPS client library for Windows kernel drivers
-site_url: https://x500x.github.io/khttp/
-repo_url: https://github.com/x500x/khttp
-repo_name: x500x/khttp
+site_url: https://x500x.github.io/wknet/
+repo_url: https://github.com/x500x/wknet
+repo_name: x500x/wknet
 docs_dir: docsite
 copyright: wknet · MIT License
 
@@ -15,10 +15,10 @@ extra_javascript:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/x500x/khttp
+      link: https://github.com/x500x/wknet
       name: GitHub 仓库
     - icon: fontawesome/solid/book
-      link: https://github.com/x500x/khttp/wiki
+      link: https://github.com/x500x/wknet/wiki
       name: GitHub Wiki
 
 theme:

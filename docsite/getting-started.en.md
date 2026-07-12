@@ -13,8 +13,8 @@
 
 1. Clone:
    ```bash
-   git clone https://github.com/x500x/khttp.git
-   cd khttp
+   git clone https://github.com/x500x/wknet.git
+   cd wknet
    ```
 2. Open `wknet.sln` in Visual Studio, pick a configuration (Debug/Release) and platform (x64/ARM64), then `Ctrl+Shift+B`.
 3. Or from the command line:

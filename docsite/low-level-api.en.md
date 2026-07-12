@@ -7,7 +7,7 @@ wknet guarantees only the public API under `include/wknet`. Interfaces under `sr
 | Layer | Representative interfaces | Responsibility |
 |---|---|---|
 | `session` | `HttpSend`, `WsConnect`, `ConnectionPool*` | Product policy and orchestration |
-| `transport` | `ITransport`, `WskTransport`, `TlsTransport`, `ProxyConnect` | Byte-stream adapters and proxy tunnels |
+| `transport` | opaque `Transport*` services and `ProxyConnect` | Plaintext/TLS byte-stream adapters and proxy tunnels |
 | `http1` | request builder, response parser, transfer coding | HTTP/1.x protocol logic |
 | `http2` | `Http2Connection`, HPACK, frames, streams | HTTP/2 state machine |
 | `ws` | frames, handshake validation, permessage-deflate | WebSocket protocol logic |
@@ -20,7 +20,8 @@ User-mode tests may inject transports, IRQL, or async scheduling only through th
 
 ## Constraints
 
-- Public bridges do not include `net/WskSocket.h` or `tls/TlsConnection.h`.
+- Public bridges do not include internal `net`, `tls`, or `http2` headers.
+- Modules do not include another module's `*Private.hpp`; explicit white-box tests are the only exception.
 - Protocol layers do not modify connection-pool fields directly.
 - Internal headers are not copied into `include/wknet`.
 - Parallel handle APIs, client classes, and compatibility layers are not restored.

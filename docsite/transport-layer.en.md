@@ -1,5 +1,23 @@
 # Transport Layer
 
-`core::ITransport` is the byte-stream abstraction (`Send`/`Receive`/`ReceiveWithTimeout`) unifying plaintext and TLS. Adapters: `WskTransport` (over `net::WskSocket`, `WSK_FLAG_NODELAY`, cancellation token) for plaintext, `TlsTransport` (wraps an inner `ITransport` + `tls::TlsConnection`) for auto encrypt/decrypt. Stack: WskSocket → WskTransport → (TlsTransport for HTTPS) → protocol layer. `IScratchAllocator` (`Acquire`/`Release`/`EnsureBuffer`) is implemented by `WorkspaceScratchAllocator`.
+### Opaque `Transport` services
 
-WSK layer: `WskClient` owns registration and resolution; `WskSocket` owns connect/send/receive/disconnect/close and forwards cancellation to IRPs. `transport::ITransport` is used by narrow `WKNET_USER_MODE_TEST` hooks for deterministic protocol tests.
+`transport/Transport.h` declares only the incomplete `Transport` type and service functions for plaintext/callback creation, TLS wrapping, send, receive, timed receive, state queries, and close. The operation table and contexts live in `TransportPrivate.hpp` and are never included across module boundaries.
+
+The production path is: opaque `WskSocket*` → opaque `Transport*` → for HTTPS the same transport service uses an opaque `TlsConnection*` → HTTP/1.1, HTTP/2, or WebSocket. `ITransport`, `WskTransport`, and `TlsTransport` have been removed without compatibility aliases.
+
+### Scratch allocation
+
+Scratch allocation belongs to `rtl`. `WorkspaceScratchAllocator` obtains heap-backed request Workspace memory; protocol aggregate buffers do not live on the kernel stack, and hot buffers are retained for reuse.
+
+### WSK layer
+
+- `WskClient.h` exposes only Create/Initialize/ResolveAll/Shutdown/Close services for opaque `WskClient*`.
+- `WskSocket.h` exposes only Create/Connect/Send/Receive/Close/Destroy services for opaque `WskSocket*`.
+- Layouts live in `WskClientPrivate.hpp` and `WskSocketPrivate.hpp` and are owned by `net`.
+- Resolution caching remains bounded to 16 entries with a five-minute TTL; an empty `AF_UNSPEC` result triggers explicit IPv4 and IPv6 queries.
+- WSK owns cancellation, timeout handling, and outstanding-I/O drain.
+
+### Test transport
+
+`WKNET_USER_MODE_TEST` uses the callback backend for deterministic byte streams. Tests consume the same opaque `Transport` services and do not implement a parallel transport interface.

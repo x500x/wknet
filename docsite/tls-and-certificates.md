@@ -65,21 +65,23 @@ AES-GCM(1.2 显式 nonce / 1.3 12 字节 IV XOR 序列号)、AES-CBC **Encrypt-t
 
 **主机名**：SAN dNSName 通配仅限单个最左标签（匹配段不含 `.`）；IP literal **只匹配 iPAddress SAN**，无 CN/dNSName 回退；**从不用 CN 做主机匹配**（CN 仅在无 SAN dNSName 时用于 name-constraint）；IDNA/punycode（标签 ≤63、总 ≤255）。
 
-### 证书存储与锁定 `tls::CertificateStore`
+### 证书存储与锁定 `wknet::http::CertificateStore`
 
-上限：信任锚 16、CA 包 8、撤销条目 32（pin 无编译上限）。信任锚必须设 `MatchSubjectPublicKey`（强制 SPKI）。CA 包支持 PEM/DER。**SPKI pin**：对配置了 pin 的主机校验叶 SPKI；**未配置 pin 的主机 fail-open**（放行）。
+上限：信任锚 16、CA 包 8、pin 32、撤销条目 32。信任锚必须设 `MatchSubjectPublicKey`（强制 SPKI）。公共 API 使用 opaque `CertificateStore*`。PEM 包仅在成员边界完整时隔离单成员格式/能力错误；缺失 END、资源/密码学错误严格失败。单 DER 解析失败严格失败。**SPKI pin**：对配置了 pin 的主机校验叶 SPKI；**未配置 pin 的主机 fail-open**（放行）。
 
 ```cpp
-tls::CertificateTrustAnchor anchor = {};
+wknet::http::CertificateTrustAnchor anchor = {};
 anchor.SubjectName = rootSubject; anchor.SubjectNameLength = rootSubjectLen;
 RtlCopyMemory(anchor.SubjectPublicKeySha256, rootSpkiHash, 32);
 anchor.MatchSubjectPublicKey = true;
-tls::CertificatePin pin = { "example.com", 11 };
+wknet::http::CertificatePin pin = { "example.com", 11 };
 RtlCopyMemory(pin.LeafSubjectPublicKeySha256, leafSpkiHash, 32);
-tls::CertificateStoreOptions o = {};
+wknet::http::CertificateStoreOptions o = {};
 o.TrustAnchors = &anchor; o.TrustAnchorCount = 1; o.Pins = &pin; o.PinCount = 1;
-tls::CertificateStore store; store.Initialize(o);
-config.Tls.Store = &store;
+wknet::http::CertificateStore* store = nullptr;
+NTSTATUS status = wknet::http::CertificateStoreCreate(&o, &store);
+config.Tls.Store = store;
+// SessionClose 后：wknet::http::CertificateStoreClose(store);
 ```
 
 ### 撤销
@@ -88,6 +90,6 @@ config.Tls.Store = &store;
 
 ### mTLS 客户端证书
 
-`tls::TlsClientCredential` 携带证书链、`KeyAlgorithm`、支持的签名方案、`AllowsDigitalSignature` 与 `Sign` 回调。**私钥永不进入库**——签名经回调完成（TLS1.2 对 transcript hash 签；TLS1.3 对 `BuildCertificateVerifyInput` 构造的上下文签）。
+`wknet::http::TlsClientCredential` 携带证书链、`KeyAlgorithm`、支持的签名方案、`AllowsDigitalSignature` 与 `Sign` 回调。**私钥永不进入库**——签名经回调完成（TLS1.2 对 transcript hash 签；TLS1.3 对 `BuildCertificateVerifyInput` 构造的上下文签）。
 
 > ⚠️ 生产环境严禁 `CertPolicy::NoVerify`（会跳过整条链校验，仅算叶 SPKI）。

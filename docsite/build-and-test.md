@@ -30,7 +30,7 @@ pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_crypto_tests -Ru
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_handshake_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_record_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_interop_matrix_tests -Run
-pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test khttp_tests -Run
+pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_api_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test high_level_api_tests -Run
 ```
 
@@ -47,7 +47,7 @@ pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_crypto_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_handshake_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_record_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_interop_matrix_tests.exe'
-pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\khttp_tests.exe'
+pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\http_api_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\high_level_api_tests.exe'
 ```
 
@@ -73,7 +73,7 @@ pwsh -NoLogo -NoProfile -File .\tests\integration\tls_matrix.ps1 -Configuration 
 | `tests/integration/tls_matrix.ps1` | 本地 OpenSSL/BoringSSL 回环互通矩阵 |
 | `websocket_frame_tests.cpp` | WebSocket 帧 |
 | `websocket_client_tests.cpp` | WebSocket 客户端 |
-| `khttp_tests.cpp` | 高层 API |
+| `http_api_tests.cpp` | 高层 API |
 | `high_level_api_tests.cpp` | 高层 API 集成 |
 
 > 注意：`tests/integration/https_smoke.ps1` 在某些环境会卡住，运行时建议加 `-SkipDriverBuild`。

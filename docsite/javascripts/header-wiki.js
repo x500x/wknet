@@ -5,7 +5,7 @@
     if (!inner || inner.querySelector(".kh-wiki-btn")) return;
 
     var a = document.createElement("a");
-    a.href = "https://github.com/x500x/khttp/wiki";
+    a.href = "https://github.com/x500x/wknet/wiki";
     a.target = "_blank";
     a.rel = "noopener noreferrer";
     a.className = "kh-wiki-btn";

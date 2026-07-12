@@ -8,7 +8,7 @@
 | **IRQL** | Interrupt Request Level；同步 HTTP/WS/TLS/证书路径要求 `PASSIVE_LEVEL` |
 | **PASSIVE_LEVEL** | 最低 IRQL，可阻塞等待、分页可用；本库同步 API 的调用前提 |
 | **NTSTATUS** | 内核统一返回码；用 `NT_SUCCESS()` 判断（[错误码](ntstatus-reference.md)） |
-| **ITransport** | 字节流传输抽象，统一明文/TLS（[传输层](transport-layer.md)） |
+| **Transport** | opaque 字节流服务，统一明文/TLS（[传输层](transport-layer.md)） |
 | **Workspace** | 会话常驻的可复用缓冲集合，避免反复分配（[内存模型](memory-model.md)） |
 | **HeapObject / HeapArray** | RAII 堆封装，替代裸 `new/delete` |
 | **连接池 / Pool** | 连接复用，按 `session::ConnectionPoolKey` 匹配（[连接池](connection-pool.md)） |

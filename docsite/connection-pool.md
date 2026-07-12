@@ -2,7 +2,7 @@
 
 ### 结构与默认
 
-- 数组 `Entries`/`Capacity`；每槽 `PooledConnection` 缓存完整传输栈（`WskSocket`/`WskTransport`/`ITransport`/`TlsConnection`/可选 `Http2Connection`），并记录 HTTP/2 stream 租约计数。
+- 数组 `Entries`/`Capacity`；每槽 opaque `PooledConnection` 持有 `WskSocket*`、`Transport*`、`TlsConnection*` 与可选 `Http2Connection*`，并记录 HTTP/2 stream 租约计数；字段布局仅在 `ConnectionPoolPrivate.hpp`。
 - 默认容量 8、最大 1024（`session::MaxConnectionPoolCapacity`）、每主机 2、空闲 30000ms。
 
 ### 连接键匹配
