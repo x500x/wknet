@@ -27,7 +27,7 @@ wknet is a pure kernel-mode HTTP/HTTPS client library designed specifically for 
 - **📡 Explicit Capability Matrix**: Supports the client main paths for HTTP/1.1, HTTP/2 (with h2c plaintext upgrade), WebSocket, and TLS 1.2/1.3, with default capabilities separated from explicit compatibility capabilities
 - **🔄 Connection Pool Management**: Built-in connection pool with connection reuse, idle timeout, concurrency protection, and automatic management
 - **⚡ Asynchronous Operations**: Supports async requests with concurrency protection and workspace isolation, avoiding blocking kernel threads
-- **🎯 Two-Layer API**: Provides product APIs (`wknet::http` / `wknet::websocket` / `wknet::crypto` / `wknet::codec`)
+- **🎯 Single Product API Surface**: Public APIs are limited to `wknet::http` / `wknet::websocket` / `wknet::crypto` / `wknet::codec`
 - **🛡️ Certificate Verification**: Supports Certificate Pinning, Trust Anchors, SPKI hash verification, and TLS 1.3 signature scheme validation
 - **📦 Response Encoding**: Supports `Content-Encoding: gzip/deflate/br/compress/zstd/dcz/aes128gcm/exi/pack200-gzip/identity`; EXI covers EXI 1.0 without an external Schema, Pack200 covers Java 5–8 stable formats, and HTTP/1.1 `Transfer-Encoding` supports `chunked/gzip/deflate/compress` chains
 - **🧱 Heap Memory Management**: Uses `HeapObject<T>` / `HeapArray<T>` for unified heap memory management, high-frequency buffers resident in Workspace
@@ -199,7 +199,7 @@ Common wknet entry namespaces:
 |-----------|---------|----------|
 | `wknet::http` | High-level HTTP API | Most application scenarios, rapid development |
 | `wknet::websocket` | High-level WebSocket API | ws/wss I/O (header `websocket/WebSocket.h`) |
-| `wknet::session` | Low-level API (`Kh*`) | Performance-critical, special customization, testing |
+| `wknet::crypto` / `wknet::codec` | Public crypto and codec APIs | Direct reuse outside HTTP sessions |
 
 > ⚠️ All WebSocket calls are in the `wknet::websocket` namespace (e.g. `wknet::websocket::Connect`/`wknet::websocket::SendText`/`wknet::websocket::Receive`/`wknet::websocket::Close`), while the session is still `wknet::http::Session`.
 
@@ -213,11 +213,8 @@ Common wknet entry namespaces:
 │                      Internal session layer (wknet::session)                  │
 │  Fine-grained control, perf optimization, test hooks         │
 ├─────────────────────────────────────────────────────────────┤
-│                    Client Layer (client)                      │
-│  HttpClient | HttpsClient | Http2Client | WebSocketClient    │
-├─────────────────────────────────────────────────────────────┤
-│                    Core Abstraction Layer (core)              │
-│  ITransport | IScratchAllocator | Workspace                  │
+│                    Transport Adapters (wknet::transport)      │
+│  ITransport | WskTransport | TlsTransport | ProxyConnect     │
 ├─────────────────────────────────────────────────────────────┤
 │                    Protocol Implementation Layer              │
 │  HTTP/1.1 | HTTP/2 (HPACK) | WebSocket | TLS 1.2/1.3        │
@@ -354,95 +351,27 @@ NTSTATUS WebSocketEcho() {
 
 ```
 wknet/
-├── include/                          # Public header files
-│   └── wknet/
-│       ├── Wknet.h             # Main header entry point
-│       ├── WknetConfig.h       # Configuration options (timeouts, buffer sizes, etc.)
-│       ├── client/                  # Client wrappers
-│       │   ├── HttpClient.h         # HTTP/1.1 plaintext client
-│       │   ├── HttpsClient.h        # HTTPS client (TLS + ALPN auto-select HTTP/1.1 or HTTP/2)
-│       │   ├── Http2Client.h        # HTTP/2 client (supports TLS ALPN, h2c Prior Knowledge, h2c Upgrade)
-│       │   └── WebSocketClient.h    # WebSocket client (supports ws:// and wss://)
-│       ├── core/                    # Core abstraction layer
-│       │   ├── ITransport.h         # Transport abstraction interface (Send/Receive/ReceiveWithTimeout)
-│       │   ├── IScratchAllocator.h  # Temporary memory allocator interface (TLS handshake, cert validation, etc.)
-│       │   ├── TlsTransport.h       # TLS transport adapter (ITransport + TlsConnection, auto encrypt/decrypt)
-│       │   ├── WskTransport.h       # WSK transport adapter (ITransport + WskSocket, plaintext transport)
-│       │   └── WorkspaceScratchAllocator.h  # Workspace temporary allocator (resident heap memory)
-│       ├── http/                   # High-level API (wknet::http)
-│       │   ├── Types.h              # Handle types, enums, config structs, callbacks
-│       │   ├── Session.h            # Session create/close
-│       │   ├── Request.h            # Request construction (URL, method, headers, body)
-│       │   ├── Http.h               # Sync convenience functions (Get/Post/Put/Patch/Delete/Head/Options)
-│       │   ├── HttpAsync.h          # Async entry points (AsyncGet/AsyncPost/AsyncSend)
-│       │   ├── AsyncOp.h            # Async operation management (Wait/Cancel/GetResponse)
-│       │   ├── Response.h           # Response read-only access (StatusCode/Body/Header)
-│       │   ├── Detail.h             # Internal bridge interface
-│       │   └── Test.h               # Test utilities
-│       ├── websocket/                     # High-level WebSocket API (wknet::websocket)
-│       │   └── WebSocket.h          # WebSocket connect/send/fragment/receive/close (wknet::websocket::Connect, ...)
-│       ├── session/                 # Session orchestration (internal)
-│       │   ├── Engine.h             # Complete API definition (Kh* prefix)
-│       │   ├── EngineImpl.h         # Engine implementation
-│       │   ├── EngineInternal.h     # Internal structures (non-public)
-│       │   ├── EngineUtils.h        # Utility functions
-│       │   ├── ConnectionPool.h     # Connection pool implementation
-│       │   ├── Workspace.h          # Workspace management
-│       │   ├── Async.h              # Async operation implementation
-│       │   ├── HttpEngine.cpp       # HTTP send pipeline (internal)
-│       │   ├── WsEngine.cpp         # WS session (internal)
-│       │   ├── UrlParser.h          # URL parser
-│       │   ├── HandleAlloc.h        # Handle allocator
-│       │   └── HandleTypes.h        # Handle type definitions
-│       ├── http/                    # HTTP protocol
-│       │   ├── HttpTypes.h          # Base types (HttpText/HttpHeader/HeapArray/HeapObject)
-│       │   ├── HttpParser.h         # HTTP response parser
-│       │   ├── HttpRequest.h        # HTTP request builder
-│       │   ├── HttpResponse.h       # HTTP response structure
-│       │   ├── HttpCoding.h          # Shared coding decoder (gzip/deflate/br/compress/zstd/dcz/aes128gcm/identity)
-│       │   ├── HttpContentEncoding.h # Content encoding negotiation and decoding
-│       │   └── HttpTransferCoding.h  # HTTP/1.1 Transfer-Encoding chain parser
-│       ├── http2/                   # HTTP/2 protocol
-│       │   ├── Http2Frame.h         # Frame types, SETTINGS, frame codec
-│       │   ├── Http2Stream.h        # Stream state machine
-│       │   ├── Http2Connection.h    # Connection management (preface, SETTINGS exchange, frame loop)
-│       │   ├── Hpack.h              # HPACK codec
-│       │   ├── HpackHuffman.h       # Huffman codec table
-│       │   └── HpackStaticTable.h   # Static table 61 entries
-│       ├── tls/                     # TLS protocol
-│       │   ├── TlsConnection.h      # TLS connection (supports TLS 1.2/1.3)
-│       │   ├── TlsContext.h         # TLS context
-│       │   ├── TlsRecord.h          # TLS record protocol
-│       │   ├── TlsHandshake12.h     # TLS 1.2 handshake
-│       │   ├── TlsHandshake13.h     # TLS 1.3 handshake (with PSK/0-RTT)
-│       │   ├── TlsPolicy.h          # Security policy (TlsSecurityProfile / compat switches)
-│       │   ├── TlsCapabilities.h    # Capability matrix (default/optional/legacy)
-│       │   ├── CertificateStore.h   # Certificate store (trust anchors/pins/revocation)
-│       │   └── CertificateValidator.h # Certificate validator
-│       ├── websocket/               # WebSocket protocol
-│       │   └── WebSocketFrame.h     # Frame codec, handshake validation
-│       ├── net/                     # Network transport layer (WSK)
-│       │   ├── WskClient.h          # WSK client
-│       │   ├── WskSocket.h          # WSK socket
-│       │   └── WskBuffer.h          # WSK buffer
-│       └── crypto/                  # Cryptography (CNG/BCrypt + in-kernel software)
-│           ├── CngProvider.h        # CNG provider (keys, hashes, signatures)
-│           ├── CngProviderCache.h   # CNG provider cache
-│           ├── Aead.h               # AEAD (GCM/ChaCha20-Poly1305/CCM)
-│           └── KeyExchange.h        # Key exchange (X25519/X448/NIST/FFDHE)
-├── src/                              # Source code
-│   ├── wknetlib/               # Core static library implementation
-│   │   ├── client/                  # Client implementation
-│   │   ├── core/                    # Core abstraction implementation
-│   │   ├── crypto/                  # Cryptography implementation
-│   │   ├── session/                 # Session / pool / send pipeline
-│   │   ├── http/                    # HTTP protocol implementation
-│   │   ├── http2/                   # HTTP/2 protocol implementation
-│   │   ├── http/                   # High-level API implementation
-│   │   ├── net/                     # Network transport (WSK)
-│   │   ├── tls/                     # TLS protocol implementation
-│   │   └── websocket/               # WebSocket implementation
-│   └── wknettest/              # Test driver project
+├── include/wknet/                    # Stable public API only
+│   ├── Wknet.h                       # Umbrella header
+│   ├── http/                         # wknet::http
+│   ├── websocket/                    # wknet::websocket
+│   ├── crypto/                       # wknet::crypto
+│   ├── codec/                        # wknet::codec
+│   ├── tls/                          # Public certificate/TLS value types
+│   └── test/                         # Narrow WKNET_USER_MODE_TEST hooks
+├── src/wknetlib/                     # Kernel static-library implementation
+│   ├── rtl/                          # Heap, tracing, text, URL
+│   ├── net/                          # WSK lifecycle and sockets
+│   ├── crypto/                       # CNG and software cryptography
+│   ├── tls/                          # TLS 1.2/1.3 and certificate validation
+│   ├── codec/                        # Content-Encoding, EXI, Pack200
+│   ├── transport/                    # ITransport, WSK/TLS, proxy CONNECT
+│   ├── http1/ / http2/ / ws/        # Protocol layers
+│   ├── session/                      # Sessions, pool, HTTP/WS orchestration
+│   └── http_api/                     # Thin public-API bridge
+├── src/wknettest/                    # Kernel test driver and public-API samples
+├── tests/                            # User-mode protocol and API tests
+└── tools/                            # pwsh build scripts
 │       └── samples/                 # Example code
 ├── tests/                            # Test code
 ├── docs/                             # Planning and audit documents
@@ -457,7 +386,7 @@ wknet/
 
 Full documentation now lives in the **GitHub Wiki** and an **online docs site** (bilingual, grounded in the actual code):
 
-- 📚 **[Project Wiki](https://github.com/x500x/khttp/wiki)** — 24 pages: capability matrix, architecture, HTTP/1.1, HTTP/2 & HPACK, WebSocket, TLS & certificates, cryptography, high/low-level API, configuration, client classes, transport layer, connection pool, async, memory, NTSTATUS, cookbook, FAQ, roadmap, glossary, and more.
+- 📚 **[Project Wiki](https://github.com/x500x/khttp/wiki)** — capability matrix, architecture, HTTP/1.1, HTTP/2 & HPACK, WebSocket, TLS & certificates, cryptography, product API, transport, connection pool, async, memory, NTSTATUS, cookbook, FAQ, roadmap, glossary, and more.
 - 🌐 **[Online docs site](https://x500x.github.io/khttp/)** — the same content as a MkDocs Material site with full-text search and dark mode.
 
 | Topic | Link |
@@ -857,6 +786,6 @@ Thanks to all developers who have contributed to the project!
 
 <div align="center">
 
-**[⬆ Back to Top](#kernelhttp)**
+**[⬆ Back to Top](#wknet)**
 
 </div>

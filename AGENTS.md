@@ -22,7 +22,7 @@
 - pwsh -NoLogo -NoProfile -File .\tests\integration\https_smoke.ps1 -Configuration Debug -Platform x64 -SkipDriverBuild,因为会卡
 
 ## 本项目方向
-- 产品名 **wknet**（原 KernelHttp 已全量更名，无兼容层）。
+- 产品名 **wknet**，不保留旧产品名、旧命名空间或兼容层。
 - 这是一个面向 Windows kernel driver 的 HTTP/HTTPS/WebSocket 客户端库。
 - 公共命名空间：`wknet::http`、`wknet::websocket`、`wknet::crypto`、`wknet::codec`。
 - 内部命名空间：`rtl` / `net` / `tls` / `http1` / `http2` / `ws` / `transport` / `session` / `detail`。
@@ -31,3 +31,5 @@
 - 工程：`wknet.sln`、`src/wknetlib`、`src/wknettest`、`include/wknet`；用户态测试宏 `WKNET_USER_MODE_TEST`。
 - C++ 可以用来组织代码，例如 `namespace`、类、RAII、轻量模板，但必须符合 `/kernel` 的限制：无异常、无 RTTI，不要依赖内核不可用的标准库能力。
 - 架构分层与调用关系见计划与 `docs/plans/2026-07-12-wknet-rename-map.md`；禁止反向依赖与公共头泄漏内部实现。
+- `src/wknetlib` 禁止 `.inc` 实现分片；实现使用独立 `.cpp`，共享声明使用 `.h` / `.hpp`。
+- 禁止恢复独立 `client` 层；HTTP/HTTPS/HTTP2/WebSocket 编排统一归 `session` / `transport`。
