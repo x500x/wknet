@@ -1,5 +1,5 @@
 #include <wknet/WknetConfig.h>
-#include <wknet/core/Lookaside.h>
+#include "rtl/Lookaside.h"
 
 #if !defined(WKNET_USER_MODE_TEST)
 

@@ -3,15 +3,15 @@
 #endif
 
 #include <wknet/Wknet.h>
-#include <wknet/core/ITransport.h>
-#include <wknet/core/Lookaside.h>
-#include <wknet/engine/Async.h>
-#include <wknet/engine/ConnectionPool.h>
-#include <wknet/engine/HandleTypes.h>
-#include <wknet/engine/Workspace.h>
-#include <wknet/http2/Http2Connection.h>
+#include "transport/ITransport.h"
+#include "rtl/Lookaside.h"
+#include "session/Async.h"
+#include "session/ConnectionPool.h"
+#include "session/HandleTypes.h"
+#include "session/Workspace.h"
+#include "http2/Http2Connection.h"
 #include <wknet/http/Test.h>
-#include <wknet/net/WskSocket.h>
+#include "net/WskSocket.h"
 
 #include <stdio.h>
 #include <stdint.h>

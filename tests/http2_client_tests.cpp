@@ -2,13 +2,13 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <wknet/client/Http2Client.h>
-#include <wknet/client/HttpsClient.h>
-#include <wknet/engine/Workspace.h>
-#include <wknet/http2/Http2Connection.h>
-#include <wknet/net/WskSocket.h>
-#include <wknet/tls/TlsConnection.h>
-#include <wknet/ws/WebSocketFrame.h>
+#include "client/Http2Client.h"
+#include "client/HttpsClient.h"
+#include "session/Workspace.h"
+#include "http2/Http2Connection.h"
+#include "net/WskSocket.h"
+#include "tls/TlsConnection.h"
+#include "ws/WebSocketFrame.h"
 
 #include <stdint.h>
 #include <stdio.h>

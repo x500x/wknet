@@ -1,0 +1,57 @@
+#pragma once
+
+#include "http1/HttpParser.h"
+#include "http1/HttpRequest.h"
+#include "net/WskSocket.h"
+
+namespace wknet
+{
+namespace client
+{
+    struct HttpRequestOptions final
+    {
+        const wchar_t* ServerName = nullptr;
+        const wchar_t* ServiceName = L"80";
+        http1::HttpRequestBuildOptions Request = {};
+        bool ResponseBodyForbidden = false;
+    };
+
+    struct HttpResponseBuffers final
+    {
+        char* RequestBuffer = nullptr;
+        SIZE_T RequestBufferLength = 0;
+        char* ResponseBuffer = nullptr;
+        SIZE_T ResponseBufferLength = 0;
+        char* DecodedBodyBuffer = nullptr;
+        SIZE_T DecodedBodyBufferLength = 0;
+        char* ScratchBodyBuffer = nullptr;
+        SIZE_T ScratchBodyBufferLength = 0;
+        http1::HttpHeader* Headers = nullptr;
+        SIZE_T HeaderCapacity = 0;
+    };
+
+    class HttpClient final
+    {
+    public:
+        HttpClient() noexcept = default;
+
+        HttpClient(const HttpClient&) = delete;
+        HttpClient& operator=(const HttpClient&) = delete;
+
+        _Must_inspect_result_
+        NTSTATUS SendRequest(
+            _Inout_ net::WskClient& wskClient,
+            _In_ const HttpRequestOptions& options,
+            _In_ const HttpResponseBuffers& buffers,
+            _Out_ http1::HttpResponse& response) noexcept;
+
+    private:
+        _Must_inspect_result_
+        NTSTATUS ReadHttpResponse(
+            _Inout_ net::WskSocket& socket,
+            bool responseBodyForbidden,
+            _In_ const HttpResponseBuffers& buffers,
+            _Out_ http1::HttpResponse& response) noexcept;
+    };
+}
+}

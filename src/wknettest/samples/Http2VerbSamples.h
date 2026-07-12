@@ -1,7 +1,7 @@
 #pragma once
 
-#include <wknet/http1/HttpResponse.h>
-#include <wknet/net/WskClient.h>
+#include "http1/HttpResponse.h"
+#include "net/WskClient.h"
 
 namespace wknet
 {

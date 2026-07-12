@@ -1,9 +1,9 @@
 #include "samples/HttpVerbSamples.h"
 
 #include <wknet/WknetConfig.h>
-#include <wknet/client/HttpClient.h>
-#include <wknet/client/HttpsClient.h>
-#include <wknet/client/WebSocketClient.h>
+#include "client/HttpClient.h"
+#include "client/HttpsClient.h"
+#include "client/WebSocketClient.h"
 #include <wknettest/SampleStatus.h>
 
 #include "samples/ExternalTrustStore.h"

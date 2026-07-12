@@ -1,6 +1,6 @@
 #pragma once
 
-#include <wknet/http1/HttpTypes.h>
+#include "http1/HttpTypes.h"
 #include "HttpXmlWriter.h"
 
 namespace wknet

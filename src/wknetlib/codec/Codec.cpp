@@ -1,6 +1,6 @@
 #include <wknet/codec/Codec.h>
 
-#include <wknet/http1/HttpCoding.h>
+#include "http1/HttpCoding.h"
 #include "../http1/HttpExiDecoder.h"
 #include "../http1/HttpPack200Decoder.h"
 

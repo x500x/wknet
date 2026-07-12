@@ -1,6 +1,6 @@
-#include <wknet/http1/HttpTransferCoding.h>
+#include "http1/HttpTransferCoding.h"
 
-#include <wknet/http1/HttpParser.h>
+#include "http1/HttpParser.h"
 
 namespace wknet
 {

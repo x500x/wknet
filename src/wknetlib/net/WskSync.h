@@ -1,7 +1,7 @@
 #pragma once
 
 #include <wknet/WknetConfig.h>
-#include <wknet/net/WskSocket.h>
+#include "net/WskSocket.h"
 
 #include <wsk.h>
 

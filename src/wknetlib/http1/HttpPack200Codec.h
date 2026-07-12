@@ -1,6 +1,6 @@
 #pragma once
 
-#include <wknet/http1/HttpTypes.h>
+#include "http1/HttpTypes.h"
 #include "HttpPack200BandCodec.h"
 
 namespace wknet

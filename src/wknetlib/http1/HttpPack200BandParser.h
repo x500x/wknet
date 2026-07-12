@@ -1,6 +1,6 @@
 #pragma once
 
-#include <wknet/http1/HttpTypes.h>
+#include "http1/HttpTypes.h"
 #include "HttpPack200Bands.h"
 #include "HttpPack200Codec.h"
 #include "HttpPack200AttributeLayout.h"

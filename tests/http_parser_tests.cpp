@@ -2,10 +2,10 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <wknet/http1/HttpParser.h>
-#include <wknet/http1/HttpRequest.h>
-#include <wknet/http1/HttpCachePolicy.h>
-#include <wknet/http1/HttpContentEncoding.h>
+#include "http1/HttpParser.h"
+#include "http1/HttpRequest.h"
+#include "http1/HttpCachePolicy.h"
+#include "http1/HttpContentEncoding.h"
 
 #include "../src/wknetlib/http1/HttpXmlWriter.h"
 #include "../src/wknetlib/http1/HttpExiEventReader.h"

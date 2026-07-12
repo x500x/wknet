@@ -1,9 +1,9 @@
-#include <wknet/engine/ConnectionPool.h>
-#include <wknet/core/TlsTransport.h>
-#include <wknet/core/WskTransport.h>
-#include <wknet/http2/Http2Connection.h>
-#include <wknet/net/WskSocket.h>
-#include <wknet/tls/TlsConnection.h>
+#include "session/ConnectionPool.h"
+#include "transport/TlsTransport.h"
+#include "transport/WskTransport.h"
+#include "http2/Http2Connection.h"
+#include "net/WskSocket.h"
+#include "tls/TlsConnection.h"
 
 #if defined(WKNET_USER_MODE_TEST)
 #include <stdlib.h>

@@ -1,4 +1,4 @@
-#include <wknet/net/WskClient.h>
+#include "net/WskClient.h"
 
 #if !defined(WKNET_USER_MODE_TEST)
 #include "WskSync.h"

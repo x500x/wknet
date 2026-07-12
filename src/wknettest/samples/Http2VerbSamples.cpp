@@ -3,8 +3,8 @@
 #include "samples/ExternalTrustStore.h"
 
 #include <wknet/WknetConfig.h>
-#include <wknet/client/Http2Client.h>
-#include <wknet/http2/Http2Frame.h>
+#include "client/Http2Client.h"
+#include "http2/Http2Frame.h"
 #include <wknettest/SampleStatus.h>
 #include "WknetTestLog.h"
 

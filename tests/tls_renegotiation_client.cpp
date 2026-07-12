@@ -2,9 +2,9 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <wknet/core/ITransport.h>
-#include <wknet/tls/TlsConnection.h>
-#include <wknet/tls/TlsPolicy.h>
+#include "transport/ITransport.h"
+#include "tls/TlsConnection.h"
+#include "tls/TlsPolicy.h"
 
 #include <limits.h>
 #include <stdio.h>

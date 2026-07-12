@@ -1,7 +1,7 @@
 #include <wknet/http/AsyncOp.h>
 #include "Detail.h"
-#include <wknet/engine/Async.h>
-#include <wknet/engine/Engine.h>
+#include "session/Async.h"
+#include "session/Engine.h"
 
 namespace wknet::http {
 NTSTATUS AsyncWait(AsyncOp* operation, ULONG timeoutMs) noexcept

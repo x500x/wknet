@@ -1,5 +1,5 @@
-#include <wknet/engine/Workspace.h>
-#include <wknet/core/Lookaside.h>
+#include "session/Workspace.h"
+#include "rtl/Lookaside.h"
 
 namespace wknet
 {

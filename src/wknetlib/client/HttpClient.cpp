@@ -1,5 +1,5 @@
-#include <wknet/client/HttpClient.h>
-#include <wknet/core/Irql.h>
+#include "client/HttpClient.h"
+#include "rtl/Irql.h"
 
 namespace wknet
 {

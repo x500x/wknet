@@ -1,13 +1,13 @@
-#include <wknet/client/HttpsClient.h>
-#include <wknet/client/ProxyTunnel.h>
-#include <wknet/core/Irql.h>
-#include <wknet/core/TlsTransport.h>
-#include <wknet/core/WorkspaceScratchAllocator.h>
-#include <wknet/core/WskTransport.h>
-#include <wknet/engine/Workspace.h>
-#include <wknet/client/Http2Client.h>
-#include <wknet/http1/HttpContentEncoding.h>
-#include <wknet/http2/Http2Connection.h>
+#include "client/HttpsClient.h"
+#include "client/ProxyTunnel.h"
+#include "rtl/Irql.h"
+#include "transport/TlsTransport.h"
+#include "rtl/WorkspaceScratchAllocator.h"
+#include "transport/WskTransport.h"
+#include "session/Workspace.h"
+#include "client/Http2Client.h"
+#include "http1/HttpContentEncoding.h"
+#include "http2/Http2Connection.h"
 
 namespace wknet
 {

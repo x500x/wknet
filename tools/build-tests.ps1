@@ -91,6 +91,7 @@ $zstdSources = @(
 
 $includeArgs = @(
     "/I", (Join-Path $repoRoot 'include'),
+    "/I", (Join-Path $repoRoot 'src\wknetlib'),
     "/I", (Join-Path $repoRoot 'src\wknettest'),
     "/I", (Join-Path $brotliRoot 'include')
 )

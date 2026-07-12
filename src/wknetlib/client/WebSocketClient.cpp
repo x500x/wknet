@@ -1,10 +1,10 @@
-#include <wknet/client/WebSocketClient.h>
-#include <wknet/core/Irql.h>
-#include <wknet/core/TlsTransport.h>
-#include <wknet/core/WorkspaceScratchAllocator.h>
-#include <wknet/core/WskTransport.h>
-#include <wknet/http1/HttpTypes.h>
-#include <wknet/http1/HttpRequest.h>
+#include "client/WebSocketClient.h"
+#include "rtl/Irql.h"
+#include "transport/TlsTransport.h"
+#include "rtl/WorkspaceScratchAllocator.h"
+#include "transport/WskTransport.h"
+#include "http1/HttpTypes.h"
+#include "http1/HttpRequest.h"
 
 #if defined(WKNET_USER_MODE_TEST)
 #include <time.h>

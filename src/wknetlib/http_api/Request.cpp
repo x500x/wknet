@@ -3,7 +3,7 @@
 #include <wknet/http/Body.h>
 #include <wknet/http/Headers.h>
 #include <wknet/http/Options.h>
-#include <wknet/engine/Engine.h>
+#include "session/Engine.h"
 
 namespace wknet::http {
 #if defined(WKNET_USER_MODE_TEST)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <wknet/http1/HttpTypes.h>
+#include "http1/HttpTypes.h"
 
 #ifndef STATUS_CONNECTION_REFUSED
 #define STATUS_CONNECTION_REFUSED ((NTSTATUS)0xC0000236L)

@@ -2,7 +2,7 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <wknet/ws/WebSocketFrame.h>
+#include "ws/WebSocketFrame.h"
 
 #include <stdio.h>
 #include <string.h>

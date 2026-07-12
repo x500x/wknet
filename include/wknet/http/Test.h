@@ -2,7 +2,7 @@
 
 #if defined(WKNET_USER_MODE_TEST)
 
-#include <wknet/engine/Engine.h>
+#include "session/Engine.h"
 #include <wknet/http/Types.h>
 
 namespace wknet::http {

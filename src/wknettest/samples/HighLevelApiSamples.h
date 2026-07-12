@@ -1,6 +1,6 @@
 #pragma once
 
-#include <wknet/http1/HttpTypes.h>
+#include "http1/HttpTypes.h"
 
 #if !defined(WKNET_USER_MODE_TEST)
 #include <ntddk.h>

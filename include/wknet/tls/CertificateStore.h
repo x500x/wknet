@@ -1,7 +1,7 @@
 #pragma once
 
 #include <wknet/crypto/CngProvider.h>
-#include <wknet/tls/TlsHandshake12.h>
+#include <wknet/tls/TlsTypes.h>
 
 namespace wknet
 {

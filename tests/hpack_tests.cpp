@@ -2,7 +2,7 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <wknet/http2/Hpack.h>
+#include "http2/Hpack.h"
 
 #include <stdio.h>
 #include <string.h>

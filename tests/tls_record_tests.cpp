@@ -2,15 +2,15 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <wknet/tls/TlsContext.h>
+#include "tls/TlsContext.h"
 #include <wknet/tls/CertificateStore.h>
-#include <wknet/tls/CertificateValidator.h>
-#include <wknet/tls/TlsCapabilities.h>
-#include <wknet/tls/TlsHandshake12.h>
-#include <wknet/tls/TlsHandshake13.h>
-#include <wknet/tls/TlsConnection.h>
-#include <wknet/tls/TlsPolicy.h>
-#include <wknet/tls/TlsRecord.h>
+#include "tls/CertificateValidator.h"
+#include "tls/TlsCapabilities.h"
+#include "tls/TlsHandshake12.h"
+#include "tls/TlsHandshake13.h"
+#include "tls/TlsConnection.h"
+#include "tls/TlsPolicy.h"
+#include "tls/TlsRecord.h"
 
 #include <stdio.h>
 #include <string.h>

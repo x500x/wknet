@@ -3,10 +3,10 @@
 #endif
 
 #include <wknet/tls/CertificateStore.h>
-#include <wknet/tls/CertificateValidator.h>
-#include <wknet/tls/TlsCapabilities.h>
-#include <wknet/tls/TlsConnection.h>
-#include <wknet/tls/TlsPolicy.h>
+#include "tls/CertificateValidator.h"
+#include "tls/TlsCapabilities.h"
+#include "tls/TlsConnection.h"
+#include "tls/TlsPolicy.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -1,8 +1,8 @@
-#include <wknet/client/Http2Client.h>
-#include <wknet/core/Irql.h>
-#include <wknet/core/TlsTransport.h>
-#include <wknet/core/WskTransport.h>
-#include <wknet/tls/TlsConnection.h>
+#include "client/Http2Client.h"
+#include "rtl/Irql.h"
+#include "transport/TlsTransport.h"
+#include "transport/WskTransport.h"
+#include "tls/TlsConnection.h"
 
 namespace wknet
 {

@@ -1,12 +1,12 @@
-#include <wknet/tls/TlsConnection.h>
+#include "tls/TlsConnection.h"
 
 #include <wknet/WknetLimits.h>
 #include <wknet/crypto/CngProviderCache.h>
 #include <wknet/crypto/Ed25519.h>
 #include <wknet/crypto/Ed448.h>
 #include <wknet/crypto/KeyExchange.h>
-#include <wknet/tls/TlsCapabilities.h>
-#include <wknet/tls/TlsHandshake13.h>
+#include "tls/TlsCapabilities.h"
+#include "tls/TlsHandshake13.h"
 
 #if defined(WKNET_USER_MODE_TEST)
 #include <time.h>

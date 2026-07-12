@@ -1,7 +1,7 @@
 #include <wknet/websocket/WebSocket.h>
 #include "Detail.h"
-#include <wknet/engine/Engine.h>
-#include <wknet/http1/HttpTypes.h>
+#include "session/Engine.h"
+#include "http1/HttpTypes.h"
 
 namespace wknet::websocket {
 namespace

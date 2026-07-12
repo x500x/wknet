@@ -1,9 +1,9 @@
-#include <wknet/engine/WsEngine.h>
-#include <wknet/engine/EngineImpl.h>
-#include <wknet/engine/HandleAlloc.h>
-#include <wknet/engine/UrlParser.h>
-#include <wknet/http1/HttpRequest.h>
-#include <wknet/ws/WebSocketFrame.h>
+#include "session/WsEngine.h"
+#include "session/EngineImpl.h"
+#include "session/HandleAlloc.h"
+#include "session/UrlParser.h"
+#include "http1/HttpRequest.h"
+#include "ws/WebSocketFrame.h"
 
 namespace wknet
 {

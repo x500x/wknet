@@ -2,10 +2,10 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <wknet/tls/TlsCapabilities.h>
-#include <wknet/tls/TlsHandshake12.h>
-#include <wknet/tls/TlsHandshake13.h>
-#include <wknet/tls/TlsPolicy.h>
+#include "tls/TlsCapabilities.h"
+#include "tls/TlsHandshake12.h"
+#include "tls/TlsHandshake13.h"
+#include "tls/TlsPolicy.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -1,5 +1,5 @@
-#include <wknet/engine/UrlParser.h>
-#include <wknet/http1/HttpTypes.h>
+#include "session/UrlParser.h"
+#include "http1/HttpTypes.h"
 
 namespace wknet
 {

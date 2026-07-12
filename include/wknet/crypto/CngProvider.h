@@ -1,7 +1,7 @@
 #pragma once
 
 #if defined(WKNET_USER_MODE_TEST)
-#include <wknet/http1/HttpTypes.h>
+#include "http1/HttpTypes.h"
 
 using LPCWSTR = const wchar_t*;
 

@@ -1,5 +1,5 @@
-#include <wknet/core/TlsTransport.h>
-#include <wknet/tls/TlsConnection.h>
+#include "transport/TlsTransport.h"
+#include "tls/TlsConnection.h"
 
 namespace wknet
 {

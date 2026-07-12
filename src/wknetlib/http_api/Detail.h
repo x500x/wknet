@@ -1,9 +1,9 @@
 #pragma once
 
-#include <wknet/engine/Engine.h>
-#include <wknet/engine/HandleTypes.h>
+#include "session/Engine.h"
+#include "session/HandleTypes.h"
 #include <wknet/http/Types.h>
-#include <wknet/net/WskClient.h>
+#include "net/WskClient.h"
 
 namespace wknet::http {
 namespace detail
