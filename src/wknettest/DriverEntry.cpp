@@ -1,4 +1,5 @@
 #include <wknet/Wknet.h>
+#include "session/EngineInternal.h"
 
 #include "WknetTestLog.h"
 #include "samples/KhttpSamples.h"

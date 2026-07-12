@@ -79,7 +79,7 @@
 #endif
 #if !defined(WKNET_USER_MODE_TEST)
         if (websocket->Client != nullptr) {
-            client::WebSocketIoBuffers buffers = {};
+            session::WsIoBuffers buffers = {};
             if (!TryUseWebSocketSendFrameScratch(*websocket, buffers)) {
                 status = STATUS_INVALID_DEVICE_STATE;
             }

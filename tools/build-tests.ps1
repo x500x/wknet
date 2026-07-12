@@ -38,7 +38,7 @@ $exePath = Join-Path $binDir "$Test.exe"
 $excludedLibSources = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 @(
     'Http2Client.cpp', 'HttpClient.cpp', 'HttpsClient.cpp',
-    'WknetConfig.cpp', 'WebSocketClient.cpp', 'WskSocket.cpp'
+    'WknetConfig.cpp', 'WsConnection.cpp', 'WskSocket.cpp'
 ) | ForEach-Object { [void]$excludedLibSources.Add($_) }
 
 switch ($Test) {
@@ -57,7 +57,7 @@ switch ($Test) {
     }
     'websocket_client_tests' {
         [void]$excludedLibSources.Add('WskClient.cpp')
-        [void]$excludedLibSources.Remove('WebSocketClient.cpp')
+        [void]$excludedLibSources.Remove('WsConnection.cpp')
     }
 }
 
@@ -67,7 +67,7 @@ $libSources = Get-ChildItem -Path (Join-Path $repoRoot 'src\wknetlib') -Recurse 
 
 # Only the high-level integration test pulls in sample translation units, and only the
 # three samples that compile under the user-mode harness. The HTTP/1.1-, HTTP/2-verb and
-# khttp samples call kernel-only client classes (HttpsClient/Http2Client/WebSocketClient)
+# khttp samples call kernel-only internal services (HttpsClient/Http2Client/WsConnection)
 # that have no user-mode implementation, so they are excluded.
 $sampleSources = @()
 if ($Test -eq 'high_level_api_tests') {

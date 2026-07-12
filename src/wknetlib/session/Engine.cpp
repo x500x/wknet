@@ -6,7 +6,7 @@
 #include "session/Workspace.h"
 #include <wknet/crypto/CngProviderCache.h>
 #include "client/Http2Client.h"
-#include "client/WebSocketClient.h"
+#include "session/WsConnection.h"
 #include "http1/HttpContentEncoding.h"
 #include "http1/HttpParser.h"
 #include "http1/HttpRequest.h"

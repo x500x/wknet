@@ -74,7 +74,7 @@
         }
 
         MutexScope sendLock(&websocket->SendLock);
-        client::WebSocketIoBuffers buffers = {};
+        session::WsIoBuffers buffers = {};
         if (!TryUseWebSocketSendFrameScratch(*websocket, buffers)) {
             return STATUS_INVALID_DEVICE_STATE;
         }
@@ -176,7 +176,7 @@
         }
 
         MutexScope sendLock(&websocket->SendLock);
-        client::WebSocketIoBuffers buffers = {};
+        session::WsIoBuffers buffers = {};
         if (!TryUseWebSocketSendFrameScratch(*websocket, buffers)) {
             return STATUS_INVALID_DEVICE_STATE;
         }
@@ -279,7 +279,7 @@
         }
 
         MutexScope sendLock(&websocket->SendLock);
-        client::WebSocketIoBuffers buffers = {};
+        session::WsIoBuffers buffers = {};
         if (!TryUseWebSocketSendFrameScratch(*websocket, buffers)) {
             return STATUS_INVALID_DEVICE_STATE;
         }

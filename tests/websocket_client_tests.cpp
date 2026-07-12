@@ -2,17 +2,17 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include "client/WebSocketClient.h"
+#include "session/WsConnection.h"
 
 #include <stdio.h>
 #include <string.h>
 
-using wknet::client::WebSocketClient;
-using wknet::client::WebSocketConnectOptions;
-using wknet::client::WebSocketHandshakeChallenge;
-using wknet::client::WebSocketHandshakeRetryAction;
-using wknet::client::WebSocketIoBuffers;
-using wknet::client::WebSocketTransportMode;
+using wknet::session::WsConnection;
+using wknet::session::WsConnectionOptions;
+using wknet::session::WsHandshakeChallenge;
+using wknet::session::WsHandshakeRetryAction;
+using wknet::session::WsIoBuffers;
+using wknet::session::WsConnectionTransportMode;
 using wknet::http1::HttpHeader;
 using wknet::ws::WebSocketCodec;
 using wknet::ws::WebSocketDeflateContext;
@@ -562,7 +562,7 @@ namespace
 
     FakeWebSocketServer* g_server = nullptr;
 
-    WebSocketIoBuffers MakeBuffers(
+    WsIoBuffers MakeBuffers(
         char* request,
         size_t requestLength,
         char* response,
@@ -574,7 +574,7 @@ namespace
         HttpHeader* headers,
         size_t headerCapacity)
     {
-        WebSocketIoBuffers buffers = {};
+        WsIoBuffers buffers = {};
         buffers.RequestBuffer = request;
         buffers.RequestBufferLength = requestLength;
         buffers.ResponseBuffer = response;
@@ -588,9 +588,9 @@ namespace
         return buffers;
     }
 
-    WebSocketConnectOptions MakeConnectOptions()
+    WsConnectionOptions MakeConnectOptions()
     {
-        WebSocketConnectOptions options = {};
+        WsConnectionOptions options = {};
         options.ServerName = L"example.test";
         options.ServiceName = L"80";
         options.Host = "example.test";
@@ -605,25 +605,25 @@ namespace
     void TestTransportModeDefaults()
     {
         Expect(
-            static_cast<ULONG>(WebSocketTransportMode::Auto) == 0,
+            static_cast<ULONG>(WsConnectionTransportMode::Auto) == 0,
             "client websocket Auto transport mode remains ABI zero");
 
-        WebSocketConnectOptions defaults = {};
+        WsConnectionOptions defaults = {};
         Expect(
-            defaults.TransportMode == WebSocketTransportMode::Auto,
+            defaults.TransportMode == WsConnectionTransportMode::Auto,
             "client websocket connect options default to Auto");
 
         FakeWebSocketServer server;
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -635,7 +635,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         NTSTATUS status = client.Connect(wskClient, options, buffers);
         Expect(NT_SUCCESS(status), "plaintext websocket default Auto connect succeeds");
         Expect(
@@ -653,13 +653,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -671,7 +671,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.Host = host;
         options.HostLength = strlen(host);
         options.Port = port;
@@ -709,13 +709,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -731,7 +731,7 @@ namespace
         extra[0] = { { "Origin", strlen("Origin") }, { "https://example.test", strlen("https://example.test") } };
         extra[1] = { { "Authorization", strlen("Authorization") }, { "Bearer token123", strlen("Bearer token123") } };
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.ExtraHeaders = extra;
         options.ExtraHeaderCount = 2;
 
@@ -771,13 +771,13 @@ namespace
             sizeof(banner) - 1);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -824,13 +824,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -863,13 +863,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -916,13 +916,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -977,13 +977,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1022,13 +1022,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1071,13 +1071,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1109,13 +1109,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1127,7 +1127,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.AddressFamily = wknet::net::WskAddressFamily::Any;
 
         const NTSTATUS status = client.Connect(wskClient, options, buffers);
@@ -1146,13 +1146,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1217,13 +1217,13 @@ namespace
             sizeof(second) - 1);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1286,13 +1286,13 @@ namespace
             sizeof(third));
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1336,13 +1336,13 @@ namespace
             sizeof(payloadBytes) - 1);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1391,13 +1391,13 @@ namespace
             sizeof(second) - 1);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1430,13 +1430,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1448,7 +1448,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.Subprotocol = "chat, superchat";
         options.SubprotocolLength = strlen(options.Subprotocol);
         const NTSTATUS status = client.Connect(wskClient, options, buffers);
@@ -1476,13 +1476,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1494,7 +1494,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.Subprotocol = "chat";
         options.SubprotocolLength = strlen(options.Subprotocol);
         USHORT statusCode = 0;
@@ -1512,13 +1512,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1543,13 +1543,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1572,13 +1572,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1611,13 +1611,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1629,7 +1629,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.PerMessageDeflate.Enable = true;
         options.PerMessageDeflate.ClientNoContextTakeover = true;
         options.PerMessageDeflate.ServerNoContextTakeover = true;
@@ -1668,13 +1668,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1686,7 +1686,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.PerMessageDeflate.Enable = true;
         options.PerMessageDeflate.ClientMaxWindowBits = 15;
         options.PerMessageDeflate.ServerMaxWindowBits = 15;
@@ -1707,13 +1707,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[512] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1725,7 +1725,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.PerMessageDeflate.Enable = true;
 
         NTSTATUS status = client.Connect(wskClient, options, buffers);
@@ -1788,13 +1788,13 @@ namespace
             true);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1806,7 +1806,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.PerMessageDeflate.Enable = true;
 
         status = client.Connect(wskClient, options, buffers);
@@ -1840,13 +1840,13 @@ namespace
             sizeof(banner) - 1);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[4] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1890,13 +1890,13 @@ namespace
             sizeof(largeMessage));
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         static unsigned char payload[21000] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1938,13 +1938,13 @@ namespace
             sizeof(oversizedTextHeader));
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[8] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -1997,13 +1997,13 @@ namespace
             sizeof(oversizedContinuationHeader));
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[8] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2056,13 +2056,13 @@ namespace
             sizeof(text) - 1);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2120,13 +2120,13 @@ namespace
             sizeof(text) - 1);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2186,13 +2186,13 @@ namespace
             sizeof(text) - 1);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[2] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2230,13 +2230,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2287,13 +2287,13 @@ namespace
         }
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[21000] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2336,13 +2336,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2385,13 +2385,13 @@ namespace
             frameLength);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frameBuffer[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2439,13 +2439,13 @@ namespace
             sizeof(maskedServerFrame));
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2518,13 +2518,13 @@ namespace
             sizeof(closePayload));
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2580,13 +2580,13 @@ namespace
             sizeof(invalidText));
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2636,13 +2636,13 @@ namespace
             true);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2697,13 +2697,13 @@ namespace
             true);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2767,13 +2767,13 @@ namespace
             true);
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2842,13 +2842,13 @@ namespace
                 payloadLengths[index]);
 
             wknet::net::WskClient wskClient;
-            WebSocketClient client;
+            WsConnection client;
             char request[1024] = {};
             char response[1024] = {};
             unsigned char frame[1024] = {};
             unsigned char payload[256] = {};
             HttpHeader headers[8] = {};
-            WebSocketIoBuffers buffers = MakeBuffers(
+            WsIoBuffers buffers = MakeBuffers(
                 request,
                 sizeof(request),
                 response,
@@ -2885,13 +2885,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2929,13 +2929,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -2974,13 +2974,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -3007,13 +3007,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -3045,13 +3045,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -3101,8 +3101,8 @@ namespace
 
     NTSTATUS AddAuthorizationOnChallenge(
         void* context,
-        const WebSocketHandshakeChallenge* challenge,
-        WebSocketHandshakeRetryAction* action)
+        const WsHandshakeChallenge* challenge,
+        WsHandshakeRetryAction* action)
     {
         auto* capture = static_cast<ChallengeCallbackCapture*>(context);
         if (capture == nullptr || challenge == nullptr || action == nullptr) {
@@ -3130,13 +3130,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -3149,7 +3149,7 @@ namespace
             sizeof(headers) / sizeof(headers[0]));
 
         ChallengeCallbackCapture capture = {};
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.ChallengeCallback = AddAuthorizationOnChallenge;
         options.ChallengeContext = &capture;
 
@@ -3176,8 +3176,8 @@ namespace
 
     NTSTATUS FollowRedirectPathOnChallenge(
         void* context,
-        const WebSocketHandshakeChallenge* challenge,
-        WebSocketHandshakeRetryAction* action)
+        const WsHandshakeChallenge* challenge,
+        WsHandshakeRetryAction* action)
     {
         UNREFERENCED_PARAMETER(context);
         if (challenge == nullptr || action == nullptr) {
@@ -3201,13 +3201,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -3219,7 +3219,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.ChallengeCallback = FollowRedirectPathOnChallenge;
 
         USHORT observedStatusCode = 0;
@@ -3241,13 +3241,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -3259,7 +3259,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.ServiceName = L"443";
         options.TlsServerName = "example.test";
         options.TlsServerNameLength = strlen(options.TlsServerName);
@@ -3280,13 +3280,13 @@ namespace
         g_server = &server;
 
         wknet::net::WskClient wskClient;
-        WebSocketClient client;
+        WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
         unsigned char frame[1024] = {};
         unsigned char payload[256] = {};
         HttpHeader headers[8] = {};
-        WebSocketIoBuffers buffers = MakeBuffers(
+        WsIoBuffers buffers = MakeBuffers(
             request,
             sizeof(request),
             response,
@@ -3298,7 +3298,7 @@ namespace
             headers,
             sizeof(headers) / sizeof(headers[0]));
 
-        WebSocketConnectOptions options = MakeConnectOptions();
+        WsConnectionOptions options = MakeConnectOptions();
         options.ServiceName = L"443";
         options.TlsServerName = "ws.postman-echo.com";
         options.TlsServerNameLength = strlen(options.TlsServerName);

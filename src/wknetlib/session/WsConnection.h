@@ -27,9 +27,9 @@ namespace crypto
     class CngProviderCache;
 }
 
-namespace client
+namespace session
 {
-    enum class WebSocketTransportMode : ULONG
+    enum class WsConnectionTransportMode : ULONG
     {
         Auto = 0,
         Http11Only = 1,
@@ -37,7 +37,7 @@ namespace client
         LegacyBoolean = 3
     };
 
-    struct WebSocketHandshakeChallenge final
+    struct WsHandshakeChallenge final
     {
         USHORT StatusCode = 0;
         const http1::HttpHeader* Headers = nullptr;
@@ -46,7 +46,7 @@ namespace client
         bool AuthenticationChallenge = false;
     };
 
-    struct WebSocketHandshakeRetryAction final
+    struct WsHandshakeRetryAction final
     {
         const char* RedirectPath = nullptr;
         SIZE_T RedirectPathLength = 0;
@@ -54,12 +54,12 @@ namespace client
         SIZE_T HeaderCount = 0;
     };
 
-    typedef NTSTATUS (*WebSocketHandshakeChallengeCallback)(
+    typedef NTSTATUS (*WsHandshakeChallengeCallback)(
         _In_opt_ void* context,
-        _In_ const WebSocketHandshakeChallenge* challenge,
-        _Out_ WebSocketHandshakeRetryAction* action);
+        _In_ const WsHandshakeChallenge* challenge,
+        _Out_ WsHandshakeRetryAction* action);
 
-    struct WebSocketConnectOptions final
+    struct WsConnectionOptions final
     {
         const wchar_t* ServerName = nullptr;
         const wchar_t* ServiceName = L"80";
@@ -88,14 +88,14 @@ namespace client
         bool UseTls = false;
         bool VerifyCertificate = true;
         bool AllowWebSocketOverHttp2 = false;
-        WebSocketTransportMode TransportMode = WebSocketTransportMode::Auto;
+        WsConnectionTransportMode TransportMode = WsConnectionTransportMode::Auto;
         ws::PerMessageDeflateOptions PerMessageDeflate = {};
-        WebSocketHandshakeChallengeCallback ChallengeCallback = nullptr;
+        WsHandshakeChallengeCallback ChallengeCallback = nullptr;
         void* ChallengeContext = nullptr;
         ULONG MaxHandshakeRetries = 0;
     };
 
-    struct WebSocketIoBuffers final
+    struct WsIoBuffers final
     {
         char* RequestBuffer = nullptr;
         SIZE_T RequestBufferLength = 0;
@@ -109,65 +109,65 @@ namespace client
         SIZE_T HeaderCapacity = 0;
     };
 
-    struct WebSocketEchoResult final
+    struct WsEchoResult final
     {
         USHORT HandshakeStatusCode = 0;
         ws::WebSocketOpcode Opcode = ws::WebSocketOpcode::Continuation;
         SIZE_T BytesReceived = 0;
     };
 
-    class WebSocketClient final
+    class WsConnection final
     {
     public:
-        WebSocketClient() noexcept = default;
-        ~WebSocketClient() noexcept;
+        WsConnection() noexcept = default;
+        ~WsConnection() noexcept;
 
-        WebSocketClient(const WebSocketClient&) = delete;
-        WebSocketClient& operator=(const WebSocketClient&) = delete;
+        WsConnection(const WsConnection&) = delete;
+        WsConnection& operator=(const WsConnection&) = delete;
 
         _Must_inspect_result_
         NTSTATUS Connect(
             _Inout_ net::WskClient& wskClient,
-            _In_ const WebSocketConnectOptions& options,
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsConnectionOptions& options,
+            _In_ const WsIoBuffers& buffers,
             _Out_opt_ USHORT* statusCode = nullptr) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendText(
             _In_reads_bytes_(messageLength) const char* message,
             SIZE_T messageLength,
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsIoBuffers& buffers,
             bool finalFragment = true) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendBinary(
             _In_reads_bytes_(messageLength) const UCHAR* message,
             SIZE_T messageLength,
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsIoBuffers& buffers,
             bool finalFragment = true) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendContinuation(
             _In_reads_bytes_(messageLength) const UCHAR* message,
             SIZE_T messageLength,
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsIoBuffers& buffers,
             bool finalFragment = true) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendPing(
             _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
             SIZE_T payloadLength,
-            _In_ const WebSocketIoBuffers& buffers) noexcept;
+            _In_ const WsIoBuffers& buffers) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendPong(
             _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
             SIZE_T payloadLength,
-            _In_ const WebSocketIoBuffers& buffers) noexcept;
+            _In_ const WsIoBuffers& buffers) noexcept;
 
         _Must_inspect_result_
         NTSTATUS ReceiveMessage(
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsIoBuffers& buffers,
             _Out_ ws::WebSocketOpcode* opcode,
             _Out_writes_bytes_(outputCapacity) UCHAR* output,
             SIZE_T outputCapacity,
@@ -177,14 +177,14 @@ namespace client
             _Out_opt_ bool* finalFragment = nullptr) noexcept;
 
         _Must_inspect_result_
-        NTSTATUS Close(_In_ const WebSocketIoBuffers& buffers) noexcept;
+        NTSTATUS Close(_In_ const WsIoBuffers& buffers) noexcept;
 
         _Must_inspect_result_
         NTSTATUS Close(
             USHORT statusCode,
             _In_reads_bytes_opt_(reasonLength) const UCHAR* reason,
             SIZE_T reasonLength,
-            _In_ const WebSocketIoBuffers& buffers) noexcept;
+            _In_ const WsIoBuffers& buffers) noexcept;
 
         _Ret_maybenull_
         const char* SelectedSubprotocol(_Out_opt_ SIZE_T* subprotocolLength = nullptr) const noexcept;
@@ -193,8 +193,8 @@ namespace client
         NTSTATUS SendTextAndReceiveEcho(
             _In_reads_bytes_(messageLength) const char* message,
             SIZE_T messageLength,
-            _In_ const WebSocketIoBuffers& buffers,
-            _Out_ WebSocketEchoResult& result) noexcept;
+            _In_ const WsIoBuffers& buffers,
+            _Out_ WsEchoResult& result) noexcept;
 
     private:
         _Must_inspect_result_
@@ -211,7 +211,7 @@ namespace client
             ULONG timeoutMilliseconds = WskOperationTimeoutMilliseconds) noexcept;
 
         _Must_inspect_result_
-        NTSTATUS WaitForPeerClose(_In_ const WebSocketIoBuffers& buffers) noexcept;
+        NTSTATUS WaitForPeerClose(_In_ const WsIoBuffers& buffers) noexcept;
 
         _Must_inspect_result_
         NTSTATUS EnsureBufferedFrameCapacity(SIZE_T capacity) noexcept;
@@ -228,27 +228,27 @@ namespace client
         _Must_inspect_result_
         NTSTATUS SendCloseStatus(
             USHORT statusCode,
-            _In_ const WebSocketIoBuffers& buffers) noexcept;
+            _In_ const WsIoBuffers& buffers) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendCloseFrame(
             _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
             SIZE_T payloadLength,
-            _In_ const WebSocketIoBuffers& buffers) noexcept;
+            _In_ const WsIoBuffers& buffers) noexcept;
 
         _Must_inspect_result_
         NTSTATUS SendControlFrame(
             ws::WebSocketOpcode opcode,
             _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
             SIZE_T payloadLength,
-            _In_ const WebSocketIoBuffers& buffers) noexcept;
+            _In_ const WsIoBuffers& buffers) noexcept;
 
         _Must_inspect_result_
         NTSTATUS EncodeAndSendFrame(
             ws::WebSocketOpcode opcode,
             _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
             SIZE_T payloadLength,
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsIoBuffers& buffers,
             bool finalFragment,
             bool rsv1 = false) noexcept;
 
@@ -257,12 +257,12 @@ namespace client
             ws::WebSocketOpcode opcode,
             _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
             SIZE_T payloadLength,
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsIoBuffers& buffers,
             bool finalFragment) noexcept;
 
         NTSTATUS FailConnectionWithClose(
             USHORT statusCode,
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsIoBuffers& buffers,
             NTSTATUS returnStatus) noexcept;
 
         _Must_inspect_result_
@@ -270,15 +270,15 @@ namespace client
             ws::WebSocketOpcode opcode,
             _In_reads_bytes_(messageLength) const UCHAR* message,
             SIZE_T messageLength,
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsIoBuffers& buffers,
             bool finalFragment) noexcept;
 
         _Must_inspect_result_
         NTSTATUS ConnectAddress(
             _Inout_ net::WskClient& wskClient,
             _In_ const SOCKADDR* remoteAddress,
-            _In_ const WebSocketConnectOptions& options,
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsConnectionOptions& options,
+            _In_ const WsIoBuffers& buffers,
             _In_reads_bytes_(clientKeyLength) const char* clientKey,
             SIZE_T clientKeyLength,
             SIZE_T requestLength,
@@ -292,7 +292,7 @@ namespace client
             _In_reads_bytes_opt_(requestedSubprotocolLength) const char* requestedSubprotocol,
             SIZE_T requestedSubprotocolLength,
             _In_ const ws::PerMessageDeflateOptions& perMessageDeflate,
-            _In_ const WebSocketIoBuffers& buffers,
+            _In_ const WsIoBuffers& buffers,
             _Out_ http1::HttpResponse& response) noexcept;
 
         net::WskSocket socket_ = {};

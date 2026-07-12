@@ -27,18 +27,18 @@
                 options.AllowWebSocketOverHttp2);
     }
 
-    client::WebSocketTransportMode ToClientWebSocketTransportMode(WebSocketTransportMode mode) noexcept
+    session::WsConnectionTransportMode ToWsConnectionTransportMode(WebSocketTransportMode mode) noexcept
     {
         switch (mode) {
         case WebSocketTransportMode::Http11Only:
-            return client::WebSocketTransportMode::Http11Only;
+            return session::WsConnectionTransportMode::Http11Only;
         case WebSocketTransportMode::Auto:
-            return client::WebSocketTransportMode::Auto;
+            return session::WsConnectionTransportMode::Auto;
         case WebSocketTransportMode::Http2Required:
-            return client::WebSocketTransportMode::Http2Required;
+            return session::WsConnectionTransportMode::Http2Required;
         case WebSocketTransportMode::LegacyBoolean:
         default:
-            return client::WebSocketTransportMode::LegacyBoolean;
+            return session::WsConnectionTransportMode::LegacyBoolean;
         }
     }
 
@@ -50,8 +50,8 @@
 
     NTSTATUS WebSocketChallengeBridge(
         void* context,
-        const client::WebSocketHandshakeChallenge* challenge,
-        client::WebSocketHandshakeRetryAction* action) noexcept
+        const session::WsHandshakeChallenge* challenge,
+        session::WsHandshakeRetryAction* action) noexcept
     {
         auto* bridge = static_cast<WebSocketChallengeBridgeContext*>(context);
         if (bridge == nullptr ||

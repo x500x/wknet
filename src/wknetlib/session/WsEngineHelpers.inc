@@ -114,7 +114,7 @@
     _Must_inspect_result_
     bool TryUseWebSocketSendFrameScratch(
         _In_ const WebSocket& websocket,
-        _Inout_ client::WebSocketIoBuffers& buffers) noexcept
+        _Inout_ session::WsIoBuffers& buffers) noexcept
     {
         if (websocket.Workspace == nullptr ||
             websocket.Workspace->WebSocketSendFrameScratch.Data == nullptr ||
@@ -390,7 +390,7 @@
         }
 
         HeapArray<UCHAR> frameBuffer(WorkspaceWebSocketFrameScratchBytes);
-        client::WebSocketIoBuffers buffers = {};
+        session::WsIoBuffers buffers = {};
         if (frameBuffer.IsValid()) {
             buffers.FrameBuffer = frameBuffer.Get();
             buffers.FrameBufferLength = frameBuffer.Count();

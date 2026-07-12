@@ -219,7 +219,7 @@
         *websocket = newWebSocket;
         return STATUS_SUCCESS;
 #else
-        newWebSocket->Client = AllocateNonPagedObject<client::WebSocketClient>();
+        newWebSocket->Client = AllocateNonPagedObject<session::WsConnection>();
         if (newWebSocket->Client == nullptr) {
             ReleaseWebSocketStorage(*newWebSocket);
             FreeHandle(newWebSocket);
@@ -239,7 +239,7 @@
             status = FormatServiceName(newWebSocket->Port, serviceName.Get(), serviceName.Count());
         }
 
-        client::WebSocketIoBuffers buffers = {};
+        session::WsIoBuffers buffers = {};
         buffers.RequestBuffer = reinterpret_cast<char*>(newWebSocket->Workspace->Request.Data);
         buffers.RequestBufferLength = newWebSocket->Workspace->Request.Length;
         buffers.ResponseBuffer = reinterpret_cast<char*>(newWebSocket->Workspace->Response.Data);
@@ -257,7 +257,7 @@
         buffers.Headers = responseHeaders.Get();
         buffers.HeaderCapacity = MaxHeadersPerResponse;
 
-        client::WebSocketConnectOptions connectOptions = {};
+        session::WsConnectionOptions connectOptions = {};
         HeapArray<http1::HttpHeader> extraHeaderViews(MaxHeadersPerRequest);
         if (!extraHeaderViews.IsValid()) {
             ReleaseWebSocketStorage(*newWebSocket);
@@ -306,7 +306,7 @@
         connectOptions.UseTls = TextEqualsLiteralIgnoreCase(newWebSocket->Scheme, newWebSocket->SchemeLength, "wss");
         connectOptions.VerifyCertificate = effectiveTls.CertificatePolicy == CertificatePolicy::Verify;
         connectOptions.AllowWebSocketOverHttp2 = options.AllowWebSocketOverHttp2;
-        connectOptions.TransportMode = ToClientWebSocketTransportMode(options.TransportMode);
+        connectOptions.TransportMode = ToWsConnectionTransportMode(options.TransportMode);
         connectOptions.PerMessageDeflate = options.PerMessageDeflate;
         WebSocketChallengeBridgeContext challengeBridge = {};
         if (options.ChallengeCallback != nullptr) {

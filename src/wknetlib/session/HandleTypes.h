@@ -5,7 +5,7 @@
 #include "session/Workspace.h"
 #include "rtl/Lookaside.h"
 #include <wknet/crypto/CngProviderCache.h>
-#include "client/WebSocketClient.h"
+#include "session/WsConnection.h"
 
 namespace wknet
 {
@@ -173,7 +173,7 @@ namespace session
         KMUTEX SendLock = {};
         KMUTEX ReceiveLock = {};
         KEVENT DrainEvent = {};
-        client::WebSocketClient* Client = nullptr;
+        session::WsConnection* Client = nullptr;
 #endif
     };
 }

@@ -1,4 +1,4 @@
-#include "client/WebSocketClient.h"
+#include "session/WsConnection.h"
 #include "rtl/Irql.h"
 #include "transport/TlsTransport.h"
 #include "rtl/WorkspaceScratchAllocator.h"
@@ -12,7 +12,7 @@
 
 namespace wknet
 {
-namespace client
+namespace session
 {
     namespace
     {
@@ -160,7 +160,7 @@ namespace client
 
         _Must_inspect_result_
         bool IsTls12ConfirmationCandidate(
-            const WebSocketConnectOptions& options,
+            const WsConnectionOptions& options,
             const tls::TlsHandshakeFailure& failure) noexcept
         {
             const bool failureCanConfirmTls12 =
@@ -175,52 +175,52 @@ namespace client
         }
 
         _Must_inspect_result_
-        bool IsValidWebSocketTransportMode(WebSocketTransportMode mode) noexcept
+        bool IsValidWsConnectionTransportMode(WsConnectionTransportMode mode) noexcept
         {
-            return mode == WebSocketTransportMode::LegacyBoolean ||
-                mode == WebSocketTransportMode::Http11Only ||
-                mode == WebSocketTransportMode::Auto ||
-                mode == WebSocketTransportMode::Http2Required;
+            return mode == WsConnectionTransportMode::LegacyBoolean ||
+                mode == WsConnectionTransportMode::Http11Only ||
+                mode == WsConnectionTransportMode::Auto ||
+                mode == WsConnectionTransportMode::Http2Required;
         }
 
         _Must_inspect_result_
-        bool IsValidWebSocketConnectOptions(const WebSocketConnectOptions& options) noexcept
+        bool IsValidWsConnectionOptions(const WsConnectionOptions& options) noexcept
         {
-            return IsValidWebSocketTransportMode(options.TransportMode) &&
+            return IsValidWsConnectionTransportMode(options.TransportMode) &&
                 ws::IsValidPerMessageDeflateOptions(options.PerMessageDeflate);
         }
 
         _Must_inspect_result_
-        bool WebSocketModeAllowsHttp2(const WebSocketConnectOptions& options) noexcept
+        bool WebSocketModeAllowsHttp2(const WsConnectionOptions& options) noexcept
         {
             switch (options.TransportMode) {
-            case WebSocketTransportMode::Http11Only:
+            case WsConnectionTransportMode::Http11Only:
                 return false;
-            case WebSocketTransportMode::Auto:
-            case WebSocketTransportMode::Http2Required:
+            case WsConnectionTransportMode::Auto:
+            case WsConnectionTransportMode::Http2Required:
                 return true;
-            case WebSocketTransportMode::LegacyBoolean:
+            case WsConnectionTransportMode::LegacyBoolean:
             default:
                 return options.AllowWebSocketOverHttp2;
             }
         }
 
         _Must_inspect_result_
-        bool WebSocketModeRequiresHttp2(const WebSocketConnectOptions& options) noexcept
+        bool WebSocketModeRequiresHttp2(const WsConnectionOptions& options) noexcept
         {
-            return options.TransportMode == WebSocketTransportMode::Http2Required;
+            return options.TransportMode == WsConnectionTransportMode::Http2Required;
         }
 
         _Must_inspect_result_
-        bool WebSocketModeCanRetryHttp11(const WebSocketConnectOptions& options, NTSTATUS status) noexcept
+        bool WebSocketModeCanRetryHttp11(const WsConnectionOptions& options, NTSTATUS status) noexcept
         {
-            return options.TransportMode == WebSocketTransportMode::Auto &&
+            return options.TransportMode == WsConnectionTransportMode::Auto &&
                 options.UseTls &&
                 status == STATUS_NOT_SUPPORTED;
         }
 
         _Must_inspect_result_
-        bool IsWebSocketHandshakeChallengeStatus(USHORT statusCode) noexcept
+        bool IsWsHandshakeChallengeStatus(USHORT statusCode) noexcept
         {
             return (statusCode >= 300 && statusCode <= 399) ||
                 statusCode == 401 ||
@@ -388,7 +388,7 @@ namespace client
 
         _Must_inspect_result_
         NTSTATUS BuildWebSocketHostHeader(
-            _In_ const WebSocketConnectOptions& options,
+            _In_ const WsConnectionOptions& options,
             _Out_writes_bytes_(destinationCapacity) char* destination,
             SIZE_T destinationCapacity,
             _Out_ SIZE_T* destinationLength) noexcept
@@ -582,7 +582,7 @@ namespace client
 
         _Must_inspect_result_
         NTSTATUS BuildHandshakeRequest(
-            _In_ const WebSocketConnectOptions& options,
+            _In_ const WsConnectionOptions& options,
             _In_reads_bytes_(clientKeyLength) const char* clientKey,
             SIZE_T clientKeyLength,
             _Out_writes_bytes_(destinationCapacity) char* destination,
@@ -678,7 +678,7 @@ namespace client
 
         _Must_inspect_result_
         NTSTATUS BuildHttp2WebSocketHeaders(
-            _In_ const WebSocketConnectOptions& options,
+            _In_ const WsConnectionOptions& options,
             _In_reads_bytes_opt_(extensionOfferLength) const char* extensionOffer,
             SIZE_T extensionOfferLength,
             _Out_writes_(headerCapacity) http1::HttpHeader* headers,
@@ -1026,9 +1026,9 @@ namespace client
         }
     }
 
-    WebSocketClient::~WebSocketClient() noexcept
+    WsConnection::~WsConnection() noexcept
     {
-        WebSocketIoBuffers empty = {};
+        WsIoBuffers empty = {};
         const NTSTATUS status = Close(empty);
         UNREFERENCED_PARAMETER(status);
         if (bufferedFrame_ != nullptr && bufferedFrameCapacity_ != 0) {
@@ -1040,10 +1040,10 @@ namespace client
         bufferedFrameLength_ = 0;
     }
 
-    NTSTATUS WebSocketClient::Connect(
+    NTSTATUS WsConnection::Connect(
         net::WskClient& wskClient,
-        const WebSocketConnectOptions& options,
-        const WebSocketIoBuffers& buffers,
+        const WsConnectionOptions& options,
+        const WsIoBuffers& buffers,
         USHORT* statusCode) noexcept
     {
         NTSTATUS status = core::CheckPassiveLevel();
@@ -1084,7 +1084,7 @@ namespace client
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (!IsValidWebSocketConnectOptions(options) ||
+        if (!IsValidWsConnectionOptions(options) ||
             (WebSocketModeRequiresHttp2(options) && !options.UseTls) ||
             (options.ChallengeCallback == nullptr && options.ChallengeContext != nullptr) ||
             options.MaxHandshakeRetries > WebSocketMaxHandshakeRetries) {
@@ -1142,7 +1142,7 @@ namespace client
             &remoteAddressCount,
             options.AddressFamily);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WebSocketClient resolve failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_DBG_PRINT("WsConnection resolve failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -1165,8 +1165,8 @@ namespace client
 
             lastStatus = status;
             if (WebSocketModeCanRetryHttp11(options, status)) {
-                WebSocketConnectOptions http11Options = options;
-                http11Options.TransportMode = WebSocketTransportMode::Http11Only;
+                WsConnectionOptions http11Options = options;
+                http11Options.TransportMode = WsConnectionTransportMode::Http11Only;
                 http11Options.AllowWebSocketOverHttp2 = false;
                 if (statusCode != nullptr) {
                     *statusCode = 0;
@@ -1185,19 +1185,19 @@ namespace client
                     &ignoredConfirmationCandidate);
                 if (NT_SUCCESS(http11Status)) {
                     WKNET_DBG_PRINT(
-                        "WebSocketClient HTTP/1.1 retry succeeded after h2 unsupported index=%Iu\r\n",
+                        "WsConnection HTTP/1.1 retry succeeded after h2 unsupported index=%Iu\r\n",
                         addressIndex);
                     return STATUS_SUCCESS;
                 }
                 WKNET_DBG_PRINT(
-                    "WebSocketClient HTTP/1.1 retry failed: 0x%08X original=0x%08X index=%Iu\r\n",
+                    "WsConnection HTTP/1.1 retry failed: 0x%08X original=0x%08X index=%Iu\r\n",
                     static_cast<ULONG>(http11Status),
                     static_cast<ULONG>(status),
                     addressIndex);
                 lastStatus = http11Status;
             }
             if (tls12ConfirmationCandidate) {
-                WebSocketConnectOptions tls12Options = options;
+                WsConnectionOptions tls12Options = options;
                 tls12Options.MaximumTlsProtocol = tls::TlsProtocol::Tls12;
                 if (statusCode != nullptr) {
                     *statusCode = 0;
@@ -1216,18 +1216,18 @@ namespace client
                     &ignoredConfirmationCandidate);
                 if (NT_SUCCESS(confirmationStatus)) {
                     WKNET_DBG_PRINT(
-                        "WebSocketClient TLS1.2 confirmed after version negotiation index=%Iu\r\n",
+                        "WsConnection TLS1.2 confirmed after version negotiation index=%Iu\r\n",
                         addressIndex);
                     return STATUS_SUCCESS;
                 }
 
                 WKNET_DBG_PRINT(
-                    "WebSocketClient TLS1.2 confirmation failed: 0x%08X original=0x%08X index=%Iu\r\n",
+                    "WsConnection TLS1.2 confirmation failed: 0x%08X original=0x%08X index=%Iu\r\n",
                     static_cast<ULONG>(confirmationStatus),
                     static_cast<ULONG>(status),
                     addressIndex);
             }
-            WKNET_DBG_PRINT("WebSocketClient address attempt failed: 0x%08X index=%Iu family=%u\r\n",
+            WKNET_DBG_PRINT("WsConnection address attempt failed: 0x%08X index=%Iu family=%u\r\n",
                 static_cast<ULONG>(lastStatus),
                 addressIndex,
                 static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
@@ -1236,11 +1236,11 @@ namespace client
         return lastStatus;
     }
 
-    NTSTATUS WebSocketClient::ConnectAddress(
+    NTSTATUS WsConnection::ConnectAddress(
         net::WskClient& wskClient,
         const SOCKADDR* remoteAddress,
-        const WebSocketConnectOptions& options,
-        const WebSocketIoBuffers& buffers,
+        const WsConnectionOptions& options,
+        const WsIoBuffers& buffers,
         const char* clientKey,
         SIZE_T clientKeyLength,
         SIZE_T requestLength,
@@ -1257,7 +1257,7 @@ namespace client
 
         NTSTATUS status = socket_.Connect(wskClient, remoteAddress, nullptr, options.Cancellation);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WebSocketClient connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_DBG_PRINT("WsConnection connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
         transportClosed_ = false;
@@ -1347,7 +1347,7 @@ namespace client
                     IsTls12ConfirmationCandidate(options, tls_->LastHandshakeFailure())) {
                     *tls12ConfirmationCandidate = true;
                 }
-                WKNET_DBG_PRINT("WebSocketClient TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_DBG_PRINT("WsConnection TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 const NTSTATUS closeStatus = CloseTransport();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -1510,7 +1510,7 @@ namespace client
             }
             if (negotiatedAlpnLength != 0 &&
                 !TextEqualsLiteral(negotiatedAlpn, negotiatedAlpnLength, WebSocketHttp11Alpn)) {
-                WKNET_DBG_PRINT("WebSocketClient unexpected ALPN: %.*s\r\n",
+                WKNET_DBG_PRINT("WsConnection unexpected ALPN: %.*s\r\n",
                     static_cast<int>(negotiatedAlpnLength),
                     negotiatedAlpn != nullptr ? negotiatedAlpn : "");
                 const NTSTATUS closeStatus = CloseTransport();
@@ -1519,7 +1519,7 @@ namespace client
             }
         }
 
-        WebSocketConnectOptions currentOptions = options;
+        WsConnectionOptions currentOptions = options;
         ULONG retryLimit = options.ChallengeCallback != nullptr ?
             (options.MaxHandshakeRetries != 0 ? options.MaxHandshakeRetries : WebSocketDefaultHandshakeRetries) :
             0;
@@ -1532,7 +1532,7 @@ namespace client
             }
 
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("WebSocketClient send handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_DBG_PRINT("WsConnection send handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 const NTSTATUS closeStatus = Close(buffers);
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -1557,16 +1557,16 @@ namespace client
 
             if (status == STATUS_NOT_SUPPORTED &&
                 options.ChallengeCallback != nullptr &&
-                IsWebSocketHandshakeChallengeStatus(response.StatusCode) &&
+                IsWsHandshakeChallengeStatus(response.StatusCode) &&
                 retryCount < retryLimit) {
-                WebSocketHandshakeChallenge challenge = {};
+                WsHandshakeChallenge challenge = {};
                 challenge.StatusCode = response.StatusCode;
                 challenge.Headers = response.Headers;
                 challenge.HeaderCount = response.HeaderCount;
                 challenge.Redirect = response.StatusCode >= 300 && response.StatusCode <= 399;
                 challenge.AuthenticationChallenge = response.StatusCode == 401 || response.StatusCode == 407;
 
-                WebSocketHandshakeRetryAction action = {};
+                WsHandshakeRetryAction action = {};
                 status = options.ChallengeCallback(options.ChallengeContext, &challenge, &action);
                 if (!NT_SUCCESS(status)) {
                     const NTSTATUS closeStatus = Close(buffers);
@@ -1618,7 +1618,7 @@ namespace client
                 continue;
             }
 
-            WKNET_DBG_PRINT("WebSocketClient handshake failed: 0x%08X status=%u\r\n",
+            WKNET_DBG_PRINT("WsConnection handshake failed: 0x%08X status=%u\r\n",
                 static_cast<ULONG>(status),
                 response.StatusCode);
             const NTSTATUS closeStatus = Close(buffers);
@@ -1631,10 +1631,10 @@ namespace client
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS WebSocketClient::SendText(
+    NTSTATUS WsConnection::SendText(
         const char* message,
         SIZE_T messageLength,
-        const WebSocketIoBuffers& buffers,
+        const WsIoBuffers& buffers,
         bool finalFragment) noexcept
     {
         NTSTATUS status = core::CheckPassiveLevel();
@@ -1650,10 +1650,10 @@ namespace client
             finalFragment);
     }
 
-    NTSTATUS WebSocketClient::SendBinary(
+    NTSTATUS WsConnection::SendBinary(
         const UCHAR* message,
         SIZE_T messageLength,
-        const WebSocketIoBuffers& buffers,
+        const WsIoBuffers& buffers,
         bool finalFragment) noexcept
     {
         NTSTATUS status = core::CheckPassiveLevel();
@@ -1669,10 +1669,10 @@ namespace client
             finalFragment);
     }
 
-    NTSTATUS WebSocketClient::SendContinuation(
+    NTSTATUS WsConnection::SendContinuation(
         const UCHAR* message,
         SIZE_T messageLength,
-        const WebSocketIoBuffers& buffers,
+        const WsIoBuffers& buffers,
         bool finalFragment) noexcept
     {
         NTSTATUS status = core::CheckPassiveLevel();
@@ -1688,10 +1688,10 @@ namespace client
             finalFragment);
     }
 
-    NTSTATUS WebSocketClient::SendPing(
+    NTSTATUS WsConnection::SendPing(
         const UCHAR* payload,
         SIZE_T payloadLength,
-        const WebSocketIoBuffers& buffers) noexcept
+        const WsIoBuffers& buffers) noexcept
     {
         NTSTATUS status = core::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -1701,10 +1701,10 @@ namespace client
         return SendControlFrame(ws::WebSocketOpcode::Ping, payload, payloadLength, buffers);
     }
 
-    NTSTATUS WebSocketClient::SendPong(
+    NTSTATUS WsConnection::SendPong(
         const UCHAR* payload,
         SIZE_T payloadLength,
-        const WebSocketIoBuffers& buffers) noexcept
+        const WsIoBuffers& buffers) noexcept
     {
         NTSTATUS status = core::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -1714,11 +1714,11 @@ namespace client
         return SendControlFrame(ws::WebSocketOpcode::Pong, payload, payloadLength, buffers);
     }
 
-    NTSTATUS WebSocketClient::SendControlFrame(
+    NTSTATUS WsConnection::SendControlFrame(
         ws::WebSocketOpcode opcode,
         const UCHAR* payload,
         SIZE_T payloadLength,
-        const WebSocketIoBuffers& buffers) noexcept
+        const WsIoBuffers& buffers) noexcept
     {
         if (!connected_) {
             return (transportClosed_ || closeSent_ || closeReceived_) ?
@@ -1745,11 +1745,11 @@ namespace client
         return EncodeAndSendFrame(opcode, payload, payloadLength, buffers, true);
     }
 
-    NTSTATUS WebSocketClient::SendFrame(
+    NTSTATUS WsConnection::SendFrame(
         ws::WebSocketOpcode opcode,
         const UCHAR* message,
         SIZE_T messageLength,
-        const WebSocketIoBuffers& buffers,
+        const WsIoBuffers& buffers,
         bool finalFragment) noexcept
     {
         if (!connected_) {
@@ -1848,8 +1848,8 @@ namespace client
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS WebSocketClient::ReceiveMessage(
-        const WebSocketIoBuffers& buffers,
+    NTSTATUS WsConnection::ReceiveMessage(
+        const WsIoBuffers& buffers,
         ws::WebSocketOpcode* opcode,
         UCHAR* output,
         SIZE_T outputCapacity,
@@ -2333,7 +2333,7 @@ namespace client
         }
     }
 
-    NTSTATUS WebSocketClient::WaitForPeerClose(const WebSocketIoBuffers& buffers) noexcept
+    NTSTATUS WsConnection::WaitForPeerClose(const WsIoBuffers& buffers) noexcept
     {
         UNREFERENCED_PARAMETER(buffers);
 
@@ -2512,7 +2512,7 @@ namespace client
         }
     }
 
-    NTSTATUS WebSocketClient::Close(const WebSocketIoBuffers& buffers) noexcept
+    NTSTATUS WsConnection::Close(const WsIoBuffers& buffers) noexcept
     {
         NTSTATUS status = core::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2557,11 +2557,11 @@ namespace client
         return closeStatus;
     }
 
-    NTSTATUS WebSocketClient::Close(
+    NTSTATUS WsConnection::Close(
         USHORT statusCode,
         const UCHAR* reason,
         SIZE_T reasonLength,
-        const WebSocketIoBuffers& buffers) noexcept
+        const WsIoBuffers& buffers) noexcept
     {
         NTSTATUS status = core::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2596,7 +2596,7 @@ namespace client
         return Close(buffers);
     }
 
-    const char* WebSocketClient::SelectedSubprotocol(SIZE_T* subprotocolLength) const noexcept
+    const char* WsConnection::SelectedSubprotocol(SIZE_T* subprotocolLength) const noexcept
     {
         if (subprotocolLength != nullptr) {
             *subprotocolLength = selectedSubprotocolLength_;
@@ -2604,11 +2604,11 @@ namespace client
         return selectedSubprotocolLength_ != 0 ? selectedSubprotocol_.Get() : nullptr;
     }
 
-    NTSTATUS WebSocketClient::SendTextAndReceiveEcho(
+    NTSTATUS WsConnection::SendTextAndReceiveEcho(
         const char* message,
         SIZE_T messageLength,
-        const WebSocketIoBuffers& buffers,
-        WebSocketEchoResult& result) noexcept
+        const WsIoBuffers& buffers,
+        WsEchoResult& result) noexcept
     {
         result = {};
 
@@ -2651,7 +2651,7 @@ namespace client
         return STATUS_INVALID_NETWORK_RESPONSE;
     }
 
-    void WebSocketClient::ResetReceiveFragment() noexcept
+    void WsConnection::ResetReceiveFragment() noexcept
     {
         receiveFragmentOpen_ = false;
         receiveCompressedMessage_ = false;
@@ -2662,7 +2662,7 @@ namespace client
         receiveTextUtf8Expected_ = 0;
     }
 
-    void WebSocketClient::ResetSendFragment() noexcept
+    void WsConnection::ResetSendFragment() noexcept
     {
         sendFragmentOpen_ = false;
         sendCompressedMessage_ = false;
@@ -2672,7 +2672,7 @@ namespace client
         sendTextUtf8Expected_ = 0;
     }
 
-    NTSTATUS WebSocketClient::CloseTransport() noexcept
+    NTSTATUS WsConnection::CloseTransport() noexcept
     {
         if (h2Connection_ != nullptr && h2Transport_ != nullptr) {
             const NTSTATUS shutdownStatus = h2Connection_->Shutdown(*h2Transport_);
@@ -2702,11 +2702,11 @@ namespace client
         return IsConnectionTerminalStatus(closeStatus) ? STATUS_SUCCESS : closeStatus;
     }
 
-    NTSTATUS WebSocketClient::EncodeAndSendFrame(
+    NTSTATUS WsConnection::EncodeAndSendFrame(
         ws::WebSocketOpcode opcode,
         const UCHAR* payload,
         SIZE_T payloadLength,
-        const WebSocketIoBuffers& buffers,
+        const WsIoBuffers& buffers,
         bool finalFragment,
         bool rsv1) noexcept
     {
@@ -2773,11 +2773,11 @@ namespace client
         return status;
     }
 
-    NTSTATUS WebSocketClient::EncodeAndSendMessageFrame(
+    NTSTATUS WsConnection::EncodeAndSendMessageFrame(
         ws::WebSocketOpcode opcode,
         const UCHAR* payload,
         SIZE_T payloadLength,
-        const WebSocketIoBuffers& buffers,
+        const WsIoBuffers& buffers,
         bool finalFragment) noexcept
     {
         const bool dataFrame =
@@ -2838,9 +2838,9 @@ namespace client
         return status;
     }
 
-    NTSTATUS WebSocketClient::SendCloseStatus(
+    NTSTATUS WsConnection::SendCloseStatus(
         USHORT statusCode,
-        const WebSocketIoBuffers& buffers) noexcept
+        const WsIoBuffers& buffers) noexcept
     {
         if (!connected_ || buffers.FrameBuffer == nullptr || buffers.FrameBufferLength == 0) {
             return STATUS_INVALID_PARAMETER;
@@ -2856,9 +2856,9 @@ namespace client
         return SendCloseFrame(payload.Get(), payload.Count(), buffers);
     }
 
-    NTSTATUS WebSocketClient::FailConnectionWithClose(
+    NTSTATUS WsConnection::FailConnectionWithClose(
         USHORT statusCode,
-        const WebSocketIoBuffers& buffers,
+        const WsIoBuffers& buffers,
         NTSTATUS returnStatus) noexcept
     {
         ResetSendFragment();
@@ -2874,10 +2874,10 @@ namespace client
         return returnStatus;
     }
 
-    NTSTATUS WebSocketClient::SendCloseFrame(
+    NTSTATUS WsConnection::SendCloseFrame(
         const UCHAR* payload,
         SIZE_T payloadLength,
-        const WebSocketIoBuffers& buffers) noexcept
+        const WsIoBuffers& buffers) noexcept
     {
         if (!connected_ ||
             (payload == nullptr && payloadLength != 0) ||
@@ -2901,7 +2901,7 @@ namespace client
         return status;
     }
 
-    NTSTATUS WebSocketClient::EnsureBufferedFrameCapacity(SIZE_T capacity) noexcept
+    NTSTATUS WsConnection::EnsureBufferedFrameCapacity(SIZE_T capacity) noexcept
     {
         if (capacity == 0) {
             return STATUS_INVALID_PARAMETER;
@@ -2929,7 +2929,7 @@ namespace client
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS WebSocketClient::StoreSelectedSubprotocol(const http1::HttpText& subprotocol) noexcept
+    NTSTATUS WsConnection::StoreSelectedSubprotocol(const http1::HttpText& subprotocol) noexcept
     {
         selectedSubprotocol_.Reset();
         selectedSubprotocolLength_ = 0;
@@ -2952,7 +2952,7 @@ namespace client
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS WebSocketClient::SendRaw(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept
+    NTSTATUS WsConnection::SendRaw(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept
     {
         if (h2Connection_ != nullptr && h2Transport_ != nullptr && h2StreamId_ != 0) {
             if (bytesSent != nullptr) {
@@ -2980,7 +2980,7 @@ namespace client
         return socket_.Send(data, length, bytesSent);
     }
 
-    NTSTATUS WebSocketClient::ReceiveRaw(
+    NTSTATUS WsConnection::ReceiveRaw(
         void* data,
         SIZE_T length,
         SIZE_T* bytesReceived,
@@ -3014,13 +3014,13 @@ namespace client
         return socket_.Receive(data, length, bytesReceived, 0, timeoutMilliseconds);
     }
 
-    NTSTATUS WebSocketClient::ReadHandshakeResponse(
+    NTSTATUS WsConnection::ReadHandshakeResponse(
         const char* clientKey,
         SIZE_T clientKeyLength,
         const char* requestedSubprotocol,
         SIZE_T requestedSubprotocolLength,
         const ws::PerMessageDeflateOptions& perMessageDeflate,
-        const WebSocketIoBuffers& buffers,
+        const WsIoBuffers& buffers,
         http1::HttpResponse& response) noexcept
     {
         SIZE_T responseLength = 0;

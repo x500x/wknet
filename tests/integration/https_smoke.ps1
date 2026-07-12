@@ -343,7 +343,7 @@ function Invoke-HostRegression {
         -Name 'websocket_client_tests' `
         -Source 'tests\websocket_client_tests.cpp' `
         -ProjectSources @(
-            'src\wknetlib\client\WebSocketClient.cpp',
+            'src\wknetlib\session\WsConnection.cpp',
             'src\wknetlib\http1\HttpTypes.cpp',
             'src\wknetlib\http1\HttpRequest.cpp',
             'src\wknetlib\http1\HttpResponse.cpp',

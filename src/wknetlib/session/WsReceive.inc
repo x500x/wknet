@@ -112,7 +112,7 @@
         }
 
         MutexScope receiveLock(&websocket->ReceiveLock);
-        client::WebSocketIoBuffers buffers = {};
+        session::WsIoBuffers buffers = {};
         buffers.FrameBuffer = websocket->Workspace->WebSocketFrameScratch.Data;
         buffers.FrameBufferLength = websocket->Workspace->WebSocketFrameScratch.Length;
         wknet::ws::WebSocketOpcode opcode = wknet::ws::WebSocketOpcode::Continuation;

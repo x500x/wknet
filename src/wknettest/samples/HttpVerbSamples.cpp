@@ -3,7 +3,7 @@
 #include <wknet/WknetConfig.h>
 #include "client/HttpClient.h"
 #include "client/HttpsClient.h"
-#include "client/WebSocketClient.h"
+#include "session/WsConnection.h"
 #include <wknettest/SampleStatus.h>
 
 #include "samples/ExternalTrustStore.h"
@@ -70,7 +70,7 @@ namespace samples
             char DecodedBody[SampleDecodedBodyBufferLength] = {};
             char HeaderNameValue[SampleHeaderNameValueBufferLength] = {};
             char ScratchBody[SampleScratchBodyBufferLength] = {};
-            http::HttpHeader Headers[SampleHeaderCapacity] = {};
+            http1::HttpHeader Headers[SampleHeaderCapacity] = {};
         };
 
         struct WebSocketSampleIoBuffers final
@@ -79,20 +79,20 @@ namespace samples
             char Response[SampleResponseBufferLength] = {};
             UCHAR Frame[SampleResponseBufferLength] = {};
             UCHAR Payload[SampleDecodedBodyBufferLength] = {};
-            http::HttpHeader Headers[SampleHeaderCapacity] = {};
+            http1::HttpHeader Headers[SampleHeaderCapacity] = {};
         };
 
-        http::HttpText FindHeaderValue(
-            _In_reads_(headerCount) const http::HttpHeader* headers,
+        http1::HttpText FindHeaderValue(
+            _In_reads_(headerCount) const http1::HttpHeader* headers,
             SIZE_T headerCount,
-            http::HttpText name) noexcept
+            http1::HttpText name) noexcept
         {
             if (headers == nullptr) {
                 return {};
             }
 
             for (SIZE_T index = 0; index < headerCount; ++index) {
-                if (http::TextEqualsIgnoreCase(headers[index].Name, name)) {
+                if (http1::TextEqualsIgnoreCase(headers[index].Name, name)) {
                     return headers[index].Value;
                 }
             }
@@ -100,16 +100,16 @@ namespace samples
             return {};
         }
 
-        bool RequestPrefersHttp2(_In_ const http::HttpRequestBuildOptions& request) noexcept
+        bool RequestPrefersHttp2(_In_ const http1::HttpRequestBuildOptions& request) noexcept
         {
             if (request.Host.Data == nullptr) {
                 return false;
             }
 
             return (request.Host.Length == NgHttp2HostNameLength &&
-                http::TextEqualsIgnoreCase(request.Host, http::MakeText(NgHttp2HostName))) ||
+                http1::TextEqualsIgnoreCase(request.Host, http1::MakeText(NgHttp2HostName))) ||
                 (request.Host.Length == HttpBinDevHostNameLength &&
-                    http::TextEqualsIgnoreCase(request.Host, http::MakeText(HttpBinDevHostName)));
+                    http1::TextEqualsIgnoreCase(request.Host, http1::MakeText(HttpBinDevHostName)));
         }
 
         int PrintLength(SIZE_T length) noexcept
@@ -229,7 +229,7 @@ namespace samples
             }
         }
 
-        void LogHttpText(_In_opt_ const char* label, http::HttpText value) noexcept
+        void LogHttpText(_In_opt_ const char* label, http1::HttpText value) noexcept
         {
             UNREFERENCED_PARAMETER(label);
             UNREFERENCED_PARAMETER(value);
@@ -237,7 +237,7 @@ namespace samples
             LogTextValue(label, value.Data, value.Length);
         }
 
-        void LogHeader(const http::HttpHeader& header) noexcept
+        void LogHeader(const http1::HttpHeader& header) noexcept
         {
             const char* name = header.Name.Data != nullptr ? header.Name.Data : "";
             const char* value = header.Value.Data != nullptr ? header.Value.Data : "";
@@ -306,7 +306,7 @@ namespace samples
             }
         }
 
-        void LogResponse(const char* methodName, const http::HttpResponse& response) noexcept
+        void LogResponse(const char* methodName, const http1::HttpResponse& response) noexcept
         {
             UNREFERENCED_PARAMETER(methodName);
             UNREFERENCED_PARAMETER(response);
@@ -323,7 +323,7 @@ namespace samples
             LogHttpText("[status-line] reason=", response.ReasonPhrase);
 
             for (SIZE_T index = 0; index < response.HeaderCount; ++index) {
-                const http::HttpHeader& header = response.Headers[index];
+                const http1::HttpHeader& header = response.Headers[index];
                 UNREFERENCED_PARAMETER(header);
 
                 LogHeader(header);
@@ -334,8 +334,8 @@ namespace samples
 
         void LogRequestStart(
             const char* sampleName,
-            http::HttpText path,
-            http::HttpText acceptEncoding) noexcept
+            http1::HttpText path,
+            http1::HttpText acceptEncoding) noexcept
         {
             UNREFERENCED_PARAMETER(sampleName);
             UNREFERENCED_PARAMETER(path);
@@ -355,7 +355,7 @@ namespace samples
             _In_z_ const wchar_t* serverName,
             _In_ const wchar_t* serviceName,
             _In_ const char* methodName,
-            _In_ const http::HttpRequestBuildOptions& request,
+            _In_ const http1::HttpRequestBuildOptions& request,
             bool responseBodyForbidden,
             _Out_ HttpVerbSampleResult& result) noexcept
         {
@@ -385,17 +385,17 @@ namespace samples
             options.Request = request;
             options.ResponseBodyForbidden = responseBodyForbidden;
 
-            http::HttpResponse response = {};
+            http1::HttpResponse response = {};
             HeapObject<client::HttpClient> client;
             if (!client.IsValid()) {
                 result.Status = STATUS_INSUFFICIENT_RESOURCES;
                 return result.Status;
             }
 
-            const http::HttpText acceptEncoding = FindHeaderValue(
+            const http1::HttpText acceptEncoding = FindHeaderValue(
                 request.ExtraHeaders,
                 request.ExtraHeaderCount,
-                http::MakeText("Accept-Encoding"));
+                http1::MakeText("Accept-Encoding"));
 
             LogRequestStart(methodName, request.Path, acceptEncoding);
             result.Status = client->SendRequest(wskClient, options, responseBuffers, response);
@@ -420,7 +420,7 @@ namespace samples
             _In_ const char* tlsServerName,
             SIZE_T tlsServerNameLength,
             _In_ const char* methodName,
-            _In_ const http::HttpRequestBuildOptions& request,
+            _In_ const http1::HttpRequestBuildOptions& request,
             bool responseBodyForbidden,
             _In_opt_ const tls::CertificateStore* certificateStore,
             bool verifyCertificate,
@@ -440,7 +440,7 @@ namespace samples
             _In_ const char* tlsServerName,
             SIZE_T tlsServerNameLength,
             _In_ const char* methodName,
-            _In_ const http::HttpRequestBuildOptions& request,
+            _In_ const http1::HttpRequestBuildOptions& request,
             bool responseBodyForbidden,
             _In_opt_ const tls::CertificateStore* certificateStore,
             bool verifyCertificate,
@@ -472,7 +472,7 @@ namespace samples
             _In_ const char* tlsServerName,
             SIZE_T tlsServerNameLength,
             _In_ const char* methodName,
-            _In_ const http::HttpRequestBuildOptions& request,
+            _In_ const http1::HttpRequestBuildOptions& request,
             bool responseBodyForbidden,
             _In_opt_ const tls::CertificateStore* certificateStore,
             bool verifyCertificate,
@@ -540,17 +540,17 @@ namespace samples
             options.AlpnProtocols = alpnProtocols;
             options.AlpnProtocolCount = alpnProtocolCount;
 
-            http::HttpResponse response = {};
+            http1::HttpResponse response = {};
             HeapObject<client::HttpsClient> client;
             if (!client.IsValid()) {
                 result.Status = STATUS_INSUFFICIENT_RESOURCES;
                 return result.Status;
             }
 
-            const http::HttpText acceptEncoding = FindHeaderValue(
+            const http1::HttpText acceptEncoding = FindHeaderValue(
                 request.ExtraHeaders,
                 request.ExtraHeaderCount,
-                http::MakeText("Accept-Encoding"));
+                http1::MakeText("Accept-Encoding"));
 
             WKNET_DBG_PRINT("[%s] HTTPS verify=%s\r\n", methodName, verifyCertificate ? "on" : "off");
             LogRequestStart(methodName, request.Path, acceptEncoding);
@@ -626,22 +626,22 @@ namespace samples
         NTSTATUS SendHttpBinDevHttpsGet(
             _Inout_ net::WskClient& wskClient,
             _In_z_ const char* sampleName,
-            _In_ http::HttpText path,
-            _In_ http::HttpText acceptEncoding,
+            _In_ http1::HttpText path,
+            _In_ http1::HttpText acceptEncoding,
             _In_opt_ const tls::CertificateStore* certificateStore,
             _Out_ HttpVerbSampleResult& result) noexcept
         {
-            const http::HttpHeader headers[] = {
-                { http::MakeText("Accept"), http::MakeText("*/*") },
-                { http::MakeText("Accept-Encoding"), acceptEncoding }
+            const http1::HttpHeader headers[] = {
+                { http1::MakeText("Accept"), http1::MakeText("*/*") },
+                { http1::MakeText("Accept-Encoding"), acceptEncoding }
             };
 
-            http::HttpRequestBuildOptions request = {};
-            request.Method = http::HttpMethod::Get;
+            http1::HttpRequestBuildOptions request = {};
+            request.Method = http1::HttpMethod::Get;
             request.Path = path;
-            request.Host = http::MakeText(HttpBinDevHostName);
-            request.UserAgent = http::MakeText("wknet/0.1");
-            request.Connection = http::HttpConnectionDirective::Close;
+            request.Host = http1::MakeText(HttpBinDevHostName);
+            request.UserAgent = http1::MakeText("wknet/0.1");
+            request.Connection = http1::HttpConnectionDirective::Close;
             request.ExtraHeaders = headers;
             request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
 
@@ -739,7 +739,7 @@ namespace samples
             return result->Status;
         }
 
-        client::WebSocketIoBuffers io = {};
+        session::WsIoBuffers io = {};
         io.RequestBuffer = buffers->Request;
         io.RequestBufferLength = sizeof(buffers->Request);
         io.ResponseBuffer = buffers->Response;
@@ -751,7 +751,7 @@ namespace samples
         io.Headers = buffers->Headers;
         io.HeaderCapacity = SampleHeaderCapacity;
 
-        client::WebSocketConnectOptions options = {};
+        session::WsConnectionOptions options = {};
         options.ServerName = WebSocketEchoServerName;
         options.ServiceName = WebSocketEchoServiceName;
         options.TlsServerName = WebSocketEchoTlsServerName;
@@ -770,7 +770,7 @@ namespace samples
             "[%s] TLS策略=ModernDefault SHA1签名=关闭\r\n",
             sampleName);
 
-        HeapObject<client::WebSocketClient> webSocket;
+        HeapObject<session::WsConnection> webSocket;
         if (!webSocket.IsValid()) {
             result->Status = STATUS_INSUFFICIENT_RESOURCES;
             return result->Status;
@@ -782,7 +782,7 @@ namespace samples
 
         if (NT_SUCCESS(status)) {
             const char message[] = "kernel-http websocket echo";
-            client::WebSocketEchoResult echo = {};
+            session::WsEchoResult echo = {};
 
             WKNET_DBG_PRINT("[%s] send bytes=%Iu data=%.*s\r\n",
                 sampleName,
@@ -910,17 +910,17 @@ namespace samples
             return STATUS_INVALID_PARAMETER;
         }
 
-        const http::HttpHeader headers[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader headers[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
-        http::HttpRequestBuildOptions request = {};
-        request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/httpbin/get");
-        request.Host = http::MakeText(NgHttp2HostName);
-        request.UserAgent = http::MakeText("wknet/0.1");
-        request.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions request = {};
+        request.Method = http1::HttpMethod::Get;
+        request.Path = http1::MakeText("/httpbin/get");
+        request.Host = http1::MakeText(NgHttp2HostName);
+        request.UserAgent = http1::MakeText("wknet/0.1");
+        request.Connection = http1::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
         request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
 
@@ -982,17 +982,17 @@ namespace samples
             return result->Status;
         }
 
-        const http::HttpHeader headers[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader headers[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
-        http::HttpRequestBuildOptions request = {};
-        request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/get");
-        request.Host = http::MakeText(HttpBinDevHostName);
-        request.UserAgent = http::MakeText("wknet/0.1");
-        request.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions request = {};
+        request.Method = http1::HttpMethod::Get;
+        request.Path = http1::MakeText("/get");
+        request.Host = http1::MakeText(HttpBinDevHostName);
+        request.UserAgent = http1::MakeText("wknet/0.1");
+        request.Connection = http1::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
         request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
 
@@ -1025,19 +1025,19 @@ namespace samples
             return result->Status;
         }
 
-        const http::HttpHeader headers[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader headers[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS POST\"}";
-        http::HttpRequestBuildOptions request = {};
-        request.Method = http::HttpMethod::Post;
-        request.Path = http::MakeText("/post");
-        request.Host = http::MakeText(HttpBinDevHostName);
-        request.UserAgent = http::MakeText("wknet/0.1");
-        request.ContentType = http::MakeText("application/json");
-        request.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions request = {};
+        request.Method = http1::HttpMethod::Post;
+        request.Path = http1::MakeText("/post");
+        request.Host = http1::MakeText(HttpBinDevHostName);
+        request.UserAgent = http1::MakeText("wknet/0.1");
+        request.ContentType = http1::MakeText("application/json");
+        request.Connection = http1::HttpConnectionDirective::Close;
         request.Body = body;
         request.BodyLength = sizeof(body) - 1;
         request.ExtraHeaders = headers;
@@ -1072,19 +1072,19 @@ namespace samples
             return result->Status;
         }
 
-        const http::HttpHeader headers[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader headers[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS PUT\"}";
-        http::HttpRequestBuildOptions request = {};
-        request.Method = http::HttpMethod::Put;
-        request.Path = http::MakeText("/put");
-        request.Host = http::MakeText(HttpBinDevHostName);
-        request.UserAgent = http::MakeText("wknet/0.1");
-        request.ContentType = http::MakeText("application/json");
-        request.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions request = {};
+        request.Method = http1::HttpMethod::Put;
+        request.Path = http1::MakeText("/put");
+        request.Host = http1::MakeText(HttpBinDevHostName);
+        request.UserAgent = http1::MakeText("wknet/0.1");
+        request.ContentType = http1::MakeText("application/json");
+        request.Connection = http1::HttpConnectionDirective::Close;
         request.Body = body;
         request.BodyLength = sizeof(body) - 1;
         request.ExtraHeaders = headers;
@@ -1119,19 +1119,19 @@ namespace samples
             return result->Status;
         }
 
-        const http::HttpHeader headers[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader headers[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         const char body[] = "{\"source\":\"kernel-http\",\"method\":\"HTTPS PATCH\"}";
-        http::HttpRequestBuildOptions request = {};
-        request.Method = http::HttpMethod::Patch;
-        request.Path = http::MakeText("/patch");
-        request.Host = http::MakeText(HttpBinDevHostName);
-        request.UserAgent = http::MakeText("wknet/0.1");
-        request.ContentType = http::MakeText("application/json");
-        request.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions request = {};
+        request.Method = http1::HttpMethod::Patch;
+        request.Path = http1::MakeText("/patch");
+        request.Host = http1::MakeText(HttpBinDevHostName);
+        request.UserAgent = http1::MakeText("wknet/0.1");
+        request.ContentType = http1::MakeText("application/json");
+        request.Connection = http1::HttpConnectionDirective::Close;
         request.Body = body;
         request.BodyLength = sizeof(body) - 1;
         request.ExtraHeaders = headers;
@@ -1166,17 +1166,17 @@ namespace samples
             return result->Status;
         }
 
-        const http::HttpHeader headers[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader headers[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
-        http::HttpRequestBuildOptions request = {};
-        request.Method = http::HttpMethod::DeleteMethod;
-        request.Path = http::MakeText("/delete");
-        request.Host = http::MakeText(HttpBinDevHostName);
-        request.UserAgent = http::MakeText("wknet/0.1");
-        request.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions request = {};
+        request.Method = http1::HttpMethod::DeleteMethod;
+        request.Path = http1::MakeText("/delete");
+        request.Host = http1::MakeText(HttpBinDevHostName);
+        request.UserAgent = http1::MakeText("wknet/0.1");
+        request.Connection = http1::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
         request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
 
@@ -1197,9 +1197,9 @@ namespace samples
     NTSTATUS RunHttpsNgHttp2HttpBinNoVerifySample(
         net::WskClient& wskClient,
         _In_z_ const char* sampleName,
-        http::HttpMethod method,
-        http::HttpText path,
-        http::HttpText contentType,
+        http1::HttpMethod method,
+        http1::HttpText path,
+        http1::HttpText contentType,
         _In_reads_bytes_opt_(bodyLength) const char* body,
         SIZE_T bodyLength,
         HttpVerbSampleResult* result) noexcept
@@ -1210,18 +1210,18 @@ namespace samples
 
         *result = {};
 
-        const http::HttpHeader headers[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader headers[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
-        http::HttpRequestBuildOptions request = {};
+        http1::HttpRequestBuildOptions request = {};
         request.Method = method;
         request.Path = path;
-        request.Host = http::MakeText(HttpBinDevHostName);
-        request.UserAgent = http::MakeText("wknet/0.1");
+        request.Host = http1::MakeText(HttpBinDevHostName);
+        request.UserAgent = http1::MakeText("wknet/0.1");
         request.ContentType = contentType;
-        request.Connection = http::HttpConnectionDirective::Close;
+        request.Connection = http1::HttpConnectionDirective::Close;
         request.Body = body;
         request.BodyLength = bodyLength;
         request.ExtraHeaders = headers;
@@ -1248,8 +1248,8 @@ namespace samples
         return RunHttpsNgHttp2HttpBinNoVerifySample(
             wskClient,
             "HTTPS GET no-verify",
-            http::HttpMethod::Get,
-            http::MakeText("/get"),
+            http1::HttpMethod::Get,
+            http1::MakeText("/get"),
             {},
             nullptr,
             0,
@@ -1265,9 +1265,9 @@ namespace samples
         return RunHttpsNgHttp2HttpBinNoVerifySample(
             wskClient,
             "HTTPS POST no-verify",
-            http::HttpMethod::Post,
-            http::MakeText("/post"),
-            http::MakeText("application/json"),
+            http1::HttpMethod::Post,
+            http1::MakeText("/post"),
+            http1::MakeText("application/json"),
             body,
             sizeof(body) - 1,
             result);
@@ -1282,9 +1282,9 @@ namespace samples
         return RunHttpsNgHttp2HttpBinNoVerifySample(
             wskClient,
             "HTTPS PUT no-verify",
-            http::HttpMethod::Put,
-            http::MakeText("/put"),
-            http::MakeText("application/json"),
+            http1::HttpMethod::Put,
+            http1::MakeText("/put"),
+            http1::MakeText("application/json"),
             body,
             sizeof(body) - 1,
             result);
@@ -1299,9 +1299,9 @@ namespace samples
         return RunHttpsNgHttp2HttpBinNoVerifySample(
             wskClient,
             "HTTPS PATCH no-verify",
-            http::HttpMethod::Patch,
-            http::MakeText("/patch"),
-            http::MakeText("application/json"),
+            http1::HttpMethod::Patch,
+            http1::MakeText("/patch"),
+            http1::MakeText("application/json"),
             body,
             sizeof(body) - 1,
             result);
@@ -1314,8 +1314,8 @@ namespace samples
         return RunHttpsNgHttp2HttpBinNoVerifySample(
             wskClient,
             "HTTPS DELETE no-verify",
-            http::HttpMethod::DeleteMethod,
-            http::MakeText("/delete"),
+            http1::HttpMethod::DeleteMethod,
+            http1::MakeText("/delete"),
             {},
             nullptr,
             0,
@@ -1337,17 +1337,17 @@ namespace samples
             return result->Status;
         }
 
-        const http::HttpHeader headers[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader headers[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
-        http::HttpRequestBuildOptions request = {};
-        request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/get");
-        request.Host = http::MakeText(HttpBinDevHostName);
-        request.UserAgent = http::MakeText("wknet/0.1");
-        request.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions request = {};
+        request.Method = http1::HttpMethod::Get;
+        request.Path = http1::MakeText("/get");
+        request.Host = http1::MakeText(HttpBinDevHostName);
+        request.UserAgent = http1::MakeText("wknet/0.1");
+        request.Connection = http1::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
         request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
 
@@ -1386,17 +1386,17 @@ namespace samples
             return result->Status;
         }
 
-        const http::HttpHeader headers[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader headers[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
-        http::HttpRequestBuildOptions request = {};
-        request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/get");
-        request.Host = http::MakeText(HttpBinDevHostName);
-        request.UserAgent = http::MakeText("wknet/0.1");
-        request.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions request = {};
+        request.Method = http1::HttpMethod::Get;
+        request.Path = http1::MakeText("/get");
+        request.Host = http1::MakeText(HttpBinDevHostName);
+        request.UserAgent = http1::MakeText("wknet/0.1");
+        request.Connection = http1::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
         request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
 
@@ -1426,17 +1426,17 @@ namespace samples
             return STATUS_INVALID_PARAMETER;
         }
 
-        const http::HttpHeader headers[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader headers[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
-        http::HttpRequestBuildOptions request = {};
-        request.Method = http::HttpMethod::Get;
-        request.Path = http::MakeText("/get");
-        request.Host = http::MakeText(HttpBinDevHostName);
-        request.UserAgent = http::MakeText("wknet/0.1");
-        request.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions request = {};
+        request.Method = http1::HttpMethod::Get;
+        request.Path = http1::MakeText("/get");
+        request.Host = http1::MakeText(HttpBinDevHostName);
+        request.UserAgent = http1::MakeText("wknet/0.1");
+        request.Connection = http1::HttpConnectionDirective::Close;
         request.ExtraHeaders = headers;
         request.ExtraHeaderCount = sizeof(headers) / sizeof(headers[0]);
 
@@ -1479,16 +1479,16 @@ namespace samples
             return status;
         }
 
-        const http::HttpHeader commonHeaders[] = {
-            { http::MakeText("Accept"), http::MakeText("*/*") },
-            { http::MakeText("Accept-Encoding"), http::MakeText("gzip, deflate, br, zstd, identity") }
+        const http1::HttpHeader commonHeaders[] = {
+            { http1::MakeText("Accept"), http1::MakeText("*/*") },
+            { http1::MakeText("Accept-Encoding"), http1::MakeText("gzip, deflate, br, zstd, identity") }
         };
 
         NTSTATUS sampleStatus = SendHttpBinDevHttpsGet(
             wskClient,
             "ENCODING identity",
-            http::MakeText("/get"),
-            http::MakeText("identity"),
+            http1::MakeText("/get"),
+            http1::MakeText("identity"),
             &trustStore.Store,
             results->IdentityEncoding);
         status = MergePublicSampleStatus(status, "ENCODING identity", sampleStatus);
@@ -1496,8 +1496,8 @@ namespace samples
         sampleStatus = SendHttpBinDevHttpsGet(
             wskClient,
             "ENCODING gzip",
-            http::MakeText("/gzip"),
-            http::MakeText("gzip"),
+            http1::MakeText("/gzip"),
+            http1::MakeText("gzip"),
             &trustStore.Store,
             results->GzipEncoding);
         status = MergePublicSampleStatus(
@@ -1508,8 +1508,8 @@ namespace samples
         sampleStatus = SendHttpBinDevHttpsGet(
             wskClient,
             "ENCODING deflate",
-            http::MakeText("/deflate"),
-            http::MakeText("deflate"),
+            http1::MakeText("/deflate"),
+            http1::MakeText("deflate"),
             &trustStore.Store,
             results->DeflateEncoding);
         status = MergePublicSampleStatus(
@@ -1520,8 +1520,8 @@ namespace samples
         sampleStatus = SendHttpBinDevHttpsGet(
             wskClient,
             "ENCODING br",
-            http::MakeText("/brotli"),
-            http::MakeText("br"),
+            http1::MakeText("/brotli"),
+            http1::MakeText("br"),
             &trustStore.Store,
             results->BrotliEncoding);
         status = MergePublicSampleStatus(
@@ -1529,12 +1529,12 @@ namespace samples
             "ENCODING br",
             sampleStatus);
 
-        http::HttpRequestBuildOptions getNgHttp2HttpBin = {};
-        getNgHttp2HttpBin.Method = http::HttpMethod::Get;
-        getNgHttp2HttpBin.Path = http::MakeText("/get");
-        getNgHttp2HttpBin.Host = http::MakeText(HttpBunHostName);
-        getNgHttp2HttpBin.UserAgent = http::MakeText("wknet/0.1");
-        getNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions getNgHttp2HttpBin = {};
+        getNgHttp2HttpBin.Method = http1::HttpMethod::Get;
+        getNgHttp2HttpBin.Path = http1::MakeText("/get");
+        getNgHttp2HttpBin.Host = http1::MakeText(HttpBunHostName);
+        getNgHttp2HttpBin.UserAgent = http1::MakeText("wknet/0.1");
+        getNgHttp2HttpBin.Connection = http1::HttpConnectionDirective::Close;
         getNgHttp2HttpBin.ExtraHeaders = commonHeaders;
         getNgHttp2HttpBin.ExtraHeaderCount = sizeof(commonHeaders) / sizeof(commonHeaders[0]);
 
@@ -1549,13 +1549,13 @@ namespace samples
         status = MergePublicSampleStatus(status, "GET", sampleStatus);
 
         const char postBody[] = "{\"source\":\"kernel-http\",\"method\":\"POST\"}";
-        http::HttpRequestBuildOptions postNgHttp2HttpBin = {};
-        postNgHttp2HttpBin.Method = http::HttpMethod::Post;
-        postNgHttp2HttpBin.Path = http::MakeText("/post");
-        postNgHttp2HttpBin.Host = http::MakeText(HttpBunHostName);
-        postNgHttp2HttpBin.UserAgent = http::MakeText("wknet/0.1");
-        postNgHttp2HttpBin.ContentType = http::MakeText("application/json");
-        postNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions postNgHttp2HttpBin = {};
+        postNgHttp2HttpBin.Method = http1::HttpMethod::Post;
+        postNgHttp2HttpBin.Path = http1::MakeText("/post");
+        postNgHttp2HttpBin.Host = http1::MakeText(HttpBunHostName);
+        postNgHttp2HttpBin.UserAgent = http1::MakeText("wknet/0.1");
+        postNgHttp2HttpBin.ContentType = http1::MakeText("application/json");
+        postNgHttp2HttpBin.Connection = http1::HttpConnectionDirective::Close;
         postNgHttp2HttpBin.Body = postBody;
         postNgHttp2HttpBin.BodyLength = sizeof(postBody) - 1;
         postNgHttp2HttpBin.ExtraHeaders = commonHeaders;
@@ -1572,13 +1572,13 @@ namespace samples
         status = MergePublicSampleStatus(status, "POST", sampleStatus);
 
         const char putBody[] = "{\"source\":\"kernel-http\",\"method\":\"PUT\"}";
-        http::HttpRequestBuildOptions putNgHttp2HttpBin = {};
-        putNgHttp2HttpBin.Method = http::HttpMethod::Put;
-        putNgHttp2HttpBin.Path = http::MakeText("/put");
-        putNgHttp2HttpBin.Host = http::MakeText(HttpBunHostName);
-        putNgHttp2HttpBin.UserAgent = http::MakeText("wknet/0.1");
-        putNgHttp2HttpBin.ContentType = http::MakeText("application/json");
-        putNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions putNgHttp2HttpBin = {};
+        putNgHttp2HttpBin.Method = http1::HttpMethod::Put;
+        putNgHttp2HttpBin.Path = http1::MakeText("/put");
+        putNgHttp2HttpBin.Host = http1::MakeText(HttpBunHostName);
+        putNgHttp2HttpBin.UserAgent = http1::MakeText("wknet/0.1");
+        putNgHttp2HttpBin.ContentType = http1::MakeText("application/json");
+        putNgHttp2HttpBin.Connection = http1::HttpConnectionDirective::Close;
         putNgHttp2HttpBin.Body = putBody;
         putNgHttp2HttpBin.BodyLength = sizeof(putBody) - 1;
         putNgHttp2HttpBin.ExtraHeaders = commonHeaders;
@@ -1595,13 +1595,13 @@ namespace samples
         status = MergePublicSampleStatus(status, "PUT", sampleStatus);
 
         const char patchBody[] = "{\"source\":\"kernel-http\",\"method\":\"PATCH\"}";
-        http::HttpRequestBuildOptions patchNgHttp2HttpBin = {};
-        patchNgHttp2HttpBin.Method = http::HttpMethod::Patch;
-        patchNgHttp2HttpBin.Path = http::MakeText("/patch");
-        patchNgHttp2HttpBin.Host = http::MakeText(HttpBunHostName);
-        patchNgHttp2HttpBin.UserAgent = http::MakeText("wknet/0.1");
-        patchNgHttp2HttpBin.ContentType = http::MakeText("application/json");
-        patchNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions patchNgHttp2HttpBin = {};
+        patchNgHttp2HttpBin.Method = http1::HttpMethod::Patch;
+        patchNgHttp2HttpBin.Path = http1::MakeText("/patch");
+        patchNgHttp2HttpBin.Host = http1::MakeText(HttpBunHostName);
+        patchNgHttp2HttpBin.UserAgent = http1::MakeText("wknet/0.1");
+        patchNgHttp2HttpBin.ContentType = http1::MakeText("application/json");
+        patchNgHttp2HttpBin.Connection = http1::HttpConnectionDirective::Close;
         patchNgHttp2HttpBin.Body = patchBody;
         patchNgHttp2HttpBin.BodyLength = sizeof(patchBody) - 1;
         patchNgHttp2HttpBin.ExtraHeaders = commonHeaders;
@@ -1618,13 +1618,13 @@ namespace samples
         status = MergePublicSampleStatus(status, "PATCH", sampleStatus);
 
         const char deleteBody[] = "{\"source\":\"kernel-http\",\"method\":\"DELETE\"}";
-        http::HttpRequestBuildOptions deleteNgHttp2HttpBin = {};
-        deleteNgHttp2HttpBin.Method = http::HttpMethod::DeleteMethod;
-        deleteNgHttp2HttpBin.Path = http::MakeText("/delete");
-        deleteNgHttp2HttpBin.Host = http::MakeText(HttpBunHostName);
-        deleteNgHttp2HttpBin.UserAgent = http::MakeText("wknet/0.1");
-        deleteNgHttp2HttpBin.ContentType = http::MakeText("application/json");
-        deleteNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions deleteNgHttp2HttpBin = {};
+        deleteNgHttp2HttpBin.Method = http1::HttpMethod::DeleteMethod;
+        deleteNgHttp2HttpBin.Path = http1::MakeText("/delete");
+        deleteNgHttp2HttpBin.Host = http1::MakeText(HttpBunHostName);
+        deleteNgHttp2HttpBin.UserAgent = http1::MakeText("wknet/0.1");
+        deleteNgHttp2HttpBin.ContentType = http1::MakeText("application/json");
+        deleteNgHttp2HttpBin.Connection = http1::HttpConnectionDirective::Close;
         deleteNgHttp2HttpBin.Body = deleteBody;
         deleteNgHttp2HttpBin.BodyLength = sizeof(deleteBody) - 1;
         deleteNgHttp2HttpBin.ExtraHeaders = commonHeaders;
@@ -1712,12 +1712,12 @@ namespace samples
             &results->Tls13HttpsGetNoVerify);
         status = MergePublicSampleStatus(status, "TLS1.3 HTTPS GET no-verify", sampleStatus);
 
-        http::HttpRequestBuildOptions headNgHttp2HttpBin = {};
-        headNgHttp2HttpBin.Method = http::HttpMethod::Head;
-        headNgHttp2HttpBin.Path = http::MakeText("/httpbin/get");
-        headNgHttp2HttpBin.Host = http::MakeText("nghttp2.org");
-        headNgHttp2HttpBin.UserAgent = http::MakeText("wknet/0.1");
-        headNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions headNgHttp2HttpBin = {};
+        headNgHttp2HttpBin.Method = http1::HttpMethod::Head;
+        headNgHttp2HttpBin.Path = http1::MakeText("/httpbin/get");
+        headNgHttp2HttpBin.Host = http1::MakeText("nghttp2.org");
+        headNgHttp2HttpBin.UserAgent = http1::MakeText("wknet/0.1");
+        headNgHttp2HttpBin.Connection = http1::HttpConnectionDirective::Close;
         headNgHttp2HttpBin.ExtraHeaders = commonHeaders;
         headNgHttp2HttpBin.ExtraHeaderCount = sizeof(commonHeaders) / sizeof(commonHeaders[0]);
 
@@ -1731,12 +1731,12 @@ namespace samples
             results->HeadNgHttp2HttpBin);
         status = MergePublicSampleStatus(status, "HEAD", sampleStatus);
 
-        http::HttpRequestBuildOptions optionsNgHttp2HttpBin = {};
-        optionsNgHttp2HttpBin.Method = http::HttpMethod::Options;
-        optionsNgHttp2HttpBin.Path = http::MakeText("/httpbin/");
-        optionsNgHttp2HttpBin.Host = http::MakeText("nghttp2.org");
-        optionsNgHttp2HttpBin.UserAgent = http::MakeText("wknet/0.1");
-        optionsNgHttp2HttpBin.Connection = http::HttpConnectionDirective::Close;
+        http1::HttpRequestBuildOptions optionsNgHttp2HttpBin = {};
+        optionsNgHttp2HttpBin.Method = http1::HttpMethod::Options;
+        optionsNgHttp2HttpBin.Path = http1::MakeText("/httpbin/");
+        optionsNgHttp2HttpBin.Host = http1::MakeText("nghttp2.org");
+        optionsNgHttp2HttpBin.UserAgent = http1::MakeText("wknet/0.1");
+        optionsNgHttp2HttpBin.Connection = http1::HttpConnectionDirective::Close;
         optionsNgHttp2HttpBin.ExtraHeaders = commonHeaders;
         optionsNgHttp2HttpBin.ExtraHeaderCount = sizeof(commonHeaders) / sizeof(commonHeaders[0]);
 

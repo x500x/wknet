@@ -39,7 +39,7 @@ namespace samples
 
         struct Http2SampleBuffers final
         {
-            http::HttpHeader Headers[Http2SampleHeaderCapacity] = {};
+            http1::HttpHeader Headers[Http2SampleHeaderCapacity] = {};
             char NameValueBuffer[Http2SampleNameValueBufferLength] = {};
             char BodyBuffer[Http2SampleBodyBufferLength] = {};
         };
@@ -75,11 +75,11 @@ namespace samples
             _Inout_ net::WskClient& wskClient,
             _In_z_ const char* sampleName,
             client::Http2TransportMode transportMode,
-            http::HttpMethod method,
-            http::HttpText path,
+            http1::HttpMethod method,
+            http1::HttpText path,
             _In_reads_bytes_opt_(bodyLength) const UCHAR* body,
             SIZE_T bodyLength,
-            http::HttpText contentType,
+            http1::HttpText contentType,
             _In_opt_ const tls::CertificateStore* externalCertificateStore,
             _Out_ Http2VerbSampleResult& result) noexcept
         {
@@ -126,9 +126,9 @@ namespace samples
             responseBuffers.BodyBuffer = buffers->BodyBuffer;
             responseBuffers.BodyBufferLength = sizeof(buffers->BodyBuffer);
 
-            const http::HttpHeader extraHeaders[] = {
-                { http::MakeText("accept"), http::MakeText("*/*") },
-                { http::MakeText("accept-encoding"), http::MakeText("identity") }
+            const http1::HttpHeader extraHeaders[] = {
+                { http1::MakeText("accept"), http1::MakeText("*/*") },
+                { http1::MakeText("accept-encoding"), http1::MakeText("identity") }
             };
 
             client::Http2RequestOptions options = {};
@@ -140,8 +140,8 @@ namespace samples
                 transportMode == client::Http2TransportMode::TlsAlpn ? effectiveCertificateStore : nullptr;
             options.Method = method;
             options.Path = path;
-            options.Authority = http::MakeText("nghttp2.org");
-            options.UserAgent = http::MakeText("wknet/0.1");
+            options.Authority = http1::MakeText("nghttp2.org");
+            options.UserAgent = http1::MakeText("wknet/0.1");
             options.ContentType = contentType;
             options.ExtraHeaders = extraHeaders;
             options.ExtraHeaderCount = sizeof(extraHeaders) / sizeof(extraHeaders[0]);
@@ -476,8 +476,8 @@ namespace samples
             wskClient,
             "HTTP2 GET",
             client::Http2TransportMode::TlsAlpn,
-            http::HttpMethod::Get,
-            http::MakeText("/httpbin/get"),
+            http1::HttpMethod::Get,
+            http1::MakeText("/httpbin/get"),
             nullptr,
             0,
             {},
@@ -490,11 +490,11 @@ namespace samples
             wskClient,
             "HTTP2 POST",
             client::Http2TransportMode::TlsAlpn,
-            http::HttpMethod::Post,
-            http::MakeText("/httpbin/post"),
+            http1::HttpMethod::Post,
+            http1::MakeText("/httpbin/post"),
             postBody,
             sizeof(postBody) - 1,
-            http::MakeText("application/json"),
+            http1::MakeText("application/json"),
             nullptr,
             results->Http2PostHttpBin);
         status = MergePublicSampleStatus(status, "HTTP2 POST", sampleStatus);
@@ -503,8 +503,8 @@ namespace samples
             wskClient,
             "HTTP2 GET external-trust",
             client::Http2TransportMode::TlsAlpn,
-            http::HttpMethod::Get,
-            http::MakeText("/httpbin/get"),
+            http1::HttpMethod::Get,
+            http1::MakeText("/httpbin/get"),
             nullptr,
             0,
             {},
@@ -516,11 +516,11 @@ namespace samples
             wskClient,
             "HTTP2 POST external-trust",
             client::Http2TransportMode::TlsAlpn,
-            http::HttpMethod::Post,
-            http::MakeText("/httpbin/post"),
+            http1::HttpMethod::Post,
+            http1::MakeText("/httpbin/post"),
             postBody,
             sizeof(postBody) - 1,
-            http::MakeText("application/json"),
+            http1::MakeText("application/json"),
             &trustStore.Store,
             results->Http2PostHttpBinExternalTrust);
         status = MergePublicSampleStatus(status, "HTTP2 POST external-trust", sampleStatus);
@@ -529,8 +529,8 @@ namespace samples
             wskClient,
             "H2C prior knowledge GET",
             client::Http2TransportMode::H2cPriorKnowledge,
-            http::HttpMethod::Get,
-            http::MakeText("/httpbin/get"),
+            http1::HttpMethod::Get,
+            http1::MakeText("/httpbin/get"),
             nullptr,
             0,
             {},
@@ -542,8 +542,8 @@ namespace samples
             wskClient,
             "H2C upgrade GET",
             client::Http2TransportMode::H2cUpgrade,
-            http::HttpMethod::Get,
-            http::MakeText("/httpbin/get"),
+            http1::HttpMethod::Get,
+            http1::MakeText("/httpbin/get"),
             nullptr,
             0,
             {},

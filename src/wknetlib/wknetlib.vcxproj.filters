@@ -98,8 +98,8 @@
     <ClCompile Include="client\HttpsClient.cpp">
       <Filter>Source Files\client</Filter>
     </ClCompile>
-    <ClCompile Include="client\WebSocketClient.cpp">
-      <Filter>Source Files\client</Filter>
+    <ClCompile Include="session\WsConnection.cpp">
+      <Filter>Source Files\engine</Filter>
     </ClCompile>
     <ClCompile Include="transport\TlsTransport.cpp">
       <Filter>Source Files\transport</Filter>
@@ -367,8 +367,8 @@
     <ClInclude Include="..\..\include\wknet\client\HttpsClient.h">
       <Filter>Header Files\client</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\client\WebSocketClient.h">
-      <Filter>Header Files\client</Filter>
+    <ClInclude Include="session\WsConnection.h">
+      <Filter>Header Files\engine</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\transport\IScratchAllocator.h">
       <Filter>Header Files\core</Filter>

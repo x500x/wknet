@@ -46,4 +46,4 @@ ServiceBinary = %12%\wknettest.sys
 [Strings]
 ManufacturerName = "wknet"
 DiskName = "wknettest Installation Disk"
-wknettest.SVCDESC = "Kernel HTTP Test Driver"
+wknettest.SVCDESC = "wknet Test Driver"
