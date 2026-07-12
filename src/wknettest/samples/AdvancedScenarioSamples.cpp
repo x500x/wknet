@@ -14,7 +14,7 @@
 #endif
 
 #include "samples/ExternalTrustStore.h"
-#include "wknettestLog.h"
+#include "WknetTestLog.h"
 
 #ifndef STATUS_CONNECTION_REFUSED
 #define STATUS_CONNECTION_REFUSED ((NTSTATUS)0xC0000236L)

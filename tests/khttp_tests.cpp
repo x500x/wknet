@@ -1417,7 +1417,7 @@ namespace
         }
 
         wknet::http::TlsConfig tls = wknet::http::DefaultTlsConfig();
-        tls.Policy.Profile = wknet::tls::TlsSecurityProfile::CompatibilityExplicit;
+        tls.Policy.Profile = wknet::http::TlsSecurityProfile::CompatibilityExplicit;
         tls.Policy.EnableTls12Renegotiation = true;
         tls.MaxTls12Renegotiations = 2;
         if (NT_SUCCESS(status)) {
@@ -1454,10 +1454,10 @@ namespace
         NTSTATUS status = wknet::http::SessionCreate(&session);
         Expect(NT_SUCCESS(status), "SessionCreate succeeds for Accept-Encoding qvalue options");
 
-        wknet::http1::HttpAcceptEncodingPreference preferences[] = {
-            { wknet::http1::HttpAcceptCoding::Brotli, 800 },
-            { wknet::http1::HttpAcceptCoding::Identity, 0 },
-            { wknet::http1::HttpAcceptCoding::Any, 0 }
+        wknet::http::AcceptEncodingPreference preferences[] = {
+            { wknet::http::AcceptCoding::Brotli, 800 },
+            { wknet::http::AcceptCoding::Identity, 0 },
+            { wknet::http::AcceptCoding::Any, 0 }
         };
         wknet::http::SendOptions options = wknet::http::DefaultSendOptions();
         options.AcceptEncodingPreferences = preferences;
@@ -1495,9 +1495,9 @@ namespace
         NTSTATUS status = wknet::http::SessionCreate(&session);
         Expect(NT_SUCCESS(status), "SessionCreate succeeds for invalid Accept-Encoding options");
 
-        wknet::http1::HttpAcceptEncodingPreference preferences[] = {
-            { wknet::http1::HttpAcceptCoding::Gzip, 1000 },
-            { wknet::http1::HttpAcceptCoding::Gzip, 500 }
+        wknet::http::AcceptEncodingPreference preferences[] = {
+            { wknet::http::AcceptCoding::Gzip, 1000 },
+            { wknet::http::AcceptCoding::Gzip, 500 }
         };
         wknet::http::SendOptions options = wknet::http::DefaultSendOptions();
         options.AcceptEncodingPreferences = preferences;
@@ -1542,9 +1542,9 @@ namespace
         NTSTATUS status = wknet::http::SessionCreate(&session);
         Expect(NT_SUCCESS(status), "SessionCreate succeeds for Accept-Encoding fail-closed");
 
-        wknet::http1::HttpAcceptEncodingPreference preferences[] = {
-            { wknet::http1::HttpAcceptCoding::Gzip, 0 },
-            { wknet::http1::HttpAcceptCoding::Identity, 1000 }
+        wknet::http::AcceptEncodingPreference preferences[] = {
+            { wknet::http::AcceptCoding::Gzip, 0 },
+            { wknet::http::AcceptCoding::Identity, 1000 }
         };
         wknet::http::SendOptions options = wknet::http::DefaultSendOptions();
         options.AcceptEncodingPreferences = preferences;
@@ -1635,15 +1635,15 @@ namespace
         NTSTATUS status = wknet::http::SessionCreate(&session);
         Expect(NT_SUCCESS(status), "SessionCreate succeeds for dcz material decode");
 
-        wknet::http1::HttpAcceptEncodingPreference preferences[] = {
-            { wknet::http1::HttpAcceptCoding::DictionaryCompressedZstd, 1000 },
-            { wknet::http1::HttpAcceptCoding::Identity, 1000 }
+        wknet::http::AcceptEncodingPreference preferences[] = {
+            { wknet::http::AcceptCoding::DictionaryCompressedZstd, 1000 },
+            { wknet::http::AcceptCoding::Identity, 1000 }
         };
-        wknet::http1::HttpCodingExternalMaterial material = {};
-        material.Coding = wknet::http1::HttpCoding::DictionaryCompressedZstd;
+        wknet::http::CodingExternalMaterial material = {};
+        material.Coding = wknet::http::ContentCoding::DictionaryCompressedZstd;
         material.Dictionary = ZstdDictionary;
         material.DictionaryLength = sizeof(ZstdDictionary);
-        wknet::http1::HttpCodingDecodeMaterials materials = {};
+        wknet::http::CodingDecodeMaterials materials = {};
         materials.Items = &material;
         materials.ItemCount = 1;
 

@@ -1,65 +1,25 @@
 #pragma once
 
-#include <wknet/engine/Engine.h>
-#include <wknet/http1/HttpContentEncoding.h>
-#include <wknet/http1/HttpTypes.h>
-#include <wknet/tls/TlsPolicy.h>
-#include <wknet/ws/WebSocketDeflate.h>
-
-#if !defined(WKNET_USER_MODE_TEST)
-#include <ntddk.h>
-#endif
-
-#if defined(WKNET_USER_MODE_TEST)
-#ifndef _Must_inspect_result_
-#define _Must_inspect_result_
-#endif
-#ifndef _In_
-#define _In_
-#endif
-#ifndef _In_opt_
-#define _In_opt_
-#endif
-#ifndef _Out_
-#define _Out_
-#endif
-#ifndef _Out_opt_
-#define _Out_opt_
-#endif
-#ifndef _Inout_
-#define _Inout_
-#endif
-#ifndef _In_z_
-#define _In_z_
-#endif
-#ifndef _In_reads_
-#define _In_reads_(s)
-#endif
-#ifndef _In_reads_bytes_
-#define _In_reads_bytes_(s)
-#endif
-#ifndef _In_reads_bytes_opt_
-#define _In_reads_bytes_opt_(s)
-#endif
-#ifndef _Outptr_result_bytebuffer_
-#define _Outptr_result_bytebuffer_(s)
-#endif
-#endif
-
-#if defined(WKNET_USER_MODE_TEST)
-#include <wknet/net/WskClient.h>
-#else
 #include <wknet/WknetConfig.h>
-#include <wknet/net/WskClient.h>
+
+#if defined(WKNET_USER_MODE_TEST)
+// User-mode harness: local sockaddr storage without pulling WSK stubs.
+// Shared with net/WskClient.h via this guard.
+#ifndef WKNET_SOCKADDR_STORAGE_DEFINED
+#define WKNET_SOCKADDR_STORAGE_DEFINED
+struct SOCKADDR_STORAGE
+{
+    USHORT ss_family = 0;
+    UCHAR __ss_pad[126] = {};
+};
+#endif
+#else
+// Kernel: SOCKADDR_STORAGE comes with WSK.
+#include <wsk.h>
 #endif
 
 namespace wknet
 {
-namespace net
-{
-    class WskClient;
-}
-
 namespace tls
 {
     class CertificateStore;
@@ -169,32 +129,124 @@ namespace wknet::http {
         Shared = 1
     };
 
+    // Public TLS policy surface (implementation lives in wknet::tls).
+    enum class TlsSecurityProfile : UCHAR
+    {
+        ModernDefault,
+        CompatibilityExplicit
+    };
+
+    struct TlsPolicy final
+    {
+        TlsSecurityProfile Profile = TlsSecurityProfile::ModernDefault;
+        bool EnableTls12RsaKeyExchange = false;
+        bool EnableTls12Cbc = false;
+        bool EnableTls12Renegotiation = false;
+        bool EnableTls12Sha1Signatures = false;
+        bool EnablePostHandshakeClientAuth = false;
+        bool RequireRevocationCheck = false;
+    };
+
+    // Public content-coding negotiation/material surface.
+    enum class AcceptCoding : UCHAR
+    {
+        Identity = 0,
+        Gzip = 1,
+        Deflate = 2,
+        Brotli = 3,
+        Compress = 4,
+        Zstd = 5,
+        DictionaryCompressedBrotli = 6,
+        DictionaryCompressedZstd = 7,
+        Aes128Gcm = 8,
+        Exi = 9,
+        Pack200Gzip = 10,
+        Any = 11,
+        Extension = 12
+    };
+
+    constexpr USHORT AcceptEncodingQValueMax = 1000;
+
+    struct AcceptEncodingPreference final
+    {
+        AcceptCoding Coding = AcceptCoding::Identity;
+        USHORT QValue = AcceptEncodingQValueMax;
+    };
+
+    enum class ContentCoding : UCHAR
+    {
+        Identity,
+        Gzip,
+        Deflate,
+        Brotli,
+        Compress,
+        Zstd,
+        DictionaryCompressedBrotli,
+        DictionaryCompressedZstd,
+        Aes128Gcm,
+        Exi,
+        Pack200Gzip
+    };
+
+    struct CodingExternalMaterial final
+    {
+        ContentCoding Coding = ContentCoding::Identity;
+        const UCHAR* Dictionary = nullptr;
+        SIZE_T DictionaryLength = 0;
+        const UCHAR* Aes128GcmKeyingMaterial = nullptr;
+        SIZE_T Aes128GcmKeyingMaterialLength = 0;
+    };
+
+    using CodingMaterialCallback = NTSTATUS(*)(
+        _In_opt_ void* context,
+        ContentCoding coding,
+        _Out_ CodingExternalMaterial* material);
+
+    struct CodingDecodeMaterials final
+    {
+        const CodingExternalMaterial* Items = nullptr;
+        SIZE_T ItemCount = 0;
+        CodingMaterialCallback Callback = nullptr;
+        void* CallbackContext = nullptr;
+    };
+
+    // Public HTTP/2 priority descriptor (RFC 7540 weight/dependency).
+    struct Http2Priority final
+    {
+        ULONG StreamDependency = 0;
+        USHORT Weight = 16;
+        bool Exclusive = false;
+    };
+
     constexpr SIZE_T DefaultRequestBufferBytes = 16 * 1024;
     constexpr SIZE_T DefaultMaxResponseBytes = 0;
     constexpr SIZE_T DefaultMaxWebSocketMessageBytes = 1024 * 1024;
     constexpr ULONG DefaultPoolCapacity = 8;
     constexpr ULONG DefaultMaxConnsPerHost = 2;
     constexpr ULONG DefaultIdleTimeoutMs = 30000;
-    constexpr ULONG DefaultTlsHandshakeTimeoutMs = ::wknet::TlsHandshakeReceiveTimeoutMilliseconds;
-    constexpr ULONG DefaultMaxTls12Renegotiations = ::wknet::session::KhDefaultMaxTls12Renegotiations;
-    constexpr ULONG HardMaxTls12Renegotiations = ::wknet::session::KhHardMaxTls12Renegotiations;
+    constexpr ULONG DefaultTlsHandshakeTimeoutMs = TlsHandshakeReceiveTimeoutMilliseconds;
+    constexpr ULONG DefaultMaxTls12Renegotiations = 1;
+    constexpr ULONG HardMaxTls12Renegotiations = 4;
     constexpr ULONG DefaultMaxRedirects = 10;
     constexpr ULONG DefaultExpectContinueTimeoutMs = 1000;
-    constexpr ULONG MaxExpectContinueTimeoutMs = ::wknet::WskOperationTimeoutMilliseconds;
-    constexpr ULONG DefaultHttp2KeepAliveIdleMs = ::wknet::session::KhDefaultHttp2KeepAliveIdleMilliseconds;
-    constexpr ULONG DefaultHttp2KeepAliveIntervalMs = ::wknet::session::KhDefaultHttp2KeepAliveIntervalMilliseconds;
-    constexpr ULONG DefaultHttp2KeepAliveAckTimeoutMs = ::wknet::session::KhDefaultHttp2KeepAliveAckTimeoutMilliseconds;
-    constexpr ULONG DefaultHttp11PipelineMaxDepth = ::wknet::session::KhDefaultHttp11PipelineMaxDepth;
-    constexpr ULONG Http11PipelineMethodGet = ::wknet::session::KhHttp11PipelineMethodGet;
-    constexpr ULONG Http11PipelineMethodPost = ::wknet::session::KhHttp11PipelineMethodPost;
-    constexpr ULONG Http11PipelineMethodPut = ::wknet::session::KhHttp11PipelineMethodPut;
-    constexpr ULONG Http11PipelineMethodPatch = ::wknet::session::KhHttp11PipelineMethodPatch;
-    constexpr ULONG Http11PipelineMethodDelete = ::wknet::session::KhHttp11PipelineMethodDelete;
-    constexpr ULONG Http11PipelineMethodHead = ::wknet::session::KhHttp11PipelineMethodHead;
-    constexpr ULONG Http11PipelineMethodOptions = ::wknet::session::KhHttp11PipelineMethodOptions;
-    constexpr ULONG Http11PipelineMethodConnect = ::wknet::session::KhHttp11PipelineMethodConnect;
-    constexpr ULONG Http11PipelineMethodTrace = ::wknet::session::KhHttp11PipelineMethodTrace;
-    constexpr ULONG DefaultHttp11PipelineMethodMask = ::wknet::session::KhDefaultHttp11PipelineMethodMask;
+    constexpr ULONG MaxExpectContinueTimeoutMs = WskOperationTimeoutMilliseconds;
+    constexpr ULONG DefaultHttp2KeepAliveIdleMs = 30000;
+    constexpr ULONG DefaultHttp2KeepAliveIntervalMs = 30000;
+    constexpr ULONG DefaultHttp2KeepAliveAckTimeoutMs = 5000;
+    constexpr ULONG DefaultHttp11PipelineMaxDepth = 4;
+    constexpr ULONG Http11PipelineMethodGet = 0x00000001;
+    constexpr ULONG Http11PipelineMethodPost = 0x00000002;
+    constexpr ULONG Http11PipelineMethodPut = 0x00000004;
+    constexpr ULONG Http11PipelineMethodPatch = 0x00000008;
+    constexpr ULONG Http11PipelineMethodDelete = 0x00000010;
+    constexpr ULONG Http11PipelineMethodHead = 0x00000020;
+    constexpr ULONG Http11PipelineMethodOptions = 0x00000040;
+    constexpr ULONG Http11PipelineMethodConnect = 0x00000080;
+    constexpr ULONG Http11PipelineMethodTrace = 0x00000100;
+    constexpr ULONG DefaultHttp11PipelineMethodMask =
+        Http11PipelineMethodGet |
+        Http11PipelineMethodHead |
+        Http11PipelineMethodOptions;
 
     typedef NTSTATUS (*HeaderCallback)(
         void* context,
@@ -234,7 +286,7 @@ namespace wknet::http {
         const char* Alpn = nullptr;
         SIZE_T AlpnLength = 0;
         bool PreferHttp2 = true;
-        ::wknet::tls::TlsPolicy Policy = {};
+        TlsPolicy Policy = {};
         const ::wknet::tls::TlsClientCredential* ClientCredential = nullptr;
         ULONG HandshakeTimeoutMs = DefaultTlsHandshakeTimeoutMs;
         ULONG MaxTls12Renegotiations = DefaultMaxTls12Renegotiations;
@@ -309,10 +361,10 @@ namespace wknet::http {
         ConnPolicy ConnectionPolicy;
         AddressFamily Family;
         Http2CleartextMode Http2CleartextMode;
-        const ::wknet::http1::HttpAcceptEncodingPreference* AcceptEncodingPreferences;
+        const AcceptEncodingPreference* AcceptEncodingPreferences;
         SIZE_T AcceptEncodingPreferenceCount;
-        const ::wknet::http1::HttpCodingDecodeMaterials* ContentCodingMaterials;
-        const ::wknet::http2::Http2Priority* Http2Priority;
+        const CodingDecodeMaterials* ContentCodingMaterials;
+        const Http2Priority* Http2Priority;
         Cache* Cache;
 #if defined(WKNET_USER_MODE_TEST)
         CompletionCallback OnComplete;
@@ -411,9 +463,45 @@ namespace wknet::websocket {
         SIZE_T ValueLength = 0;
     };
 
-    using HandshakeChallenge = ::wknet::session::KhWebSocketHandshakeChallenge;
-    using HandshakeRetryAction = ::wknet::session::KhWebSocketHandshakeRetryAction;
-    using HandshakeChallengeCallback = ::wknet::session::KhWebSocketHandshakeChallengeCallback;
+    // Response header view used only by handshake challenge callbacks.
+    struct ResponseHeader final
+    {
+        const char* Name = nullptr;
+        SIZE_T NameLength = 0;
+        const char* Value = nullptr;
+        SIZE_T ValueLength = 0;
+    };
+
+    struct HandshakeChallenge final
+    {
+        USHORT StatusCode = 0;
+        const ResponseHeader* Headers = nullptr;
+        SIZE_T HeaderCount = 0;
+        bool Redirect = false;
+        bool AuthenticationChallenge = false;
+    };
+
+    struct HandshakeRetryAction final
+    {
+        const char* RedirectPath = nullptr;
+        SIZE_T RedirectPathLength = 0;
+        const Header* Headers = nullptr;
+        SIZE_T HeaderCount = 0;
+    };
+
+    typedef NTSTATUS (*HandshakeChallengeCallback)(
+        void* context,
+        const HandshakeChallenge* challenge,
+        HandshakeRetryAction* action);
+
+    struct PerMessageDeflateOptions final
+    {
+        bool Enable = false;
+        bool ClientNoContextTakeover = false;
+        bool ServerNoContextTakeover = false;
+        UCHAR ClientMaxWindowBits = 15;
+        UCHAR ServerMaxWindowBits = 15;
+    };
 
     struct ConnectConfig final
     {
@@ -429,7 +517,7 @@ namespace wknet::websocket {
         bool AutoReplyPing = true;
         bool AllowWebSocketOverHttp2 = false;
         wknet::http::WebSocketTransportMode TransportMode = wknet::http::WebSocketTransportMode::Auto;
-        ::wknet::ws::PerMessageDeflateOptions PerMessageDeflate = {};
+        PerMessageDeflateOptions PerMessageDeflate = {};
         HandshakeChallengeCallback ChallengeCallback = nullptr;
         void* ChallengeContext = nullptr;
         ULONG MaxHandshakeRetries = 0;

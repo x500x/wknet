@@ -1,5 +1,5 @@
 #include <wknet/http/Body.h>
-#include <wknet/http/Detail.h>
+#include "Detail.h"
 
 namespace wknet::http {
 namespace

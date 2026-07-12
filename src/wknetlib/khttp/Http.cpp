@@ -1,5 +1,5 @@
 #include <wknet/http/Http.h>
-#include <wknet/http/Detail.h>
+#include "Detail.h"
 #include <wknet/engine/Engine.h>
 
 namespace wknet::http {
@@ -99,10 +99,10 @@ namespace
         dst.BodyCallback = reinterpret_cast<::wknet::session::KhBodyCallback>(src.OnBody);
         dst.CallbackContext = src.CallbackContext;
         dst.Http2CleartextMode = detail::ToApiHttp2CleartextMode(src.Http2CleartextMode);
-        dst.AcceptEncodingPreferences = src.AcceptEncodingPreferences;
+        dst.AcceptEncodingPreferences = detail::ToApiAcceptEncodingPreferences(src.AcceptEncodingPreferences);
         dst.AcceptEncodingPreferenceCount = src.AcceptEncodingPreferenceCount;
-        dst.ContentCodingMaterials = src.ContentCodingMaterials;
-        dst.Http2Priority = src.Http2Priority;
+        dst.ContentCodingMaterials = detail::ToApiCodingMaterials(src.ContentCodingMaterials);
+        dst.Http2Priority = detail::ToApiHttp2Priority(src.Http2Priority);
         dst.Cache = detail::ToApiCache(src.Cache);
     }
 

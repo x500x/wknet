@@ -1,5 +1,5 @@
 #include <wknet/http/AsyncOp.h>
-#include <wknet/http/Detail.h>
+#include "Detail.h"
 #include <wknet/engine/Async.h>
 #include <wknet/engine/Engine.h>
 

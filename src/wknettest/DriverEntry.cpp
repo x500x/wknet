@@ -1,6 +1,6 @@
 #include <wknet/Wknet.h>
 
-#include "wknettestLog.h"
+#include "WknetTestLog.h"
 #include "samples/KhttpSamples.h"
 
 extern "C" NTSYSAPI NTSTATUS NTAPI ZwWaitForSingleObject(

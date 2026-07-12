@@ -2,8 +2,6 @@
 
 #include <wknet/WknetConfig.h>
 
-#include <wknet/net/WskClient.h>
-
 #include <wknet/http/AsyncOp.h>
 #include <wknet/http/Body.h>
 #include <wknet/http/Cache.h>
@@ -18,11 +16,5 @@
 #include <wknet/http/Types.h>
 #include <wknet/websocket/WebSocket.h>
 
-#include <wknet/engine/Engine.h>
-
-#include <wknet/client/Http2Client.h>
-#include <wknet/client/HttpClient.h>
-#include <wknet/client/HttpsClient.h>
-#include <wknet/client/WebSocketClient.h>
-
+// Certificate store remains reachable for external CA loading; implementation is tls-internal.
 #include <wknet/tls/CertificateStore.h>

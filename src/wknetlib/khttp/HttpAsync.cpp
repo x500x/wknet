@@ -1,5 +1,5 @@
 #include <wknet/http/HttpAsync.h>
-#include <wknet/http/Detail.h>
+#include "Detail.h"
 #include <wknet/engine/Engine.h>
 
 namespace wknet::http {

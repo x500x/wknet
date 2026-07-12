@@ -1,6 +1,6 @@
 #include "samples/KhttpSamples.h"
 
-#include "wknettestLog.h"
+#include "WknetTestLog.h"
 
 namespace wknet
 {

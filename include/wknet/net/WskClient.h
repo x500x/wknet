@@ -12,11 +12,14 @@ struct SOCKADDR
     char sa_data[14] = {};
 };
 
+#ifndef WKNET_SOCKADDR_STORAGE_DEFINED
+#define WKNET_SOCKADDR_STORAGE_DEFINED
 struct SOCKADDR_STORAGE
 {
     USHORT ss_family = 0;
     UCHAR __ss_pad[126] = {};
 };
+#endif
 
 struct SOCKADDR_IN
 {

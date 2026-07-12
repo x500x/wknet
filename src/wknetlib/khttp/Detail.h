@@ -393,6 +393,21 @@ namespace detail
             ::wknet::session::KhHttpCacheMode::Private;
     }
 
+    inline ::wknet::tls::TlsPolicy ToApiTlsPolicy(const TlsPolicy& src) noexcept
+    {
+        ::wknet::tls::TlsPolicy dst = {};
+        dst.Profile = src.Profile == TlsSecurityProfile::CompatibilityExplicit
+            ? ::wknet::tls::TlsSecurityProfile::CompatibilityExplicit
+            : ::wknet::tls::TlsSecurityProfile::ModernDefault;
+        dst.EnableTls12RsaKeyExchange = src.EnableTls12RsaKeyExchange;
+        dst.EnableTls12Cbc = src.EnableTls12Cbc;
+        dst.EnableTls12Renegotiation = src.EnableTls12Renegotiation;
+        dst.EnableTls12Sha1Signatures = src.EnableTls12Sha1Signatures;
+        dst.EnablePostHandshakeClientAuth = src.EnablePostHandshakeClientAuth;
+        dst.RequireRevocationCheck = src.RequireRevocationCheck;
+        return dst;
+    }
+
     inline void FillApiTlsOptions(const TlsConfig& src, ::wknet::session::KhTlsOptions& dst) noexcept
     {
         dst.MinVersion = ToApiTlsVersion(src.MinVersion);
@@ -404,10 +419,47 @@ namespace detail
         dst.Alpn = src.Alpn;
         dst.AlpnLength = src.AlpnLength;
         dst.PreferHttp2 = src.PreferHttp2;
-        dst.Policy = src.Policy;
+        dst.Policy = ToApiTlsPolicy(src.Policy);
         dst.ClientCredential = src.ClientCredential;
         dst.HandshakeReceiveTimeoutMilliseconds = src.HandshakeTimeoutMs;
         dst.MaxTls12Renegotiations = src.MaxTls12Renegotiations;
+    }
+
+    // Public coding/priority views are layout-compatible with internal protocol types.
+    inline const ::wknet::http1::HttpAcceptEncodingPreference* ToApiAcceptEncodingPreferences(
+        const AcceptEncodingPreference* preferences) noexcept
+    {
+        return reinterpret_cast<const ::wknet::http1::HttpAcceptEncodingPreference*>(preferences);
+    }
+
+    inline const ::wknet::http1::HttpCodingDecodeMaterials* ToApiCodingMaterials(
+        const CodingDecodeMaterials* materials) noexcept
+    {
+        return reinterpret_cast<const ::wknet::http1::HttpCodingDecodeMaterials*>(materials);
+    }
+
+    inline const ::wknet::http2::Http2Priority* ToApiHttp2Priority(
+        const Http2Priority* priority) noexcept
+    {
+        return reinterpret_cast<const ::wknet::http2::Http2Priority*>(priority);
+    }
+
+    inline ::wknet::ws::PerMessageDeflateOptions ToApiPerMessageDeflate(
+        const wknet::websocket::PerMessageDeflateOptions& src) noexcept
+    {
+        ::wknet::ws::PerMessageDeflateOptions dst = {};
+        dst.Enable = src.Enable;
+        dst.ClientNoContextTakeover = src.ClientNoContextTakeover;
+        dst.ServerNoContextTakeover = src.ServerNoContextTakeover;
+        dst.ClientMaxWindowBits = src.ClientMaxWindowBits;
+        dst.ServerMaxWindowBits = src.ServerMaxWindowBits;
+        return dst;
+    }
+
+    inline ::wknet::session::KhWebSocketHandshakeChallengeCallback ToApiHandshakeChallengeCallback(
+        wknet::websocket::HandshakeChallengeCallback callback) noexcept
+    {
+        return reinterpret_cast<::wknet::session::KhWebSocketHandshakeChallengeCallback>(callback);
     }
 
     void FillApiSendOptions(

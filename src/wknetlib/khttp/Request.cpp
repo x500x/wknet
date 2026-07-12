@@ -1,5 +1,5 @@
 #include <wknet/http/Request.h>
-#include <wknet/http/Detail.h>
+#include "Detail.h"
 #include <wknet/http/Body.h>
 #include <wknet/http/Headers.h>
 #include <wknet/http/Options.h>

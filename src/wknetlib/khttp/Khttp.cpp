@@ -1,5 +1,5 @@
 #include <wknet/http/Test.h>
-#include <wknet/http/Detail.h>
+#include "Detail.h"
 #include <wknet/engine/Engine.h>
 #include <wknet/http1/HttpTypes.h>
 

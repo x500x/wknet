@@ -6,7 +6,7 @@
 #include <wknet/client/Http2Client.h>
 #include <wknet/http2/Http2Frame.h>
 #include <wknettest/SampleStatus.h>
-#include "wknettestLog.h"
+#include "WknetTestLog.h"
 
 namespace wknet
 {

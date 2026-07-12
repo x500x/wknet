@@ -7,7 +7,7 @@
 #include <wknettest/SampleStatus.h>
 
 #include "samples/ExternalTrustStore.h"
-#include "wknettestLog.h"
+#include "WknetTestLog.h"
 
 namespace wknet
 {

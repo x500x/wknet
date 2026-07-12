@@ -1,5 +1,5 @@
 #include <wknet/websocket/WebSocket.h>
-#include <wknet/http/Detail.h>
+#include "Detail.h"
 #include <wknet/engine/Engine.h>
 #include <wknet/http1/HttpTypes.h>
 
@@ -22,8 +22,8 @@ namespace
         dst.AutoReplyPing = src.AutoReplyPing;
         dst.AllowWebSocketOverHttp2 = src.AllowWebSocketOverHttp2;
         dst.TransportMode = wknet::http::detail::ToApiWebSocketTransportMode(src.TransportMode);
-        dst.PerMessageDeflate = src.PerMessageDeflate;
-        dst.ChallengeCallback = src.ChallengeCallback;
+        dst.PerMessageDeflate = wknet::http::detail::ToApiPerMessageDeflate(src.PerMessageDeflate);
+        dst.ChallengeCallback = wknet::http::detail::ToApiHandshakeChallengeCallback(src.ChallengeCallback);
         dst.ChallengeContext = src.ChallengeContext;
         dst.MaxHandshakeRetries = src.MaxHandshakeRetries;
 

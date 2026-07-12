@@ -53,7 +53,7 @@
     <ClInclude Include="..\..\include\wknettest\SampleStatus.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
-    <ClInclude Include="wknettestLog.h">
+    <ClInclude Include="WknetTestLog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="samples\AdvancedScenarioSamples.h">

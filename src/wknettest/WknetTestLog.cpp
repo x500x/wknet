@@ -1,4 +1,4 @@
-#include "wknettestLog.h"
+#include "WknetTestLog.h"
 
 #if !defined(WKNET_USER_MODE_TEST)
 #include <ntstrsafe.h>

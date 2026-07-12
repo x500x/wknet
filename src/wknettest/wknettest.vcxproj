@@ -31,7 +31,7 @@
   <ItemGroup>
     <ClInclude Include="..\..\include\wknet\Wknet.h" />
     <ClInclude Include="..\..\include\wknettest\SampleStatus.h" />
-    <ClInclude Include="wknettestLog.h" />
+    <ClInclude Include="WknetTestLog.h" />
     <ClInclude Include="samples\AdvancedScenarioSamples.h" />
     <ClInclude Include="samples\ExternalTrustStore.h" />
     <ClInclude Include="samples\HighLevelApiSamples.h" />

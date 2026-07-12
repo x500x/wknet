@@ -9,7 +9,7 @@
 #include <wknet/websocket/WebSocket.h>
 #include <wknettest/SampleStatus.h>
 #include "samples/ExternalTrustStore.h"
-#include "wknettestLog.h"
+#include "WknetTestLog.h"
 
 #ifndef STATUS_CONNECTION_REFUSED
 #define STATUS_CONNECTION_REFUSED ((NTSTATUS)0xC0000236L)
@@ -1612,7 +1612,7 @@ namespace
             CertPolicyName(config.Tls.Certificate),
             BoolName(config.AutoReplyPing),
             config.MaxMessageBytes,
-            config.Tls.Policy.Profile == tls::TlsSecurityProfile::CompatibilityExplicit ? "CompatibilityExplicit" : "ModernDefault",
+            config.Tls.Policy.Profile == wknet::http::TlsSecurityProfile::CompatibilityExplicit ? "CompatibilityExplicit" : "ModernDefault",
             config.Tls.Policy.EnableTls12Sha1Signatures ? "启用(endpoint兼容)" : "关闭",
             config.Tls.MaxTls12Renegotiations);
     }

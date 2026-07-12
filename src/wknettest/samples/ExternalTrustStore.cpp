@@ -6,7 +6,7 @@
 #else
 #include <wknet/WknetConfig.h>
 #endif
-#include "wknettestLog.h"
+#include "WknetTestLog.h"
 
 namespace wknet
 {
