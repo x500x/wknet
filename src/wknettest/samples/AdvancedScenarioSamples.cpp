@@ -10,7 +10,7 @@
 #include <wknet/websocket/WebSocket.h>
 #include <wknettest/SampleStatus.h>
 #if defined(WKNET_USER_MODE_TEST)
-#include <wknet/http/Test.h>
+#include <wknet/test/Test.h>
 #endif
 
 #include "samples/ExternalTrustStore.h"

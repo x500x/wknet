@@ -10,7 +10,7 @@ namespace wknet
 {
 namespace session
 {
-    struct KhWorkspace;
+    struct Workspace;
 }
 
 namespace crypto
@@ -43,7 +43,7 @@ namespace client
         const tls::TlsAlpnProtocol* AlpnProtocols = nullptr;
         SIZE_T AlpnProtocolCount = 0;
         const tls::TlsClientCredential* ClientCredential = nullptr;
-        session::KhWorkspace* Workspace = nullptr;
+        session::Workspace* Workspace = nullptr;
         const crypto::CngProviderCache* ProviderCache = nullptr;
         bool EnableSessionResumption = true;
         ULONG MaxTls12Renegotiations = tls::Tls12DefaultMaxRenegotiations;

@@ -8,7 +8,7 @@ namespace session
 {
     _Must_inspect_result_
     NTSTATUS ParseUrlIntoRequest(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         const char* url,
         SIZE_T urlLength) noexcept;
 

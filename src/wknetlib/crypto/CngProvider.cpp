@@ -1707,7 +1707,7 @@ namespace crypto
         const UCHAR* normalizedModulus = modulus + modulusOffset;
         const SIZE_T normalizedModulusLength = modulusLength - modulusOffset;
         const SIZE_T modulusBits = normalizedModulusLength * 8;
-        if (modulusBits < KhMinRsaModulusBits || normalizedModulusLength > MAXULONG) {
+        if (modulusBits < MinRsaModulusBits || normalizedModulusLength > MAXULONG) {
             return STATUS_NOT_SUPPORTED;
         }
 

@@ -41,7 +41,7 @@ namespace
 
     bool IsValidHeaderName(const char* name, SIZE_T nameLength) noexcept
     {
-        if (name == nullptr || nameLength == 0 || nameLength > ::wknet::session::KhMaxHeaderNameLength) {
+        if (name == nullptr || nameLength == 0 || nameLength > ::wknet::session::MaxHeaderNameLength) {
             return false;
         }
         for (SIZE_T index = 0; index < nameLength; ++index) {
@@ -64,7 +64,7 @@ namespace
         if (value == nullptr && valueLength != 0) {
             return false;
         }
-        if (valueLength > ::wknet::session::KhMaxHeaderValueLength) {
+        if (valueLength > ::wknet::session::MaxHeaderValueLength) {
             return false;
         }
         for (SIZE_T index = 0; index < valueLength; ++index) {
@@ -142,7 +142,7 @@ NTSTATUS HeadersAdd(Headers* headers, const char* name, const char* value) noexc
 
 NTSTATUS HeadersAddEx(Headers* headers, const char* name, SIZE_T nameLength, const char* value, SIZE_T valueLength) noexcept
 {
-    if (headers == nullptr || headers->Magic != detail::KhHighHeadersMagic ||
+    if (headers == nullptr || headers->Magic != detail::HighHeadersMagic ||
         !IsValidHeaderName(name, nameLength) ||
         !IsValidHeaderValue(value, valueLength) ||
         IsControlledHeader(name, nameLength)) {
@@ -150,7 +150,7 @@ NTSTATUS HeadersAddEx(Headers* headers, const char* name, SIZE_T nameLength, con
     }
 
     const SIZE_T slot = FindHeader(*headers, name, nameLength);
-    if (slot == headers->Count && headers->Count >= ::wknet::session::KhMaxHeadersPerRequest) {
+    if (slot == headers->Count && headers->Count >= ::wknet::session::MaxHeadersPerRequest) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
@@ -180,7 +180,7 @@ NTSTATUS HeadersAddEx(Headers* headers, const char* name, SIZE_T nameLength, con
 
 void HeadersRelease(Headers* headers) noexcept
 {
-    if (headers == nullptr || headers->Magic != detail::KhHighHeadersMagic) {
+    if (headers == nullptr || headers->Magic != detail::HighHeadersMagic) {
         return;
     }
     for (SIZE_T index = 0; index < headers->Count; ++index) {

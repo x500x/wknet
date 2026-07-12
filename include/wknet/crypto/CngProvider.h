@@ -1,15 +1,14 @@
 #pragma once
 
-#if defined(WKNET_USER_MODE_TEST)
-#include "http1/HttpTypes.h"
+#include <wknet/WknetConfig.h>
 
+#if defined(WKNET_USER_MODE_TEST)
 using LPCWSTR = const wchar_t*;
 
 #ifndef _In_reads_bytes_opt_
 #define _In_reads_bytes_opt_(x)
 #endif
 #else
-#include <wknet/WknetConfig.h>
 #include <bcrypt.h>
 #endif
 

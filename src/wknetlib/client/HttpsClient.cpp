@@ -145,7 +145,7 @@ namespace client
 
         _Must_inspect_result_
         NTSTATUS PrepareHttp2HeaderScratch(
-            _In_opt_ session::KhWorkspace* workspace,
+            _In_opt_ session::Workspace* workspace,
             _Out_ Http2HeaderScratch& scratch) noexcept
         {
             scratch = {};

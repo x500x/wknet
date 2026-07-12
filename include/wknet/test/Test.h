@@ -8,16 +8,16 @@
 namespace wknet::http {
 namespace test
 {
-    typedef ::wknet::session::KhTestHttpTransportRequest HttpTransportRequest;
-    typedef ::wknet::session::KhTestHttpTransportResponse HttpTransportResponse;
-    typedef ::wknet::session::KhTestHttpTransportCallback HttpTransportCallback;
+    typedef ::wknet::session::TestHttpTransportRequest HttpTransportRequest;
+    typedef ::wknet::session::TestHttpTransportResponse HttpTransportResponse;
+    typedef ::wknet::session::TestHttpTransportCallback HttpTransportCallback;
 
-    typedef ::wknet::session::KhTestWebSocketConnectRequest WebSocketConnectRequest;
-    typedef ::wknet::session::KhTestWebSocketMessage WebSocketMessage;
-    typedef ::wknet::session::KhTestWebSocketConnectCallback WebSocketConnectCallback;
-    typedef ::wknet::session::KhTestWebSocketSendCallback WebSocketSendCallback;
-    typedef ::wknet::session::KhTestWebSocketReceiveCallback WebSocketReceiveCallback;
-    typedef ::wknet::session::KhTestWebSocketCloseCallback WebSocketCloseCallback;
+    typedef ::wknet::session::TestWebSocketConnectRequest WebSocketConnectRequest;
+    typedef ::wknet::session::TestWebSocketMessage WebSocketMessage;
+    typedef ::wknet::session::TestWebSocketConnectCallback WebSocketConnectCallback;
+    typedef ::wknet::session::TestWebSocketSendCallback WebSocketSendCallback;
+    typedef ::wknet::session::TestWebSocketReceiveCallback WebSocketReceiveCallback;
+    typedef ::wknet::session::TestWebSocketCloseCallback WebSocketCloseCallback;
 
     void SetHttpTransport(HttpTransportCallback callback, void* context) noexcept;
 
@@ -33,8 +33,8 @@ namespace test
     void SetAsyncAutoRun(bool enabled) noexcept;
     NTSTATUS RunAsyncOperation(_In_ AsyncOp* operation) noexcept;
     bool IsHttpTls12ConfirmationCandidate(
-        ::wknet::session::KhTlsVersion minVersion,
-        ::wknet::session::KhTlsVersion maxVersion,
+        ::wknet::session::TlsVersion minVersion,
+        ::wknet::session::TlsVersion maxVersion,
         ULONG category,
         NTSTATUS status,
         bool beforeTls13FirstServerHello) noexcept;

@@ -529,7 +529,7 @@ namespace http1
 
             *headerCount = 0;
             SIZE_T cursor = headerStart;
-            if (headerEnd < headerStart || headerEnd - headerStart > KhHttpMaxHeaderBytes) {
+            if (headerEnd < headerStart || headerEnd - headerStart > HttpMaxHeaderBytes) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
@@ -538,7 +538,7 @@ namespace http1
                 if (lineEnd == InvalidOffset || lineEnd > headerEnd) {
                     return STATUS_INVALID_NETWORK_RESPONSE;
                 }
-                if (lineEnd - cursor > KhHttpMaxHeaderLineBytes) {
+                if (lineEnd - cursor > HttpMaxHeaderLineBytes) {
                     return STATUS_INVALID_NETWORK_RESPONSE;
                 }
 
@@ -563,7 +563,7 @@ namespace http1
                     return STATUS_INVALID_NETWORK_RESPONSE;
                 }
 
-                if (*headerCount >= KhHttpMaxHeaders ||
+                if (*headerCount >= HttpMaxHeaders ||
                     *headerCount >= headerCapacity ||
                     headers == nullptr) {
                     return STATUS_BUFFER_TOO_SMALL;
@@ -712,7 +712,7 @@ namespace http1
         if (headerEnd == InvalidOffset) {
             return STATUS_MORE_PROCESSING_REQUIRED;
         }
-        if (headerEnd > KhHttpMaxHeaderBytes) {
+        if (headerEnd > HttpMaxHeaderBytes) {
             response = {};
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
@@ -900,7 +900,7 @@ namespace http1
             if (chunkLineEnd == InvalidOffset) {
                 return STATUS_MORE_PROCESSING_REQUIRED;
             }
-            if (chunkLineEnd - cursor > KhHttpMaxChunkSizeLineBytes) {
+            if (chunkLineEnd - cursor > HttpMaxChunkSizeLineBytes) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
@@ -942,7 +942,7 @@ namespace http1
                     if (trailerLineEnd == InvalidOffset) {
                         return STATUS_MORE_PROCESSING_REQUIRED;
                     }
-                    if (trailerLineEnd - cursor > KhHttpMaxHeaderLineBytes) {
+                    if (trailerLineEnd - cursor > HttpMaxHeaderLineBytes) {
                         return STATUS_INVALID_NETWORK_RESPONSE;
                     }
 
@@ -952,7 +952,7 @@ namespace http1
                     }
 
                     HttpHeader* targetTrailer = nullptr;
-                    if (*trailerCount >= KhHttpMaxTrailers) {
+                    if (*trailerCount >= HttpMaxTrailers) {
                         return STATUS_INVALID_NETWORK_RESPONSE;
                     }
                     if (trailers != nullptr) {
@@ -976,7 +976,7 @@ namespace http1
                 }
             }
 
-            if (++chunkCount > KhHttpMaxChunks) {
+            if (++chunkCount > HttpMaxChunks) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #if defined(WKNET_USER_MODE_TEST)
-#include "http1/HttpTypes.h"
+#include <wknet/UmTypes.h>
 #else
 #include <ntddk.h>
 #endif

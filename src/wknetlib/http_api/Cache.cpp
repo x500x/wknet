@@ -7,7 +7,7 @@ namespace
 {
     void FillApiCacheOptions(
         const CacheOptions* options,
-        ::wknet::session::KhHttpCacheOptions& apiOptions) noexcept
+        ::wknet::session::HttpCacheOptions& apiOptions) noexcept
     {
         if (options == nullptr) {
             apiOptions = {};
@@ -19,7 +19,7 @@ namespace
     }
 
     void FillCacheStats(
-        const ::wknet::session::KhHttpCacheStats& src,
+        const ::wknet::session::HttpCacheStats& src,
         CacheStats& dst) noexcept
     {
         dst.EntryCount = src.EntryCount;
@@ -52,9 +52,9 @@ NTSTATUS CacheCreate(const CacheOptions* options, Cache** cache) noexcept
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    ::wknet::session::KhHttpCacheOptions apiOptions = {};
+    ::wknet::session::HttpCacheOptions apiOptions = {};
     FillApiCacheOptions(options, apiOptions);
-    NTSTATUS status = ::wknet::session::KhHttpCacheCreate(&apiOptions, &created->Engine);
+    NTSTATUS status = ::wknet::session::HttpCacheCreate(&apiOptions, &created->Engine);
     if (!NT_SUCCESS(status)) {
         ::wknet::FreeNonPagedObject(created);
         return status;
@@ -66,11 +66,11 @@ NTSTATUS CacheCreate(const CacheOptions* options, Cache** cache) noexcept
 
 void CacheRelease(Cache* cache) noexcept
 {
-    if (cache == nullptr || cache->Magic != detail::KhHighCacheMagic) {
+    if (cache == nullptr || cache->Magic != detail::HighCacheMagic) {
         return;
     }
     if (cache->Engine != nullptr) {
-        ::wknet::session::KhHttpCacheClose(cache->Engine);
+        ::wknet::session::HttpCacheClose(cache->Engine);
         cache->Engine = nullptr;
     }
     cache->Magic = 0;
@@ -79,7 +79,7 @@ void CacheRelease(Cache* cache) noexcept
 
 NTSTATUS CacheClear(Cache* cache) noexcept
 {
-    return ::wknet::session::KhHttpCacheClear(detail::ToApiCache(cache));
+    return ::wknet::session::HttpCacheClear(detail::ToApiCache(cache));
 }
 
 NTSTATUS CacheGetStats(Cache* cache, CacheStats* stats) noexcept
@@ -90,8 +90,8 @@ NTSTATUS CacheGetStats(Cache* cache, CacheStats* stats) noexcept
     if (stats == nullptr) {
         return STATUS_INVALID_PARAMETER;
     }
-    ::wknet::session::KhHttpCacheStats apiStats = {};
-    NTSTATUS status = ::wknet::session::KhHttpCacheGetStats(detail::ToApiCache(cache), &apiStats);
+    ::wknet::session::HttpCacheStats apiStats = {};
+    NTSTATUS status = ::wknet::session::HttpCacheGetStats(detail::ToApiCache(cache), &apiStats);
     if (NT_SUCCESS(status)) {
         FillCacheStats(apiStats, *stats);
     }

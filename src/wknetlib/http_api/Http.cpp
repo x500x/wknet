@@ -69,7 +69,7 @@ namespace
         if (valueLength != nullptr) {
             *valueLength = 0;
         }
-        if (headers == nullptr || headers->Magic != detail::KhHighHeadersMagic) {
+        if (headers == nullptr || headers->Magic != detail::HighHeadersMagic) {
             return false;
         }
         for (SIZE_T index = 0; index < headers->Count; ++index) {
@@ -89,14 +89,14 @@ namespace
 
     void FillEngineSendOptions(
         const SendOptions& src,
-        ::wknet::session::KhHttpSendOptions& dst) noexcept
+        ::wknet::session::HttpSendOptions& dst) noexcept
     {
         dst.MaxResponseBytes = src.MaxResponseBytes;
         dst.Flags = src.Flags;
         dst.MaxRedirects = src.MaxRedirects;
         dst.ExpectContinueTimeoutMilliseconds = src.ExpectContinueTimeoutMs;
-        dst.HeaderCallback = reinterpret_cast<::wknet::session::KhHeaderCallback>(src.OnHeader);
-        dst.BodyCallback = reinterpret_cast<::wknet::session::KhBodyCallback>(src.OnBody);
+        dst.HeaderCallback = reinterpret_cast<::wknet::session::HeaderCallback>(src.OnHeader);
+        dst.BodyCallback = reinterpret_cast<::wknet::session::BodyCallback>(src.OnBody);
         dst.CallbackContext = src.CallbackContext;
         dst.Http2CleartextMode = detail::ToApiHttp2CleartextMode(src.Http2CleartextMode);
         dst.AcceptEncodingPreferences = detail::ToApiAcceptEncodingPreferences(src.AcceptEncodingPreferences);
@@ -107,7 +107,7 @@ namespace
     }
 
     NTSTATUS ApplyOptionsToRequest(
-        ::wknet::session::KH_REQUEST request,
+        ::wknet::session::RequestHandle request,
         const SendOptions* options) noexcept
     {
         if (options == nullptr) {
@@ -115,17 +115,17 @@ namespace
         }
         NTSTATUS status = STATUS_SUCCESS;
         if (options->HasTlsOverride) {
-            ::wknet::session::KhTlsOptions tls = {};
+            ::wknet::session::TlsOptions tls = {};
             detail::FillApiTlsOptions(options->Tls, tls);
-            status = ::wknet::session::KhHttpRequestSetTlsOptions(request, &tls);
+            status = ::wknet::session::HttpRequestSetTlsOptions(request, &tls);
         }
         if (NT_SUCCESS(status)) {
-            status = ::wknet::session::KhHttpRequestSetConnectionPolicy(
+            status = ::wknet::session::HttpRequestSetConnectionPolicy(
                 request,
                 detail::ToApiConnPolicy(options->ConnectionPolicy));
         }
         if (NT_SUCCESS(status)) {
-            status = ::wknet::session::KhHttpRequestSetAddressFamily(
+            status = ::wknet::session::HttpRequestSetAddressFamily(
                 request,
                 detail::ToApiAddressFamily(options->Family));
         }
@@ -133,14 +133,14 @@ namespace
     }
 
     NTSTATUS ApplyHeadersToRequest(
-        ::wknet::session::KH_REQUEST request,
+        ::wknet::session::RequestHandle request,
         const Headers* headers,
         bool skipContentType) noexcept
     {
         if (headers == nullptr) {
             return STATUS_SUCCESS;
         }
-        if (headers->Magic != detail::KhHighHeadersMagic) {
+        if (headers->Magic != detail::HighHeadersMagic) {
             return STATUS_INVALID_PARAMETER;
         }
         for (SIZE_T index = 0; index < headers->Count; ++index) {
@@ -148,7 +148,7 @@ namespace
             if (skipContentType && TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, "Content-Type")) {
                 continue;
             }
-            NTSTATUS status = ::wknet::session::KhHttpRequestSetHeader(
+            NTSTATUS status = ::wknet::session::HttpRequestSetHeader(
                 request,
                 header.Name,
                 header.NameLength,
@@ -162,14 +162,14 @@ namespace
     }
 
     NTSTATUS ApplyBodyToRequest(
-        ::wknet::session::KH_REQUEST request,
+        ::wknet::session::RequestHandle request,
         const Body* body,
         const Headers* headers) noexcept
     {
         if (body == nullptr) {
             return STATUS_SUCCESS;
         }
-        if (body->Magic != detail::KhHighBodyMagic) {
+        if (body->Magic != detail::HighBodyMagic) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -185,7 +185,7 @@ namespace
         NTSTATUS status = STATUS_SUCCESS;
         switch (body->Kind) {
         case detail::BodyStorageKind::Text:
-            status = ::wknet::session::KhHttpRequestSetTextBody(
+            status = ::wknet::session::HttpRequestSetTextBody(
                 request,
                 reinterpret_cast<const char*>(body->Data),
                 body->DataLength,
@@ -195,7 +195,7 @@ namespace
         case detail::BodyStorageKind::Json:
         case detail::BodyStorageKind::Bytes:
             if (contentType != nullptr) {
-                status = ::wknet::session::KhHttpRequestSetRawBody(
+                status = ::wknet::session::HttpRequestSetRawBody(
                     request,
                     body->Data,
                     body->DataLength,
@@ -203,12 +203,12 @@ namespace
                     contentTypeLength);
             }
             else {
-                status = ::wknet::session::KhHttpRequestSetBody(request, body->Data, body->DataLength);
+                status = ::wknet::session::HttpRequestSetBody(request, body->Data, body->DataLength);
             }
             break;
         case detail::BodyStorageKind::Form:
         {
-            ::wknet::HeapArray<::wknet::session::KhNameValuePair> pairs(body->FormPairCount);
+            ::wknet::HeapArray<::wknet::session::NameValuePair> pairs(body->FormPairCount);
             if (!pairs.IsValid()) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
@@ -218,12 +218,12 @@ namespace
                 pairs[index].Value = body->FormPairs[index].Value;
                 pairs[index].ValueLength = body->FormPairs[index].ValueLength;
             }
-            status = ::wknet::session::KhHttpRequestSetUrlEncodedBody(request, pairs.Get(), body->FormPairCount);
+            status = ::wknet::session::HttpRequestSetUrlEncodedBody(request, pairs.Get(), body->FormPairCount);
             break;
         }
         case detail::BodyStorageKind::Multipart:
         {
-            ::wknet::HeapArray<::wknet::session::KhMultipartFormDataPart> parts(body->MultipartPartCount);
+            ::wknet::HeapArray<::wknet::session::MultipartFormDataPart> parts(body->MultipartPartCount);
             if (!parts.IsValid()) {
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
@@ -243,14 +243,14 @@ namespace
                 parts[index].ContentType = source.ContentType;
                 parts[index].ContentTypeLength = source.ContentTypeLength;
             }
-            status = ::wknet::session::KhHttpRequestSetMultipartFormDataBody(
+            status = ::wknet::session::HttpRequestSetMultipartFormDataBody(
                 request,
                 parts.Get(),
                 body->MultipartPartCount);
             break;
         }
         case detail::BodyStorageKind::File:
-            status = ::wknet::session::KhHttpRequestSetFileBody(
+            status = ::wknet::session::HttpRequestSetFileBody(
                 request,
                 body->FilePath,
                 body->FilePathLength,
@@ -258,14 +258,14 @@ namespace
                 contentTypeLength);
             break;
         case detail::BodyStorageKind::Stream:
-            status = ::wknet::session::KhHttpRequestSetBodySource(
+            status = ::wknet::session::HttpRequestSetBodySource(
                 request,
-                reinterpret_cast<::wknet::session::KhRequestBodyReadCallback>(body->StreamCallback),
+                reinterpret_cast<::wknet::session::RequestBodyReadCallback>(body->StreamCallback),
                 body->StreamContext,
                 body->StreamContentLength,
                 body->StreamContentLengthKnown);
             if (NT_SUCCESS(status) && contentType != nullptr) {
-                status = ::wknet::session::KhHttpRequestSetHeader(
+                status = ::wknet::session::HttpRequestSetHeader(
                     request,
                     "Content-Type",
                     sizeof("Content-Type") - 1,
@@ -275,7 +275,7 @@ namespace
             break;
         case detail::BodyStorageKind::Empty:
         default:
-            status = ::wknet::session::KhHttpRequestSetBody(request, nullptr, 0);
+            status = ::wknet::session::HttpRequestSetBody(request, nullptr, 0);
             break;
         }
 
@@ -283,14 +283,14 @@ namespace
             return status;
         }
 
-        status = ::wknet::session::KhHttpRequestSetBodyMode(request, detail::ToApiRequestBodyMode(body->Mode));
+        status = ::wknet::session::HttpRequestSetBodyMode(request, detail::ToApiRequestBodyMode(body->Mode));
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
         for (SIZE_T index = 0; index < body->TrailerCount; ++index) {
             const detail::StoredHeader& trailer = body->Trailers[index];
-            status = ::wknet::session::KhHttpRequestAddTrailer(
+            status = ::wknet::session::HttpRequestAddTrailer(
                 request,
                 trailer.Name,
                 trailer.NameLength,
@@ -311,7 +311,7 @@ namespace
         const Headers* headers,
         const Body* body,
         const SendOptions* options,
-        ::wknet::session::KH_REQUEST* request) noexcept
+        ::wknet::session::RequestHandle* request) noexcept
     {
         if (request != nullptr) {
             *request = nullptr;
@@ -321,15 +321,15 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        ::wknet::session::KH_REQUEST apiRequest = nullptr;
-        NTSTATUS status = ::wknet::session::KhHttpRequestCreate(session->Engine, &apiRequest);
+        ::wknet::session::RequestHandle apiRequest = nullptr;
+        NTSTATUS status = ::wknet::session::HttpRequestCreate(session->Engine, &apiRequest);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        status = ::wknet::session::KhHttpRequestSetUrl(apiRequest, url, urlLength);
+        status = ::wknet::session::HttpRequestSetUrl(apiRequest, url, urlLength);
         if (NT_SUCCESS(status)) {
-            status = ::wknet::session::KhHttpRequestSetMethod(apiRequest, detail::ToApiMethod(method));
+            status = ::wknet::session::HttpRequestSetMethod(apiRequest, detail::ToApiMethod(method));
         }
         if (NT_SUCCESS(status)) {
             status = ApplyOptionsToRequest(apiRequest, options);
@@ -343,7 +343,7 @@ namespace
         }
 
         if (!NT_SUCCESS(status)) {
-            ::wknet::session::KhHttpRequestRelease(apiRequest);
+            ::wknet::session::HttpRequestRelease(apiRequest);
             return status;
         }
 
@@ -368,28 +368,28 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        ::wknet::session::KH_REQUEST apiRequest = nullptr;
+        ::wknet::session::RequestHandle apiRequest = nullptr;
         NTSTATUS status = PrepareRequest(session, method, url, urlLength, headers, body, options, &apiRequest);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        ::wknet::session::KhHttpSendOptions apiOptions = {};
-        const ::wknet::session::KhHttpSendOptions* apiOptionsPtr = nullptr;
+        ::wknet::session::HttpSendOptions apiOptions = {};
+        const ::wknet::session::HttpSendOptions* apiOptionsPtr = nullptr;
         if (options != nullptr) {
             FillEngineSendOptions(*options, apiOptions);
             apiOptionsPtr = &apiOptions;
         }
 
-        ::wknet::session::KH_RESPONSE apiResp = nullptr;
-        status = ::wknet::session::KhHttpSendSync(session->Engine, apiRequest, apiOptionsPtr, &apiResp);
-        ::wknet::session::KhHttpRequestRelease(apiRequest);
+        ::wknet::session::ResponseHandle apiResp = nullptr;
+        status = ::wknet::session::HttpSendSync(session->Engine, apiRequest, apiOptionsPtr, &apiResp);
+        ::wknet::session::HttpRequestRelease(apiRequest);
 
         if (NT_SUCCESS(status)) {
             *response = detail::FromApiResponse(apiResp);
         }
         else if (apiResp != nullptr) {
-            ::wknet::session::KhResponseRelease(apiResp);
+            ::wknet::session::ResponseRelease(apiResp);
         }
         return status;
     }
@@ -399,7 +399,7 @@ namespace detail
 {
 void FillApiSendOptions(
     const SendOptions& src,
-    ::wknet::session::KhHttpSendOptions& dst) noexcept
+    ::wknet::session::HttpSendOptions& dst) noexcept
 {
     FillEngineSendOptions(src, dst);
 }
@@ -412,7 +412,7 @@ NTSTATUS PrepareHttpRequest(
     const Headers* headers,
     const Body* body,
     const SendOptions* options,
-    ::wknet::session::KH_REQUEST* request) noexcept
+    ::wknet::session::RequestHandle* request) noexcept
 {
     return PrepareRequest(session, method, url, urlLength, headers, body, options, request);
 }
@@ -507,21 +507,21 @@ NTSTATUS Send(Session* session, Request* request, const SendOptions* options, Re
 NTSTATUS SendEx(Session* session, Request* request, const SendOptions* options, Response** response) noexcept
 {
     UNREFERENCED_PARAMETER(session);
-    if (request == nullptr || request->Magic != detail::KhHighRequestMagic) {
+    if (request == nullptr || request->Magic != detail::HighRequestMagic) {
         if (response != nullptr) {
             *response = nullptr;
         }
         return STATUS_INVALID_PARAMETER;
     }
-    ::wknet::session::KH_REQUEST validationRequest = nullptr;
-    NTSTATUS status = ::wknet::session::KhHttpRequestCreate(request->Parent->Engine, &validationRequest);
+    ::wknet::session::RequestHandle validationRequest = nullptr;
+    NTSTATUS status = ::wknet::session::HttpRequestCreate(request->Parent->Engine, &validationRequest);
     if (!NT_SUCCESS(status)) {
         if (response != nullptr) {
             *response = nullptr;
         }
         return status;
     }
-    ::wknet::session::KhHttpRequestRelease(validationRequest);
+    ::wknet::session::HttpRequestRelease(validationRequest);
     if (request->BuilderUrl == nullptr || request->BuilderUrlLength == 0) {
         if (response != nullptr) {
             *response = nullptr;

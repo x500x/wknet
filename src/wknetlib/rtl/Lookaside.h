@@ -6,18 +6,18 @@ namespace wknet
 {
 namespace core
 {
-    class KhLookasideList final
+    class LookasideList final
     {
     public:
-        KhLookasideList() noexcept = default;
+        LookasideList() noexcept = default;
 
-        ~KhLookasideList() noexcept
+        ~LookasideList() noexcept
         {
             Shutdown();
         }
 
-        KhLookasideList(const KhLookasideList&) = delete;
-        KhLookasideList& operator=(const KhLookasideList&) = delete;
+        LookasideList(const LookasideList&) = delete;
+        LookasideList& operator=(const LookasideList&) = delete;
 
         _Must_inspect_result_
         NTSTATUS Initialize(SIZE_T blockSize) noexcept

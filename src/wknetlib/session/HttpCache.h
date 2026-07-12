@@ -7,16 +7,16 @@ namespace wknet
 {
 namespace session
 {
-    constexpr SIZE_T KhHttpCacheMaxVaryFields = KhMaxHeadersPerRequest;
-    constexpr SIZE_T KhHttpCacheMaxPartialRanges = 16;
+    constexpr SIZE_T HttpCacheMaxVaryFields = MaxHeadersPerRequest;
+    constexpr SIZE_T HttpCacheMaxPartialRanges = 16;
 
-    struct KhHttpCacheRange final
+    struct HttpCacheRange final
     {
         ULONGLONG First = 0;
         ULONGLONG Last = 0;
     };
 
-    struct KhHttpCacheVaryField final
+    struct HttpCacheVaryField final
     {
         char* Name = nullptr;
         SIZE_T NameLength = 0;
@@ -24,9 +24,9 @@ namespace session
         SIZE_T ValueLength = 0;
     };
 
-    struct KhHttpCacheEntry;
+    struct HttpCacheEntry;
 
-    struct KhHttpCacheSnapshot final
+    struct HttpCacheSnapshot final
     {
         USHORT StatusCode = 0;
         http1::HttpHeader* Headers = nullptr;
@@ -39,27 +39,27 @@ namespace session
         SIZE_T BodyLength = 0;
     };
 
-    struct KhHttpCacheLookupResult final
+    struct HttpCacheLookupResult final
     {
         bool Found = false;
         bool RequiresValidation = false;
         bool RangeRequest = false;
         bool SatisfiedRange = false;
         bool OnlyIfCachedMiss = false;
-        KhHttpCacheSnapshot Snapshot = {};
-        char IfNoneMatch[KhMaxHeaderValueLength + 1] = {};
+        HttpCacheSnapshot Snapshot = {};
+        char IfNoneMatch[MaxHeaderValueLength + 1] = {};
         SIZE_T IfNoneMatchLength = 0;
-        char IfModifiedSince[KhMaxHeaderValueLength + 1] = {};
+        char IfModifiedSince[MaxHeaderValueLength + 1] = {};
         SIZE_T IfModifiedSinceLength = 0;
     };
 
-    struct KhHttpCache
+    struct HttpCache
     {
-        KhHandleHeader Header = { KhHandleKind::HttpCache, 0, nullptr };
-        KhHttpCacheOptions Options = {};
-        KhHttpCacheStats Stats = {};
-        KhHttpCacheEntry* Head = nullptr;
-        KhHttpCacheEntry* Tail = nullptr;
+        HandleHeader Header = { HandleKind::HttpCache, 0, nullptr };
+        HttpCacheOptions Options = {};
+        HttpCacheStats Stats = {};
+        HttpCacheEntry* Head = nullptr;
+        HttpCacheEntry* Tail = nullptr;
         SIZE_T EntryCount = 0;
         SIZE_T BytesUsed = 0;
 #if defined(WKNET_USER_MODE_TEST)
@@ -71,30 +71,30 @@ namespace session
     };
 
     _Must_inspect_result_
-    NTSTATUS KhHttpCacheLookup(
-        _In_ KH_HTTP_CACHE cache,
-        _In_ const KhRequest& request,
-        _In_ const KhHttpSendOptions& options,
-        _Out_ KhHttpCacheLookupResult* result) noexcept;
+    NTSTATUS HttpCacheLookup(
+        _In_ HttpCacheHandle cache,
+        _In_ const Request& request,
+        _In_ const HttpSendOptions& options,
+        _Out_ HttpCacheLookupResult* result) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpCacheStoreResponse(
-        _In_ KH_HTTP_CACHE cache,
-        _In_ const KhRequest& request,
-        _In_ const KhHttpSendOptions& options,
+    NTSTATUS HttpCacheStoreResponse(
+        _In_ HttpCacheHandle cache,
+        _In_ const Request& request,
+        _In_ const HttpSendOptions& options,
         _In_ const http1::HttpResponse& response) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpCacheUpdateNotModified(
-        _In_ KH_HTTP_CACHE cache,
-        _In_ const KhRequest& request,
+    NTSTATUS HttpCacheUpdateNotModified(
+        _In_ HttpCacheHandle cache,
+        _In_ const Request& request,
         _In_ const http1::HttpResponse& response,
-        _Out_ KhHttpCacheSnapshot* snapshot) noexcept;
+        _Out_ HttpCacheSnapshot* snapshot) noexcept;
 
-    void KhHttpCacheInvalidateForRequest(
-        _In_ KH_HTTP_CACHE cache,
-        _In_ const KhRequest& request) noexcept;
+    void HttpCacheInvalidateForRequest(
+        _In_ HttpCacheHandle cache,
+        _In_ const Request& request) noexcept;
 
-    void KhHttpCacheFreeSnapshot(_Inout_ KhHttpCacheSnapshot* snapshot) noexcept;
+    void HttpCacheFreeSnapshot(_Inout_ HttpCacheSnapshot* snapshot) noexcept;
 }
 }

@@ -27,66 +27,66 @@ namespace wknet
 {
 namespace session
 {
-    struct KhSession;
-    struct KhRequest;
-    struct KhResponse;
-    struct KhHttpCache;
-    struct KhWebSocket;
-    struct KhAsyncOperation;
+    struct Session;
+    struct Request;
+    struct Response;
+    struct HttpCache;
+    struct WebSocket;
+    struct AsyncOperation;
 
-    typedef KhSession* KH_SESSION;
-    typedef KhRequest* KH_REQUEST;
-    typedef KhResponse* KH_RESPONSE;
-    typedef KhHttpCache* KH_HTTP_CACHE;
-    typedef KhWebSocket* KH_WEBSOCKET;
-    typedef KhAsyncOperation* KH_ASYNC_OPERATION;
+    typedef Session* SessionHandle;
+    typedef Request* RequestHandle;
+    typedef Response* ResponseHandle;
+    typedef HttpCache* HttpCacheHandle;
+    typedef WebSocket* WebSocketHandle;
+    typedef AsyncOperation* AsyncOperationHandle;
 
-    constexpr SIZE_T KhDefaultRequestBufferBytes = 16 * 1024;
-    constexpr SIZE_T KhDefaultMaxResponseBytes = 0;
-    constexpr SIZE_T KhDefaultMaxWebSocketMessageBytes = 1024 * 1024;
-    constexpr SIZE_T KhDefaultMaxResponseHeaders = 64;
-    constexpr SIZE_T KhMaxConfigurableResponseHeaders = WKNET_HARD_MAX_HEADERS;
-    constexpr SIZE_T KhDefaultHttp2MaxHeaderBlockBytes = 32 * 1024;
-    constexpr SIZE_T KhMaxHttp2HeaderBlockBytes = WKNET_HARD_MAX_HEADER_SECTION;
-    constexpr ULONG KhDefaultConnectionPoolCapacity = 8;
-    constexpr ULONG KhDefaultConnectionsPerHost = 2;
-    constexpr ULONG KhDefaultIdleTimeoutMilliseconds = 30000;
-    constexpr ULONG KhDefaultTlsHandshakeReceiveTimeoutMilliseconds = TlsHandshakeReceiveTimeoutMilliseconds;
-    constexpr ULONG KhDefaultMaxRedirects = 10;
-    constexpr ULONG KhDefaultExpectContinueTimeoutMilliseconds = 1000;
-    constexpr ULONG KhMaxExpectContinueTimeoutMilliseconds = WskOperationTimeoutMilliseconds;
-    constexpr ULONG KhDefaultMaxTls12Renegotiations = 1;
-    constexpr ULONG KhHardMaxTls12Renegotiations = 4;
-    constexpr ULONG KhDefaultHttp2KeepAliveIdleMilliseconds = 30000;
-    constexpr ULONG KhDefaultHttp2KeepAliveIntervalMilliseconds = 30000;
-    constexpr ULONG KhDefaultHttp2KeepAliveAckTimeoutMilliseconds = 5000;
-    constexpr ULONG KhDefaultHttp11PipelineMaxDepth = 4;
-    constexpr ULONG KhMaxHttp11PipelineDepth = 64;
-    constexpr ULONG KhHttp11PipelineMethodGet = 0x00000001;
-    constexpr ULONG KhHttp11PipelineMethodPost = 0x00000002;
-    constexpr ULONG KhHttp11PipelineMethodPut = 0x00000004;
-    constexpr ULONG KhHttp11PipelineMethodPatch = 0x00000008;
-    constexpr ULONG KhHttp11PipelineMethodDelete = 0x00000010;
-    constexpr ULONG KhHttp11PipelineMethodHead = 0x00000020;
-    constexpr ULONG KhHttp11PipelineMethodOptions = 0x00000040;
-    constexpr ULONG KhHttp11PipelineMethodConnect = 0x00000080;
-    constexpr ULONG KhHttp11PipelineMethodTrace = 0x00000100;
-    constexpr ULONG KhHttp11PipelineKnownMethodMask =
-        KhHttp11PipelineMethodGet |
-        KhHttp11PipelineMethodPost |
-        KhHttp11PipelineMethodPut |
-        KhHttp11PipelineMethodPatch |
-        KhHttp11PipelineMethodDelete |
-        KhHttp11PipelineMethodHead |
-        KhHttp11PipelineMethodOptions |
-        KhHttp11PipelineMethodConnect |
-        KhHttp11PipelineMethodTrace;
-    constexpr ULONG KhDefaultHttp11PipelineMethodMask =
-        KhHttp11PipelineMethodGet |
-        KhHttp11PipelineMethodHead |
-        KhHttp11PipelineMethodOptions;
+    constexpr SIZE_T DefaultRequestBufferBytes = 16 * 1024;
+    constexpr SIZE_T DefaultMaxResponseBytes = 0;
+    constexpr SIZE_T DefaultMaxWebSocketMessageBytes = 1024 * 1024;
+    constexpr SIZE_T DefaultMaxResponseHeaders = 64;
+    constexpr SIZE_T MaxConfigurableResponseHeaders = WKNET_HARD_MAX_HEADERS;
+    constexpr SIZE_T DefaultHttp2MaxHeaderBlockBytes = 32 * 1024;
+    constexpr SIZE_T MaxHttp2HeaderBlockBytes = WKNET_HARD_MAX_HEADER_SECTION;
+    constexpr ULONG DefaultConnectionPoolCapacity = 8;
+    constexpr ULONG DefaultConnectionsPerHost = 2;
+    constexpr ULONG DefaultIdleTimeoutMilliseconds = 30000;
+    constexpr ULONG DefaultTlsHandshakeReceiveTimeoutMilliseconds = TlsHandshakeReceiveTimeoutMilliseconds;
+    constexpr ULONG DefaultMaxRedirects = 10;
+    constexpr ULONG DefaultExpectContinueTimeoutMilliseconds = 1000;
+    constexpr ULONG MaxExpectContinueTimeoutMilliseconds = WskOperationTimeoutMilliseconds;
+    constexpr ULONG DefaultMaxTls12Renegotiations = 1;
+    constexpr ULONG HardMaxTls12Renegotiations = 4;
+    constexpr ULONG DefaultHttp2KeepAliveIdleMilliseconds = 30000;
+    constexpr ULONG DefaultHttp2KeepAliveIntervalMilliseconds = 30000;
+    constexpr ULONG DefaultHttp2KeepAliveAckTimeoutMilliseconds = 5000;
+    constexpr ULONG DefaultHttp11PipelineMaxDepth = 4;
+    constexpr ULONG MaxHttp11PipelineDepth = 64;
+    constexpr ULONG Http11PipelineMethodGet = 0x00000001;
+    constexpr ULONG Http11PipelineMethodPost = 0x00000002;
+    constexpr ULONG Http11PipelineMethodPut = 0x00000004;
+    constexpr ULONG Http11PipelineMethodPatch = 0x00000008;
+    constexpr ULONG Http11PipelineMethodDelete = 0x00000010;
+    constexpr ULONG Http11PipelineMethodHead = 0x00000020;
+    constexpr ULONG Http11PipelineMethodOptions = 0x00000040;
+    constexpr ULONG Http11PipelineMethodConnect = 0x00000080;
+    constexpr ULONG Http11PipelineMethodTrace = 0x00000100;
+    constexpr ULONG Http11PipelineKnownMethodMask =
+        Http11PipelineMethodGet |
+        Http11PipelineMethodPost |
+        Http11PipelineMethodPut |
+        Http11PipelineMethodPatch |
+        Http11PipelineMethodDelete |
+        Http11PipelineMethodHead |
+        Http11PipelineMethodOptions |
+        Http11PipelineMethodConnect |
+        Http11PipelineMethodTrace;
+    constexpr ULONG DefaultHttp11PipelineMethodMask =
+        Http11PipelineMethodGet |
+        Http11PipelineMethodHead |
+        Http11PipelineMethodOptions;
 
-    enum class KhPoolType : ULONG
+    enum class PoolType : ULONG
     {
         NonPaged = 0,
         // Reserved ABI value. Current kernel implementation is NonPaged-only
@@ -94,7 +94,7 @@ namespace session
         Paged = 1
     };
 
-    enum class KhHttpMethod : ULONG
+    enum class HttpMethod : ULONG
     {
         Get = 0,
         Post = 1,
@@ -107,53 +107,53 @@ namespace session
         Trace = 8
     };
 
-    enum class KhTlsVersion : ULONG
+    enum class TlsVersion : ULONG
     {
         Tls12 = 0x0303,
         Tls13 = 0x0304
     };
 
-    enum class KhCertificatePolicy : ULONG
+    enum class CertificatePolicy : ULONG
     {
         Verify = 0,
         NoVerify = 1
     };
 
-    enum class KhConnectionPolicy : ULONG
+    enum class ConnectionPolicy : ULONG
     {
         ReuseOrCreate = 0,
         ForceNew = 1,
         NoPool = 2
     };
 
-    enum class KhHttp2CleartextMode : ULONG
+    enum class Http2CleartextMode : ULONG
     {
         Disabled = 0,
         PriorKnowledge = 1,
         Upgrade = 2
     };
 
-    enum class KhAddressFamily : ULONG
+    enum class AddressFamily : ULONG
     {
         Any = 0,
         Ipv4 = 4,
         Ipv6 = 6
     };
 
-    enum class KhRequestBodyPartKind : ULONG
+    enum class RequestBodyPartKind : ULONG
     {
         Field = 0,
         FileBytes = 1,
         FilePath = 2
     };
 
-    enum class KhRequestBodyMode : ULONG
+    enum class RequestBodyMode : ULONG
     {
         ContentLength = 0,
         Chunked = 1
     };
 
-    enum class KhWebSocketTransportMode : ULONG
+    enum class WebSocketTransportMode : ULONG
     {
         Auto = 0,
         Http11Only = 1,
@@ -161,25 +161,25 @@ namespace session
         LegacyBoolean = 3
     };
 
-    enum KhHttpSendFlags : ULONG
+    enum HttpSendFlags : ULONG
     {
-        KhHttpSendFlagNone = 0,
-        KhHttpSendFlagAggregateWithCallbacks = 0x00000001,
-        KhHttpSendFlagDisableAutoRedirect = 0x00000002,
-        KhHttpSendFlagExpectContinue = 0x00000004,
-        KhHttpSendFlagAllowTrace = 0x00000008,
-        KhHttpSendFlagBypassCache = 0x00000010,
-        KhHttpSendFlagNoCacheStore = 0x00000020,
-        KhHttpSendFlagOnlyIfCached = 0x00000040
+        HttpSendFlagNone = 0,
+        HttpSendFlagAggregateWithCallbacks = 0x00000001,
+        HttpSendFlagDisableAutoRedirect = 0x00000002,
+        HttpSendFlagExpectContinue = 0x00000004,
+        HttpSendFlagAllowTrace = 0x00000008,
+        HttpSendFlagBypassCache = 0x00000010,
+        HttpSendFlagNoCacheStore = 0x00000020,
+        HttpSendFlagOnlyIfCached = 0x00000040
     };
 
-    enum class KhHttpCacheMode : ULONG
+    enum class HttpCacheMode : ULONG
     {
         Private = 0,
         Shared = 1
     };
 
-    enum class KhWebSocketMessageType : ULONG
+    enum class WebSocketMessageType : ULONG
     {
         Text = 0,
         Binary = 1,
@@ -189,42 +189,42 @@ namespace session
         Pong = 5
     };
 
-    typedef NTSTATUS (*KhHeaderCallback)(
+    typedef NTSTATUS (*HeaderCallback)(
         void* context,
         const char* name,
         SIZE_T nameLength,
         const char* value,
         SIZE_T valueLength);
 
-    typedef NTSTATUS (*KhBodyCallback)(
+    typedef NTSTATUS (*BodyCallback)(
         void* context,
         const UCHAR* data,
         SIZE_T dataLength,
         bool finalChunk);
 
-    typedef NTSTATUS (*KhRequestBodyReadCallback)(
+    typedef NTSTATUS (*RequestBodyReadCallback)(
         void* context,
         _Out_writes_bytes_(bufferCapacity) UCHAR* buffer,
         SIZE_T bufferCapacity,
         _Out_ SIZE_T* bytesRead,
         _Out_ bool* endOfBody);
 
-    typedef void (*KhAsyncCompletionCallback)(
+    typedef void (*AsyncCompletionCallback)(
         void* context,
         NTSTATUS status);
 
-    typedef NTSTATUS (*KhWebSocketMessageCallback)(
+    typedef NTSTATUS (*WebSocketMessageCallback)(
         void* context,
-        KhWebSocketMessageType type,
+        WebSocketMessageType type,
         const UCHAR* data,
         SIZE_T dataLength,
         bool finalFragment);
 
-    struct KhTlsOptions final
+    struct TlsOptions final
     {
-        KhTlsVersion MinVersion = KhTlsVersion::Tls12;
-        KhTlsVersion MaxVersion = KhTlsVersion::Tls13;
-        KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
+        TlsVersion MinVersion = TlsVersion::Tls12;
+        TlsVersion MaxVersion = TlsVersion::Tls13;
+        CertificatePolicy CertificatePolicy = CertificatePolicy::Verify;
         const tls::CertificateStore* CertificateStore = nullptr;
         const char* ServerName = nullptr;
         SIZE_T ServerNameLength = 0;
@@ -233,11 +233,11 @@ namespace session
         bool PreferHttp2 = true;
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
-        ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;
-        ULONG MaxTls12Renegotiations = KhDefaultMaxTls12Renegotiations;
+        ULONG HandshakeReceiveTimeoutMilliseconds = DefaultTlsHandshakeReceiveTimeoutMilliseconds;
+        ULONG MaxTls12Renegotiations = DefaultMaxTls12Renegotiations;
     };
 
-    struct KhProxyOptions final
+    struct ProxyOptions final
     {
         bool Enabled = false;
         SOCKADDR_STORAGE Address = {};
@@ -247,22 +247,22 @@ namespace session
         SIZE_T AuthHeaderLength = 0;
     };
 
-    struct KhHttp2KeepAliveOptions final
+    struct Http2KeepAliveOptions final
     {
         bool Enabled = false;
-        ULONG IdleMilliseconds = KhDefaultHttp2KeepAliveIdleMilliseconds;
-        ULONG IntervalMilliseconds = KhDefaultHttp2KeepAliveIntervalMilliseconds;
-        ULONG AckTimeoutMilliseconds = KhDefaultHttp2KeepAliveAckTimeoutMilliseconds;
+        ULONG IdleMilliseconds = DefaultHttp2KeepAliveIdleMilliseconds;
+        ULONG IntervalMilliseconds = DefaultHttp2KeepAliveIntervalMilliseconds;
+        ULONG AckTimeoutMilliseconds = DefaultHttp2KeepAliveAckTimeoutMilliseconds;
     };
 
-    struct KhHttpCacheOptions final
+    struct HttpCacheOptions final
     {
         SIZE_T MaxBytes = 16 * 1024 * 1024;
         SIZE_T MaxEntries = 256;
-        KhHttpCacheMode Mode = KhHttpCacheMode::Private;
+        HttpCacheMode Mode = HttpCacheMode::Private;
     };
 
-    struct KhHttpCacheStats final
+    struct HttpCacheStats final
     {
         SIZE_T EntryCount = 0;
         SIZE_T BytesUsed = 0;
@@ -274,49 +274,49 @@ namespace session
         ULONGLONG Evictions = 0;
     };
 
-    struct KhSessionOptions final
+    struct SessionOptions final
     {
-        KhPoolType ResponsePoolType = KhPoolType::NonPaged;
-        SIZE_T RequestBufferBytes = KhDefaultRequestBufferBytes;
+        PoolType ResponsePoolType = PoolType::NonPaged;
+        SIZE_T RequestBufferBytes = DefaultRequestBufferBytes;
         // 0 means no caller-imposed buffered response byte limit.
-        SIZE_T MaxResponseBytes = KhDefaultMaxResponseBytes;
-        SIZE_T MaxResponseHeaders = KhDefaultMaxResponseHeaders;
-        SIZE_T Http2MaxHeaderBlockBytes = KhDefaultHttp2MaxHeaderBlockBytes;
-        ULONG ConnectionPoolCapacity = KhDefaultConnectionPoolCapacity;
-        ULONG MaxConnectionsPerHost = KhDefaultConnectionsPerHost;
-        ULONG IdleTimeoutMilliseconds = KhDefaultIdleTimeoutMilliseconds;
+        SIZE_T MaxResponseBytes = DefaultMaxResponseBytes;
+        SIZE_T MaxResponseHeaders = DefaultMaxResponseHeaders;
+        SIZE_T Http2MaxHeaderBlockBytes = DefaultHttp2MaxHeaderBlockBytes;
+        ULONG ConnectionPoolCapacity = DefaultConnectionPoolCapacity;
+        ULONG MaxConnectionsPerHost = DefaultConnectionsPerHost;
+        ULONG IdleTimeoutMilliseconds = DefaultIdleTimeoutMilliseconds;
         bool EnableHttp11Pipeline = false;
-        ULONG Http11PipelineMaxDepth = KhDefaultHttp11PipelineMaxDepth;
-        ULONG Http11PipelineMethodMask = KhDefaultHttp11PipelineMethodMask;
-        KhHttp2KeepAliveOptions Http2KeepAlive = {};
-        KhTlsOptions Tls = {};
-        KhProxyOptions Proxy = {};
-        KH_HTTP_CACHE Cache = nullptr;
+        ULONG Http11PipelineMaxDepth = DefaultHttp11PipelineMaxDepth;
+        ULONG Http11PipelineMethodMask = DefaultHttp11PipelineMethodMask;
+        Http2KeepAliveOptions Http2KeepAlive = {};
+        TlsOptions Tls = {};
+        ProxyOptions Proxy = {};
+        HttpCacheHandle Cache = nullptr;
     };
 
-    struct KhHttpSendOptions final
+    struct HttpSendOptions final
     {
         // 0 means use the session response limit. Passing nullptr options does the same.
         SIZE_T MaxResponseBytes = 0;
-        ULONG Flags = KhHttpSendFlagNone;
+        ULONG Flags = HttpSendFlagNone;
         // 0 means use the default redirect limit.
         ULONG MaxRedirects = 0;
-        // 0 means use KhDefaultExpectContinueTimeoutMilliseconds.
+        // 0 means use DefaultExpectContinueTimeoutMilliseconds.
         ULONG ExpectContinueTimeoutMilliseconds = 0;
-        KhHeaderCallback HeaderCallback = nullptr;
-        KhBodyCallback BodyCallback = nullptr;
+        HeaderCallback HeaderCallback = nullptr;
+        BodyCallback BodyCallback = nullptr;
         void* CallbackContext = nullptr;
-        KhAsyncCompletionCallback CompletionCallback = nullptr;
+        AsyncCompletionCallback CompletionCallback = nullptr;
         void* CompletionContext = nullptr;
-        KhHttp2CleartextMode Http2CleartextMode = KhHttp2CleartextMode::Disabled;
+        Http2CleartextMode Http2CleartextMode = Http2CleartextMode::Disabled;
         const http1::HttpAcceptEncodingPreference* AcceptEncodingPreferences = nullptr;
         SIZE_T AcceptEncodingPreferenceCount = 0;
         const http1::HttpCodingDecodeMaterials* ContentCodingMaterials = nullptr;
         const http2::Http2Priority* Http2Priority = nullptr;
-        KH_HTTP_CACHE Cache = nullptr;
+        HttpCacheHandle Cache = nullptr;
     };
 
-    struct KhNameValuePair final
+    struct NameValuePair final
     {
         const char* Name = nullptr;
         SIZE_T NameLength = 0;
@@ -324,9 +324,9 @@ namespace session
         SIZE_T ValueLength = 0;
     };
 
-    struct KhMultipartFormDataPart final
+    struct MultipartFormDataPart final
     {
-        KhRequestBodyPartKind Kind = KhRequestBodyPartKind::Field;
+        RequestBodyPartKind Kind = RequestBodyPartKind::Field;
         const char* Name = nullptr;
         SIZE_T NameLength = 0;
         const char* Value = nullptr;
@@ -341,14 +341,14 @@ namespace session
         SIZE_T ContentTypeLength = 0;
     };
 
-    struct KhResponseView final
+    struct ResponseView final
     {
         ULONG StatusCode = 0;
         const UCHAR* Body = nullptr;
         SIZE_T BodyLength = 0;
     };
 
-    struct KhWebSocketHeader final
+    struct WebSocketHeader final
     {
         const char* Name = nullptr;
         SIZE_T NameLength = 0;
@@ -356,7 +356,7 @@ namespace session
         SIZE_T ValueLength = 0;
     };
 
-    struct KhWebSocketHandshakeChallenge final
+    struct WebSocketHandshakeChallenge final
     {
         USHORT StatusCode = 0;
         const http1::HttpHeader* Headers = nullptr;
@@ -365,7 +365,7 @@ namespace session
         bool AuthenticationChallenge = false;
     };
 
-    struct KhWebSocketHandshakeRetryAction final
+    struct WebSocketHandshakeRetryAction final
     {
         const char* RedirectPath = nullptr;
         SIZE_T RedirectPathLength = 0;
@@ -373,391 +373,391 @@ namespace session
         SIZE_T HeaderCount = 0;
     };
 
-    typedef NTSTATUS (*KhWebSocketHandshakeChallengeCallback)(
+    typedef NTSTATUS (*WebSocketHandshakeChallengeCallback)(
         void* context,
-        const KhWebSocketHandshakeChallenge* challenge,
-        KhWebSocketHandshakeRetryAction* action);
+        const WebSocketHandshakeChallenge* challenge,
+        WebSocketHandshakeRetryAction* action);
 
-    struct KhWebSocketConnectOptions final
+    struct WebSocketConnectOptions final
     {
         const char* Url = nullptr;
         SIZE_T UrlLength = 0;
         const char* Subprotocol = nullptr;
         SIZE_T SubprotocolLength = 0;
-        const KhWebSocketHeader* Headers = nullptr;
+        const WebSocketHeader* Headers = nullptr;
         SIZE_T HeaderCount = 0;
-        KhTlsOptions Tls = {};
-        KhAddressFamily AddressFamily = KhAddressFamily::Any;
-        SIZE_T MaxMessageBytes = KhDefaultMaxWebSocketMessageBytes;
+        TlsOptions Tls = {};
+        AddressFamily AddressFamily = AddressFamily::Any;
+        SIZE_T MaxMessageBytes = DefaultMaxWebSocketMessageBytes;
         bool AutoReplyPing = true;
         bool AllowWebSocketOverHttp2 = false;
-        KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::Auto;
+        WebSocketTransportMode TransportMode = WebSocketTransportMode::Auto;
         ws::PerMessageDeflateOptions PerMessageDeflate = {};
-        KhWebSocketHandshakeChallengeCallback ChallengeCallback = nullptr;
+        WebSocketHandshakeChallengeCallback ChallengeCallback = nullptr;
         void* ChallengeContext = nullptr;
         ULONG MaxHandshakeRetries = 0;
     };
 
-    struct KhWebSocketSendOptions final
+    struct WebSocketSendOptions final
     {
         bool FinalFragment = true;
     };
 
-    struct KhWebSocketReceiveOptions final
+    struct WebSocketReceiveOptions final
     {
         SIZE_T MaxMessageBytes = 0;
         bool AutoAllocate = true;
-        KhWebSocketMessageCallback MessageCallback = nullptr;
+        WebSocketMessageCallback MessageCallback = nullptr;
         void* CallbackContext = nullptr;
         bool DeliverFragments = false;
     };
 
-    struct KhWebSocketMessage final
+    struct WebSocketMessage final
     {
-        KhWebSocketMessageType Type = KhWebSocketMessageType::Binary;
+        WebSocketMessageType Type = WebSocketMessageType::Binary;
         const UCHAR* Data = nullptr;
         SIZE_T DataLength = 0;
         bool FinalFragment = true;
     };
 
     _Must_inspect_result_
-    NTSTATUS KhSessionCreate(
+    NTSTATUS SessionCreate(
         _In_ net::WskClient* wskClient,
-        _In_opt_ const KhSessionOptions* options,
-        _Out_ KH_SESSION* session) noexcept;
+        _In_opt_ const SessionOptions* options,
+        _Out_ SessionHandle* session) noexcept;
 
-    void KhSessionClose(_In_opt_ KH_SESSION session) noexcept;
-
-    _Must_inspect_result_
-    NTSTATUS KhHttpCacheCreate(
-        _In_opt_ const KhHttpCacheOptions* options,
-        _Out_ KH_HTTP_CACHE* cache) noexcept;
-
-    void KhHttpCacheClose(_In_opt_ KH_HTTP_CACHE cache) noexcept;
+    void SessionClose(_In_opt_ SessionHandle session) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpCacheClear(_In_ KH_HTTP_CACHE cache) noexcept;
+    NTSTATUS HttpCacheCreate(
+        _In_opt_ const HttpCacheOptions* options,
+        _Out_ HttpCacheHandle* cache) noexcept;
+
+    void HttpCacheClose(_In_opt_ HttpCacheHandle cache) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpCacheGetStats(
-        _In_ KH_HTTP_CACHE cache,
-        _Out_ KhHttpCacheStats* stats) noexcept;
+    NTSTATUS HttpCacheClear(_In_ HttpCacheHandle cache) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestCreate(
-        _In_ KH_SESSION session,
-        _Out_ KH_REQUEST* request) noexcept;
-
-    void KhHttpRequestRelease(_In_opt_ KH_REQUEST request) noexcept;
+    NTSTATUS HttpCacheGetStats(
+        _In_ HttpCacheHandle cache,
+        _Out_ HttpCacheStats* stats) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetUrl(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestCreate(
+        _In_ SessionHandle session,
+        _Out_ RequestHandle* request) noexcept;
+
+    void HttpRequestRelease(_In_opt_ RequestHandle request) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS HttpRequestSetUrl(
+        _In_ RequestHandle request,
         _In_reads_bytes_(urlLength) const char* url,
         SIZE_T urlLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetMethod(
-        _In_ KH_REQUEST request,
-        KhHttpMethod method) noexcept;
+    NTSTATUS HttpRequestSetMethod(
+        _In_ RequestHandle request,
+        HttpMethod method) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetHeader(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetHeader(
+        _In_ RequestHandle request,
         _In_reads_bytes_(nameLength) const char* name,
         SIZE_T nameLength,
         _In_reads_bytes_(valueLength) const char* value,
         SIZE_T valueLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetRangeBytes(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetRangeBytes(
+        _In_ RequestHandle request,
         ULONGLONG firstByte,
         ULONGLONG lastByte,
         bool hasLastByte) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetRangeSuffix(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetRangeSuffix(
+        _In_ RequestHandle request,
         ULONGLONG suffixLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetIfMatch(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetIfMatch(
+        _In_ RequestHandle request,
         _In_reads_bytes_(valueLength) const char* value,
         SIZE_T valueLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetIfNoneMatch(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetIfNoneMatch(
+        _In_ RequestHandle request,
         _In_reads_bytes_(valueLength) const char* value,
         SIZE_T valueLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetIfModifiedSince(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetIfModifiedSince(
+        _In_ RequestHandle request,
         _In_reads_bytes_(valueLength) const char* value,
         SIZE_T valueLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetIfUnmodifiedSince(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetIfUnmodifiedSince(
+        _In_ RequestHandle request,
         _In_reads_bytes_(valueLength) const char* value,
         SIZE_T valueLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetBody(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetBody(
+        _In_ RequestHandle request,
         _In_reads_bytes_opt_(bodyLength) const UCHAR* body,
         SIZE_T bodyLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetBodySource(
-        _In_ KH_REQUEST request,
-        _In_ KhRequestBodyReadCallback callback,
+    NTSTATUS HttpRequestSetBodySource(
+        _In_ RequestHandle request,
+        _In_ RequestBodyReadCallback callback,
         _In_opt_ void* context,
         SIZE_T contentLength,
         bool contentLengthKnown) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetBodyMode(
-        _In_ KH_REQUEST request,
-        KhRequestBodyMode mode) noexcept;
+    NTSTATUS HttpRequestSetBodyMode(
+        _In_ RequestHandle request,
+        RequestBodyMode mode) noexcept;
 
     // Adds a trailer field emitted after the final chunk. Only honored when the
-    // request uses KhRequestBodyMode::Chunked; the field name must be a valid token
+    // request uses RequestBodyMode::Chunked; the field name must be a valid token
     // and must not be a forbidden trailer field (framing/auth/cookie headers), or
     // the send fails. Order is preserved.
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestAddTrailer(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestAddTrailer(
+        _In_ RequestHandle request,
         _In_reads_bytes_(nameLength) const char* name,
         SIZE_T nameLength,
         _In_reads_bytes_(valueLength) const char* value,
         SIZE_T valueLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestClearBody(_In_ KH_REQUEST request) noexcept;
+    NTSTATUS HttpRequestClearBody(_In_ RequestHandle request) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetTextBody(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetTextBody(
+        _In_ RequestHandle request,
         _In_reads_bytes_opt_(textLength) const char* text,
         SIZE_T textLength,
         _In_reads_bytes_opt_(contentTypeLength) const char* contentType,
         SIZE_T contentTypeLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetRawBody(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetRawBody(
+        _In_ RequestHandle request,
         _In_reads_bytes_opt_(dataLength) const UCHAR* data,
         SIZE_T dataLength,
         _In_reads_bytes_opt_(contentTypeLength) const char* contentType,
         SIZE_T contentTypeLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetUrlEncodedBody(
-        _In_ KH_REQUEST request,
-        _In_reads_(pairCount) const KhNameValuePair* pairs,
+    NTSTATUS HttpRequestSetUrlEncodedBody(
+        _In_ RequestHandle request,
+        _In_reads_(pairCount) const NameValuePair* pairs,
         SIZE_T pairCount) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetMultipartFormDataBody(
-        _In_ KH_REQUEST request,
-        _In_reads_(partCount) const KhMultipartFormDataPart* parts,
+    NTSTATUS HttpRequestSetMultipartFormDataBody(
+        _In_ RequestHandle request,
+        _In_reads_(partCount) const MultipartFormDataPart* parts,
         SIZE_T partCount) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetFileBody(
-        _In_ KH_REQUEST request,
+    NTSTATUS HttpRequestSetFileBody(
+        _In_ RequestHandle request,
         _In_reads_bytes_(filePathLength) const char* filePath,
         SIZE_T filePathLength,
         _In_reads_bytes_opt_(contentTypeLength) const char* contentType,
         SIZE_T contentTypeLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetTlsOptions(
-        _In_ KH_REQUEST request,
-        _In_ const KhTlsOptions* options) noexcept;
+    NTSTATUS HttpRequestSetTlsOptions(
+        _In_ RequestHandle request,
+        _In_ const TlsOptions* options) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetConnectionPolicy(
-        _In_ KH_REQUEST request,
-        KhConnectionPolicy policy) noexcept;
+    NTSTATUS HttpRequestSetConnectionPolicy(
+        _In_ RequestHandle request,
+        ConnectionPolicy policy) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpRequestSetAddressFamily(
-        _In_ KH_REQUEST request,
-        KhAddressFamily addressFamily) noexcept;
+    NTSTATUS HttpRequestSetAddressFamily(
+        _In_ RequestHandle request,
+        AddressFamily addressFamily) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpSendSync(
-        _In_ KH_SESSION session,
-        _In_ KH_REQUEST request,
-        _In_opt_ const KhHttpSendOptions* options,
-        _Out_opt_ KH_RESPONSE* response) noexcept;
+    NTSTATUS HttpSendSync(
+        _In_ SessionHandle session,
+        _In_ RequestHandle request,
+        _In_opt_ const HttpSendOptions* options,
+        _Out_opt_ ResponseHandle* response) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhHttpSendAsync(
-        _In_ KH_SESSION session,
-        _In_ KH_REQUEST request,
-        _In_opt_ const KhHttpSendOptions* options,
-        _Out_ KH_ASYNC_OPERATION* operation) noexcept;
+    NTSTATUS HttpSendAsync(
+        _In_ SessionHandle session,
+        _In_ RequestHandle request,
+        _In_opt_ const HttpSendOptions* options,
+        _Out_ AsyncOperationHandle* operation) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhResponseGetView(
-        _In_ KH_RESPONSE response,
-        _Out_ KhResponseView* view) noexcept;
+    NTSTATUS ResponseGetView(
+        _In_ ResponseHandle response,
+        _Out_ ResponseView* view) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhResponseGetHeader(
-        _In_ KH_RESPONSE response,
+    NTSTATUS ResponseGetHeader(
+        _In_ ResponseHandle response,
         _In_reads_bytes_(nameLength) const char* name,
         SIZE_T nameLength,
         _Outptr_result_bytebuffer_(*valueLength) const char** value,
         _Out_ SIZE_T* valueLength) noexcept;
 
-    SIZE_T KhResponseHeaderCount(_In_opt_ KH_RESPONSE response) noexcept;
+    SIZE_T ResponseHeaderCount(_In_opt_ ResponseHandle response) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhResponseGetHeaderAt(
-        _In_ KH_RESPONSE response,
+    NTSTATUS ResponseGetHeaderAt(
+        _In_ ResponseHandle response,
         SIZE_T index,
         _Outptr_result_bytebuffer_(*nameLength) const char** name,
         _Out_ SIZE_T* nameLength,
         _Outptr_result_bytebuffer_(*valueLength) const char** value,
         _Out_ SIZE_T* valueLength) noexcept;
 
-    SIZE_T KhResponseTrailerCount(_In_opt_ KH_RESPONSE response) noexcept;
+    SIZE_T ResponseTrailerCount(_In_opt_ ResponseHandle response) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhResponseGetTrailer(
-        _In_ KH_RESPONSE response,
+    NTSTATUS ResponseGetTrailer(
+        _In_ ResponseHandle response,
         _In_reads_bytes_(nameLength) const char* name,
         SIZE_T nameLength,
         _Outptr_result_bytebuffer_(*valueLength) const char** value,
         _Out_ SIZE_T* valueLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhResponseGetTrailerAt(
-        _In_ KH_RESPONSE response,
+    NTSTATUS ResponseGetTrailerAt(
+        _In_ ResponseHandle response,
         SIZE_T index,
         _Outptr_result_bytebuffer_(*nameLength) const char** name,
         _Out_ SIZE_T* nameLength,
         _Outptr_result_bytebuffer_(*valueLength) const char** value,
         _Out_ SIZE_T* valueLength) noexcept;
 
-    void KhResponseRelease(_In_opt_ KH_RESPONSE response) noexcept;
+    void ResponseRelease(_In_opt_ ResponseHandle response) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketConnectSync(
-        _In_ KH_SESSION session,
-        _In_ const KhWebSocketConnectOptions* options,
-        _Out_ KH_WEBSOCKET* websocket) noexcept;
+    NTSTATUS WebSocketConnectSync(
+        _In_ SessionHandle session,
+        _In_ const WebSocketConnectOptions* options,
+        _Out_ WebSocketHandle* websocket) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketConnectAsync(
-        _In_ KH_SESSION session,
-        _In_ const KhWebSocketConnectOptions* options,
-        _Out_ KH_ASYNC_OPERATION* operation) noexcept;
+    NTSTATUS WebSocketConnectAsync(
+        _In_ SessionHandle session,
+        _In_ const WebSocketConnectOptions* options,
+        _Out_ AsyncOperationHandle* operation) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketSendTextSync(
-        _In_ KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSendTextSync(
+        _In_ WebSocketHandle websocket,
         _In_reads_bytes_(textLength) const char* text,
         SIZE_T textLength,
-        _In_opt_ const KhWebSocketSendOptions* options) noexcept;
+        _In_opt_ const WebSocketSendOptions* options) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketSendBinarySync(
-        _In_ KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSendBinarySync(
+        _In_ WebSocketHandle websocket,
         _In_reads_bytes_(dataLength) const UCHAR* data,
         SIZE_T dataLength,
-        _In_opt_ const KhWebSocketSendOptions* options) noexcept;
+        _In_opt_ const WebSocketSendOptions* options) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketSendContinuationSync(
-        _In_ KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSendContinuationSync(
+        _In_ WebSocketHandle websocket,
         _In_reads_bytes_(dataLength) const UCHAR* data,
         SIZE_T dataLength,
-        _In_opt_ const KhWebSocketSendOptions* options) noexcept;
+        _In_opt_ const WebSocketSendOptions* options) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketSendPingSync(
-        _In_ KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSendPingSync(
+        _In_ WebSocketHandle websocket,
         _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
         SIZE_T payloadLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketSendPongSync(
-        _In_ KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSendPongSync(
+        _In_ WebSocketHandle websocket,
         _In_reads_bytes_opt_(payloadLength) const UCHAR* payload,
         SIZE_T payloadLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketReceiveSync(
-        _In_ KH_WEBSOCKET websocket,
-        _In_opt_ const KhWebSocketReceiveOptions* options,
-        _Out_opt_ KhWebSocketMessage* message) noexcept;
+    NTSTATUS WebSocketReceiveSync(
+        _In_ WebSocketHandle websocket,
+        _In_opt_ const WebSocketReceiveOptions* options,
+        _Out_opt_ WebSocketMessage* message) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketCloseSync(_In_opt_ KH_WEBSOCKET websocket) noexcept;
+    NTSTATUS WebSocketCloseSync(_In_opt_ WebSocketHandle websocket) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketCloseExSync(
-        _In_opt_ KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketCloseExSync(
+        _In_opt_ WebSocketHandle websocket,
         USHORT statusCode,
         _In_reads_bytes_opt_(reasonLength) const UCHAR* reason,
         SIZE_T reasonLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWebSocketSelectedSubprotocol(
-        _In_ KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSelectedSubprotocol(
+        _In_ WebSocketHandle websocket,
         _Outptr_result_bytebuffer_(*subprotocolLength) const char** subprotocol,
         _Out_ SIZE_T* subprotocolLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhAsyncCancel(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    NTSTATUS AsyncCancel(_In_ AsyncOperationHandle operation) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhAsyncWait(
-        _In_ KH_ASYNC_OPERATION operation,
+    NTSTATUS AsyncWait(
+        _In_ AsyncOperationHandle operation,
         ULONG timeoutMilliseconds) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhAsyncGetHttpResponse(
-        _In_ KH_ASYNC_OPERATION operation,
-        _Out_ KH_RESPONSE* response) noexcept;
+    NTSTATUS AsyncGetHttpResponse(
+        _In_ AsyncOperationHandle operation,
+        _Out_ ResponseHandle* response) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhAsyncGetWebSocket(
-        _In_ KH_ASYNC_OPERATION operation,
-        _Out_ KH_WEBSOCKET* websocket) noexcept;
+    NTSTATUS AsyncGetWebSocket(
+        _In_ AsyncOperationHandle operation,
+        _Out_ WebSocketHandle* websocket) noexcept;
 
-    void KhAsyncRelease(_In_opt_ KH_ASYNC_OPERATION operation) noexcept;
+    void AsyncRelease(_In_opt_ AsyncOperationHandle operation) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhEngineDrainAsync() noexcept;
+    NTSTATUS EngineDrainAsync() noexcept;
 
-    void KhEngineCloseActiveHandles() noexcept;
+    void EngineCloseActiveHandles() noexcept;
 
 #if defined(WKNET_USER_MODE_TEST)
-    struct KhTestHttpTransportRequest final
+    struct TestHttpTransportRequest final
     {
         const char* Scheme = nullptr;
         SIZE_T SchemeLength = 0;
         const char* Host = nullptr;
         SIZE_T HostLength = 0;
         USHORT Port = 0;
-        KhAddressFamily AddressFamily = KhAddressFamily::Any;
+        AddressFamily AddressFamily = AddressFamily::Any;
         const char* BuiltRequest = nullptr;
         SIZE_T BuiltRequestLength = 0;
         SIZE_T HeaderBytesLength = 0;
         SIZE_T BodyBytesLength = 0;
         bool ExpectContinueEnabled = false;
         bool ExpectContinueBodySent = false;
-        KhConnectionPolicy ConnectionPolicy = KhConnectionPolicy::ReuseOrCreate;
-        KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
+        ConnectionPolicy ConnectionPolicy = ConnectionPolicy::ReuseOrCreate;
+        CertificatePolicy CertificatePolicy = CertificatePolicy::Verify;
         const tls::CertificateStore* CertificateStore = nullptr;
         const char* Alpn = nullptr;
         SIZE_T AlpnLength = 0;
@@ -765,7 +765,7 @@ namespace session
         SIZE_T OfferedAlpnLength = 0;
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
-        ULONG MaxTls12Renegotiations = KhDefaultMaxTls12Renegotiations;
+        ULONG MaxTls12Renegotiations = DefaultMaxTls12Renegotiations;
         bool ProxyEnabled = false;
         SOCKADDR_STORAGE ProxyAddress = {};
         const char* ProxyAuthority = nullptr;
@@ -778,11 +778,11 @@ namespace session
         bool Http11PipelineEnabled = false;
         bool Http11PipelineLease = false;
         ULONG Http11PipelineSequence = 0;
-        KhHttp2CleartextMode Http2CleartextMode = KhHttp2CleartextMode::Disabled;
+        Http2CleartextMode Http2CleartextMode = Http2CleartextMode::Disabled;
         bool UsedHttp2 = false;
     };
 
-    struct KhTestHttpTransportResponse final
+    struct TestHttpTransportResponse final
     {
         const char* RawResponse = nullptr;
         SIZE_T RawResponseLength = 0;
@@ -791,12 +791,12 @@ namespace session
         bool ConnectionReusable = true;
     };
 
-    typedef NTSTATUS (*KhTestHttpTransportCallback)(
+    typedef NTSTATUS (*TestHttpTransportCallback)(
         void* context,
-        const KhTestHttpTransportRequest* request,
-        KhTestHttpTransportResponse* response);
+        const TestHttpTransportRequest* request,
+        TestHttpTransportResponse* response);
 
-    struct KhTestWebSocketConnectRequest final
+    struct TestWebSocketConnectRequest final
     {
         const char* Scheme = nullptr;
         SIZE_T SchemeLength = 0;
@@ -807,82 +807,82 @@ namespace session
         USHORT Port = 0;
         const char* Subprotocol = nullptr;
         SIZE_T SubprotocolLength = 0;
-        KhCertificatePolicy CertificatePolicy = KhCertificatePolicy::Verify;
+        CertificatePolicy CertificatePolicy = CertificatePolicy::Verify;
         const tls::CertificateStore* CertificateStore = nullptr;
-        KhTlsVersion MinTlsVersion = KhTlsVersion::Tls12;
-        KhTlsVersion MaxTlsVersion = KhTlsVersion::Tls13;
+        TlsVersion MinTlsVersion = TlsVersion::Tls12;
+        TlsVersion MaxTlsVersion = TlsVersion::Tls13;
         tls::TlsPolicy Policy = {};
         const tls::TlsClientCredential* ClientCredential = nullptr;
-        KhAddressFamily AddressFamily = KhAddressFamily::Any;
+        AddressFamily AddressFamily = AddressFamily::Any;
         bool AutoReplyPing = true;
         SIZE_T MaxMessageBytes = 0;
-        ULONG HandshakeReceiveTimeoutMilliseconds = KhDefaultTlsHandshakeReceiveTimeoutMilliseconds;
-        ULONG MaxTls12Renegotiations = KhDefaultMaxTls12Renegotiations;
+        ULONG HandshakeReceiveTimeoutMilliseconds = DefaultTlsHandshakeReceiveTimeoutMilliseconds;
+        ULONG MaxTls12Renegotiations = DefaultMaxTls12Renegotiations;
         bool AllowWebSocketOverHttp2 = false;
-        KhWebSocketTransportMode TransportMode = KhWebSocketTransportMode::Auto;
+        WebSocketTransportMode TransportMode = WebSocketTransportMode::Auto;
         ws::PerMessageDeflateOptions PerMessageDeflate = {};
     };
 
-    struct KhTestWebSocketMessage final
+    struct TestWebSocketMessage final
     {
-        KhWebSocketMessageType Type = KhWebSocketMessageType::Binary;
+        WebSocketMessageType Type = WebSocketMessageType::Binary;
         const UCHAR* Data = nullptr;
         SIZE_T DataLength = 0;
         bool FinalFragment = true;
     };
 
-    typedef NTSTATUS (*KhTestWebSocketConnectCallback)(
+    typedef NTSTATUS (*TestWebSocketConnectCallback)(
         void* context,
-        const KhTestWebSocketConnectRequest* request);
+        const TestWebSocketConnectRequest* request);
 
-    typedef NTSTATUS (*KhTestWebSocketSendCallback)(
+    typedef NTSTATUS (*TestWebSocketSendCallback)(
         void* context,
-        KH_WEBSOCKET websocket,
-        KhWebSocketMessageType type,
+        WebSocketHandle websocket,
+        WebSocketMessageType type,
         const UCHAR* data,
         SIZE_T dataLength,
         bool finalFragment);
 
-    typedef NTSTATUS (*KhTestWebSocketReceiveCallback)(
+    typedef NTSTATUS (*TestWebSocketReceiveCallback)(
         void* context,
-        KH_WEBSOCKET websocket,
-        KhTestWebSocketMessage* message);
+        WebSocketHandle websocket,
+        TestWebSocketMessage* message);
 
-    typedef void (*KhTestWebSocketCloseCallback)(
+    typedef void (*TestWebSocketCloseCallback)(
         void* context,
-        KH_WEBSOCKET websocket);
+        WebSocketHandle websocket);
 
-    void KhTestSetHttpTransport(
-        KhTestHttpTransportCallback callback,
+    void TestSetHttpTransport(
+        TestHttpTransportCallback callback,
         void* context) noexcept;
 
-    void KhTestSetWebSocketTransport(
-        KhTestWebSocketConnectCallback connectCallback,
-        KhTestWebSocketSendCallback sendCallback,
-        KhTestWebSocketReceiveCallback receiveCallback,
-        KhTestWebSocketCloseCallback closeCallback,
+    void TestSetWebSocketTransport(
+        TestWebSocketConnectCallback connectCallback,
+        TestWebSocketSendCallback sendCallback,
+        TestWebSocketReceiveCallback receiveCallback,
+        TestWebSocketCloseCallback closeCallback,
         void* context) noexcept;
 
-    void KhTestSetAsyncAutoRun(bool enabled) noexcept;
+    void TestSetAsyncAutoRun(bool enabled) noexcept;
 
-    NTSTATUS KhTestRunAsyncOperation(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    NTSTATUS TestRunAsyncOperation(_In_ AsyncOperationHandle operation) noexcept;
 
-    NTSTATUS KhTestAsyncStatus(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    NTSTATUS TestAsyncStatus(_In_ AsyncOperationHandle operation) noexcept;
 
-    bool KhTestAsyncIsCompleted(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    bool TestAsyncIsCompleted(_In_ AsyncOperationHandle operation) noexcept;
 
-    bool KhTestAsyncIsCanceled(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    bool TestAsyncIsCanceled(_In_ AsyncOperationHandle operation) noexcept;
 
-    void KhTestSetCurrentIrql(ULONG irql) noexcept;
-    void KhTestResetCurrentIrql() noexcept;
-    bool KhTestIsHttpTls12ConfirmationCandidate(
-        KhTlsVersion minVersion,
-        KhTlsVersion maxVersion,
+    void TestSetCurrentIrql(ULONG irql) noexcept;
+    void TestResetCurrentIrql() noexcept;
+    bool TestIsHttpTls12ConfirmationCandidate(
+        TlsVersion minVersion,
+        TlsVersion maxVersion,
         ULONG category,
         NTSTATUS status,
         bool beforeTls13FirstServerHello) noexcept;
-    bool KhTestSessionHasWorkspace(KH_SESSION session) noexcept;
-    bool KhTestSessionHasProviderCache(KH_SESSION session) noexcept;
+    bool TestSessionHasWorkspace(SessionHandle session) noexcept;
+    bool TestSessionHasProviderCache(SessionHandle session) noexcept;
 #endif
 }
 }

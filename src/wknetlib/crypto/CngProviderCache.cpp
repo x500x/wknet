@@ -7,33 +7,33 @@ namespace crypto
 namespace
 {
 #if defined(WKNET_USER_MODE_TEST)
-    constexpr LPCWSTR KhBcryptAesAlgorithm = L"AES";
-    constexpr LPCWSTR KhBcryptSha1Algorithm = L"SHA1";
-    constexpr LPCWSTR KhBcryptSha256Algorithm = L"SHA256";
-    constexpr LPCWSTR KhBcryptSha384Algorithm = L"SHA384";
-    constexpr LPCWSTR KhBcryptSha512Algorithm = L"SHA512";
-    constexpr LPCWSTR KhBcryptRsaAlgorithm = L"RSA";
-    constexpr LPCWSTR KhBcryptEcdsaP256Algorithm = L"ECDSA_P256";
-    constexpr LPCWSTR KhBcryptEcdsaP384Algorithm = L"ECDSA_P384";
-    constexpr LPCWSTR KhBcryptEcdsaP521Algorithm = L"ECDSA_P521";
-    constexpr LPCWSTR KhBcryptEcdhP256Algorithm = L"ECDH_P256";
-    constexpr LPCWSTR KhBcryptEcdhP384Algorithm = L"ECDH_P384";
-    constexpr LPCWSTR KhBcryptEcdhP521Algorithm = L"ECDH_P521";
-    constexpr ULONG KhBcryptAlgHandleHmacFlag = 0x00000008;
+    constexpr LPCWSTR BcryptAesAlgorithm = L"AES";
+    constexpr LPCWSTR BcryptSha1Algorithm = L"SHA1";
+    constexpr LPCWSTR BcryptSha256Algorithm = L"SHA256";
+    constexpr LPCWSTR BcryptSha384Algorithm = L"SHA384";
+    constexpr LPCWSTR BcryptSha512Algorithm = L"SHA512";
+    constexpr LPCWSTR BcryptRsaAlgorithm = L"RSA";
+    constexpr LPCWSTR BcryptEcdsaP256Algorithm = L"ECDSA_P256";
+    constexpr LPCWSTR BcryptEcdsaP384Algorithm = L"ECDSA_P384";
+    constexpr LPCWSTR BcryptEcdsaP521Algorithm = L"ECDSA_P521";
+    constexpr LPCWSTR BcryptEcdhP256Algorithm = L"ECDH_P256";
+    constexpr LPCWSTR BcryptEcdhP384Algorithm = L"ECDH_P384";
+    constexpr LPCWSTR BcryptEcdhP521Algorithm = L"ECDH_P521";
+    constexpr ULONG BcryptAlgHandleHmacFlag = 0x00000008;
 #else
-    constexpr LPCWSTR KhBcryptAesAlgorithm = BCRYPT_AES_ALGORITHM;
-    constexpr LPCWSTR KhBcryptSha1Algorithm = BCRYPT_SHA1_ALGORITHM;
-    constexpr LPCWSTR KhBcryptSha256Algorithm = BCRYPT_SHA256_ALGORITHM;
-    constexpr LPCWSTR KhBcryptSha384Algorithm = BCRYPT_SHA384_ALGORITHM;
-    constexpr LPCWSTR KhBcryptSha512Algorithm = BCRYPT_SHA512_ALGORITHM;
-    constexpr LPCWSTR KhBcryptRsaAlgorithm = BCRYPT_RSA_ALGORITHM;
-    constexpr LPCWSTR KhBcryptEcdsaP256Algorithm = BCRYPT_ECDSA_P256_ALGORITHM;
-    constexpr LPCWSTR KhBcryptEcdsaP384Algorithm = BCRYPT_ECDSA_P384_ALGORITHM;
-    constexpr LPCWSTR KhBcryptEcdsaP521Algorithm = BCRYPT_ECDSA_P521_ALGORITHM;
-    constexpr LPCWSTR KhBcryptEcdhP256Algorithm = BCRYPT_ECDH_P256_ALGORITHM;
-    constexpr LPCWSTR KhBcryptEcdhP384Algorithm = BCRYPT_ECDH_P384_ALGORITHM;
-    constexpr LPCWSTR KhBcryptEcdhP521Algorithm = BCRYPT_ECDH_P521_ALGORITHM;
-    constexpr ULONG KhBcryptAlgHandleHmacFlag = BCRYPT_ALG_HANDLE_HMAC_FLAG;
+    constexpr LPCWSTR BcryptAesAlgorithm = BCRYPT_AES_ALGORITHM;
+    constexpr LPCWSTR BcryptSha1Algorithm = BCRYPT_SHA1_ALGORITHM;
+    constexpr LPCWSTR BcryptSha256Algorithm = BCRYPT_SHA256_ALGORITHM;
+    constexpr LPCWSTR BcryptSha384Algorithm = BCRYPT_SHA384_ALGORITHM;
+    constexpr LPCWSTR BcryptSha512Algorithm = BCRYPT_SHA512_ALGORITHM;
+    constexpr LPCWSTR BcryptRsaAlgorithm = BCRYPT_RSA_ALGORITHM;
+    constexpr LPCWSTR BcryptEcdsaP256Algorithm = BCRYPT_ECDSA_P256_ALGORITHM;
+    constexpr LPCWSTR BcryptEcdsaP384Algorithm = BCRYPT_ECDSA_P384_ALGORITHM;
+    constexpr LPCWSTR BcryptEcdsaP521Algorithm = BCRYPT_ECDSA_P521_ALGORITHM;
+    constexpr LPCWSTR BcryptEcdhP256Algorithm = BCRYPT_ECDH_P256_ALGORITHM;
+    constexpr LPCWSTR BcryptEcdhP384Algorithm = BCRYPT_ECDH_P384_ALGORITHM;
+    constexpr LPCWSTR BcryptEcdhP521Algorithm = BCRYPT_ECDH_P521_ALGORITHM;
+    constexpr ULONG BcryptAlgHandleHmacFlag = BCRYPT_ALG_HANDLE_HMAC_FLAG;
 #endif
 
     _Must_inspect_result_
@@ -95,54 +95,54 @@ namespace
 
         Shutdown();
 
-        status = OpenProvider(aes_, KhBcryptAesAlgorithm);
+        status = OpenProvider(aes_, BcryptAesAlgorithm);
         if (NT_SUCCESS(status)) {
             status = SetCachedAesGcmMode(aes_);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(sha1_, KhBcryptSha1Algorithm);
+            status = OpenProvider(sha1_, BcryptSha1Algorithm);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(sha256_, KhBcryptSha256Algorithm);
+            status = OpenProvider(sha256_, BcryptSha256Algorithm);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(sha384_, KhBcryptSha384Algorithm);
+            status = OpenProvider(sha384_, BcryptSha384Algorithm);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(sha512_, KhBcryptSha512Algorithm);
+            status = OpenProvider(sha512_, BcryptSha512Algorithm);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(hmacSha1_, KhBcryptSha1Algorithm, KhBcryptAlgHandleHmacFlag);
+            status = OpenProvider(hmacSha1_, BcryptSha1Algorithm, BcryptAlgHandleHmacFlag);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(hmacSha256_, KhBcryptSha256Algorithm, KhBcryptAlgHandleHmacFlag);
+            status = OpenProvider(hmacSha256_, BcryptSha256Algorithm, BcryptAlgHandleHmacFlag);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(hmacSha384_, KhBcryptSha384Algorithm, KhBcryptAlgHandleHmacFlag);
+            status = OpenProvider(hmacSha384_, BcryptSha384Algorithm, BcryptAlgHandleHmacFlag);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(hmacSha512_, KhBcryptSha512Algorithm, KhBcryptAlgHandleHmacFlag);
+            status = OpenProvider(hmacSha512_, BcryptSha512Algorithm, BcryptAlgHandleHmacFlag);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(rsa_, KhBcryptRsaAlgorithm);
+            status = OpenProvider(rsa_, BcryptRsaAlgorithm);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(ecdsaP256_, KhBcryptEcdsaP256Algorithm);
+            status = OpenProvider(ecdsaP256_, BcryptEcdsaP256Algorithm);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(ecdsaP384_, KhBcryptEcdsaP384Algorithm);
+            status = OpenProvider(ecdsaP384_, BcryptEcdsaP384Algorithm);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(ecdsaP521_, KhBcryptEcdsaP521Algorithm);
+            status = OpenProvider(ecdsaP521_, BcryptEcdsaP521Algorithm);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(ecdhP256_, KhBcryptEcdhP256Algorithm);
+            status = OpenProvider(ecdhP256_, BcryptEcdhP256Algorithm);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(ecdhP384_, KhBcryptEcdhP384Algorithm);
+            status = OpenProvider(ecdhP384_, BcryptEcdhP384Algorithm);
         }
         if (NT_SUCCESS(status)) {
-            status = OpenProvider(ecdhP521_, KhBcryptEcdhP521Algorithm);
+            status = OpenProvider(ecdhP521_, BcryptEcdhP521Algorithm);
         }
 
         if (!NT_SUCCESS(status)) {

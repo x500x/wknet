@@ -10,7 +10,7 @@
 #include "session/HandleTypes.h"
 #include "session/Workspace.h"
 #include "http2/Http2Connection.h"
-#include <wknet/http/Test.h>
+#include <wknet/test/Test.h>
 #include "net/WskSocket.h"
 
 #include <stdio.h>
@@ -266,8 +266,8 @@ namespace
         SIZE_T ProxyAuthorityLength = 0;
         char ProxyAuthHeader[128] = {};
         SIZE_T ProxyAuthHeaderLength = 0;
-        wknet::session::KhHttp2CleartextMode Http2CleartextMode =
-            wknet::session::KhHttp2CleartextMode::Disabled;
+        wknet::session::Http2CleartextMode Http2CleartextMode =
+            wknet::session::Http2CleartextMode::Disabled;
         bool UsedHttp2 = false;
         bool Http11PipelineEnabled = false;
         bool Http11PipelineLease = false;
@@ -439,8 +439,8 @@ namespace
 
     NTSTATUS TestTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* captured = static_cast<CapturedRequest*>(context);
         if (captured == nullptr || request == nullptr || response == nullptr) {
@@ -518,8 +518,8 @@ namespace
 
     NTSTATUS CacheTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<CacheCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -604,8 +604,8 @@ namespace
 
     NTSTATUS LongUrlTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<LongUrlCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -640,8 +640,8 @@ namespace
 
     NTSTATUS ExpectContinueTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<ExpectContinueCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -757,7 +757,7 @@ namespace
 
     void CaptureRedirectRequest(
         RedirectCapture& capture,
-        const wknet::session::KhTestHttpTransportRequest& request) noexcept
+        const wknet::session::TestHttpTransportRequest& request) noexcept
     {
         if (capture.CallCount >= sizeof(capture.Requests) / sizeof(capture.Requests[0])) {
             return;
@@ -774,8 +774,8 @@ namespace
 
     NTSTATUS RedirectTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<RedirectCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -826,8 +826,8 @@ namespace
 
     NTSTATUS RelativeRedirectTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<RedirectCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -899,8 +899,8 @@ namespace
 
     NTSTATUS HttpsDowngradeRedirectTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<RedirectCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -924,8 +924,8 @@ namespace
 
     NTSTATUS RedirectMethodTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<RedirectMethodCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -981,8 +981,8 @@ namespace
 
     NTSTATUS ReusedFailureTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<ReusedFailureCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -1016,8 +1016,8 @@ namespace
 
     NTSTATUS FreshTimeoutTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<FreshTimeoutCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -1052,8 +1052,8 @@ namespace
 
     NTSTATUS FreshRetrySignalTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<FreshRetrySignalCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -1087,8 +1087,8 @@ namespace
 
     NTSTATUS ReuseDecisionTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<ReuseDecisionCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -1115,8 +1115,8 @@ namespace
 
     NTSTATUS Http11PipelineTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<Http11PipelineCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -1150,14 +1150,14 @@ namespace
         char LastSendBuffer[64] = {};
         UCHAR LastSendData[128] = {};
         SIZE_T LastSendLength = 0;
-        wknet::session::KhWebSocketMessageType LastSendType = wknet::session::KhWebSocketMessageType::Text;
+        wknet::session::WebSocketMessageType LastSendType = wknet::session::WebSocketMessageType::Text;
         bool LastSendFinalFragment = false;
-        wknet::session::KhWebSocketMessageType NextType = wknet::session::KhWebSocketMessageType::Text;
+        wknet::session::WebSocketMessageType NextType = wknet::session::WebSocketMessageType::Text;
         UCHAR NextData[64] = {};
         SIZE_T NextLength = 0;
         bool LastAllowWebSocketOverHttp2 = false;
-        wknet::session::KhWebSocketTransportMode LastTransportMode =
-            wknet::session::KhWebSocketTransportMode::Auto;
+        wknet::session::WebSocketTransportMode LastTransportMode =
+            wknet::session::WebSocketTransportMode::Auto;
         wknet::ws::PerMessageDeflateOptions LastPerMessageDeflate = {};
         ULONG LastMaxTls12Renegotiations = 0;
         NTSTATUS SendStatus = STATUS_SUCCESS;
@@ -1166,7 +1166,7 @@ namespace
 
     NTSTATUS WsConnectCallback(
         void* context,
-        const wknet::session::KhTestWebSocketConnectRequest* request) noexcept
+        const wknet::session::TestWebSocketConnectRequest* request) noexcept
     {
         auto* capture = static_cast<WsCapture*>(context);
         if (capture == nullptr || request == nullptr) {
@@ -1199,8 +1199,8 @@ namespace
 
     NTSTATUS WsSendCallback(
         void* context,
-        wknet::session::KH_WEBSOCKET websocket,
-        wknet::session::KhWebSocketMessageType type,
+        wknet::session::WebSocketHandle websocket,
+        wknet::session::WebSocketMessageType type,
         const UCHAR* data,
         SIZE_T dataLength,
         bool finalFragment) noexcept
@@ -1235,8 +1235,8 @@ namespace
 
     NTSTATUS WsReceiveCallback(
         void* context,
-        wknet::session::KH_WEBSOCKET websocket,
-        wknet::session::KhTestWebSocketMessage* message) noexcept
+        wknet::session::WebSocketHandle websocket,
+        wknet::session::TestWebSocketMessage* message) noexcept
     {
         UNREFERENCED_PARAMETER(websocket);
         auto* capture = static_cast<WsCapture*>(context);
@@ -1254,7 +1254,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    void WsCloseCallback(void* context, wknet::session::KH_WEBSOCKET websocket) noexcept
+    void WsCloseCallback(void* context, wknet::session::WebSocketHandle websocket) noexcept
     {
         UNREFERENCED_PARAMETER(websocket);
         auto* capture = static_cast<WsCapture*>(context);
@@ -1276,8 +1276,8 @@ namespace
         Expect(session != nullptr, "Session pointer non-null");
         wknet::http::SessionClose(session);
 
-        wknet::session::KH_SESSION apiSession = nullptr;
-        status = wknet::session::KhSessionCreate(
+        wknet::session::SessionHandle apiSession = nullptr;
+        status = wknet::session::SessionCreate(
             reinterpret_cast<wknet::net::WskClient*>(0x1),
             nullptr,
             &apiSession);
@@ -1286,10 +1286,10 @@ namespace
         if (apiSession != nullptr) {
             Expect(apiSession->WorkspaceLookaside.IsInitialized(), "session workspace lookaside initializes");
             Expect(
-                apiSession->WorkspaceLookaside.BlockSize() == sizeof(wknet::session::KhWorkspace),
-                "session workspace lookaside uses KhWorkspace block size");
+                apiSession->WorkspaceLookaside.BlockSize() == sizeof(wknet::session::Workspace),
+                "session workspace lookaside uses Workspace block size");
         }
-        wknet::session::KhSessionClose(apiSession);
+        wknet::session::SessionClose(apiSession);
     }
 
     void TestDestroyIsUnconditionalHighLevelDrain() noexcept
@@ -1818,30 +1818,30 @@ namespace
         captured.RawResponseLength = Length(response);
         wknet::http::test::SetHttpTransport(TestTransport, &captured);
 
-        wknet::session::KH_SESSION session = nullptr;
-        NTSTATUS status = wknet::session::KhSessionCreate(
+        wknet::session::SessionHandle session = nullptr;
+        NTSTATUS status = wknet::session::SessionCreate(
             reinterpret_cast<wknet::net::WskClient*>(0x1),
             nullptr,
             &session);
         Expect(NT_SUCCESS(status), "engine SessionCreate succeeds for typed Range helpers");
 
-        wknet::session::KH_REQUEST request = nullptr;
-        status = wknet::session::KhHttpRequestCreate(session, &request);
+        wknet::session::RequestHandle request = nullptr;
+        status = wknet::session::HttpRequestCreate(session, &request);
         Expect(NT_SUCCESS(status), "engine RequestCreate succeeds for typed Range helpers");
 
         const char* url = "http://example.com/file";
-        status = wknet::session::KhHttpRequestSetUrl(request, url, Length(url));
+        status = wknet::session::HttpRequestSetUrl(request, url, Length(url));
         Expect(NT_SUCCESS(status), "engine RequestSetUrl succeeds for typed Range helpers");
 
-        status = wknet::session::KhHttpRequestSetRangeSuffix(request, 256);
+        status = wknet::session::HttpRequestSetRangeSuffix(request, 256);
         Expect(NT_SUCCESS(status), "engine suffix Range helper accepts length");
 
         const char* etag = "\"engine\"";
-        status = wknet::session::KhHttpRequestSetIfMatch(request, etag, Length(etag));
+        status = wknet::session::HttpRequestSetIfMatch(request, etag, Length(etag));
         Expect(NT_SUCCESS(status), "engine If-Match helper accepts ETag");
 
-        wknet::session::KH_RESPONSE resp = nullptr;
-        status = wknet::session::KhHttpSendSync(session, request, nullptr, &resp);
+        wknet::session::ResponseHandle resp = nullptr;
+        status = wknet::session::HttpSendSync(session, request, nullptr, &resp);
         Expect(NT_SUCCESS(status), "engine typed Range helper request sends");
         Expect(
             BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "Range: bytes=-256\r\n"),
@@ -1850,9 +1850,9 @@ namespace
             BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "If-Match: \"engine\"\r\n"),
             "engine condition helper emits If-Match header");
 
-        wknet::session::KhResponseRelease(resp);
-        wknet::session::KhHttpRequestRelease(request);
-        wknet::session::KhSessionClose(session);
+        wknet::session::ResponseRelease(resp);
+        wknet::session::HttpRequestRelease(request);
+        wknet::session::SessionClose(session);
         wknet::http::test::SetHttpTransport(nullptr, nullptr);
     }
 
@@ -2703,102 +2703,102 @@ namespace
 
     void TestConnectionPoolHonorsMaxConnectionsPerHost() noexcept
     {
-        wknet::session::KhConnectionPool pool = {};
-        NTSTATUS status = wknet::session::KhConnectionPoolInitialize(&pool, 4, 1, 30000);
+        wknet::session::ConnectionPool pool = {};
+        NTSTATUS status = wknet::session::ConnectionPoolInitialize(&pool, 4, 1, 30000);
         Expect(NT_SUCCESS(status), "connection pool initializes with per-host limit");
 
-        wknet::session::KhConnectionPoolKey firstKey = {};
+        wknet::session::ConnectionPoolKey firstKey = {};
         memcpy(firstKey.Scheme, "http", Length("http"));
         firstKey.SchemeLength = Length("http");
         memcpy(firstKey.Host, "example.com", Length("example.com"));
         firstKey.HostLength = Length("example.com");
         firstKey.Port = 80;
 
-        wknet::session::KhConnectionPoolKey secondKey = firstKey;
+        wknet::session::ConnectionPoolKey secondKey = firstKey;
         memcpy(secondKey.Host, "other.example", Length("other.example"));
         secondKey.HostLength = Length("other.example");
 
-        wknet::session::KhPooledConnection* first = nullptr;
+        wknet::session::PooledConnection* first = nullptr;
         bool reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             firstKey,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &first,
             &reused);
         Expect(NT_SUCCESS(status), "first per-host connection acquires");
         Expect(first != nullptr && !reused, "first per-host acquire is fresh");
 
-        wknet::session::KhPooledConnection* blocked = nullptr;
+        wknet::session::PooledConnection* blocked = nullptr;
         reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             firstKey,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &blocked,
             &reused);
         Expect(status == STATUS_INSUFFICIENT_RESOURCES, "same host is limited while first is active");
         Expect(blocked == nullptr, "blocked same-host acquire returns no connection");
 
-        wknet::session::KhPooledConnection* other = nullptr;
+        wknet::session::PooledConnection* other = nullptr;
         reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             secondKey,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &other,
             &reused);
         Expect(NT_SUCCESS(status), "different host can acquire under same pool capacity");
         Expect(other != nullptr && !reused, "different host acquire is fresh");
 
-        wknet::session::KhConnectionPoolRelease(&pool, other, false);
-        wknet::session::KhConnectionPoolRelease(&pool, first, false);
-        wknet::session::KhConnectionPoolShutdown(&pool);
+        wknet::session::ConnectionPoolRelease(&pool, other, false);
+        wknet::session::ConnectionPoolRelease(&pool, first, false);
+        wknet::session::ConnectionPoolShutdown(&pool);
     }
 
     void TestConnectionPoolSharesActiveHttp1PipelineLeases() noexcept
     {
-        wknet::session::KhConnectionPool pool = {};
-        NTSTATUS status = wknet::session::KhConnectionPoolInitialize(&pool, 2, 1, 30000);
+        wknet::session::ConnectionPool pool = {};
+        NTSTATUS status = wknet::session::ConnectionPoolInitialize(&pool, 2, 1, 30000);
         Expect(NT_SUCCESS(status), "connection pool initializes for HTTP/1.1 pipeline sharing");
 
-        wknet::session::KhConnectionPoolKey key = {};
+        wknet::session::ConnectionPoolKey key = {};
         memcpy(key.Scheme, "http", Length("http"));
         key.SchemeLength = Length("http");
         memcpy(key.Host, "example.com", Length("example.com"));
         key.HostLength = Length("example.com");
         key.Port = 80;
 
-        wknet::session::KhPooledConnection* first = nullptr;
+        wknet::session::PooledConnection* first = nullptr;
         bool reused = true;
-        status = wknet::session::KhConnectionPoolAcquireHttp1Pipeline(
+        status = wknet::session::ConnectionPoolAcquireHttp1Pipeline(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             2,
             &first,
             &reused);
         Expect(NT_SUCCESS(status), "first HTTP/1.1 pipeline acquire succeeds");
         Expect(first != nullptr && !reused, "first HTTP/1.1 pipeline acquire is fresh");
 
-        status = wknet::session::KhConnectionPoolPromoteHttp1PipelineLease(&pool, first, 2);
+        status = wknet::session::ConnectionPoolPromoteHttp1PipelineLease(&pool, first, 2);
         Expect(NT_SUCCESS(status), "first HTTP/1.1 lease promotes connection to pipeline mode");
         Expect(
-            wknet::session::KhConnectionPoolHasHttp1PipelineLease(first),
+            wknet::session::ConnectionPoolHasHttp1PipelineLease(first),
             "promoted connection reports HTTP/1.1 pipeline lease");
 
         ULONG firstSequence = 0;
-        status = wknet::session::KhConnectionPoolBeginHttp1PipelineSend(&pool, first, &firstSequence);
+        status = wknet::session::ConnectionPoolBeginHttp1PipelineSend(&pool, first, &firstSequence);
         Expect(NT_SUCCESS(status), "first HTTP/1.1 pipeline send begins");
         Expect(firstSequence == 1, "first HTTP/1.1 pipeline sequence is 1");
-        wknet::session::KhConnectionPoolEndHttp1PipelineSend(first);
+        wknet::session::ConnectionPoolEndHttp1PipelineSend(first);
 
-        wknet::session::KhPooledConnection* second = nullptr;
+        wknet::session::PooledConnection* second = nullptr;
         reused = false;
-        status = wknet::session::KhConnectionPoolAcquireHttp1Pipeline(
+        status = wknet::session::ConnectionPoolAcquireHttp1Pipeline(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             2,
             &second,
             &reused);
@@ -2806,16 +2806,16 @@ namespace
         Expect(second == first && reused, "second HTTP/1.1 pipeline acquire shares active connection");
 
         ULONG secondSequence = 0;
-        status = wknet::session::KhConnectionPoolBeginHttp1PipelineSend(&pool, second, &secondSequence);
+        status = wknet::session::ConnectionPoolBeginHttp1PipelineSend(&pool, second, &secondSequence);
         Expect(NT_SUCCESS(status), "second HTTP/1.1 pipeline send begins");
         Expect(secondSequence == 2, "second HTTP/1.1 pipeline sequence is 2");
-        wknet::session::KhConnectionPoolEndHttp1PipelineSend(second);
+        wknet::session::ConnectionPoolEndHttp1PipelineSend(second);
 
-        status = wknet::session::KhConnectionPoolWaitHttp1PipelineReceiveTurn(&pool, first, firstSequence);
+        status = wknet::session::ConnectionPoolWaitHttp1PipelineReceiveTurn(&pool, first, firstSequence);
         Expect(NT_SUCCESS(status), "first HTTP/1.1 pipeline response turn is ready");
 
         const UCHAR extra[] = { 'H', 'T', 'T', 'P' };
-        status = wknet::session::KhConnectionPoolStoreHttp1PipelineBufferedBytes(
+        status = wknet::session::ConnectionPoolStoreHttp1PipelineBufferedBytes(
             &pool,
             first,
             extra,
@@ -2823,7 +2823,7 @@ namespace
         Expect(NT_SUCCESS(status), "HTTP/1.1 pipeline stores bytes for next response");
 
         SIZE_T bufferedLength = 0;
-        status = wknet::session::KhConnectionPoolHttp1PipelineBufferedLength(
+        status = wknet::session::ConnectionPoolHttp1PipelineBufferedLength(
             &pool,
             second,
             &bufferedLength);
@@ -2832,7 +2832,7 @@ namespace
 
         UCHAR copied[sizeof(extra)] = {};
         SIZE_T copiedLength = 0;
-        status = wknet::session::KhConnectionPoolTakeHttp1PipelineBufferedBytes(
+        status = wknet::session::ConnectionPoolTakeHttp1PipelineBufferedBytes(
             &pool,
             second,
             copied,
@@ -2842,53 +2842,53 @@ namespace
         Expect(copiedLength == sizeof(extra), "HTTP/1.1 pipeline copied byte count matches");
         Expect(memcmp(copied, extra, sizeof(extra)) == 0, "HTTP/1.1 pipeline copied bytes match");
 
-        wknet::session::KhConnectionPoolCompleteHttp1PipelineReceive(&pool, first, firstSequence);
-        status = wknet::session::KhConnectionPoolWaitHttp1PipelineReceiveTurn(&pool, second, secondSequence);
+        wknet::session::ConnectionPoolCompleteHttp1PipelineReceive(&pool, first, firstSequence);
+        status = wknet::session::ConnectionPoolWaitHttp1PipelineReceiveTurn(&pool, second, secondSequence);
         Expect(NT_SUCCESS(status), "second HTTP/1.1 pipeline response waits for FIFO turn");
-        wknet::session::KhConnectionPoolCompleteHttp1PipelineReceive(&pool, second, secondSequence);
+        wknet::session::ConnectionPoolCompleteHttp1PipelineReceive(&pool, second, secondSequence);
 
-        wknet::session::KhConnectionPoolRelease(&pool, second, true);
-        wknet::session::KhConnectionPoolRelease(&pool, first, true);
-        wknet::session::KhConnectionPoolShutdown(&pool);
+        wknet::session::ConnectionPoolRelease(&pool, second, true);
+        wknet::session::ConnectionPoolRelease(&pool, first, true);
+        wknet::session::ConnectionPoolShutdown(&pool);
     }
 
     void TestConnectionPoolHttp1PipelineFailureClosesLeases() noexcept
     {
-        wknet::session::KhConnectionPool pool = {};
-        NTSTATUS status = wknet::session::KhConnectionPoolInitialize(&pool, 2, 1, 30000);
+        wknet::session::ConnectionPool pool = {};
+        NTSTATUS status = wknet::session::ConnectionPoolInitialize(&pool, 2, 1, 30000);
         Expect(NT_SUCCESS(status), "connection pool initializes for HTTP/1.1 pipeline failure");
 
-        wknet::session::KhConnectionPoolKey key = {};
+        wknet::session::ConnectionPoolKey key = {};
         memcpy(key.Scheme, "http", Length("http"));
         key.SchemeLength = Length("http");
         memcpy(key.Host, "example.com", Length("example.com"));
         key.HostLength = Length("example.com");
         key.Port = 80;
 
-        wknet::session::KhPooledConnection* first = nullptr;
+        wknet::session::PooledConnection* first = nullptr;
         bool reused = true;
-        status = wknet::session::KhConnectionPoolAcquireHttp1Pipeline(
+        status = wknet::session::ConnectionPoolAcquireHttp1Pipeline(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             2,
             &first,
             &reused);
         Expect(NT_SUCCESS(status), "first failure pipeline acquire succeeds");
-        status = wknet::session::KhConnectionPoolPromoteHttp1PipelineLease(&pool, first, 2);
+        status = wknet::session::ConnectionPoolPromoteHttp1PipelineLease(&pool, first, 2);
         Expect(NT_SUCCESS(status), "failure pipeline promote succeeds");
 
         ULONG firstSequence = 0;
-        status = wknet::session::KhConnectionPoolBeginHttp1PipelineSend(&pool, first, &firstSequence);
+        status = wknet::session::ConnectionPoolBeginHttp1PipelineSend(&pool, first, &firstSequence);
         Expect(NT_SUCCESS(status), "first failure pipeline send begins");
-        wknet::session::KhConnectionPoolEndHttp1PipelineSend(first);
+        wknet::session::ConnectionPoolEndHttp1PipelineSend(first);
 
-        wknet::session::KhPooledConnection* second = nullptr;
+        wknet::session::PooledConnection* second = nullptr;
         reused = false;
-        status = wknet::session::KhConnectionPoolAcquireHttp1Pipeline(
+        status = wknet::session::ConnectionPoolAcquireHttp1Pipeline(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             2,
             &second,
             &reused);
@@ -2896,45 +2896,45 @@ namespace
         Expect(second == first && reused, "second failure pipeline acquire shares active connection");
 
         ULONG secondSequence = 0;
-        status = wknet::session::KhConnectionPoolBeginHttp1PipelineSend(&pool, second, &secondSequence);
+        status = wknet::session::ConnectionPoolBeginHttp1PipelineSend(&pool, second, &secondSequence);
         Expect(NT_SUCCESS(status), "second failure pipeline send begins before failure");
-        wknet::session::KhConnectionPoolEndHttp1PipelineSend(second);
+        wknet::session::ConnectionPoolEndHttp1PipelineSend(second);
 
-        wknet::session::KhConnectionPoolFailHttp1Pipeline(
+        wknet::session::ConnectionPoolFailHttp1Pipeline(
             &pool,
             first,
             STATUS_INVALID_NETWORK_RESPONSE);
-        status = wknet::session::KhConnectionPoolWaitHttp1PipelineReceiveTurn(
+        status = wknet::session::ConnectionPoolWaitHttp1PipelineReceiveTurn(
             &pool,
             second,
             secondSequence);
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "pipeline failure propagates to pending response");
 
-        wknet::session::KhConnectionPoolRelease(&pool, second, false);
-        wknet::session::KhConnectionPoolRelease(&pool, first, false);
+        wknet::session::ConnectionPoolRelease(&pool, second, false);
+        wknet::session::ConnectionPoolRelease(&pool, first, false);
 
-        wknet::session::KhPooledConnection* fresh = nullptr;
+        wknet::session::PooledConnection* fresh = nullptr;
         reused = true;
-        status = wknet::session::KhConnectionPoolAcquireHttp1Pipeline(
+        status = wknet::session::ConnectionPoolAcquireHttp1Pipeline(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             2,
             &fresh,
             &reused);
         Expect(NT_SUCCESS(status), "pipeline acquire after failure creates usable connection");
         Expect(fresh != nullptr && !reused, "failed pipeline connection is not reused");
-        wknet::session::KhConnectionPoolRelease(&pool, fresh, false);
-        wknet::session::KhConnectionPoolShutdown(&pool);
+        wknet::session::ConnectionPoolRelease(&pool, fresh, false);
+        wknet::session::ConnectionPoolShutdown(&pool);
     }
 
     void TestConnectionPoolSharesActiveHttp2StreamLeases() noexcept
     {
-        wknet::session::KhConnectionPool pool = {};
-        NTSTATUS status = wknet::session::KhConnectionPoolInitialize(&pool, 2, 1, 30000);
+        wknet::session::ConnectionPool pool = {};
+        NTSTATUS status = wknet::session::ConnectionPoolInitialize(&pool, 2, 1, 30000);
         Expect(NT_SUCCESS(status), "connection pool initializes for HTTP/2 stream sharing");
 
-        wknet::session::KhConnectionPoolKey key = {};
+        wknet::session::ConnectionPoolKey key = {};
         memcpy(key.Scheme, "https", Length("https"));
         key.SchemeLength = Length("https");
         memcpy(key.Host, "example.com", Length("example.com"));
@@ -2943,12 +2943,12 @@ namespace
         memcpy(key.Alpn, "h2", Length("h2"));
         key.AlpnLength = Length("h2");
 
-        wknet::session::KhPooledConnection* first = nullptr;
+        wknet::session::PooledConnection* first = nullptr;
         bool reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &first,
             &reused);
         Expect(NT_SUCCESS(status), "first HTTP/2 pool acquire succeeds");
@@ -2958,56 +2958,56 @@ namespace
         first->Transport = &transport;
         first->Http2 = &connection;
 
-        status = wknet::session::KhConnectionPoolPromoteHttp2StreamLease(&pool, first, 2);
+        status = wknet::session::ConnectionPoolPromoteHttp2StreamLease(&pool, first, 2);
         Expect(NT_SUCCESS(status), "first HTTP/2 stream lease promotes connection");
 
-        wknet::session::KhPooledConnection* second = nullptr;
+        wknet::session::PooledConnection* second = nullptr;
         reused = false;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &second,
             &reused);
         Expect(NT_SUCCESS(status), "second HTTP/2 stream lease shares active connection");
         Expect(second == first && reused, "second HTTP/2 stream lease reuses same connection");
 
-        wknet::session::KhPooledConnection* blocked = nullptr;
+        wknet::session::PooledConnection* blocked = nullptr;
         reused = false;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &blocked,
             &reused);
         Expect(status == STATUS_INSUFFICIENT_RESOURCES, "HTTP/2 stream lease cap blocks third active lease");
         Expect(blocked == nullptr, "blocked HTTP/2 stream lease returns no connection");
 
-        wknet::session::KhConnectionPoolRelease(&pool, second, true);
+        wknet::session::ConnectionPoolRelease(&pool, second, true);
 
-        wknet::session::KhPooledConnection* third = nullptr;
+        wknet::session::PooledConnection* third = nullptr;
         reused = false;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &third,
             &reused);
         Expect(NT_SUCCESS(status), "released HTTP/2 stream lease frees capacity");
         Expect(third == first && reused, "third HTTP/2 stream lease reuses same active connection");
 
-        wknet::session::KhConnectionPoolRelease(&pool, third, true);
-        wknet::session::KhConnectionPoolRelease(&pool, first, true);
-        wknet::session::KhConnectionPoolShutdown(&pool);
+        wknet::session::ConnectionPoolRelease(&pool, third, true);
+        wknet::session::ConnectionPoolRelease(&pool, first, true);
+        wknet::session::ConnectionPoolShutdown(&pool);
     }
 
     void TestHttp2KeepAliveDefaultDisabled() noexcept
     {
-        wknet::session::KhConnectionPool pool = {};
-        NTSTATUS status = wknet::session::KhConnectionPoolInitialize(&pool, 2, 1, 30000);
+        wknet::session::ConnectionPool pool = {};
+        NTSTATUS status = wknet::session::ConnectionPoolInitialize(&pool, 2, 1, 30000);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive default-disabled pool initializes");
 
-        wknet::session::KhConnectionPoolKey key = {};
+        wknet::session::ConnectionPoolKey key = {};
         memcpy(key.Scheme, "https", Length("https"));
         key.SchemeLength = Length("https");
         memcpy(key.Host, "example.com", Length("example.com"));
@@ -3018,40 +3018,40 @@ namespace
 
         Http2KeepAliveTestTransport transport = {};
         wknet::http2::Http2Connection connection;
-        wknet::session::KhPooledConnection* pooled = nullptr;
+        wknet::session::PooledConnection* pooled = nullptr;
         bool reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &pooled,
             &reused);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive default-disabled acquire succeeds");
         pooled->Transport = &transport;
         pooled->Http2 = &connection;
-        wknet::session::KhConnectionPoolRelease(&pool, pooled, true);
+        wknet::session::ConnectionPoolRelease(&pool, pooled, true);
 
         bool attempted = true;
-        status = wknet::session::KhConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
+        status = wknet::session::ConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive default-disabled sweep succeeds");
         Expect(!attempted, "HTTP/2 keepalive default-disabled sweep does not attempt PING");
         Expect(transport.SendCalls == 0, "HTTP/2 keepalive default-disabled sweep sends no PING");
-        wknet::session::KhConnectionPoolShutdown(&pool);
+        wknet::session::ConnectionPoolShutdown(&pool);
     }
 
     void TestHttp2KeepAliveSendsPingForIdleConnection() noexcept
     {
-        wknet::session::KhHttp2KeepAliveOptions keepAlive = {};
+        wknet::session::Http2KeepAliveOptions keepAlive = {};
         keepAlive.Enabled = true;
         keepAlive.IdleMilliseconds = 1;
         keepAlive.IntervalMilliseconds = 1;
         keepAlive.AckTimeoutMilliseconds = 7;
 
-        wknet::session::KhConnectionPool pool = {};
-        NTSTATUS status = wknet::session::KhConnectionPoolInitialize(&pool, 2, 1, 30000, &keepAlive);
+        wknet::session::ConnectionPool pool = {};
+        NTSTATUS status = wknet::session::ConnectionPoolInitialize(&pool, 2, 1, 30000, &keepAlive);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive enabled pool initializes");
 
-        wknet::session::KhConnectionPoolKey key = {};
+        wknet::session::ConnectionPoolKey key = {};
         memcpy(key.Scheme, "https", Length("https"));
         key.SchemeLength = Length("https");
         memcpy(key.Host, "example.com", Length("example.com"));
@@ -3062,43 +3062,43 @@ namespace
 
         Http2KeepAliveTestTransport transport = {};
         wknet::http2::Http2Connection connection;
-        wknet::session::KhPooledConnection* pooled = nullptr;
+        wknet::session::PooledConnection* pooled = nullptr;
         bool reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &pooled,
             &reused);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive idle acquire succeeds");
         pooled->Transport = &transport;
         pooled->Http2 = &connection;
-        wknet::session::KhConnectionPoolRelease(&pool, pooled, true);
+        wknet::session::ConnectionPoolRelease(&pool, pooled, true);
 
         bool attempted = false;
-        status = wknet::session::KhConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
+        status = wknet::session::ConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive idle sweep succeeds");
         Expect(attempted, "HTTP/2 keepalive idle sweep attempts PING");
         Expect(transport.SendCalls == 1, "HTTP/2 keepalive idle sweep sends one PING");
         Expect(transport.LastTimeoutMs == keepAlive.AckTimeoutMilliseconds,
             "HTTP/2 keepalive idle sweep uses ACK timeout");
         Expect(pooled->Http2LastKeepAliveTime != 0, "HTTP/2 keepalive records successful PING time");
-        wknet::session::KhConnectionPoolShutdown(&pool);
+        wknet::session::ConnectionPoolShutdown(&pool);
     }
 
     void TestHttp2KeepAliveSkipsNotDueAndActiveConnections() noexcept
     {
-        wknet::session::KhHttp2KeepAliveOptions keepAlive = {};
+        wknet::session::Http2KeepAliveOptions keepAlive = {};
         keepAlive.Enabled = true;
         keepAlive.IdleMilliseconds = 1000;
         keepAlive.IntervalMilliseconds = 1000;
         keepAlive.AckTimeoutMilliseconds = 5;
 
-        wknet::session::KhConnectionPool pool = {};
-        NTSTATUS status = wknet::session::KhConnectionPoolInitialize(&pool, 2, 1, 30000, &keepAlive);
+        wknet::session::ConnectionPool pool = {};
+        NTSTATUS status = wknet::session::ConnectionPoolInitialize(&pool, 2, 1, 30000, &keepAlive);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive skip pool initializes");
 
-        wknet::session::KhConnectionPoolKey key = {};
+        wknet::session::ConnectionPoolKey key = {};
         memcpy(key.Scheme, "https", Length("https"));
         key.SchemeLength = Length("https");
         memcpy(key.Host, "example.com", Length("example.com"));
@@ -3109,59 +3109,59 @@ namespace
 
         Http2KeepAliveTestTransport transport = {};
         wknet::http2::Http2Connection connection;
-        wknet::session::KhPooledConnection* pooled = nullptr;
+        wknet::session::PooledConnection* pooled = nullptr;
         bool reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &pooled,
             &reused);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive not-due acquire succeeds");
         pooled->Transport = &transport;
         pooled->Http2 = &connection;
-        wknet::session::KhConnectionPoolRelease(&pool, pooled, true);
+        wknet::session::ConnectionPoolRelease(&pool, pooled, true);
 
         bool attempted = true;
-        status = wknet::session::KhConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
+        status = wknet::session::ConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive not-due sweep succeeds");
         Expect(!attempted, "HTTP/2 keepalive not-due sweep skips PING");
         Expect(transport.SendCalls == 0, "HTTP/2 keepalive not-due sweep sends no PING");
 
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &pooled,
             &reused);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive active acquire succeeds");
         pooled->Transport = &transport;
         pooled->Http2 = &connection;
-        status = wknet::session::KhConnectionPoolPromoteHttp2StreamLease(&pool, pooled, 2);
+        status = wknet::session::ConnectionPoolPromoteHttp2StreamLease(&pool, pooled, 2);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive active stream lease promotes");
 
         attempted = true;
-        status = wknet::session::KhConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
+        status = wknet::session::ConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive active sweep succeeds");
         Expect(!attempted, "HTTP/2 keepalive active stream sweep skips PING");
         Expect(transport.SendCalls == 0, "HTTP/2 keepalive active stream sends no PING");
-        wknet::session::KhConnectionPoolRelease(&pool, pooled, false);
-        wknet::session::KhConnectionPoolShutdown(&pool);
+        wknet::session::ConnectionPoolRelease(&pool, pooled, false);
+        wknet::session::ConnectionPoolShutdown(&pool);
     }
 
     void TestHttp2KeepAliveAckTimeoutClosesIdleConnection() noexcept
     {
-        wknet::session::KhHttp2KeepAliveOptions keepAlive = {};
+        wknet::session::Http2KeepAliveOptions keepAlive = {};
         keepAlive.Enabled = true;
         keepAlive.IdleMilliseconds = 1;
         keepAlive.IntervalMilliseconds = 1;
         keepAlive.AckTimeoutMilliseconds = 5;
 
-        wknet::session::KhConnectionPool pool = {};
-        NTSTATUS status = wknet::session::KhConnectionPoolInitialize(&pool, 2, 1, 30000, &keepAlive);
+        wknet::session::ConnectionPool pool = {};
+        NTSTATUS status = wknet::session::ConnectionPoolInitialize(&pool, 2, 1, 30000, &keepAlive);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive timeout pool initializes");
 
-        wknet::session::KhConnectionPoolKey key = {};
+        wknet::session::ConnectionPoolKey key = {};
         memcpy(key.Scheme, "https", Length("https"));
         key.SchemeLength = Length("https");
         memcpy(key.Host, "example.com", Length("example.com"));
@@ -3173,47 +3173,47 @@ namespace
         Http2KeepAliveTestTransport transport = {};
         transport.TimeoutAck = true;
         wknet::http2::Http2Connection connection;
-        wknet::session::KhPooledConnection* pooled = nullptr;
+        wknet::session::PooledConnection* pooled = nullptr;
         bool reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &pooled,
             &reused);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive timeout acquire succeeds");
         pooled->Transport = &transport;
         pooled->Http2 = &connection;
-        wknet::session::KhConnectionPoolRelease(&pool, pooled, true);
+        wknet::session::ConnectionPoolRelease(&pool, pooled, true);
 
         bool attempted = false;
-        status = wknet::session::KhConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
+        status = wknet::session::ConnectionPoolRunHttp2KeepAliveSweep(&pool, &attempted);
         Expect(status == STATUS_IO_TIMEOUT, "HTTP/2 keepalive ACK timeout is reported");
         Expect(attempted, "HTTP/2 keepalive timeout sweep attempts PING");
         Expect(transport.SendCalls == 1, "HTTP/2 keepalive timeout sends one PING");
         Expect(pool.ActiveCount == 0, "HTTP/2 keepalive timeout closes idle pooled connection");
 
-        wknet::session::KhPooledConnection* fresh = nullptr;
+        wknet::session::PooledConnection* fresh = nullptr;
         reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             key,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &fresh,
             &reused);
         Expect(NT_SUCCESS(status), "HTTP/2 keepalive timeout allows fresh acquire");
         Expect(fresh != nullptr && !reused, "HTTP/2 keepalive timeout does not reuse closed connection");
-        wknet::session::KhConnectionPoolRelease(&pool, fresh, false);
-        wknet::session::KhConnectionPoolShutdown(&pool);
+        wknet::session::ConnectionPoolRelease(&pool, fresh, false);
+        wknet::session::ConnectionPoolShutdown(&pool);
     }
 
     void TestConnectionPoolHostQuotaSeparatesTlsReuseIdentity() noexcept
     {
-        wknet::session::KhConnectionPool pool = {};
-        NTSTATUS status = wknet::session::KhConnectionPoolInitialize(&pool, 2, 1, 30000);
+        wknet::session::ConnectionPool pool = {};
+        NTSTATUS status = wknet::session::ConnectionPoolInitialize(&pool, 2, 1, 30000);
         Expect(NT_SUCCESS(status), "connection pool initializes for TLS identity quota");
 
-        wknet::session::KhConnectionPoolKey firstKey = {};
+        wknet::session::ConnectionPoolKey firstKey = {};
         memcpy(firstKey.Scheme, "https", Length("https"));
         firstKey.SchemeLength = Length("https");
         memcpy(firstKey.Host, "example.com", Length("example.com"));
@@ -3224,94 +3224,94 @@ namespace
         memcpy(firstKey.Alpn, "h2", Length("h2"));
         firstKey.AlpnLength = Length("h2");
 
-        wknet::session::KhConnectionPoolKey secondIdentity = firstKey;
+        wknet::session::ConnectionPoolKey secondIdentity = firstKey;
         memcpy(secondIdentity.TlsServerName, "other.example.com", Length("other.example.com"));
         secondIdentity.TlsServerNameLength = Length("other.example.com");
 
-        wknet::session::KhPooledConnection* first = nullptr;
+        wknet::session::PooledConnection* first = nullptr;
         bool reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             firstKey,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &first,
             &reused);
         Expect(NT_SUCCESS(status), "first TLS identity connection acquires");
         Expect(first != nullptr && !reused, "first TLS identity acquire is fresh");
 
-        wknet::session::KhPooledConnection* blocked = nullptr;
+        wknet::session::PooledConnection* blocked = nullptr;
         reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             secondIdentity,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &blocked,
             &reused);
         Expect(status == STATUS_INSUFFICIENT_RESOURCES, "active same-host different TLS identity counts toward host quota");
         Expect(blocked == nullptr, "blocked TLS identity acquire returns no connection");
 
         const ULONG firstId = first != nullptr ? first->Id : 0;
-        wknet::session::KhConnectionPoolRelease(&pool, first, true);
+        wknet::session::ConnectionPoolRelease(&pool, first, true);
 
-        wknet::session::KhPooledConnection* second = nullptr;
+        wknet::session::PooledConnection* second = nullptr;
         reused = true;
-        status = wknet::session::KhConnectionPoolAcquire(
+        status = wknet::session::ConnectionPoolAcquire(
             &pool,
             secondIdentity,
-            wknet::session::KhConnectionPolicy::ReuseOrCreate,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
             &second,
             &reused);
         Expect(NT_SUCCESS(status), "idle same-host different TLS identity can replace old idle slot");
         Expect(second != nullptr && !reused, "different TLS identity is not reused across identity key");
         Expect(second != nullptr && second->Id != firstId, "different TLS identity receives a fresh connection id");
 
-        wknet::session::KhConnectionPoolRelease(&pool, second, false);
-        wknet::session::KhConnectionPoolShutdown(&pool);
+        wknet::session::ConnectionPoolRelease(&pool, second, false);
+        wknet::session::ConnectionPoolShutdown(&pool);
     }
 
     void TestConnectionPoolKeyIncludesTlsIdentity() noexcept
     {
-        wknet::session::KhConnectionPoolKey base = {};
+        wknet::session::ConnectionPoolKey base = {};
         memcpy(base.Scheme, "https", Length("https"));
         base.SchemeLength = Length("https");
         memcpy(base.Host, "example.com", Length("example.com"));
         base.HostLength = Length("example.com");
         base.Port = 443;
-        base.MinTlsVersion = wknet::session::KhTlsVersion::Tls12;
-        base.MaxTlsVersion = wknet::session::KhTlsVersion::Tls13;
-        base.CertificatePolicy = wknet::session::KhCertificatePolicy::Verify;
+        base.MinTlsVersion = wknet::session::TlsVersion::Tls12;
+        base.MaxTlsVersion = wknet::session::TlsVersion::Tls13;
+        base.CertificatePolicy = wknet::session::CertificatePolicy::Verify;
         base.CertificateStore = reinterpret_cast<const wknet::tls::CertificateStore*>(static_cast<uintptr_t>(0x1000));
         memcpy(base.TlsServerName, "api.example.com", Length("api.example.com"));
         base.TlsServerNameLength = Length("api.example.com");
         memcpy(base.Alpn, "h2", Length("h2"));
         base.AlpnLength = Length("h2");
 
-        wknet::session::KhConnectionPoolKey same = base;
+        wknet::session::ConnectionPoolKey same = base;
         Expect(
-            wknet::session::KhConnectionPoolKeysEqual(base, same),
+            wknet::session::ConnectionPoolKeysEqual(base, same),
             "connection pool keys match when TLS identity is identical");
 
-        wknet::session::KhConnectionPoolKey differentSni = base;
+        wknet::session::ConnectionPoolKey differentSni = base;
         memcpy(differentSni.TlsServerName, "other.example", Length("other.example"));
         differentSni.TlsServerNameLength = Length("other.example");
         Expect(
-            !wknet::session::KhConnectionPoolKeysEqual(base, differentSni),
+            !wknet::session::ConnectionPoolKeysEqual(base, differentSni),
             "connection pool key includes TLS server name");
 
-        wknet::session::KhConnectionPoolKey differentStore = base;
+        wknet::session::ConnectionPoolKey differentStore = base;
         differentStore.CertificateStore =
             reinterpret_cast<const wknet::tls::CertificateStore*>(static_cast<uintptr_t>(0x2000));
         Expect(
-            !wknet::session::KhConnectionPoolKeysEqual(base, differentStore),
+            !wknet::session::ConnectionPoolKeysEqual(base, differentStore),
             "connection pool key includes certificate store identity");
 
-        wknet::session::KhConnectionPoolKey differentRenegotiationLimit = base;
+        wknet::session::ConnectionPoolKey differentRenegotiationLimit = base;
         differentRenegotiationLimit.MaxTls12Renegotiations = 2;
         Expect(
-            !wknet::session::KhConnectionPoolKeysEqual(base, differentRenegotiationLimit),
+            !wknet::session::ConnectionPoolKeysEqual(base, differentRenegotiationLimit),
             "connection pool key includes TLS 1.2 renegotiation limit");
 
-        wknet::session::KhConnectionPoolKey proxyKey = base;
+        wknet::session::ConnectionPoolKey proxyKey = base;
         proxyKey.ProxyEnabled = true;
         auto* proxyAddress = reinterpret_cast<SOCKADDR_IN*>(&proxyKey.ProxyAddress);
         proxyAddress->sin_family = AF_INET;
@@ -3321,25 +3321,25 @@ namespace
         proxyKey.ProxyAuthorityLength = Length("proxy.example:8080");
 
         Expect(
-            !wknet::session::KhConnectionPoolKeysEqual(base, proxyKey),
+            !wknet::session::ConnectionPoolKeysEqual(base, proxyKey),
             "connection pool key includes proxy enablement");
 
-        wknet::session::KhConnectionPoolKey sameProxy = proxyKey;
+        wknet::session::ConnectionPoolKey sameProxy = proxyKey;
         Expect(
-            wknet::session::KhConnectionPoolKeysEqual(proxyKey, sameProxy),
+            wknet::session::ConnectionPoolKeysEqual(proxyKey, sameProxy),
             "connection pool keys match when proxy identity is identical");
 
-        wknet::session::KhConnectionPoolKey differentProxyAddress = proxyKey;
+        wknet::session::ConnectionPoolKey differentProxyAddress = proxyKey;
         reinterpret_cast<SOCKADDR_IN*>(&differentProxyAddress.ProxyAddress)->sin_addr = 0x0a000002UL;
         Expect(
-            !wknet::session::KhConnectionPoolKeysEqual(proxyKey, differentProxyAddress),
+            !wknet::session::ConnectionPoolKeysEqual(proxyKey, differentProxyAddress),
             "connection pool key includes proxy address");
 
-        wknet::session::KhConnectionPoolKey differentProxyAuthority = proxyKey;
+        wknet::session::ConnectionPoolKey differentProxyAuthority = proxyKey;
         memcpy(differentProxyAuthority.ProxyAuthority, "other-proxy:8080", Length("other-proxy:8080"));
         differentProxyAuthority.ProxyAuthorityLength = Length("other-proxy:8080");
         Expect(
-            !wknet::session::KhConnectionPoolKeysEqual(proxyKey, differentProxyAuthority),
+            !wknet::session::ConnectionPoolKeysEqual(proxyKey, differentProxyAuthority),
             "connection pool key includes proxy authority");
     }
 
@@ -3512,7 +3512,7 @@ namespace
             status = wknet::http::Get(session, url, Length(url), &resp);
             Expect(NT_SUCCESS(status), "default http request succeeds over HTTP/1.1");
             Expect(!captured.UsedHttp2, "default http request does not use h2c");
-            Expect(captured.Http2CleartextMode == wknet::session::KhHttp2CleartextMode::Disabled,
+            Expect(captured.Http2CleartextMode == wknet::session::Http2CleartextMode::Disabled,
                 "default http request records h2c disabled");
 
             wknet::http::ResponseRelease(resp);
@@ -3535,7 +3535,7 @@ namespace
             status = wknet::http::GetEx(session, url, Length(url), nullptr, &options, &resp);
             Expect(NT_SUCCESS(status), "explicit h2c prior knowledge succeeds through test transport");
             Expect(captured.UsedHttp2, "explicit h2c prior knowledge uses HTTP/2");
-            Expect(captured.Http2CleartextMode == wknet::session::KhHttp2CleartextMode::PriorKnowledge,
+            Expect(captured.Http2CleartextMode == wknet::session::Http2CleartextMode::PriorKnowledge,
                 "explicit h2c prior knowledge mode propagates to transport");
             Expect(wknet::http::ResponseStatusCode(resp) == 200, "explicit h2c prior response status is 200");
 
@@ -5798,7 +5798,7 @@ namespace
     }
 
     NTSTATUS ReleaseDuringAsyncWorker(
-        wknet::session::KH_ASYNC_OPERATION operation,
+        wknet::session::AsyncOperationHandle operation,
         void* context) noexcept
     {
         auto* capture = static_cast<AsyncReleaseDuringWorkerCapture*>(context);
@@ -5806,10 +5806,10 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        capture->CancelStatus = wknet::session::KhAsyncOperationCancel(operation);
-        wknet::session::KhAsyncOperationRelease(operation);
+        capture->CancelStatus = wknet::session::AsyncOperationCancel(operation);
+        wknet::session::AsyncOperationRelease(operation);
         capture->ObservedCanceledAfterRelease =
-            wknet::session::KhAsyncOperationIsCanceled(operation);
+            wknet::session::AsyncOperationIsCanceled(operation);
         return capture->ObservedCanceledAfterRelease ? STATUS_CANCELLED : STATUS_UNSUCCESSFUL;
     }
 
@@ -5818,27 +5818,27 @@ namespace
         wknet::http::test::SetAsyncAutoRun(false);
 
         AsyncReleaseDuringWorkerCapture capture = {};
-        wknet::session::KhAsyncCreateOptions options = {};
-        options.Kind = wknet::session::KhAsyncOperationKind::HttpSend;
+        wknet::session::AsyncCreateOptions options = {};
+        options.Kind = wknet::session::AsyncOperationKind::HttpSend;
         options.WorkerRoutine = ReleaseDuringAsyncWorker;
         options.CleanupRoutine = CleanupAsyncReleaseDuringWorker;
         options.Context = &capture;
         options.CompletionCallback = RecordAsyncReleaseDuringWorkerCompletion;
         options.CompletionContext = &capture;
 
-        wknet::session::KH_ASYNC_OPERATION operation = nullptr;
-        NTSTATUS status = wknet::session::KhAsyncOperationCreate(options, &operation);
+        wknet::session::AsyncOperationHandle operation = nullptr;
+        NTSTATUS status = wknet::session::AsyncOperationCreate(options, &operation);
         Expect(NT_SUCCESS(status), "direct async operation create succeeds");
         Expect(operation != nullptr, "direct async operation is returned");
 
-        status = wknet::session::KhTestRunAsyncOperation(operation);
+        status = wknet::session::TestRunAsyncOperation(operation);
         Expect(status == STATUS_CANCELLED, "manual run returns canceled after release");
         Expect(NT_SUCCESS(capture.CancelStatus), "worker cancel succeeds before release");
         Expect(capture.ObservedCanceledAfterRelease, "worker observes cancel after release");
         Expect(capture.CompletionCount == 1, "completion fires once when worker releases handle");
         Expect(capture.CompletionStatus == STATUS_CANCELLED, "completion status remains canceled");
         Expect(capture.CleanupCount == 1, "cleanup fires once after worker reference is released");
-        Expect(NT_SUCCESS(wknet::session::KhEngineDrainAsync()), "async drain succeeds after manual worker release");
+        Expect(NT_SUCCESS(wknet::session::EngineDrainAsync()), "async drain succeeds after manual worker release");
 
         wknet::http::test::SetAsyncAutoRun(true);
     }
@@ -5881,7 +5881,7 @@ namespace
 
     void TestLookasideListBaseline() noexcept
     {
-        wknet::core::KhLookasideList lookaside;
+        wknet::core::LookasideList lookaside;
         Expect(!lookaside.IsInitialized(), "lookaside starts uninitialized");
         Expect(lookaside.BlockSize() == 0, "uninitialized lookaside has zero block size");
         Expect(lookaside.Allocate() == nullptr, "uninitialized lookaside does not allocate");
@@ -5923,10 +5923,10 @@ namespace
             wknet::http::DefaultMaxWebSocketMessageBytes > 0,
             "websocket message default remains independently bounded");
         static_assert(
-            wknet::WKNET_HARD_MAX_HEADER_SECTION >= wknet::KhHttpMaxHeaderBytes,
+            wknet::WKNET_HARD_MAX_HEADER_SECTION >= wknet::HttpMaxHeaderBytes,
             "hard header cap must cover the parser header limit");
         static_assert(
-            wknet::WKNET_HARD_MAX_HEADERS >= wknet::KhHttpMaxHeaders,
+            wknet::WKNET_HARD_MAX_HEADERS >= wknet::HttpMaxHeaders,
             "hard header count must cover the parser header count limit");
         static_assert(
             wknet::WKNET_HARD_MAX_DECODED_BYTES == 0,
@@ -5949,24 +5949,24 @@ namespace
 
     void TestPagedPoolRejected() noexcept
     {
-        wknet::session::KhWorkspaceOptions workspaceOptions = {};
-        workspaceOptions.PoolType = wknet::session::KhPoolType::Paged;
-        wknet::session::KhWorkspace* workspace = nullptr;
-        NTSTATUS status = wknet::session::KhWorkspaceCreate(&workspaceOptions, &workspace);
+        wknet::session::WorkspaceOptions workspaceOptions = {};
+        workspaceOptions.PoolType = wknet::session::PoolType::Paged;
+        wknet::session::Workspace* workspace = nullptr;
+        NTSTATUS status = wknet::session::WorkspaceCreate(&workspaceOptions, &workspace);
         Expect(status == STATUS_INVALID_PARAMETER, "workspace rejects paged pool");
         Expect(workspace == nullptr, "workspace output remains null when paged pool is rejected");
 
         workspaceOptions = {};
         workspaceOptions.MaxResponseBytes = (64 * 1024 * 1024) + 1;
-        status = wknet::session::KhWorkspaceCreate(&workspaceOptions, &workspace);
+        status = wknet::session::WorkspaceCreate(&workspaceOptions, &workspace);
         Expect(NT_SUCCESS(status), "workspace accepts response limits above the old hard cap");
-        wknet::session::KhWorkspaceRelease(workspace);
+        wknet::session::WorkspaceRelease(workspace);
         workspace = nullptr;
 
-        wknet::session::KhSessionOptions sessionOptions = {};
-        sessionOptions.ResponsePoolType = wknet::session::KhPoolType::Paged;
-        wknet::session::KH_SESSION apiSession = nullptr;
-        status = wknet::session::KhSessionCreate(
+        wknet::session::SessionOptions sessionOptions = {};
+        sessionOptions.ResponsePoolType = wknet::session::PoolType::Paged;
+        wknet::session::SessionHandle apiSession = nullptr;
+        status = wknet::session::SessionCreate(
             reinterpret_cast<wknet::net::WskClient*>(0x1),
             &sessionOptions,
             &apiSession);
@@ -5975,7 +5975,7 @@ namespace
 
         sessionOptions = {};
         sessionOptions.MaxResponseHeaders = wknet::WKNET_HARD_MAX_HEADERS + 1;
-        status = wknet::session::KhSessionCreate(
+        status = wknet::session::SessionCreate(
             reinterpret_cast<wknet::net::WskClient*>(0x1),
             &sessionOptions,
             &apiSession);
@@ -5984,7 +5984,7 @@ namespace
 
         sessionOptions = {};
         sessionOptions.Http2MaxHeaderBlockBytes = wknet::WKNET_HARD_MAX_HEADER_SECTION + 1;
-        status = wknet::session::KhSessionCreate(
+        status = wknet::session::SessionCreate(
             reinterpret_cast<wknet::net::WskClient*>(0x1),
             &sessionOptions,
             &apiSession);
@@ -6076,7 +6076,7 @@ namespace
             static_cast<ULONG>(wknet::http::WebSocketTransportMode::Auto) == 0,
             "public websocket Auto transport mode remains ABI zero");
         Expect(
-            static_cast<ULONG>(wknet::session::KhWebSocketTransportMode::Auto) == 0,
+            static_cast<ULONG>(wknet::session::WebSocketTransportMode::Auto) == 0,
             "engine websocket Auto transport mode remains ABI zero");
 
         wknet::websocket::ConnectConfig aggregateConfig = {};
@@ -6089,9 +6089,9 @@ namespace
             defaultConfig.TransportMode == wknet::http::WebSocketTransportMode::Auto,
             "DefaultConnectConfig defaults to Auto");
 
-        wknet::session::KhWebSocketConnectOptions engineOptions = {};
+        wknet::session::WebSocketConnectOptions engineOptions = {};
         Expect(
-            engineOptions.TransportMode == wknet::session::KhWebSocketTransportMode::Auto,
+            engineOptions.TransportMode == wknet::session::WebSocketTransportMode::Auto,
             "engine websocket connect options default to Auto");
 
         WsCapture capture = {};
@@ -6111,7 +6111,7 @@ namespace
         status = wknet::websocket::Connect(session, url, Length(url), &ws);
         Expect(NT_SUCCESS(status), "URL websocket connect succeeds with default Auto transport");
         Expect(
-            capture.LastTransportMode == wknet::session::KhWebSocketTransportMode::Auto,
+            capture.LastTransportMode == wknet::session::WebSocketTransportMode::Auto,
             "URL websocket connect propagates Auto transport mode");
         status = wknet::websocket::Close(ws);
         Expect(NT_SUCCESS(status), "URL websocket default transport close succeeds");
@@ -6125,7 +6125,7 @@ namespace
         status = wknet::websocket::Connect(session, &http11Config, &ws);
         Expect(NT_SUCCESS(status), "explicit HTTP/1.1 websocket connect succeeds");
         Expect(
-            capture.LastTransportMode == wknet::session::KhWebSocketTransportMode::Http11Only,
+            capture.LastTransportMode == wknet::session::WebSocketTransportMode::Http11Only,
             "explicit HTTP/1.1 websocket transport mode propagates");
         Expect(!capture.LastAllowWebSocketOverHttp2, "explicit HTTP/1.1 websocket connect does not set legacy h2 flag");
         status = wknet::websocket::Close(ws);
@@ -6139,7 +6139,7 @@ namespace
     {
         WsCapture capture = {};
         const char* echo = "world";
-        capture.NextType = wknet::session::KhWebSocketMessageType::Text;
+        capture.NextType = wknet::session::WebSocketMessageType::Text;
         capture.NextLength = Length(echo);
         memcpy(capture.NextData, echo, capture.NextLength);
 
@@ -6165,7 +6165,7 @@ namespace
         Expect(strcmp(capture.LastScheme, "ws") == 0, "scheme captured");
         Expect(strcmp(capture.LastHost, "example.com") == 0, "host captured");
         Expect(
-            capture.LastTransportMode == wknet::session::KhWebSocketTransportMode::Auto,
+            capture.LastTransportMode == wknet::session::WebSocketTransportMode::Auto,
             "default websocket connect config uses Auto transport mode");
         Expect(!capture.LastPerMessageDeflate.Enable, "default websocket connect config leaves permessage-deflate disabled");
 
@@ -6261,7 +6261,7 @@ namespace
         Expect(NT_SUCCESS(status), "wss websocket h2 opt-in connect succeeds through test transport");
         Expect(capture.LastAllowWebSocketOverHttp2, "wss websocket h2 opt-in propagates to engine");
         Expect(
-            capture.LastTransportMode == wknet::session::KhWebSocketTransportMode::LegacyBoolean,
+            capture.LastTransportMode == wknet::session::WebSocketTransportMode::LegacyBoolean,
             "legacy websocket h2 opt-in keeps legacy transport mode");
         Expect(
             capture.LastMaxTls12Renegotiations == 2,
@@ -6306,7 +6306,7 @@ namespace
     {
         WsCapture capture = {};
         const UCHAR pingPayload[] = { 'h', 'b' };
-        capture.NextType = wknet::session::KhWebSocketMessageType::Ping;
+        capture.NextType = wknet::session::WebSocketMessageType::Ping;
         capture.NextLength = sizeof(pingPayload);
         memcpy(capture.NextData, pingPayload, capture.NextLength);
 
@@ -6355,7 +6355,7 @@ namespace
 
         status = wknet::websocket::SendPong(ws, message.Data, message.DataLength);
         Expect(NT_SUCCESS(status), "WsSendPong succeeds");
-        Expect(capture.LastSendType == wknet::session::KhWebSocketMessageType::Pong, "pong type captured");
+        Expect(capture.LastSendType == wknet::session::WebSocketMessageType::Pong, "pong type captured");
         Expect(capture.LastSendLength == sizeof(pingPayload), "pong payload length captured");
         Expect(memcmp(capture.LastSendData, pingPayload, sizeof(pingPayload)) == 0, "pong payload captured");
         Expect(capture.LastSendFinalFragment, "pong is final");
@@ -6363,7 +6363,7 @@ namespace
         const UCHAR activePing[] = { 'p', 'i', 'n', 'g' };
         status = wknet::websocket::SendPing(ws, activePing, sizeof(activePing));
         Expect(NT_SUCCESS(status), "WsSendPing succeeds");
-        Expect(capture.LastSendType == wknet::session::KhWebSocketMessageType::Ping, "ping type captured");
+        Expect(capture.LastSendType == wknet::session::WebSocketMessageType::Ping, "ping type captured");
         Expect(capture.LastSendLength == sizeof(activePing), "ping payload length captured");
         Expect(memcmp(capture.LastSendData, activePing, sizeof(activePing)) == 0, "ping payload captured");
 
@@ -6374,7 +6374,7 @@ namespace
         const UCHAR reason[] = { 'b', 'y', 'e' };
         status = wknet::websocket::CloseEx(ws, 1000, reason, sizeof(reason));
         Expect(NT_SUCCESS(status), "WsCloseEx succeeds");
-        Expect(capture.LastSendType == wknet::session::KhWebSocketMessageType::Close, "close type captured");
+        Expect(capture.LastSendType == wknet::session::WebSocketMessageType::Close, "close type captured");
         Expect(capture.LastSendLength == 2 + sizeof(reason), "close payload length captured");
         Expect(capture.LastSendData[0] == 0x03 && capture.LastSendData[1] == 0xe8, "close code captured");
         Expect(memcmp(capture.LastSendData + 2, reason, sizeof(reason)) == 0, "close reason captured");
@@ -6423,7 +6423,7 @@ namespace
         status = wknet::websocket::SendContinuation(ws, final, sizeof(final));
         Expect(NT_SUCCESS(status), "smaller final continuation still succeeds");
         Expect(capture.SendCount == 2, "final continuation reaches test transport");
-        Expect(capture.LastSendType == wknet::session::KhWebSocketMessageType::Continuation,
+        Expect(capture.LastSendType == wknet::session::WebSocketMessageType::Continuation,
             "final continuation type captured");
         Expect(capture.LastSendFinalFragment, "final continuation closes fragmented send");
 
@@ -6436,7 +6436,7 @@ namespace
     {
         WsCapture capture = {};
         const UCHAR payload[] = { 'a', 'b', 'c', 'd', 'e', 'f' };
-        capture.NextType = wknet::session::KhWebSocketMessageType::Binary;
+        capture.NextType = wknet::session::WebSocketMessageType::Binary;
         capture.NextLength = sizeof(payload);
         memcpy(capture.NextData, payload, capture.NextLength);
 

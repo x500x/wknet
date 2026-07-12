@@ -11,22 +11,22 @@ namespace wknet
 {
 namespace session
 {
-    struct KhHttpCache;
+    struct HttpCache;
 
-    constexpr SIZE_T KhMaxHeadersPerRequest = 16;
-    constexpr SIZE_T KhMaxHeadersPerResponse = KhMaxConfigurableResponseHeaders;
-    constexpr SIZE_T KhMaxTrailersPerResponse = 16;
-    constexpr SIZE_T KhMaxHeaderNameLength = 128;
-    constexpr SIZE_T KhMaxHeaderValueLength = 512;
-    constexpr SIZE_T KhMaxSchemeLength = 5;
-    constexpr SIZE_T KhMaxHostLength = KhPoolMaxHostLength;
-    constexpr SIZE_T KhMaxHostHeaderLength = KhMaxHostLength + 9;
-    constexpr SIZE_T KhMaxPathLength = 8000;
-    constexpr SIZE_T KhMaxServiceNameLength = 5;
-    constexpr SIZE_T KhInitialOwnedBodyCapacity = 256;
-    constexpr SIZE_T KhMultipartBoundaryStorageLength = 64;
+    constexpr SIZE_T MaxHeadersPerRequest = 16;
+    constexpr SIZE_T MaxHeadersPerResponse = MaxConfigurableResponseHeaders;
+    constexpr SIZE_T MaxTrailersPerResponse = 16;
+    constexpr SIZE_T MaxHeaderNameLength = 128;
+    constexpr SIZE_T MaxHeaderValueLength = 512;
+    constexpr SIZE_T MaxSchemeLength = 5;
+    constexpr SIZE_T MaxHostLength = PoolMaxHostLength;
+    constexpr SIZE_T MaxHostHeaderLength = MaxHostLength + 9;
+    constexpr SIZE_T MaxPathLength = 8000;
+    constexpr SIZE_T MaxServiceNameLength = 5;
+    constexpr SIZE_T InitialOwnedBodyCapacity = 256;
+    constexpr SIZE_T MultipartBoundaryStorageLength = 64;
 
-    enum class KhHandleKind : ULONG
+    enum class HandleKind : ULONG
     {
         Session = 0x4B485331,
         Request = 0x4B485231,
@@ -36,30 +36,30 @@ namespace session
         AsyncOperation = 0x4B484131
     };
 
-    struct KhHandleHeader
+    struct HandleHeader
     {
-        KhHandleKind Kind;
+        HandleKind Kind;
         volatile LONG Closed;
-        KhHandleHeader* TableNext;
+        HandleHeader* TableNext;
     };
 
-    struct KhSession
+    struct Session
     {
-        KhHandleHeader Header = { KhHandleKind::Session, 0, nullptr };
+        HandleHeader Header = { HandleKind::Session, 0, nullptr };
         net::WskClient* WskClient = nullptr;
-        KhSessionOptions Options = {};
-        KhWorkspace* Workspace = nullptr;
-        KhHttpCache* Cache = nullptr;
-        core::KhLookasideList WorkspaceLookaside = {};
+        SessionOptions Options = {};
+        Workspace* Workspace = nullptr;
+        HttpCache* Cache = nullptr;
+        core::LookasideList WorkspaceLookaside = {};
         crypto::CngProviderCache* ProviderCache = nullptr;
-        KhConnectionPool ConnectionPool = {};
+        ConnectionPool ConnectionPool = {};
         volatile LONG InFlight = 0;
 #if !defined(WKNET_USER_MODE_TEST)
         KEVENT DrainEvent = {};
 #endif
     };
 
-    struct KhStoredHeader
+    struct StoredHeader
     {
         char* Name = nullptr;
         SIZE_T NameLength = 0;
@@ -67,25 +67,25 @@ namespace session
         SIZE_T ValueLength = 0;
     };
 
-    struct KhRequest
+    struct Request
     {
-        KhHandleHeader Header = { KhHandleKind::Request, 0, nullptr };
-        KH_SESSION Session = nullptr;
-        KhHttpMethod Method = KhHttpMethod::Get;
+        HandleHeader Header = { HandleKind::Request, 0, nullptr };
+        SessionHandle Session = nullptr;
+        HttpMethod Method = HttpMethod::Get;
         char* Url = nullptr;
         SIZE_T UrlLength = 0;
-        char Scheme[KhMaxSchemeLength + 1] = {};
+        char Scheme[MaxSchemeLength + 1] = {};
         SIZE_T SchemeLength = 0;
-        char Host[KhMaxHostLength + 1] = {};
+        char Host[MaxHostLength + 1] = {};
         SIZE_T HostLength = 0;
-        char Path[KhMaxPathLength + 1] = {};
+        char Path[MaxPathLength + 1] = {};
         SIZE_T PathLength = 0;
         USHORT Port = 0;
         const UCHAR* Body = nullptr;
         SIZE_T BodyLength = 0;
         bool HasBody = false;
-        KhRequestBodyMode BodyMode = KhRequestBodyMode::ContentLength;
-        KhRequestBodyReadCallback BodySourceCallback = nullptr;
+        RequestBodyMode BodyMode = RequestBodyMode::ContentLength;
+        RequestBodyReadCallback BodySourceCallback = nullptr;
         void* BodySourceContext = nullptr;
         SIZE_T BodySourceContentLength = 0;
         bool BodySourceContentLengthKnown = false;
@@ -93,26 +93,26 @@ namespace session
         SIZE_T OwnedBodyLength = 0;
         SIZE_T OwnedBodyCapacity = 0;
         ULONG BodyBuildCounter = 0;
-        char MultipartBoundary[KhMultipartBoundaryStorageLength] = {};
-        KhStoredHeader Headers[KhMaxHeadersPerRequest] = {};
+        char MultipartBoundary[MultipartBoundaryStorageLength] = {};
+        StoredHeader Headers[MaxHeadersPerRequest] = {};
         SIZE_T HeaderCount = 0;
-        KhStoredHeader Trailers[KhMaxHeadersPerRequest] = {};
+        StoredHeader Trailers[MaxHeadersPerRequest] = {};
         SIZE_T TrailerCount = 0;
-        KhTlsOptions Tls = {};
+        TlsOptions Tls = {};
         char* OwnedTlsServerName = nullptr;
         char* OwnedTlsAlpn = nullptr;
         bool HasTlsOverride = false;
-        KhConnectionPolicy ConnectionPolicy = KhConnectionPolicy::ReuseOrCreate;
-        KhAddressFamily AddressFamily = KhAddressFamily::Any;
+        ConnectionPolicy ConnectionPolicy = ConnectionPolicy::ReuseOrCreate;
+        AddressFamily AddressFamily = AddressFamily::Any;
         volatile LONG InFlight = 0;
 #if !defined(WKNET_USER_MODE_TEST)
         KEVENT DrainEvent = {};
 #endif
     };
 
-    struct KhResponse
+    struct Response
     {
-        KhHandleHeader Header = { KhHandleKind::Response, 0, nullptr };
+        HandleHeader Header = { HandleKind::Response, 0, nullptr };
         ULONG StatusCode = 0;
         UCHAR* Body = nullptr;
         SIZE_T BodyLength = 0;
@@ -136,34 +136,34 @@ namespace session
 #endif
     };
 
-    struct KhWebSocket
+    struct WebSocket
     {
-        KhHandleHeader Header = { KhHandleKind::WebSocket, 0, nullptr };
-        KH_SESSION Session = nullptr;
-        KhWorkspace* Workspace = nullptr;
+        HandleHeader Header = { HandleKind::WebSocket, 0, nullptr };
+        SessionHandle Session = nullptr;
+        Workspace* Workspace = nullptr;
         char* Url = nullptr;
         SIZE_T UrlLength = 0;
-        char Scheme[KhMaxSchemeLength + 1] = {};
+        char Scheme[MaxSchemeLength + 1] = {};
         SIZE_T SchemeLength = 0;
-        char Host[KhMaxHostLength + 1] = {};
+        char Host[MaxHostLength + 1] = {};
         SIZE_T HostLength = 0;
-        char Path[KhMaxPathLength + 1] = {};
+        char Path[MaxPathLength + 1] = {};
         SIZE_T PathLength = 0;
         USHORT Port = 0;
         char* Subprotocol = nullptr;
         SIZE_T SubprotocolLength = 0;
-        KhStoredHeader ExtraHeaders[KhMaxHeadersPerRequest] = {};
+        StoredHeader ExtraHeaders[MaxHeadersPerRequest] = {};
         SIZE_T ExtraHeaderCount = 0;
         UCHAR* LastMessage = nullptr;
         SIZE_T LastMessageLength = 0;
-        KhWebSocketMessageType LastMessageType = KhWebSocketMessageType::Binary;
-        SIZE_T MaxMessageBytes = KhDefaultMaxWebSocketMessageBytes;
+        WebSocketMessageType LastMessageType = WebSocketMessageType::Binary;
+        SIZE_T MaxMessageBytes = DefaultMaxWebSocketMessageBytes;
         bool AutoReplyPing = true;
         ws::PerMessageDeflateOptions PerMessageDeflate = {};
         bool Connected = false;
         bool TransportClosed = true;
         bool SendFragmentOpen = false;
-        KhWebSocketMessageType SendFragmentType = KhWebSocketMessageType::Binary;
+        WebSocketMessageType SendFragmentType = WebSocketMessageType::Binary;
         SIZE_T SendFragmentLength = 0;
         ULONG SendTextUtf8CodePoint = 0;
         UCHAR SendTextUtf8Remaining = 0;

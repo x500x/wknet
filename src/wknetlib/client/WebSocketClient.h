@@ -19,7 +19,7 @@ namespace core
 
 namespace session
 {
-    struct KhWorkspace;
+    struct Workspace;
 }
 
 namespace crypto
@@ -75,7 +75,7 @@ namespace client
         const http1::HttpHeader* ExtraHeaders = nullptr;
         SIZE_T ExtraHeaderCount = 0;
         const tls::CertificateStore* CertificateStore = nullptr;
-        session::KhWorkspace* Workspace = nullptr;
+        session::Workspace* Workspace = nullptr;
         const crypto::CngProviderCache* ProviderCache = nullptr;
         net::WskAddressFamily AddressFamily = net::WskAddressFamily::Any;
         tls::TlsProtocol MinimumTlsProtocol = tls::TlsProtocol::Tls12;

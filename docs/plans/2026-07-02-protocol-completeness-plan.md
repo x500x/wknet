@@ -4,7 +4,7 @@
 
 **Goal:** 把 KernelHttp 的协议完整性从“能力很多但边界分散”提升为“客户端主路径能力完整、缺口可审计、非目标清晰显示、测试可证明”的状态。
 
-**Architecture:** 以“协议能力账本”为源头，把 RFC/公开行为拆成已实现、待补全、安全拒绝、明确非目标四类；实现上优先补 HTTP/1.1、HTTP/2、TLS/证书、WebSocket 的客户端主路径缺口。所有新增路径复用现有 WSK/CNG/内核自实现路线，使用 `KhWorkspace`、lookaside、`HeapArray`/`HeapObject` 等堆内存模型，不引入 WinHTTP/WinINet/SChannel 主路径。
+**Architecture:** 以“协议能力账本”为源头，把 RFC/公开行为拆成已实现、待补全、安全拒绝、明确非目标四类；实现上优先补 HTTP/1.1、HTTP/2、TLS/证书、WebSocket 的客户端主路径缺口。所有新增路径复用现有 WSK/CNG/内核自实现路线，使用 `Workspace`、lookaside、`HeapArray`/`HeapObject` 等堆内存模型，不引入 WinHTTP/WinINet/SChannel 主路径。
 
 **Tech Stack:** Windows kernel C++17（`/kernel`、无异常、无 RTTI）、WSK transport、内核态 CNG/BCrypt、现有用户态协议测试、`pwsh`、MSBuild/WDK。
 

@@ -2,7 +2,7 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <wknet/http/Test.h>
+#include <wknet/test/Test.h>
 #include <wknet/http/Http.h>
 #include <wknet/http/Request.h>
 #include <wknet/http/Response.h>
@@ -117,7 +117,7 @@ namespace
         SIZE_T WebSocketReceiveCalls = 0;
         SIZE_T WebSocketCloseCalls = 0;
         bool FailHttpByAddressFamily = false;
-        wknet::session::KhAddressFamily HttpFailureAddressFamily = wknet::session::KhAddressFamily::Any;
+        wknet::session::AddressFamily HttpFailureAddressFamily = wknet::session::AddressFamily::Any;
         NTSTATUS HttpFailureStatus = STATUS_UNSUCCESSFUL;
         bool FailHttpsTrustFailureRequest = false;
         NTSTATUS HttpsTrustFailureRequestStatus = STATUS_NO_MATCH;
@@ -126,9 +126,9 @@ namespace
         NTSTATUS WebSocketConnectFailureStatus = STATUS_HOST_UNREACHABLE;
         UCHAR WebSocketEcho[32] = {};
         SIZE_T WebSocketEchoLength = 0;
-        wknet::session::KhWebSocketMessageType LastWebSocketSendType = wknet::session::KhWebSocketMessageType::Text;
-        wknet::session::KhWebSocketMessageType PendingWebSocketFragmentType =
-            wknet::session::KhWebSocketMessageType::Text;
+        wknet::session::WebSocketMessageType LastWebSocketSendType = wknet::session::WebSocketMessageType::Text;
+        wknet::session::WebSocketMessageType PendingWebSocketFragmentType =
+            wknet::session::WebSocketMessageType::Text;
         UCHAR LastWebSocketSendData[MaxWebSocketPayload] = {};
         UCHAR LastWebSocketReceiveData[MaxWebSocketPayload] = {};
         UCHAR PendingWebSocketFragmentData[MaxWebSocketPayload] = {};
@@ -161,7 +161,7 @@ namespace
         return headerLength + LargePostBodyLength;
     }
 
-    NTSTATUS SetLargePostResponse(wknet::session::KhTestHttpTransportResponse* response) noexcept
+    NTSTATUS SetLargePostResponse(wknet::session::TestHttpTransportResponse* response) noexcept
     {
         if (response == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -182,7 +182,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    bool IsAdvancedLargePostRequest(const wknet::session::KhTestHttpTransportRequest* request) noexcept
+    bool IsAdvancedLargePostRequest(const wknet::session::TestHttpTransportRequest* request) noexcept
     {
         return request != nullptr &&
             BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "POST /post ") &&
@@ -191,8 +191,8 @@ namespace
 
     NTSTATUS HttpTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<SampleCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -200,13 +200,13 @@ namespace
         }
 
         ++capture->HttpCalls;
-        if (request->AddressFamily == wknet::session::KhAddressFamily::Ipv4) {
+        if (request->AddressFamily == wknet::session::AddressFamily::Ipv4) {
             ++capture->HttpIpv4Calls;
         }
-        if (request->AddressFamily == wknet::session::KhAddressFamily::Ipv6) {
+        if (request->AddressFamily == wknet::session::AddressFamily::Ipv6) {
             ++capture->HttpIpv6Calls;
         }
-        if (request->AddressFamily == wknet::session::KhAddressFamily::Any) {
+        if (request->AddressFamily == wknet::session::AddressFamily::Any) {
             ++capture->HttpAnyCalls;
         }
 
@@ -215,26 +215,26 @@ namespace
             return capture->HttpFailureStatus;
         }
 
-        if (request->ConnectionPolicy == wknet::session::KhConnectionPolicy::ReuseOrCreate) {
+        if (request->ConnectionPolicy == wknet::session::ConnectionPolicy::ReuseOrCreate) {
             ++capture->HttpReuseCalls;
         }
-        if (request->ConnectionPolicy == wknet::session::KhConnectionPolicy::NoPool) {
+        if (request->ConnectionPolicy == wknet::session::ConnectionPolicy::NoPool) {
             ++capture->HttpNoPoolCalls;
         }
-        if (request->ConnectionPolicy == wknet::session::KhConnectionPolicy::ForceNew) {
+        if (request->ConnectionPolicy == wknet::session::ConnectionPolicy::ForceNew) {
             ++capture->HttpForceNewCalls;
         }
 
         const bool isHttps = TextEqualsLiteral(request->Scheme, request->SchemeLength, "https");
         if (isHttps &&
-            request->CertificatePolicy == wknet::session::KhCertificatePolicy::Verify) {
+            request->CertificatePolicy == wknet::session::CertificatePolicy::Verify) {
             ++capture->HttpsVerifyCalls;
             if (request->CertificateStore != nullptr) {
                 ++capture->HttpsVerifyWithStoreCalls;
             }
         }
         if (isHttps &&
-            request->CertificatePolicy == wknet::session::KhCertificatePolicy::NoVerify) {
+            request->CertificatePolicy == wknet::session::CertificatePolicy::NoVerify) {
             ++capture->HttpsNoVerifyCalls;
             if (request->CertificateStore == nullptr) {
                 ++capture->HttpsNoVerifyWithoutStoreCalls;
@@ -339,8 +339,8 @@ namespace
 
     NTSTATUS LargePostHttpTransport(
         void*,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         if (request == nullptr || response == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -404,8 +404,8 @@ namespace
 
     NTSTATUS ChunkedLargeResponseHttpTransport(
         void*,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         if (request == nullptr || response == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -446,8 +446,8 @@ namespace
 
     NTSTATUS CloseDelimitedLargeResponseHttpTransport(
         void*,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         if (request == nullptr || response == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -480,8 +480,8 @@ namespace
 
     NTSTATUS ProtocolAutodetectTransport(
         void* context,
-        const wknet::session::KhTestHttpTransportRequest* request,
-        wknet::session::KhTestHttpTransportResponse* response) noexcept
+        const wknet::session::TestHttpTransportRequest* request,
+        wknet::session::TestHttpTransportResponse* response) noexcept
     {
         auto* capture = static_cast<ProtocolAutodetectCapture*>(context);
         if (capture == nullptr || request == nullptr || response == nullptr) {
@@ -518,7 +518,7 @@ namespace
 
     NTSTATUS WebSocketConnect(
         void* context,
-        const wknet::session::KhTestWebSocketConnectRequest* request) noexcept
+        const wknet::session::TestWebSocketConnectRequest* request) noexcept
     {
         auto* capture = static_cast<SampleCapture*>(context);
         if (capture == nullptr || request == nullptr) {
@@ -526,10 +526,10 @@ namespace
         }
 
         ++capture->WebSocketConnectCalls;
-        if (request->AddressFamily == wknet::session::KhAddressFamily::Ipv4) {
+        if (request->AddressFamily == wknet::session::AddressFamily::Ipv4) {
             ++capture->WebSocketIpv4Calls;
         }
-        if (request->AddressFamily == wknet::session::KhAddressFamily::Any) {
+        if (request->AddressFamily == wknet::session::AddressFamily::Any) {
             ++capture->WebSocketAnyCalls;
         }
         if (TextEqualsLiteral(request->Scheme, request->SchemeLength, "ws")) {
@@ -549,19 +549,19 @@ namespace
             }
         }
         if (TextEqualsLiteral(request->Scheme, request->SchemeLength, "wss") &&
-            request->CertificatePolicy == wknet::session::KhCertificatePolicy::Verify) {
+            request->CertificatePolicy == wknet::session::CertificatePolicy::Verify) {
             ++capture->WebSocketVerifyCalls;
             if (request->CertificateStore != nullptr) {
                 ++capture->WebSocketVerifyWithStoreCalls;
             }
             if (TextEqualsLiteral(request->Host, request->HostLength, "websocket-echo.com") &&
-                request->MinTlsVersion == wknet::session::KhTlsVersion::Tls12 &&
-                request->MaxTlsVersion == wknet::session::KhTlsVersion::Tls13) {
+                request->MinTlsVersion == wknet::session::TlsVersion::Tls12 &&
+                request->MaxTlsVersion == wknet::session::TlsVersion::Tls13) {
                 ++capture->WebSocketTls12ToTls13Calls;
             }
             if (TextEqualsLiteral(request->Host, request->HostLength, "websocket-echo.com") &&
-                request->MinTlsVersion == wknet::session::KhTlsVersion::Tls13 &&
-                request->MaxTlsVersion == wknet::session::KhTlsVersion::Tls13) {
+                request->MinTlsVersion == wknet::session::TlsVersion::Tls13 &&
+                request->MaxTlsVersion == wknet::session::TlsVersion::Tls13) {
                 ++capture->WebSocketTls13OnlyCalls;
             }
         }
@@ -576,8 +576,8 @@ namespace
 
     NTSTATUS WebSocketSend(
         void* context,
-        wknet::session::KH_WEBSOCKET websocket,
-        wknet::session::KhWebSocketMessageType type,
+        wknet::session::WebSocketHandle websocket,
+        wknet::session::WebSocketMessageType type,
         const UCHAR* data,
         SIZE_T dataLength,
         bool finalFragment) noexcept
@@ -594,20 +594,20 @@ namespace
         }
 
         ++capture->WebSocketSendCalls;
-        if (type == wknet::session::KhWebSocketMessageType::Text) {
+        if (type == wknet::session::WebSocketMessageType::Text) {
             ++capture->WebSocketTextSendCalls;
         }
-        if (type == wknet::session::KhWebSocketMessageType::Binary) {
+        if (type == wknet::session::WebSocketMessageType::Binary) {
             ++capture->WebSocketBinarySendCalls;
         }
-        if (type == wknet::session::KhWebSocketMessageType::Continuation) {
+        if (type == wknet::session::WebSocketMessageType::Continuation) {
             ++capture->WebSocketContinuationSendCalls;
         }
         if (!finalFragment) {
             ++capture->WebSocketNonFinalSendCalls;
         }
 
-        if (type == wknet::session::KhWebSocketMessageType::Continuation) {
+        if (type == wknet::session::WebSocketMessageType::Continuation) {
             if (!capture->HasPendingWebSocketFragment ||
                 dataLength > SampleCapture::MaxWebSocketPayload - capture->PendingWebSocketFragmentLength) {
                 return STATUS_INVALID_DEVICE_STATE;
@@ -665,8 +665,8 @@ namespace
 
     NTSTATUS WebSocketReceive(
         void* context,
-        wknet::session::KH_WEBSOCKET websocket,
-        wknet::session::KhTestWebSocketMessage* message) noexcept
+        wknet::session::WebSocketHandle websocket,
+        wknet::session::TestWebSocketMessage* message) noexcept
     {
         UNREFERENCED_PARAMETER(websocket);
         auto* capture = static_cast<SampleCapture*>(context);
@@ -682,7 +682,7 @@ namespace
         if (capture->PendingWebSocketGreeting) {
             static const UCHAR greeting[] = "Request served by high-level-test";
             capture->PendingWebSocketGreeting = false;
-            message->Type = wknet::session::KhWebSocketMessageType::Text;
+            message->Type = wknet::session::WebSocketMessageType::Text;
             message->Data = greeting;
             message->DataLength = sizeof(greeting) - 1;
             message->FinalFragment = true;
@@ -708,7 +708,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    void WebSocketClose(void* context, wknet::session::KH_WEBSOCKET websocket) noexcept
+    void WebSocketClose(void* context, wknet::session::WebSocketHandle websocket) noexcept
     {
         UNREFERENCED_PARAMETER(websocket);
         auto* capture = static_cast<SampleCapture*>(context);
@@ -852,7 +852,7 @@ namespace
         }
 
         capture.FailHttpByAddressFamily = true;
-        capture.HttpFailureAddressFamily = wknet::session::KhAddressFamily::Ipv6;
+        capture.HttpFailureAddressFamily = wknet::session::AddressFamily::Ipv6;
         capture.HttpFailureStatus = STATUS_UNSUCCESSFUL;
 
         wknet::http::test::SetAsyncAutoRun(true);
@@ -887,7 +887,7 @@ namespace
         }
 
         capture.FailHttpByAddressFamily = true;
-        capture.HttpFailureAddressFamily = wknet::session::KhAddressFamily::Ipv4;
+        capture.HttpFailureAddressFamily = wknet::session::AddressFamily::Ipv4;
         capture.HttpFailureStatus = STATUS_IO_TIMEOUT;
 
         wknet::http::test::SetAsyncAutoRun(true);
@@ -922,7 +922,7 @@ namespace
         }
 
         capture.FailHttpByAddressFamily = true;
-        capture.HttpFailureAddressFamily = wknet::session::KhAddressFamily::Ipv6;
+        capture.HttpFailureAddressFamily = wknet::session::AddressFamily::Ipv6;
         capture.HttpFailureStatus = STATUS_IO_TIMEOUT;
 
         wknet::http::test::SetAsyncAutoRun(true);
@@ -1337,63 +1337,63 @@ namespace
 
     void TestHighLevelTlsVersionFallbackPolicy() noexcept
     {
-        using wknet::session::KhTlsVersion;
+        using wknet::session::TlsVersion;
         constexpr ULONG TlsFailureVersionNegotiation = 1;
         constexpr ULONG TlsFailureNetworkIo = 4;
         constexpr ULONG TlsFailurePeerAlert = 7;
 
         Expect(
             wknet::http::test::IsHttpTls12ConfirmationCandidate(
-                KhTlsVersion::Tls12,
-                KhTlsVersion::Tls13,
+                TlsVersion::Tls12,
+                TlsVersion::Tls13,
                 TlsFailureVersionNegotiation,
                 STATUS_NOT_SUPPORTED,
                 false),
             "default TLS 1.2-1.3 policy treats version negotiation as TLS 1.2 confirmation candidate");
         Expect(
             wknet::http::test::IsHttpTls12ConfirmationCandidate(
-                KhTlsVersion::Tls12,
-                KhTlsVersion::Tls13,
+                TlsVersion::Tls12,
+                TlsVersion::Tls13,
                 TlsFailureNetworkIo,
                 STATUS_CONNECTION_DISCONNECTED,
                 true),
             "TLS 1.3 first ServerHello network failure can confirm TLS 1.2 when both versions are allowed");
         Expect(
             !wknet::http::test::IsHttpTls12ConfirmationCandidate(
-                KhTlsVersion::Tls12,
-                KhTlsVersion::Tls13,
+                TlsVersion::Tls12,
+                TlsVersion::Tls13,
                 TlsFailureNetworkIo,
                 STATUS_IO_TIMEOUT,
                 true),
             "TLS 1.3 first ServerHello timeout does not trigger TLS 1.2 confirmation");
         Expect(
             !wknet::http::test::IsHttpTls12ConfirmationCandidate(
-                KhTlsVersion::Tls12,
-                KhTlsVersion::Tls13,
+                TlsVersion::Tls12,
+                TlsVersion::Tls13,
                 TlsFailureNetworkIo,
                 STATUS_CONNECTION_DISCONNECTED,
                 false),
             "generic network I/O failure does not trigger TLS 1.2 confirmation");
         Expect(
             !wknet::http::test::IsHttpTls12ConfirmationCandidate(
-                KhTlsVersion::Tls13,
-                KhTlsVersion::Tls13,
+                TlsVersion::Tls13,
+                TlsVersion::Tls13,
                 TlsFailureVersionNegotiation,
                 STATUS_NOT_SUPPORTED,
                 false),
             "TLS 1.3-only policy does not trigger TLS 1.2 fallback");
         Expect(
             !wknet::http::test::IsHttpTls12ConfirmationCandidate(
-                KhTlsVersion::Tls12,
-                KhTlsVersion::Tls12,
+                TlsVersion::Tls12,
+                TlsVersion::Tls12,
                 TlsFailureNetworkIo,
                 STATUS_CONNECTION_DISCONNECTED,
                 true),
             "TLS 1.2-only policy does not need TLS 1.2 confirmation");
         Expect(
             !wknet::http::test::IsHttpTls12ConfirmationCandidate(
-                KhTlsVersion::Tls12,
-                KhTlsVersion::Tls13,
+                TlsVersion::Tls12,
+                TlsVersion::Tls13,
                 TlsFailurePeerAlert,
                 STATUS_INVALID_NETWORK_RESPONSE,
                 true),

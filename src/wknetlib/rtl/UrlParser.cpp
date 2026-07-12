@@ -548,7 +548,7 @@ namespace
 }
 
 NTSTATUS ParseUrlIntoRequest(
-    KhRequest& request,
+    Request& request,
     const char* url,
     SIZE_T urlLength) noexcept
 {
@@ -667,7 +667,7 @@ NTSTATUS ParseUrlIntoRequest(
     else {
         const bool queryOnly = url[pathStart] == '?';
         const SIZE_T requestTargetLength = pathLength + (queryOnly ? 1 : 0);
-        if (requestTargetLength > KhMaxPathLength) {
+        if (requestTargetLength > MaxPathLength) {
             return STATUS_BUFFER_TOO_SMALL;
         }
 

@@ -504,7 +504,7 @@ namespace wknet
             ::wknet::http::Destroy();
             WKNET_DBG_PRINT("驱动卸载: 异步 HTTP worker 已结束\r\n");
             WKNET_DBG_PRINT("驱动卸载: 开始关闭 active HTTP/WebSocket handle\r\n");
-            session::KhEngineCloseActiveHandles();
+            session::EngineCloseActiveHandles();
             WKNET_DBG_PRINT("驱动卸载: active HTTP/WebSocket handle 已关闭\r\n");
             WKNET_DBG_PRINT("驱动卸载: 开始释放 WSK client\r\n");
             ReleaseWskClient();

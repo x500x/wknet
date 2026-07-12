@@ -19,7 +19,7 @@ namespace core
         };
 
         WorkspaceScratchAllocator(
-            _Inout_ session::KhWorkspace& workspace,
+            _Inout_ session::Workspace& workspace,
             BufferKind kind) noexcept
             : workspace_(workspace)
             , kind_(kind)
@@ -35,7 +35,7 @@ namespace core
                 return STATUS_INVALID_PARAMETER;
             }
 
-            session::KhWorkspaceBuffer* wb = GetBuffer();
+            session::WorkspaceBuffer* wb = GetBuffer();
             if (wb == nullptr) {
                 return STATUS_INVALID_PARAMETER;
             }
@@ -64,7 +64,7 @@ namespace core
         }
 
     private:
-        session::KhWorkspaceBuffer* GetBuffer() noexcept
+        session::WorkspaceBuffer* GetBuffer() noexcept
         {
             switch (kind_)
             {
@@ -81,7 +81,7 @@ namespace core
             }
         }
 
-        session::KhWorkspace& workspace_;
+        session::Workspace& workspace_;
         BufferKind kind_;
     };
 }

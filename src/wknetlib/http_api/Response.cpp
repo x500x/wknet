@@ -8,9 +8,9 @@ ULONG ResponseStatusCode(const Response* response) noexcept
     if (response == nullptr) {
         return 0;
     }
-    ::wknet::session::KhResponseView view = {};
-    NTSTATUS status = ::wknet::session::KhResponseGetView(
-        const_cast<::wknet::session::KH_RESPONSE>(detail::ToApiResponseConst(response)),
+    ::wknet::session::ResponseView view = {};
+    NTSTATUS status = ::wknet::session::ResponseGetView(
+        const_cast<::wknet::session::ResponseHandle>(detail::ToApiResponseConst(response)),
         &view);
     return NT_SUCCESS(status) ? view.StatusCode : 0;
 }
@@ -20,9 +20,9 @@ const UCHAR* ResponseBody(const Response* response) noexcept
     if (response == nullptr) {
         return nullptr;
     }
-    ::wknet::session::KhResponseView view = {};
-    NTSTATUS status = ::wknet::session::KhResponseGetView(
-        const_cast<::wknet::session::KH_RESPONSE>(detail::ToApiResponseConst(response)),
+    ::wknet::session::ResponseView view = {};
+    NTSTATUS status = ::wknet::session::ResponseGetView(
+        const_cast<::wknet::session::ResponseHandle>(detail::ToApiResponseConst(response)),
         &view);
     return NT_SUCCESS(status) ? view.Body : nullptr;
 }
@@ -32,23 +32,23 @@ SIZE_T ResponseBodyLength(const Response* response) noexcept
     if (response == nullptr) {
         return 0;
     }
-    ::wknet::session::KhResponseView view = {};
-    NTSTATUS status = ::wknet::session::KhResponseGetView(
-        const_cast<::wknet::session::KH_RESPONSE>(detail::ToApiResponseConst(response)),
+    ::wknet::session::ResponseView view = {};
+    NTSTATUS status = ::wknet::session::ResponseGetView(
+        const_cast<::wknet::session::ResponseHandle>(detail::ToApiResponseConst(response)),
         &view);
     return NT_SUCCESS(status) ? view.BodyLength : 0;
 }
 
 SIZE_T ResponseHeaderCount(const Response* response) noexcept
 {
-    return ::wknet::session::KhResponseHeaderCount(
-        const_cast<::wknet::session::KH_RESPONSE>(detail::ToApiResponseConst(response)));
+    return ::wknet::session::ResponseHeaderCount(
+        const_cast<::wknet::session::ResponseHandle>(detail::ToApiResponseConst(response)));
 }
 
 SIZE_T ResponseTrailerCount(const Response* response) noexcept
 {
-    return ::wknet::session::KhResponseTrailerCount(
-        const_cast<::wknet::session::KH_RESPONSE>(detail::ToApiResponseConst(response)));
+    return ::wknet::session::ResponseTrailerCount(
+        const_cast<::wknet::session::ResponseHandle>(detail::ToApiResponseConst(response)));
 }
 
 NTSTATUS ResponseGetHeader(
@@ -58,8 +58,8 @@ NTSTATUS ResponseGetHeader(
     const char** value,
     SIZE_T* valueLength) noexcept
 {
-    return ::wknet::session::KhResponseGetHeader(
-        const_cast<::wknet::session::KH_RESPONSE>(detail::ToApiResponseConst(response)),
+    return ::wknet::session::ResponseGetHeader(
+        const_cast<::wknet::session::ResponseHandle>(detail::ToApiResponseConst(response)),
         name,
         nameLength,
         value,
@@ -74,8 +74,8 @@ NTSTATUS ResponseGetHeaderAt(
     const char** value,
     SIZE_T* valueLength) noexcept
 {
-    return ::wknet::session::KhResponseGetHeaderAt(
-        const_cast<::wknet::session::KH_RESPONSE>(detail::ToApiResponseConst(response)),
+    return ::wknet::session::ResponseGetHeaderAt(
+        const_cast<::wknet::session::ResponseHandle>(detail::ToApiResponseConst(response)),
         index,
         name,
         nameLength,
@@ -90,8 +90,8 @@ NTSTATUS ResponseGetTrailer(
     const char** value,
     SIZE_T* valueLength) noexcept
 {
-    return ::wknet::session::KhResponseGetTrailer(
-        const_cast<::wknet::session::KH_RESPONSE>(detail::ToApiResponseConst(response)),
+    return ::wknet::session::ResponseGetTrailer(
+        const_cast<::wknet::session::ResponseHandle>(detail::ToApiResponseConst(response)),
         name,
         nameLength,
         value,
@@ -106,8 +106,8 @@ NTSTATUS ResponseGetTrailerAt(
     const char** value,
     SIZE_T* valueLength) noexcept
 {
-    return ::wknet::session::KhResponseGetTrailerAt(
-        const_cast<::wknet::session::KH_RESPONSE>(detail::ToApiResponseConst(response)),
+    return ::wknet::session::ResponseGetTrailerAt(
+        const_cast<::wknet::session::ResponseHandle>(detail::ToApiResponseConst(response)),
         index,
         name,
         nameLength,
@@ -117,6 +117,6 @@ NTSTATUS ResponseGetTrailerAt(
 
 void ResponseRelease(Response* response) noexcept
 {
-    ::wknet::session::KhResponseRelease(detail::ToApiResponse(response));
+    ::wknet::session::ResponseRelease(detail::ToApiResponse(response));
 }
 }

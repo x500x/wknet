@@ -2034,7 +2034,7 @@ namespace client
             }
 
             if (header.Opcode == ws::WebSocketOpcode::Ping) {
-                if (++controlFrameCount > KhWsMaxControlFramesPerReceive) {
+                if (++controlFrameCount > WsMaxControlFramesPerReceive) {
                     return FailConnectionWithClose(
                         WebSocketClosePolicyViolation,
                         buffers,
@@ -2084,7 +2084,7 @@ namespace client
             }
 
             if (header.Opcode == ws::WebSocketOpcode::Pong) {
-                if (++controlFrameCount > KhWsMaxControlFramesPerReceive) {
+                if (++controlFrameCount > WsMaxControlFramesPerReceive) {
                     return FailConnectionWithClose(
                         WebSocketClosePolicyViolation,
                         buffers,

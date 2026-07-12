@@ -23,45 +23,45 @@ namespace wknet
 {
 namespace session
 {
-    constexpr SIZE_T KhHttpRequestHeaderScratchBytes =
-        sizeof(http1::HttpHeader) * KhMaxHeadersPerRequest;
-    constexpr SIZE_T KhHttpRequestTrailerScratchBytes =
-        sizeof(http1::HttpHeader) * KhMaxHeadersPerRequest;
-    constexpr SIZE_T KhHttpResponseHeaderScratchBytes =
-        sizeof(http1::HttpHeader) * KhMaxHeadersPerResponse;
-    constexpr SIZE_T KhHttpResponseTrailerScratchBytes =
-        sizeof(http1::HttpHeader) * KhMaxTrailersPerResponse;
-    constexpr SIZE_T KhHttpHostHeaderScratchBytes =
-        KhMaxHostHeaderLength;
-    constexpr SIZE_T KhHttpRequestTargetScratchBytes =
-        KhMaxSchemeLength + 3 + KhMaxHostHeaderLength + KhMaxPathLength;
-    constexpr SIZE_T KhHttpHeaderScratchRequiredBytes =
-        KhHttpRequestHeaderScratchBytes +
-        KhHttpRequestTrailerScratchBytes +
-        KhHttpResponseHeaderScratchBytes +
-        KhHttpResponseTrailerScratchBytes +
-        KhHttpHostHeaderScratchBytes +
-        KhHttpRequestTargetScratchBytes;
-    constexpr char KhDefaultAcceptEncoding[] = "gzip, deflate, br, zstd, identity";
-    constexpr char KhDeflateUnavailableAcceptEncoding[] = "br, identity";
-    constexpr SIZE_T KhWorkspaceCacheMaxRetainedBytes = 256 * 1024;
+    constexpr SIZE_T HttpRequestHeaderScratchBytes =
+        sizeof(http1::HttpHeader) * MaxHeadersPerRequest;
+    constexpr SIZE_T HttpRequestTrailerScratchBytes =
+        sizeof(http1::HttpHeader) * MaxHeadersPerRequest;
+    constexpr SIZE_T HttpResponseHeaderScratchBytes =
+        sizeof(http1::HttpHeader) * MaxHeadersPerResponse;
+    constexpr SIZE_T HttpResponseTrailerScratchBytes =
+        sizeof(http1::HttpHeader) * MaxTrailersPerResponse;
+    constexpr SIZE_T HttpHostHeaderScratchBytes =
+        MaxHostHeaderLength;
+    constexpr SIZE_T HttpRequestTargetScratchBytes =
+        MaxSchemeLength + 3 + MaxHostHeaderLength + MaxPathLength;
+    constexpr SIZE_T HttpHeaderScratchRequiredBytes =
+        HttpRequestHeaderScratchBytes +
+        HttpRequestTrailerScratchBytes +
+        HttpResponseHeaderScratchBytes +
+        HttpResponseTrailerScratchBytes +
+        HttpHostHeaderScratchBytes +
+        HttpRequestTargetScratchBytes;
+    constexpr char DefaultAcceptEncodingValue[] = "gzip, deflate, br, zstd, identity";
+    constexpr char DeflateUnavailableAcceptEncoding[] = "br, identity";
+    constexpr SIZE_T WorkspaceCacheMaxRetainedBytes = 256 * 1024;
 
-    constexpr SIZE_T KhHttp2HeaderScratchBytes =
+    constexpr SIZE_T Http2HeaderScratchBytes =
         sizeof(http1::HttpHeader) * client::Http2MaxRequestHeaders;
-    constexpr SIZE_T KhHttp2ExtraHeaderScratchBytes =
+    constexpr SIZE_T Http2ExtraHeaderScratchBytes =
         sizeof(http1::HttpHeader) * client::Http2MaxRequestHeaders;
-    constexpr SIZE_T KhHttp2TrailerScratchBytes =
+    constexpr SIZE_T Http2TrailerScratchBytes =
         sizeof(http1::HttpHeader) * client::Http2MaxRequestTrailers;
-    constexpr SIZE_T KhHttp2LowerHeaderScratchBytes =
+    constexpr SIZE_T Http2LowerHeaderScratchBytes =
         client::Http2MaxRequestHeaders * client::Http2MaxHeaderNameLength;
-    constexpr SIZE_T KhHttp2LowerTrailerScratchBytes =
+    constexpr SIZE_T Http2LowerTrailerScratchBytes =
         client::Http2MaxRequestTrailers * client::Http2MaxHeaderNameLength;
-    constexpr SIZE_T KhHttp2RequestScratchBytes =
-        KhHttp2HeaderScratchBytes +
-        KhHttp2ExtraHeaderScratchBytes +
-        KhHttp2TrailerScratchBytes +
-        KhHttp2LowerHeaderScratchBytes +
-        KhHttp2LowerTrailerScratchBytes +
+    constexpr SIZE_T Http2RequestScratchBytes =
+        Http2HeaderScratchBytes +
+        Http2ExtraHeaderScratchBytes +
+        Http2TrailerScratchBytes +
+        Http2LowerHeaderScratchBytes +
+        Http2LowerTrailerScratchBytes +
         client::Http2ContentLengthBufferLength;
 
     struct ApiHttp2Scratch final
@@ -90,25 +90,25 @@ namespace session
 
     struct RedirectOriginSnapshot final
     {
-        char Scheme[KhMaxSchemeLength + 1] = {};
-        char Host[KhMaxHostLength + 1] = {};
+        char Scheme[MaxSchemeLength + 1] = {};
+        char Host[MaxHostLength + 1] = {};
     };
 
     _Must_inspect_result_
-    NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ KhWorkspace& workspace) noexcept;
+    NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ Workspace& workspace) noexcept;
 
     http1::HttpText DefaultAcceptEncoding() noexcept
     {
         return http1::MakeText(
             http1::HttpCodingCodec::DeflateRuntimeAvailable() ?
-                KhDefaultAcceptEncoding :
-                KhDeflateUnavailableAcceptEncoding);
+                DefaultAcceptEncodingValue :
+                DeflateUnavailableAcceptEncoding);
     }
 
     _Must_inspect_result_
     NTSTATUS BuildEffectiveAcceptEncoding(
-        _In_ const KhHttpSendOptions& sendOptions,
-        _Inout_ KhWorkspace& workspace,
+        _In_ const HttpSendOptions& sendOptions,
+        _Inout_ Workspace& workspace,
         _Out_ http1::HttpText* value) noexcept
     {
         if (value != nullptr) {
@@ -174,7 +174,7 @@ namespace session
         return STATUS_SUCCESS;
     }
 
-    bool RequestHasHeader(_In_ const KhRequest& request, _In_z_ const char* name) noexcept
+    bool RequestHasHeader(_In_ const Request& request, _In_z_ const char* name) noexcept
     {
         if (name == nullptr) {
             return false;
@@ -191,7 +191,7 @@ namespace session
     }
 
     void FillParsedFromCacheSnapshot(
-        const KhHttpCacheSnapshot& snapshot,
+        const HttpCacheSnapshot& snapshot,
         _Out_ http1::HttpResponse* parsed) noexcept
     {
         if (parsed == nullptr) {
@@ -210,48 +210,48 @@ namespace session
     }
 
     _Ret_maybenull_
-    KhWorkspace* ExchangeSessionWorkspace(_In_ KH_SESSION session, _In_opt_ KhWorkspace* workspace) noexcept
+    Workspace* ExchangeSessionWorkspace(_In_ SessionHandle session, _In_opt_ Workspace* workspace) noexcept
     {
         if (session == nullptr) {
             return nullptr;
         }
 
 #if defined(WKNET_USER_MODE_TEST)
-        KhWorkspace* previous = session->Workspace;
+        Workspace* previous = session->Workspace;
         session->Workspace = workspace;
         return previous;
 #else
-        return static_cast<KhWorkspace*>(InterlockedExchangePointer(
+        return static_cast<Workspace*>(InterlockedExchangePointer(
             reinterpret_cast<PVOID volatile*>(&session->Workspace),
             workspace));
 #endif
     }
 
     _Ret_maybenull_
-    KhWorkspace* CompareExchangeSessionWorkspace(
-        _In_ KH_SESSION session,
-        _In_opt_ KhWorkspace* workspace,
-        _In_opt_ KhWorkspace* expected) noexcept
+    Workspace* CompareExchangeSessionWorkspace(
+        _In_ SessionHandle session,
+        _In_opt_ Workspace* workspace,
+        _In_opt_ Workspace* expected) noexcept
     {
         if (session == nullptr) {
             return nullptr;
         }
 
 #if defined(WKNET_USER_MODE_TEST)
-        KhWorkspace* previous = session->Workspace;
+        Workspace* previous = session->Workspace;
         if (previous == expected) {
             session->Workspace = workspace;
         }
         return previous;
 #else
-        return static_cast<KhWorkspace*>(InterlockedCompareExchangePointer(
+        return static_cast<Workspace*>(InterlockedCompareExchangePointer(
             reinterpret_cast<PVOID volatile*>(&session->Workspace),
             workspace,
             expected));
 #endif
     }
 
-    SIZE_T WorkspaceRetainedBytes(_In_ const KhWorkspace& workspace) noexcept
+    SIZE_T WorkspaceRetainedBytes(_In_ const Workspace& workspace) noexcept
     {
         return workspace.Request.Length +
             workspace.Response.Length +
@@ -266,18 +266,18 @@ namespace session
     }
 
     bool CanCacheRequestWorkspace(
-        _In_ const KhWorkspace& workspace,
+        _In_ const Workspace& workspace,
         SIZE_T requestBufferBytes) noexcept
     {
-        return workspace.PoolType == KhPoolType::NonPaged &&
+        return workspace.PoolType == PoolType::NonPaged &&
             workspace.Request.Length >= requestBufferBytes &&
-            WorkspaceRetainedBytes(workspace) <= KhWorkspaceCacheMaxRetainedBytes;
+            WorkspaceRetainedBytes(workspace) <= WorkspaceCacheMaxRetainedBytes;
     }
 
     NTSTATUS AcquireRequestWorkspace(
-        _In_ KH_SESSION session,
+        _In_ SessionHandle session,
         SIZE_T maxResponseBytes,
-        _Outptr_ KhWorkspace** workspace) noexcept
+        _Outptr_ Workspace** workspace) noexcept
     {
         if (session == nullptr || workspace == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -285,29 +285,29 @@ namespace session
 
         *workspace = nullptr;
 
-        KhWorkspace* cached = ExchangeSessionWorkspace(session, nullptr);
+        Workspace* cached = ExchangeSessionWorkspace(session, nullptr);
         if (cached != nullptr) {
             if (cached->Request.Length >= session->Options.RequestBufferBytes) {
                 cached->MaxResponseBytes = maxResponseBytes;
-                KhWorkspaceReset(cached);
+                WorkspaceReset(cached);
                 *workspace = cached;
                 return STATUS_SUCCESS;
             }
 
-            KhWorkspaceReleaseToLookaside(cached, &session->WorkspaceLookaside);
+            WorkspaceReleaseToLookaside(cached, &session->WorkspaceLookaside);
         }
 
-        KhWorkspaceOptions workspaceOptions = {};
-        workspaceOptions.PoolType = KhPoolType::NonPaged;
+        WorkspaceOptions workspaceOptions = {};
+        workspaceOptions.PoolType = PoolType::NonPaged;
         workspaceOptions.RequestBufferBytes = session->Options.RequestBufferBytes;
         workspaceOptions.MaxResponseBytes = maxResponseBytes;
-        return KhWorkspaceCreateFromLookaside(
+        return WorkspaceCreateFromLookaside(
             &workspaceOptions,
             &session->WorkspaceLookaside,
             workspace);
     }
 
-    void ReleaseRequestWorkspace(_In_ KH_SESSION session, _In_opt_ KhWorkspace* workspace) noexcept
+    void ReleaseRequestWorkspace(_In_ SessionHandle session, _In_opt_ Workspace* workspace) noexcept
     {
         if (workspace == nullptr) {
             return;
@@ -315,15 +315,15 @@ namespace session
 
         if (session == nullptr ||
             !CanCacheRequestWorkspace(*workspace, session->Options.RequestBufferBytes)) {
-            KhWorkspaceReleaseToLookaside(workspace, session != nullptr ? &session->WorkspaceLookaside : nullptr);
+            WorkspaceReleaseToLookaside(workspace, session != nullptr ? &session->WorkspaceLookaside : nullptr);
             return;
         }
 
         workspace->MaxResponseBytes = session->Options.MaxResponseBytes;
-        KhWorkspaceReset(workspace);
+        WorkspaceReset(workspace);
 
         if (CompareExchangeSessionWorkspace(session, workspace, nullptr) != nullptr) {
-            KhWorkspaceReleaseToLookaside(workspace, &session->WorkspaceLookaside);
+            WorkspaceReleaseToLookaside(workspace, &session->WorkspaceLookaside);
         }
     }
 
@@ -345,15 +345,15 @@ namespace session
         {
             Reset();
 
-            KhWorkspaceOptions workspaceOptions = {};
-            workspaceOptions.PoolType = KhPoolType::NonPaged;
+            WorkspaceOptions workspaceOptions = {};
+            workspaceOptions.PoolType = PoolType::NonPaged;
             workspaceOptions.RequestBufferBytes = requestBufferBytes;
             workspaceOptions.MaxResponseBytes = maxResponseBytes;
-            return KhWorkspaceCreate(&workspaceOptions, &workspace_);
+            return WorkspaceCreate(&workspaceOptions, &workspace_);
         }
 
         _Must_inspect_result_
-        NTSTATUS CreateForSession(_In_ KH_SESSION session, SIZE_T maxResponseBytes) noexcept
+        NTSTATUS CreateForSession(_In_ SessionHandle session, SIZE_T maxResponseBytes) noexcept
         {
             Reset();
             session_ = session;
@@ -366,14 +366,14 @@ namespace session
                 ReleaseRequestWorkspace(session_, workspace_);
             }
             else {
-                KhWorkspaceRelease(workspace_);
+                WorkspaceRelease(workspace_);
             }
             workspace_ = nullptr;
             session_ = nullptr;
         }
 
         _Ret_maybenull_
-        KhWorkspace* Get() noexcept
+        Workspace* Get() noexcept
         {
             return workspace_;
         }
@@ -385,13 +385,13 @@ namespace session
         }
 
     private:
-        KH_SESSION session_ = nullptr;
-        KhWorkspace* workspace_ = nullptr;
+        SessionHandle session_ = nullptr;
+        Workspace* workspace_ = nullptr;
     };
 
     _Must_inspect_result_
     NTSTATUS PrepareApiHttpHeaderScratch(
-        _Inout_ KhWorkspace& workspace,
+        _Inout_ Workspace& workspace,
         _Out_ ApiHttpHeaderScratch* scratch) noexcept
     {
         if (scratch == nullptr) {
@@ -400,7 +400,7 @@ namespace session
 
         *scratch = {};
         if (workspace.HttpHeaderScratch.Data == nullptr ||
-            workspace.HttpHeaderScratch.Length < KhHttpHeaderScratchRequiredBytes) {
+            workspace.HttpHeaderScratch.Length < HttpHeaderScratchRequiredBytes) {
             return STATUS_BUFFER_TOO_SMALL;
         }
 
@@ -408,38 +408,38 @@ namespace session
         scratch->RequestHeaders = reinterpret_cast<http1::HttpHeader*>(
             workspace.HttpHeaderScratch.Data);
         scratch->RequestTrailers = reinterpret_cast<http1::HttpHeader*>(
-            workspace.HttpHeaderScratch.Data + KhHttpRequestHeaderScratchBytes);
+            workspace.HttpHeaderScratch.Data + HttpRequestHeaderScratchBytes);
         scratch->ResponseHeaders = reinterpret_cast<http1::HttpHeader*>(
             workspace.HttpHeaderScratch.Data +
-            KhHttpRequestHeaderScratchBytes +
-            KhHttpRequestTrailerScratchBytes);
+            HttpRequestHeaderScratchBytes +
+            HttpRequestTrailerScratchBytes);
         scratch->ResponseTrailers = reinterpret_cast<http1::HttpHeader*>(
             workspace.HttpHeaderScratch.Data +
-            KhHttpRequestHeaderScratchBytes +
-            KhHttpRequestTrailerScratchBytes +
-            KhHttpResponseHeaderScratchBytes);
+            HttpRequestHeaderScratchBytes +
+            HttpRequestTrailerScratchBytes +
+            HttpResponseHeaderScratchBytes);
         scratch->HostHeader = reinterpret_cast<char*>(
             workspace.HttpHeaderScratch.Data +
-            KhHttpRequestHeaderScratchBytes +
-            KhHttpRequestTrailerScratchBytes +
-            KhHttpResponseHeaderScratchBytes +
-            KhHttpResponseTrailerScratchBytes);
-        scratch->HostHeaderCapacity = KhHttpHostHeaderScratchBytes;
+            HttpRequestHeaderScratchBytes +
+            HttpRequestTrailerScratchBytes +
+            HttpResponseHeaderScratchBytes +
+            HttpResponseTrailerScratchBytes);
+        scratch->HostHeaderCapacity = HttpHostHeaderScratchBytes;
         scratch->RequestTarget = reinterpret_cast<char*>(
             workspace.HttpHeaderScratch.Data +
-            KhHttpRequestHeaderScratchBytes +
-            KhHttpRequestTrailerScratchBytes +
-            KhHttpResponseHeaderScratchBytes +
-            KhHttpResponseTrailerScratchBytes +
-            KhHttpHostHeaderScratchBytes);
-        scratch->RequestTargetCapacity = KhHttpRequestTargetScratchBytes;
+            HttpRequestHeaderScratchBytes +
+            HttpRequestTrailerScratchBytes +
+            HttpResponseHeaderScratchBytes +
+            HttpResponseTrailerScratchBytes +
+            HttpHostHeaderScratchBytes);
+        scratch->RequestTargetCapacity = HttpRequestTargetScratchBytes;
         return STATUS_SUCCESS;
     }
 
 #if !defined(WKNET_USER_MODE_TEST)
     _Must_inspect_result_
     NTSTATUS PrepareApiHttp2Scratch(
-        _Inout_ KhWorkspace& workspace,
+        _Inout_ Workspace& workspace,
         _Out_ ApiHttp2Scratch* scratch) noexcept
     {
         if (scratch == nullptr) {
@@ -448,39 +448,39 @@ namespace session
 
         *scratch = {};
         if (workspace.Http2HeaderScratch.Data == nullptr ||
-            workspace.Http2HeaderScratch.Length < KhHttp2RequestScratchBytes) {
+            workspace.Http2HeaderScratch.Length < Http2RequestScratchBytes) {
             return STATUS_BUFFER_TOO_SMALL;
         }
 
         RtlZeroMemory(workspace.Http2HeaderScratch.Data, workspace.Http2HeaderScratch.Length);
         scratch->Headers = reinterpret_cast<http1::HttpHeader*>(workspace.Http2HeaderScratch.Data);
         scratch->ExtraHeaders = reinterpret_cast<http1::HttpHeader*>(
-            workspace.Http2HeaderScratch.Data + KhHttp2HeaderScratchBytes);
+            workspace.Http2HeaderScratch.Data + Http2HeaderScratchBytes);
         scratch->Trailers = reinterpret_cast<http1::HttpHeader*>(
             workspace.Http2HeaderScratch.Data +
-            KhHttp2HeaderScratchBytes +
-            KhHttp2ExtraHeaderScratchBytes);
+            Http2HeaderScratchBytes +
+            Http2ExtraHeaderScratchBytes);
         scratch->LowerHeaderNames = reinterpret_cast<char (*)[client::Http2MaxHeaderNameLength]>(
             workspace.Http2HeaderScratch.Data +
-            KhHttp2HeaderScratchBytes +
-            KhHttp2ExtraHeaderScratchBytes +
-            KhHttp2TrailerScratchBytes);
+            Http2HeaderScratchBytes +
+            Http2ExtraHeaderScratchBytes +
+            Http2TrailerScratchBytes);
         scratch->LowerTrailerNames = reinterpret_cast<char (*)[client::Http2MaxHeaderNameLength]>(
             workspace.Http2HeaderScratch.Data +
-            KhHttp2HeaderScratchBytes +
-            KhHttp2ExtraHeaderScratchBytes +
-            KhHttp2TrailerScratchBytes +
-            KhHttp2LowerHeaderScratchBytes);
+            Http2HeaderScratchBytes +
+            Http2ExtraHeaderScratchBytes +
+            Http2TrailerScratchBytes +
+            Http2LowerHeaderScratchBytes);
         scratch->ContentLengthBuffer = reinterpret_cast<char*>(
             workspace.Http2HeaderScratch.Data +
-            KhHttp2HeaderScratchBytes +
-            KhHttp2ExtraHeaderScratchBytes +
-            KhHttp2TrailerScratchBytes +
-            KhHttp2LowerHeaderScratchBytes +
-            KhHttp2LowerTrailerScratchBytes);
+            Http2HeaderScratchBytes +
+            Http2ExtraHeaderScratchBytes +
+            Http2TrailerScratchBytes +
+            Http2LowerHeaderScratchBytes +
+            Http2LowerTrailerScratchBytes);
         scratch->AuthorityBuffer = reinterpret_cast<char*>(
-            workspace.Http2HeaderScratch.Data + KhHttp2RequestScratchBytes);
-        scratch->AuthorityCapacity = workspace.Http2HeaderScratch.Length - KhHttp2RequestScratchBytes;
+            workspace.Http2HeaderScratch.Data + Http2RequestScratchBytes);
+        scratch->AuthorityCapacity = workspace.Http2HeaderScratch.Length - Http2RequestScratchBytes;
         return STATUS_SUCCESS;
     }
 
@@ -523,7 +523,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS BuildHttp2TrailersFromRequest(
-        const KhRequest& request,
+        const Request& request,
         _Out_writes_(trailerCapacity) http1::HttpHeader* trailers,
         SIZE_T trailerCapacity,
         char lowerTrailerNames[client::Http2MaxRequestTrailers][client::Http2MaxHeaderNameLength],
@@ -540,7 +540,7 @@ namespace session
         }
 
         for (SIZE_T index = 0; index < request.TrailerCount; ++index) {
-            const KhStoredHeader& trailer = request.Trailers[index];
+            const StoredHeader& trailer = request.Trailers[index];
             http1::HttpText loweredName = {};
             if (!LowercaseHttp2HeaderName(
                 { trailer.Name, trailer.NameLength },
@@ -560,26 +560,26 @@ namespace session
     }
 #endif
 
-    http1::HttpMethod ToHttpMethod(KhHttpMethod method) noexcept
+    http1::HttpMethod ToHttpMethod(HttpMethod method) noexcept
     {
         switch (method) {
-        case KhHttpMethod::Post:
+        case HttpMethod::Post:
             return http1::HttpMethod::Post;
-        case KhHttpMethod::Put:
+        case HttpMethod::Put:
             return http1::HttpMethod::Put;
-        case KhHttpMethod::Patch:
+        case HttpMethod::Patch:
             return http1::HttpMethod::Patch;
-        case KhHttpMethod::Delete:
+        case HttpMethod::Delete:
             return http1::HttpMethod::DeleteMethod;
-        case KhHttpMethod::Head:
+        case HttpMethod::Head:
             return http1::HttpMethod::Head;
-        case KhHttpMethod::Options:
+        case HttpMethod::Options:
             return http1::HttpMethod::Options;
-        case KhHttpMethod::Connect:
+        case HttpMethod::Connect:
             return http1::HttpMethod::Connect;
-        case KhHttpMethod::Trace:
+        case HttpMethod::Trace:
             return http1::HttpMethod::Trace;
-        case KhHttpMethod::Get:
+        case HttpMethod::Get:
         default:
             return http1::HttpMethod::Get;
         }
@@ -587,7 +587,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS BuildHostHeaderValue(
-        const KhRequest& request,
+        const Request& request,
         _Out_writes_bytes_(destinationCapacity) char* destination,
         SIZE_T destinationCapacity,
         _Out_ SIZE_T* destinationLength) noexcept
@@ -652,7 +652,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS BuildProxyAbsoluteFormTarget(
-        const KhRequest& request,
+        const Request& request,
         http1::HttpText hostHeader,
         _Out_writes_bytes_(destinationCapacity) char* destination,
         SIZE_T destinationCapacity,
@@ -697,7 +697,7 @@ namespace session
         return STATUS_SUCCESS;
     }
 
-    bool HeaderNameEquals(const KhStoredHeader& header, const char* name) noexcept
+    bool HeaderNameEquals(const StoredHeader& header, const char* name) noexcept
     {
         return TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, name);
     }
@@ -708,17 +708,17 @@ namespace session
             TextEqualsLiteral(alpn, alpnLength, "http/1.1");
     }
 
-    bool IsHttpsRequest(const KhRequest& request) noexcept
+    bool IsHttpsRequest(const Request& request) noexcept
     {
         return TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https");
     }
 
-    bool IsPlainHttpRequest(const KhRequest& request) noexcept
+    bool IsPlainHttpRequest(const Request& request) noexcept
     {
         return TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "http");
     }
 
-    bool IsAutomaticHttpAlpnMode(const KhRequest& request) noexcept
+    bool IsAutomaticHttpAlpnMode(const Request& request) noexcept
     {
         return IsHttpsRequest(request) &&
             request.Tls.PreferHttp2 &&
@@ -727,16 +727,16 @@ namespace session
     }
 
     NTSTATUS EffectiveHttp2CleartextMode(
-        _In_ const KhHttpSendOptions& options,
-        _In_ const KhRequest& request,
-        _Out_ KhHttp2CleartextMode* mode) noexcept
+        _In_ const HttpSendOptions& options,
+        _In_ const Request& request,
+        _Out_ Http2CleartextMode* mode) noexcept
     {
         if (mode == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        *mode = KhHttp2CleartextMode::Disabled;
-        if (options.Http2CleartextMode == KhHttp2CleartextMode::Disabled) {
+        *mode = Http2CleartextMode::Disabled;
+        if (options.Http2CleartextMode == Http2CleartextMode::Disabled) {
             return STATUS_SUCCESS;
         }
 
@@ -749,7 +749,7 @@ namespace session
     }
 
     void RefreshResponseParseDecodedBuffers(
-        _In_ const KhWorkspace& workspace,
+        _In_ const Workspace& workspace,
         _Inout_ http1::HttpParseOptions& parseOptions) noexcept
     {
         parseOptions.DecodedBody = reinterpret_cast<char*>(workspace.DecodedBody.Data);
@@ -757,16 +757,16 @@ namespace session
     }
 
     bool IsTlsVersionAllowed(
-        KhTlsVersion minimum,
-        KhTlsVersion maximum,
-        KhTlsVersion protocol) noexcept
+        TlsVersion minimum,
+        TlsVersion maximum,
+        TlsVersion protocol) noexcept
     {
         return static_cast<USHORT>(minimum) <= static_cast<USHORT>(protocol) &&
             static_cast<USHORT>(protocol) <= static_cast<USHORT>(maximum);
     }
 
     bool IsHttpTls12ConfirmationCandidate(
-        const KhRequest& request,
+        const Request& request,
         const tls::TlsHandshakeFailure& failure) noexcept
     {
         const bool failureCanConfirmTls12 =
@@ -774,19 +774,19 @@ namespace session
             (failure.Category == tls::TlsHandshakeFailureCategory::NetworkIo &&
                 failure.BeforeTls13FirstServerHello &&
                 failure.Status != STATUS_IO_TIMEOUT);
-        return IsTlsVersionAllowed(request.Tls.MinVersion, request.Tls.MaxVersion, KhTlsVersion::Tls12) &&
-            IsTlsVersionAllowed(request.Tls.MinVersion, request.Tls.MaxVersion, KhTlsVersion::Tls13) &&
+        return IsTlsVersionAllowed(request.Tls.MinVersion, request.Tls.MaxVersion, TlsVersion::Tls12) &&
+            IsTlsVersionAllowed(request.Tls.MinVersion, request.Tls.MaxVersion, TlsVersion::Tls13) &&
             failureCanConfirmTls12;
     }
 
-    bool IsSafeFreshConnectionRetryMethod(KhHttpMethod method) noexcept
+    bool IsSafeFreshConnectionRetryMethod(HttpMethod method) noexcept
     {
-        return method == KhHttpMethod::Get ||
-            method == KhHttpMethod::Head ||
-            method == KhHttpMethod::Options;
+        return method == HttpMethod::Get ||
+            method == HttpMethod::Head ||
+            method == HttpMethod::Options;
     }
 
-    bool IsTraceSensitiveHeader(const KhStoredHeader& header) noexcept
+    bool IsTraceSensitiveHeader(const StoredHeader& header) noexcept
     {
         return HeaderNameEquals(header, "Authorization") ||
             HeaderNameEquals(header, "Proxy-Authorization") ||
@@ -801,48 +801,48 @@ namespace session
     }
 
     bool ShouldRetryWithFreshConnection(
-        _In_ const KhRequest& request,
+        _In_ const Request& request,
         NTSTATUS status,
         bool reusedConnection) noexcept
     {
         return !NT_SUCCESS(status) &&
-            request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate &&
+            request.ConnectionPolicy == ConnectionPolicy::ReuseOrCreate &&
             IsSafeFreshConnectionRetryMethod(request.Method) &&
             (status == STATUS_RETRY ||
                 (reusedConnection && IsFreshConnectionRetryStatus(status)));
     }
 
     bool RequestUsesExpectContinue(
-        _In_ const KhHttpSendOptions& options,
-        _In_ const KhRequest& request) noexcept;
+        _In_ const HttpSendOptions& options,
+        _In_ const Request& request) noexcept;
 
-    ULONG Http11PipelineMethodBit(KhHttpMethod method) noexcept
+    ULONG Http11PipelineMethodBit(HttpMethod method) noexcept
     {
         switch (method) {
-        case KhHttpMethod::Get:
-            return KhHttp11PipelineMethodGet;
-        case KhHttpMethod::Post:
-            return KhHttp11PipelineMethodPost;
-        case KhHttpMethod::Put:
-            return KhHttp11PipelineMethodPut;
-        case KhHttpMethod::Patch:
-            return KhHttp11PipelineMethodPatch;
-        case KhHttpMethod::Delete:
-            return KhHttp11PipelineMethodDelete;
-        case KhHttpMethod::Head:
-            return KhHttp11PipelineMethodHead;
-        case KhHttpMethod::Options:
-            return KhHttp11PipelineMethodOptions;
-        case KhHttpMethod::Connect:
-            return KhHttp11PipelineMethodConnect;
-        case KhHttpMethod::Trace:
-            return KhHttp11PipelineMethodTrace;
+        case HttpMethod::Get:
+            return Http11PipelineMethodGet;
+        case HttpMethod::Post:
+            return Http11PipelineMethodPost;
+        case HttpMethod::Put:
+            return Http11PipelineMethodPut;
+        case HttpMethod::Patch:
+            return Http11PipelineMethodPatch;
+        case HttpMethod::Delete:
+            return Http11PipelineMethodDelete;
+        case HttpMethod::Head:
+            return Http11PipelineMethodHead;
+        case HttpMethod::Options:
+            return Http11PipelineMethodOptions;
+        case HttpMethod::Connect:
+            return Http11PipelineMethodConnect;
+        case HttpMethod::Trace:
+            return Http11PipelineMethodTrace;
         default:
             return 0;
         }
     }
 
-    bool IsHttp11PipelineTlsModeEligible(_In_ const KhRequest& request) noexcept
+    bool IsHttp11PipelineTlsModeEligible(_In_ const Request& request) noexcept
     {
         if (!IsHttpsRequest(request)) {
             return true;
@@ -856,14 +856,14 @@ namespace session
     }
 
     bool IsHttp11PipelineCandidate(
-        _In_ const KhSession& session,
-        _In_ const KhRequest& request,
-        _In_ const KhHttpSendOptions& options,
-        KhHttp2CleartextMode http2CleartextMode) noexcept
+        _In_ const Session& session,
+        _In_ const Request& request,
+        _In_ const HttpSendOptions& options,
+        Http2CleartextMode http2CleartextMode) noexcept
     {
         if (!session.Options.EnableHttp11Pipeline ||
-            request.ConnectionPolicy != KhConnectionPolicy::ReuseOrCreate ||
-            http2CleartextMode != KhHttp2CleartextMode::Disabled ||
+            request.ConnectionPolicy != ConnectionPolicy::ReuseOrCreate ||
+            http2CleartextMode != Http2CleartextMode::Disabled ||
             RequestUsesExpectContinue(options, request) ||
             !IsHttp11PipelineTlsModeEligible(request) ||
             request.HasBody ||
@@ -878,18 +878,18 @@ namespace session
     }
 
     bool RequestUsesExpectContinue(
-        _In_ const KhHttpSendOptions& options,
-        _In_ const KhRequest& request) noexcept
+        _In_ const HttpSendOptions& options,
+        _In_ const Request& request) noexcept
     {
-        return ((options.Flags & KhHttpSendFlagExpectContinue) != 0) && request.HasBody;
+        return ((options.Flags & HttpSendFlagExpectContinue) != 0) && request.HasBody;
     }
 
     ULONG EffectiveExpectContinueTimeoutMilliseconds(
-        _In_ const KhHttpSendOptions& options) noexcept
+        _In_ const HttpSendOptions& options) noexcept
     {
         return options.ExpectContinueTimeoutMilliseconds != 0 ?
             options.ExpectContinueTimeoutMilliseconds :
-            KhDefaultExpectContinueTimeoutMilliseconds;
+            DefaultExpectContinueTimeoutMilliseconds;
     }
 
     bool TryReadRawResponseStatusCode(
@@ -936,11 +936,11 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS BuildHttpRequestOptions(
-        const KhRequest& request,
+        const Request& request,
         bool addExpectContinue,
         bool allowTrace,
         bool useProxyAbsoluteForm,
-        const KhProxyOptions& proxy,
+        const ProxyOptions& proxy,
         http1::HttpText acceptEncoding,
         _Out_writes_bytes_(hostCapacity) char* host,
         SIZE_T hostCapacity,
@@ -984,8 +984,8 @@ namespace session
 
         SIZE_T extraHeaderCount = 0;
         bool hasAcceptEncoding = false;
-        const bool chunkedRequest = request.BodyMode == KhRequestBodyMode::Chunked;
-        const bool traceMethod = request.Method == KhHttpMethod::Trace;
+        const bool chunkedRequest = request.BodyMode == RequestBodyMode::Chunked;
+        const bool traceMethod = request.Method == HttpMethod::Trace;
 
         if (traceMethod && !allowTrace) {
             return STATUS_NOT_SUPPORTED;
@@ -1007,7 +1007,7 @@ namespace session
         }
 
         for (SIZE_T index = 0; index < request.HeaderCount; ++index) {
-            const KhStoredHeader& header = request.Headers[index];
+            const StoredHeader& header = request.Headers[index];
             if (HeaderNameEquals(header, "Transfer-Encoding")) {
                 return STATUS_NOT_SUPPORTED;
             }
@@ -1017,7 +1017,7 @@ namespace session
             }
 
             // `Trailer` declares which trailer fields will follow; only meaningful
-            // when the request emits chunked framing (see KhHttpRequestAddTrailer).
+            // when the request emits chunked framing (see HttpRequestAddTrailer).
             if (HeaderNameEquals(header, "Trailer") && !chunkedRequest) {
                 return STATUS_NOT_SUPPORTED;
             }
@@ -1102,7 +1102,7 @@ namespace session
         options->Method = ToHttpMethod(request.Method);
         options->Path = requestPath;
         options->Host = { host, hostLength };
-        options->Connection = request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate ?
+        options->Connection = request.ConnectionPolicy == ConnectionPolicy::ReuseOrCreate ?
             http1::HttpConnectionDirective::KeepAlive :
             http1::HttpConnectionDirective::Close;
         options->ExtraHeaders = headers;
@@ -1110,7 +1110,7 @@ namespace session
         options->Body = reinterpret_cast<const char*>(request.Body);
         options->BodyLength = request.BodyLength;
         options->IncludeContentLength = request.HasBody;
-        options->BodyMode = request.BodyMode == KhRequestBodyMode::Chunked ?
+        options->BodyMode = request.BodyMode == RequestBodyMode::Chunked ?
             http1::HttpRequestBodyMode::Chunked :
             http1::HttpRequestBodyMode::ContentLength;
         options->AllowExpectContinue = emitExpectContinue;
@@ -1118,7 +1118,7 @@ namespace session
 
         if (request.TrailerCount != 0) {
             for (SIZE_T index = 0; index < request.TrailerCount; ++index) {
-                const KhStoredHeader& trailer = request.Trailers[index];
+                const StoredHeader& trailer = request.Trailers[index];
                 trailers[index].Name = { trailer.Name, trailer.NameLength };
                 trailers[index].Value = { trailer.Value, trailer.ValueLength };
             }
@@ -1134,10 +1134,10 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS BuildPoolKey(
-        const KhRequest& request,
-        const KhProxyOptions& proxy,
-        KhHttp2CleartextMode http2CleartextMode,
-        _Out_ KhConnectionPoolKey* key) noexcept
+        const Request& request,
+        const ProxyOptions& proxy,
+        Http2CleartextMode http2CleartextMode,
+        _Out_ ConnectionPoolKey* key) noexcept
     {
         if (key == nullptr || request.SchemeLength == 0 || request.HostLength == 0) {
             return STATUS_INVALID_PARAMETER;
@@ -1226,7 +1226,7 @@ namespace session
         const http1::HttpResponse& parsed,
         const char* rawResponse,
         SIZE_T rawResponseLength,
-        _Out_ KH_RESPONSE* response) noexcept
+        _Out_ ResponseHandle* response) noexcept
     {
         if (response != nullptr) {
             *response = nullptr;
@@ -1236,12 +1236,12 @@ namespace session
             return STATUS_INVALID_PARAMETER;
         }
 
-        KH_RESPONSE newResponse = AllocateResponseHandle();
+        ResponseHandle newResponse = AllocateResponseHandle();
         if (newResponse == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        newResponse->Header = { KhHandleKind::Response, 0, nullptr };
+        newResponse->Header = { HandleKind::Response, 0, nullptr };
         newResponse->StatusCode = parsed.StatusCode;
         newResponse->InFlight = 0;
 #if !defined(WKNET_USER_MODE_TEST)
@@ -1408,7 +1408,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS InvokeResponseCallbacks(
-        const KhHttpSendOptions& options,
+        const HttpSendOptions& options,
         const http1::HttpResponse& parsed) noexcept
     {
         if (options.HeaderCallback != nullptr) {
@@ -1477,7 +1477,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS ParseResponseBytes(
-        KhWorkspace& workspace,
+        Workspace& workspace,
         SIZE_T responseLength,
         bool messageCompleteOnConnectionClose,
         _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
@@ -1564,9 +1564,9 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS LoadHttp1PipelineBufferedBytes(
-        _Inout_ KhConnectionPool* connectionPool,
-        _Inout_ KhPooledConnection* pooledConnection,
-        _Inout_ KhWorkspace& workspace) noexcept
+        _Inout_ ConnectionPool* connectionPool,
+        _Inout_ PooledConnection* pooledConnection,
+        _Inout_ Workspace& workspace) noexcept
     {
         if (connectionPool == nullptr || pooledConnection == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -1574,7 +1574,7 @@ namespace session
 
         workspace.ResponseLength = 0;
         SIZE_T bufferedLength = 0;
-        NTSTATUS status = KhConnectionPoolHttp1PipelineBufferedLength(
+        NTSTATUS status = ConnectionPoolHttp1PipelineBufferedLength(
             connectionPool,
             pooledConnection,
             &bufferedLength);
@@ -1585,13 +1585,13 @@ namespace session
             return STATUS_SUCCESS;
         }
 
-        status = KhWorkspaceEnsureResponseCapacity(&workspace, bufferedLength);
+        status = WorkspaceEnsureResponseCapacity(&workspace, bufferedLength);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
         SIZE_T copied = 0;
-        status = KhConnectionPoolTakeHttp1PipelineBufferedBytes(
+        status = ConnectionPoolTakeHttp1PipelineBufferedBytes(
             connectionPool,
             pooledConnection,
             workspace.Response.Data,
@@ -1607,9 +1607,9 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS PreserveHttp1PipelineTrailingBytes(
-        _Inout_ KhConnectionPool* connectionPool,
-        _Inout_ KhPooledConnection* pooledConnection,
-        _Inout_ KhWorkspace& workspace,
+        _Inout_ ConnectionPool* connectionPool,
+        _Inout_ PooledConnection* pooledConnection,
+        _Inout_ Workspace& workspace,
         _In_ const http1::HttpResponse& parsed,
         _Out_ SIZE_T* rawResponseLength) noexcept
     {
@@ -1623,7 +1623,7 @@ namespace session
         const SIZE_T consumed = parsed.BytesConsumed;
         const SIZE_T trailingLength = workspace.ResponseLength - consumed;
         if (trailingLength != 0) {
-            NTSTATUS status = KhConnectionPoolStoreHttp1PipelineBufferedBytes(
+            NTSTATUS status = ConnectionPoolStoreHttp1PipelineBufferedBytes(
                 connectionPool,
                 pooledConnection,
                 workspace.Response.Data + consumed,
@@ -1641,7 +1641,7 @@ namespace session
 #if !defined(WKNET_USER_MODE_TEST)
     _Must_inspect_result_
     NTSTATUS BuildHttp2OptionsFromRequest(
-        const KhRequest& request,
+        const Request& request,
         _In_reads_(requestHeaderCount) const http1::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
         http1::HttpText authority,
@@ -1679,9 +1679,9 @@ namespace session
         options->BodySource = bodySource;
         options->IncludeContentLength =
             request.HasBody &&
-            request.BodyMode == KhRequestBodyMode::ContentLength;
+            request.BodyMode == RequestBodyMode::ContentLength;
         options->CertificateStore = request.Tls.CertificateStore;
-        options->VerifyCertificate = request.Tls.CertificatePolicy == KhCertificatePolicy::Verify;
+        options->VerifyCertificate = request.Tls.CertificatePolicy == CertificatePolicy::Verify;
         options->Policy = request.Tls.Policy;
         options->ClientCredential = request.Tls.ClientCredential;
         options->MaxTls12Renegotiations = request.Tls.MaxTls12Renegotiations;
@@ -1733,12 +1733,12 @@ namespace session
         const UCHAR* data,
         SIZE_T dataLength) noexcept
     {
-        auto* workspace = static_cast<KhWorkspace*>(context);
+        auto* workspace = static_cast<Workspace*>(context);
         if (workspace == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        return KhWorkspaceAppendResponse(workspace, data, dataLength);
+        return WorkspaceAppendResponse(workspace, data, dataLength);
     }
 
     _Must_inspect_result_
@@ -1747,7 +1747,7 @@ namespace session
         SIZE_T responseHeaderCount,
         _In_reads_bytes_(responseBodyLength) const char* responseBody,
         SIZE_T responseBodyLength,
-        _Inout_ KhWorkspace& workspace,
+        _Inout_ Workspace& workspace,
         _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
         _In_opt_ const http1::HttpCodingDecodeMaterials* materials,
         _Out_ http1::HttpContentDecodeResult* decoded) noexcept
@@ -1794,11 +1794,11 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp2ViaTransport(
-        const KhRequest& request,
-        KhWorkspace& workspace,
-        _In_ const KhHttpSendOptions& sendOptions,
-        _Inout_ KhConnectionPool* connectionPool,
-        _Inout_ KhPooledConnection& pooledConnection,
+        const Request& request,
+        Workspace& workspace,
+        _In_ const HttpSendOptions& sendOptions,
+        _Inout_ ConnectionPool* connectionPool,
+        _Inout_ PooledConnection& pooledConnection,
         SIZE_T maxHeaderBlockBytes,
         _In_reads_(requestHeaderCount) const http1::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
@@ -1901,7 +1901,7 @@ namespace session
         responseBodySink.Context = &workspace;
 
         const bool h2LeaseAlreadyHeld =
-            KhConnectionPoolHasHttp2StreamLease(&pooledConnection);
+            ConnectionPoolHasHttp2StreamLease(&pooledConnection);
         ULONG streamId = 0;
         http2::Http2RequestBody requestBody = {};
         requestBody.Data = h2Options.Body;
@@ -1936,7 +1936,7 @@ namespace session
         }
 
         if (!h2LeaseAlreadyHeld) {
-            status = KhConnectionPoolPromoteHttp2StreamLease(
+            status = ConnectionPoolPromoteHttp2StreamLease(
                 connectionPool,
                 &pooledConnection,
                 pooledConnection.Http2->MaxConcurrentStreams());
@@ -2107,26 +2107,26 @@ namespace session
         return length;
     }
 
-    http1::HttpText KhHttpMethodText(KhHttpMethod method) noexcept
+    http1::HttpText HttpMethodText(HttpMethod method) noexcept
     {
         switch (method) {
-        case KhHttpMethod::Post:
+        case HttpMethod::Post:
             return http1::MakeText("POST");
-        case KhHttpMethod::Put:
+        case HttpMethod::Put:
             return http1::MakeText("PUT");
-        case KhHttpMethod::Patch:
+        case HttpMethod::Patch:
             return http1::MakeText("PATCH");
-        case KhHttpMethod::Delete:
+        case HttpMethod::Delete:
             return http1::MakeText("DELETE");
-        case KhHttpMethod::Head:
+        case HttpMethod::Head:
             return http1::MakeText("HEAD");
-        case KhHttpMethod::Options:
+        case HttpMethod::Options:
             return http1::MakeText("OPTIONS");
-        case KhHttpMethod::Connect:
+        case HttpMethod::Connect:
             return http1::MakeText("CONNECT");
-        case KhHttpMethod::Trace:
+        case HttpMethod::Trace:
             return http1::MakeText("TRACE");
-        case KhHttpMethod::Get:
+        case HttpMethod::Get:
         default:
             return http1::MakeText("GET");
         }
@@ -2174,7 +2174,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS BuildH2cUpgradeRequest(
-        const KhRequest& request,
+        const Request& request,
         http1::HttpText authority,
         _In_reads_(requestHeaderCount) const http1::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
@@ -2213,7 +2213,7 @@ namespace session
         settingsText.Data = settingsValue.Get();
 
         SIZE_T offset = 0;
-        status = AppendH2cText(output, outputCapacity, &offset, KhHttpMethodText(request.Method));
+        status = AppendH2cText(output, outputCapacity, &offset, HttpMethodText(request.Method));
         if (!NT_SUCCESS(status)) return status;
         status = AppendH2cLiteral(output, outputCapacity, &offset, " ");
         if (!NT_SUCCESS(status)) return status;
@@ -2358,7 +2358,7 @@ namespace session
     _Must_inspect_result_
     NTSTATUS ReadH2cUpgradeResponse(
         _Inout_ core::ITransport& transport,
-        _Inout_ KhWorkspace& workspace,
+        _Inout_ Workspace& workspace,
         _Inout_ HeapArray<UCHAR>& replayBytes,
         _Out_ SIZE_T* replayLength) noexcept
     {
@@ -2397,7 +2397,7 @@ namespace session
             }
 
             if (workspace.ResponseLength == workspace.Response.Length) {
-                NTSTATUS status = KhWorkspaceEnsureResponseCapacity(&workspace, workspace.ResponseLength + 1);
+                NTSTATUS status = WorkspaceEnsureResponseCapacity(&workspace, workspace.ResponseLength + 1);
                 if (!NT_SUCCESS(status)) {
                     return status;
                 }
@@ -2420,10 +2420,10 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendH2cUpgradeViaTransport(
-        const KhRequest& request,
-        KhWorkspace& workspace,
-        _Inout_ KhPooledConnection& pooledConnection,
-        _In_ const KhHttpSendOptions& sendOptions,
+        const Request& request,
+        Workspace& workspace,
+        _Inout_ PooledConnection& pooledConnection,
+        _In_ const HttpSendOptions& sendOptions,
         SIZE_T maxHeaderBlockBytes,
         _In_reads_(requestHeaderCount) const http1::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
@@ -2604,7 +2604,7 @@ namespace session
 #endif
 
     _Must_inspect_result_
-    NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ KhWorkspace& workspace) noexcept
+    NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ Workspace& workspace) noexcept
     {
         const SIZE_T currentLength = workspace.DecodedBody.Length;
         if (workspace.MaxResponseBytes != 0 && currentLength >= workspace.MaxResponseBytes) {
@@ -2612,7 +2612,7 @@ namespace session
         }
 
         SIZE_T requiredCapacity = currentLength == 0 ?
-            KhWorkspaceDecodedBodyBytes :
+            WorkspaceDecodedBodyBytes :
             currentLength * 2;
         if (currentLength != 0 &&
             requiredCapacity < currentLength) {
@@ -2628,18 +2628,18 @@ namespace session
             return STATUS_BUFFER_TOO_SMALL;
         }
 
-        return KhWorkspaceEnsureDecodedBodyCapacity(&workspace, requiredCapacity);
+        return WorkspaceEnsureDecodedBodyCapacity(&workspace, requiredCapacity);
     }
 
     _Must_inspect_result_
     NTSTATUS BuildRequestBytes(
-        const KhRequest& request,
+        const Request& request,
         bool addExpectContinue,
         bool allowTrace,
         bool useProxyAbsoluteForm,
-        const KhProxyOptions& proxy,
-        _Inout_ KhWorkspace& workspace,
-        _In_ const KhHttpSendOptions& sendOptions,
+        const ProxyOptions& proxy,
+        _Inout_ Workspace& workspace,
+        _In_ const HttpSendOptions& sendOptions,
         _Out_writes_bytes_(hostHeaderCapacity) char* hostHeader,
         SIZE_T hostHeaderCapacity,
         _Out_writes_bytes_(requestTargetCapacity) char* requestTarget,
@@ -2792,7 +2792,7 @@ namespace session
     _Must_inspect_result_
     NTSTATUS ReadHttpResponseFromSocket(
         _Inout_ core::ITransport& transport,
-        _Inout_ KhWorkspace& workspace,
+        _Inout_ Workspace& workspace,
         bool responseBodyForbidden,
         _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
         _In_opt_ const http1::HttpCodingDecodeMaterials* materials,
@@ -2805,10 +2805,10 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp1PipelineRequestBuffer(
-        _Inout_ KhConnectionPool* connectionPool,
-        _Inout_ KhPooledConnection* pooledConnection,
+        _Inout_ ConnectionPool* connectionPool,
+        _Inout_ PooledConnection* pooledConnection,
         _Inout_ core::ITransport& transport,
-        _Inout_ KhWorkspace& workspace,
+        _Inout_ Workspace& workspace,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
         SIZE_T requestLength,
         bool responseBodyForbidden,
@@ -2839,7 +2839,7 @@ namespace session
         }
 
         ULONG sequence = 0;
-        NTSTATUS status = KhConnectionPoolBeginHttp1PipelineSend(
+        NTSTATUS status = ConnectionPoolBeginHttp1PipelineSend(
             connectionPool,
             pooledConnection,
             &sequence);
@@ -2848,13 +2848,13 @@ namespace session
         }
 
         status = SendHttp1RequestBuffer(transport, requestBytes, requestLength);
-        KhConnectionPoolEndHttp1PipelineSend(pooledConnection);
+        ConnectionPoolEndHttp1PipelineSend(pooledConnection);
         if (!NT_SUCCESS(status)) {
-            KhConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
+            ConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
             return status;
         }
 
-        status = KhConnectionPoolWaitHttp1PipelineReceiveTurn(
+        status = ConnectionPoolWaitHttp1PipelineReceiveTurn(
             connectionPool,
             pooledConnection,
             sequence);
@@ -2864,7 +2864,7 @@ namespace session
 
         status = LoadHttp1PipelineBufferedBytes(connectionPool, pooledConnection, workspace);
         if (!NT_SUCCESS(status)) {
-            KhConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
+            ConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
             return status;
         }
 
@@ -2881,7 +2881,7 @@ namespace session
             trailerCapacity,
             rawResponseLength);
         if (!NT_SUCCESS(status)) {
-            KhConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
+            ConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
             return status;
         }
 
@@ -2892,7 +2892,7 @@ namespace session
             *parsed,
             rawResponseLength);
         if (!NT_SUCCESS(status)) {
-            KhConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
+            ConnectionPoolFailHttp1Pipeline(connectionPool, pooledConnection, status);
             return status;
         }
 
@@ -2901,13 +2901,13 @@ namespace session
             parsed->MajorVersion == 1 &&
             parsed->MinorVersion == 1;
         if (reusable) {
-            KhConnectionPoolCompleteHttp1PipelineReceive(
+            ConnectionPoolCompleteHttp1PipelineReceive(
                 connectionPool,
                 pooledConnection,
                 sequence);
         }
         else {
-            KhConnectionPoolFailHttp1Pipeline(
+            ConnectionPoolFailHttp1Pipeline(
                 connectionPool,
                 pooledConnection,
                 STATUS_CONNECTION_DISCONNECTED);
@@ -2964,7 +2964,7 @@ namespace session
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestTrailers(
         _Inout_ core::ITransport& transport,
-        _In_ const KhRequest& request) noexcept
+        _In_ const Request& request) noexcept
     {
         NTSTATUS status = SendTransportSegment(
             transport,
@@ -2975,7 +2975,7 @@ namespace session
         }
 
         for (SIZE_T index = 0; index < request.TrailerCount; ++index) {
-            const KhStoredHeader& trailer = request.Trailers[index];
+            const StoredHeader& trailer = request.Trailers[index];
             status = SendTransportSegment(
                 transport,
                 reinterpret_cast<const UCHAR*>(trailer.Name),
@@ -3011,7 +3011,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS ReadRequestBodySource(
-        _In_ const KhRequest& request,
+        _In_ const Request& request,
         _Out_writes_bytes_(bufferCapacity) UCHAR* buffer,
         SIZE_T bufferCapacity,
         _Out_ SIZE_T* bytesRead,
@@ -3048,8 +3048,8 @@ namespace session
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestBodySource(
         _Inout_ core::ITransport& transport,
-        _In_ const KhRequest& request,
-        _Inout_ KhWorkspace& workspace) noexcept
+        _In_ const Request& request,
+        _Inout_ Workspace& workspace) noexcept
     {
         if (request.BodySourceCallback == nullptr ||
             workspace.Request.Data == nullptr ||
@@ -3076,7 +3076,7 @@ namespace session
                 return status;
             }
 
-            if (request.BodyMode == KhRequestBodyMode::ContentLength) {
+            if (request.BodyMode == RequestBodyMode::ContentLength) {
                 if (!request.BodySourceContentLengthKnown) {
                     return STATUS_INVALID_PARAMETER;
                 }
@@ -3139,8 +3139,8 @@ namespace session
 #if defined(WKNET_USER_MODE_TEST)
     _Must_inspect_result_
     NTSTATUS SimulateHttp1RequestBodySourceForTest(
-        _In_ const KhRequest& request,
-        _Inout_ KhWorkspace& workspace,
+        _In_ const Request& request,
+        _Inout_ Workspace& workspace,
         _Out_ SIZE_T* bodyBytesLength) noexcept
     {
         if (bodyBytesLength != nullptr) {
@@ -3173,7 +3173,7 @@ namespace session
                 return status;
             }
 
-            if (request.BodyMode == KhRequestBodyMode::ContentLength) {
+            if (request.BodyMode == RequestBodyMode::ContentLength) {
                 if (!request.BodySourceContentLengthKnown) {
                     return STATUS_INVALID_PARAMETER;
                 }
@@ -3213,7 +3213,7 @@ namespace session
                     return STATUS_INTEGER_OVERFLOW;
                 }
                 for (SIZE_T index = 0; index < request.TrailerCount; ++index) {
-                    const KhStoredHeader& trailer = request.Trailers[index];
+                    const StoredHeader& trailer = request.Trailers[index];
                     if (!AddSizeChecked(next, trailer.NameLength, &next) ||
                         !AddSizeChecked(next, sizeof(": ") - 1, &next) ||
                         !AddSizeChecked(next, trailer.ValueLength, &next) ||
@@ -3270,7 +3270,7 @@ namespace session
     _Must_inspect_result_
     NTSTATUS ReadHttpResponseFromSocketEx(
         _Inout_ core::ITransport& transport,
-        _Inout_ KhWorkspace& workspace,
+        _Inout_ Workspace& workspace,
         bool responseBodyForbidden,
         bool preserveInformationalResponses,
         ULONG readTimeoutMilliseconds,
@@ -3339,7 +3339,7 @@ namespace session
             }
 
             // Content decoding (gzip/deflate/br) and chunked transfer-decoding write into the
-            // workspace DecodedBody buffer, which starts at KhWorkspaceDecodedBodyBytes. A decoded
+            // workspace DecodedBody buffer, which starts at WorkspaceDecodedBodyBytes. A decoded
             // body larger than the current buffer surfaces as STATUS_BUFFER_TOO_SMALL here. Grow the
             // buffer (bounded only when MaxResponseBytes is nonzero) and re-parse, mirroring the
             // HTTP/2 decode path.
@@ -3364,7 +3364,7 @@ namespace session
                 return STATUS_BUFFER_TOO_SMALL;
             }
 
-            status = KhWorkspaceEnsureResponseCapacity(&workspace, responseLength + 1);
+            status = WorkspaceEnsureResponseCapacity(&workspace, responseLength + 1);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -3486,7 +3486,7 @@ namespace session
     _Must_inspect_result_
     NTSTATUS ReadHttpResponseFromSocket(
         _Inout_ core::ITransport& transport,
-        _Inout_ KhWorkspace& workspace,
+        _Inout_ Workspace& workspace,
         bool responseBodyForbidden,
         _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
         _In_opt_ const http1::HttpCodingDecodeMaterials* materials,
@@ -3516,7 +3516,7 @@ namespace session
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestBufferWithExpect(
         _Inout_ core::ITransport& transport,
-        _Inout_ KhWorkspace& workspace,
+        _Inout_ Workspace& workspace,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
         SIZE_T requestLength,
         ULONG expectContinueTimeoutMilliseconds,
@@ -3660,8 +3660,8 @@ namespace session
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestSourceWithExpect(
         _Inout_ core::ITransport& transport,
-        _Inout_ KhWorkspace& workspace,
-        _In_ const KhRequest& request,
+        _Inout_ Workspace& workspace,
+        _In_ const Request& request,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
         SIZE_T requestLength,
         ULONG expectContinueTimeoutMilliseconds,
@@ -3846,9 +3846,9 @@ namespace session
         return STATUS_SUCCESS;
     }
 
-    tls::TlsProtocol ToTlsProtocol(KhTlsVersion version) noexcept
+    tls::TlsProtocol ToTlsProtocol(TlsVersion version) noexcept
     {
-        return version == KhTlsVersion::Tls13 ? tls::TlsProtocol::Tls13 : tls::TlsProtocol::Tls12;
+        return version == TlsVersion::Tls13 ? tls::TlsProtocol::Tls13 : tls::TlsProtocol::Tls12;
     }
 
     SIZE_T DecimalDigitCount(USHORT value) noexcept
@@ -3896,7 +3896,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS BuildProxyConnectAuthority(
-        const KhRequest& request,
+        const Request& request,
         _Out_writes_bytes_(destinationCapacity) char* destination,
         SIZE_T destinationCapacity,
         _Out_ SIZE_T* destinationLength) noexcept
@@ -3944,7 +3944,7 @@ namespace session
 #if !defined(WKNET_USER_MODE_TEST)
     static bool IsHttpAsyncCancellationRequested(_In_opt_ void* context) noexcept;
 
-    void ReleaseHttp2Layer(_Inout_ KhPooledConnection& connection) noexcept
+    void ReleaseHttp2Layer(_Inout_ PooledConnection& connection) noexcept
     {
         if (connection.Http2 == nullptr) {
             return;
@@ -3958,7 +3958,7 @@ namespace session
         connection.Http2 = nullptr;
     }
 
-    void ReleaseTlsLayer(_Inout_ KhPooledConnection& connection) noexcept
+    void ReleaseTlsLayer(_Inout_ PooledConnection& connection) noexcept
     {
         ReleaseHttp2Layer(connection);
         if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
@@ -3971,7 +3971,7 @@ namespace session
         }
     }
 
-    void ClosePooledTransportResources(_Inout_ KhPooledConnection& connection) noexcept
+    void ClosePooledTransportResources(_Inout_ PooledConnection& connection) noexcept
     {
         ReleaseTlsLayer(connection);
 
@@ -3994,10 +3994,10 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS ConnectSocketToAddress(
-        _In_ KH_SESSION session,
+        _In_ SessionHandle session,
         _In_ const SOCKADDR* remoteAddress,
-        _Inout_ KhPooledConnection& connection,
-        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
+        _Inout_ PooledConnection& connection,
+        _In_opt_ AsyncOperationHandle cancellationOperation) noexcept
     {
         if (session == nullptr || remoteAddress == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -4041,15 +4041,15 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS EstablishProxyTunnel(
-        _In_ KH_SESSION session,
-        const KhRequest& request,
-        _Inout_ KhWorkspace& workspace,
-        _Inout_ KhPooledConnection& connection,
+        _In_ SessionHandle session,
+        const Request& request,
+        _Inout_ Workspace& workspace,
+        _Inout_ PooledConnection& connection,
         _Out_writes_(headerCapacity) http1::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
         _Out_writes_(trailerCapacity) http1::HttpHeader* responseTrailers,
         SIZE_T trailerCapacity,
-        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
+        _In_opt_ AsyncOperationHandle cancellationOperation) noexcept
     {
         if (session == nullptr || !session->Options.Proxy.Enabled) {
             return STATUS_SUCCESS;
@@ -4158,10 +4158,10 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS EnsureSocketConnected(
-        _In_ KH_SESSION session,
-        const KhRequest& request,
-        _Inout_ KhPooledConnection& connection,
-        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
+        _In_ SessionHandle session,
+        const Request& request,
+        _Inout_ PooledConnection& connection,
+        _In_opt_ AsyncOperationHandle cancellationOperation) noexcept
     {
         if (session == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -4200,8 +4200,8 @@ namespace session
                 cancellationOperation);
         }
 
-        HeapArray<wchar_t> serverName(KhMaxHostLength + 1);
-        HeapArray<wchar_t> serviceName(KhMaxServiceNameLength + 1);
+        HeapArray<wchar_t> serverName(MaxHostLength + 1);
+        HeapArray<wchar_t> serviceName(MaxServiceNameLength + 1);
         if (!serverName.IsValid() || !serviceName.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -4260,12 +4260,12 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS ConnectTlsOnExistingSocket(
-        _In_ KH_SESSION session,
-        const KhRequest& request,
-        _Inout_ KhWorkspace& workspace,
-        _Inout_ KhPooledConnection& connection,
-        KhTlsVersion maximumTlsVersion,
-        _In_opt_ KH_ASYNC_OPERATION cancellationOperation,
+        _In_ SessionHandle session,
+        const Request& request,
+        _Inout_ Workspace& workspace,
+        _Inout_ PooledConnection& connection,
+        TlsVersion maximumTlsVersion,
+        _In_opt_ AsyncOperationHandle cancellationOperation,
         _Out_opt_ tls::TlsHandshakeFailure* failure) noexcept
     {
         if (failure != nullptr) {
@@ -4306,7 +4306,7 @@ namespace session
             request.Tls.ServerNameLength :
             request.HostLength;
         tlsOptions.CertificateStore = request.Tls.CertificateStore;
-        tlsOptions.VerifyCertificate = request.Tls.CertificatePolicy == KhCertificatePolicy::Verify;
+        tlsOptions.VerifyCertificate = request.Tls.CertificatePolicy == CertificatePolicy::Verify;
         tlsOptions.MinimumProtocol = ToTlsProtocol(request.Tls.MinVersion);
         tlsOptions.MaximumProtocol = ToTlsProtocol(maximumTlsVersion);
         tlsOptions.Policy = request.Tls.Policy;
@@ -4369,15 +4369,15 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS EnsureTlsConnected(
-        _In_ KH_SESSION session,
-        const KhRequest& request,
-        _Inout_ KhWorkspace& workspace,
-        _Inout_ KhPooledConnection& connection,
+        _In_ SessionHandle session,
+        const Request& request,
+        _Inout_ Workspace& workspace,
+        _Inout_ PooledConnection& connection,
         _Out_writes_(headerCapacity) http1::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,
         _Out_writes_(trailerCapacity) http1::HttpHeader* responseTrailers,
         SIZE_T trailerCapacity,
-        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
+        _In_opt_ AsyncOperationHandle cancellationOperation) noexcept
     {
         if (session == nullptr || connection.Socket == nullptr || connection.RawTransport == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -4454,7 +4454,7 @@ namespace session
             request,
             workspace,
             connection,
-            KhTlsVersion::Tls12,
+            TlsVersion::Tls12,
             cancellationOperation,
             nullptr);
         if (NT_SUCCESS(status)) {
@@ -4477,7 +4477,7 @@ namespace session
     public:
         WskCancellationScope(
             _In_opt_ core::WskTransport* transport,
-            _In_opt_ KH_ASYNC_OPERATION operation) noexcept :
+            _In_opt_ AsyncOperationHandle operation) noexcept :
             transport_(transport)
         {
             if (transport_ == nullptr || operation == nullptr) {
@@ -4507,9 +4507,9 @@ namespace session
 
 #if defined(WKNET_USER_MODE_TEST)
     void PopulateTestHttpTransportRequest(
-        const KhRequest& request,
-        const KhSession& session,
-        KhPooledConnection* pooledConnection,
+        const Request& request,
+        const Session& session,
+        PooledConnection* pooledConnection,
         bool reusedConnection,
         _In_reads_bytes_opt_(builtRequestLength) const char* builtRequest,
         SIZE_T builtRequestLength,
@@ -4517,8 +4517,8 @@ namespace session
         SIZE_T bodyBytesLength,
         bool expectContinueEnabled,
         bool expectContinueBodySent,
-        _Out_ KhTestHttpTransportRequest* testRequest,
-        KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled,
+        _Out_ TestHttpTransportRequest* testRequest,
+        Http2CleartextMode http2CleartextMode = Http2CleartextMode::Disabled,
         bool usedHttp2 = false,
         bool http11PipelineEnabled = false,
         bool http11PipelineLease = false,
@@ -4563,7 +4563,7 @@ namespace session
         testRequest->ProxyAuthorityLength = session.Options.Proxy.AuthorityLength;
         testRequest->ProxyAuthHeader = session.Options.Proxy.AuthHeader;
         testRequest->ProxyAuthHeaderLength = session.Options.Proxy.AuthHeaderLength;
-        testRequest->PoolableConnection = request.ConnectionPolicy != KhConnectionPolicy::NoPool;
+        testRequest->PoolableConnection = request.ConnectionPolicy != ConnectionPolicy::NoPool;
         testRequest->ReusedConnection = reusedConnection;
         testRequest->ConnectionId = pooledConnection != nullptr ? pooledConnection->Id : 0;
         testRequest->Http11PipelineEnabled = http11PipelineEnabled;
@@ -4576,11 +4576,11 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendViaTransport(
-        KH_SESSION session,
-        const KhRequest& request,
-        const KhHttpSendOptions& sendOptions,
-        KhWorkspace& workspace,
-        KhPooledConnection* pooledConnection,
+        SessionHandle session,
+        const Request& request,
+        const HttpSendOptions& sendOptions,
+        Workspace& workspace,
+        PooledConnection* pooledConnection,
         bool reusedConnection,
         bool allowHttp11Pipeline,
         ULONG http11PipelineMaxDepth,
@@ -4595,7 +4595,7 @@ namespace session
         _Out_ SIZE_T* rawResponseLength,
         _Out_ bool* connectionReusable,
         _Out_opt_ bool* usedHttp11Pipeline,
-        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
+        _In_opt_ AsyncOperationHandle cancellationOperation) noexcept
     {
         if (rawResponseLength != nullptr) {
             *rawResponseLength = 0;
@@ -4653,7 +4653,7 @@ namespace session
         }
         SIZE_T bodyBytesLength = builtRequestLength - headerBytesLength;
         const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
-        KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled;
+        Http2CleartextMode http2CleartextMode = Http2CleartextMode::Disabled;
         status = EffectiveHttp2CleartextMode(
             sendOptions,
             request,
@@ -4662,11 +4662,11 @@ namespace session
             return status;
         }
         const bool useHttp2Cleartext =
-            http2CleartextMode != KhHttp2CleartextMode::Disabled;
+            http2CleartextMode != Http2CleartextMode::Disabled;
         if (useHttp2Cleartext && useExpectContinue) {
             return STATUS_NOT_SUPPORTED;
         }
-        if (http2CleartextMode == KhHttp2CleartextMode::Upgrade &&
+        if (http2CleartextMode == Http2CleartextMode::Upgrade &&
             (request.HasBody || request.BodySourceCallback != nullptr || request.TrailerCount != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -4678,9 +4678,9 @@ namespace session
         bool testHttp11PipelineLease = false;
         ULONG testHttp11PipelineSequence = 0;
 
-        KhTestHttpTransportResponse testResponse = {};
+        TestHttpTransportResponse testResponse = {};
         status = STATUS_SUCCESS;
-        KhTestHttpTransportRequest testRequest = {};
+        TestHttpTransportRequest testRequest = {};
         if (useExpectContinue) {
             PopulateTestHttpTransportRequest(
                 request,
@@ -4745,8 +4745,8 @@ namespace session
                 !useHttp2Cleartext &&
                 !h2ExplicitlyRequestedForTest;
             if (canUseTestHttp11Pipeline) {
-                if (!KhConnectionPoolHasHttp1PipelineLease(pooledConnection)) {
-                    status = KhConnectionPoolPromoteHttp1PipelineLease(
+                if (!ConnectionPoolHasHttp1PipelineLease(pooledConnection)) {
+                    status = ConnectionPoolPromoteHttp1PipelineLease(
                         &session->ConnectionPool,
                         pooledConnection,
                         http11PipelineMaxDepth);
@@ -4755,7 +4755,7 @@ namespace session
                     }
                 }
 
-                status = KhConnectionPoolBeginHttp1PipelineSend(
+                status = ConnectionPoolBeginHttp1PipelineSend(
                     &session->ConnectionPool,
                     pooledConnection,
                     &testHttp11PipelineSequence);
@@ -4786,19 +4786,19 @@ namespace session
                 testHttp11PipelineSequence);
             status = g_testHttpTransport(g_testHttpTransportContext, &testRequest, &testResponse);
             if (testHttp11PipelineLease) {
-                KhConnectionPoolEndHttp1PipelineSend(pooledConnection);
+                ConnectionPoolEndHttp1PipelineSend(pooledConnection);
             }
         }
         if (!NT_SUCCESS(status)) {
             if (testHttp11PipelineLease) {
-                KhConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
+                ConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
             }
             return status;
         }
 
         if (useHttp2Cleartext) {
             if (testHttp11PipelineLease) {
-                KhConnectionPoolFailHttp1Pipeline(
+                ConnectionPoolFailHttp1Pipeline(
                     &session->ConnectionPool,
                     pooledConnection,
                     STATUS_NOT_SUPPORTED);
@@ -4815,7 +4815,7 @@ namespace session
 
         if (TextEqualsLiteral(testResponse.NegotiatedAlpn, testResponse.NegotiatedAlpnLength, "h2")) {
             if (testHttp11PipelineLease) {
-                KhConnectionPoolFailHttp1Pipeline(
+                ConnectionPoolFailHttp1Pipeline(
                     &session->ConnectionPool,
                     pooledConnection,
                     STATUS_NOT_SUPPORTED);
@@ -4842,7 +4842,7 @@ namespace session
 
         if (testResponse.RawResponse == nullptr || testResponse.RawResponseLength == 0) {
             if (testHttp11PipelineLease) {
-                KhConnectionPoolFailHttp1Pipeline(
+                ConnectionPoolFailHttp1Pipeline(
                     &session->ConnectionPool,
                     pooledConnection,
                     STATUS_INVALID_NETWORK_RESPONSE);
@@ -4851,7 +4851,7 @@ namespace session
         }
 
         if (testHttp11PipelineLease) {
-            status = KhConnectionPoolWaitHttp1PipelineReceiveTurn(
+            status = ConnectionPoolWaitHttp1PipelineReceiveTurn(
                 &session->ConnectionPool,
                 pooledConnection,
                 testHttp11PipelineSequence);
@@ -4860,10 +4860,10 @@ namespace session
             }
         }
 
-        status = KhWorkspaceEnsureResponseCapacity(&workspace, testResponse.RawResponseLength);
+        status = WorkspaceEnsureResponseCapacity(&workspace, testResponse.RawResponseLength);
         if (!NT_SUCCESS(status)) {
             if (testHttp11PipelineLease) {
-                KhConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
+                ConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
             }
             return status;
         }
@@ -4884,7 +4884,7 @@ namespace session
             trailerCapacity);
         if (!NT_SUCCESS(status)) {
             if (testHttp11PipelineLease) {
-                KhConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
+                ConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
             }
             return status;
         }
@@ -4897,7 +4897,7 @@ namespace session
                 *parsed,
                 rawResponseLength);
             if (!NT_SUCCESS(status)) {
-                KhConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
+                ConnectionPoolFailHttp1Pipeline(&session->ConnectionPool, pooledConnection, status);
                 return status;
             }
 
@@ -4907,13 +4907,13 @@ namespace session
                 parsed->MajorVersion == 1 &&
                 parsed->MinorVersion == 1;
             if (*connectionReusable) {
-                KhConnectionPoolCompleteHttp1PipelineReceive(
+                ConnectionPoolCompleteHttp1PipelineReceive(
                     &session->ConnectionPool,
                     pooledConnection,
                     testHttp11PipelineSequence);
             }
             else {
-                KhConnectionPoolFailHttp1Pipeline(
+                ConnectionPoolFailHttp1Pipeline(
                     &session->ConnectionPool,
                     pooledConnection,
                     STATUS_CONNECTION_DISCONNECTED);
@@ -4934,7 +4934,7 @@ namespace session
         }
 
         if (IsHttpsRequest(request)) {
-            if (request.Tls.CertificatePolicy == KhCertificatePolicy::Verify &&
+            if (request.Tls.CertificatePolicy == CertificatePolicy::Verify &&
                 request.Tls.CertificateStore == nullptr) {
                 return STATUS_INVALID_PARAMETER;
             }
@@ -4944,7 +4944,7 @@ namespace session
         }
 
         const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
-        KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled;
+        Http2CleartextMode http2CleartextMode = Http2CleartextMode::Disabled;
         status = EffectiveHttp2CleartextMode(
             sendOptions,
             request,
@@ -4954,14 +4954,14 @@ namespace session
         }
 
         const bool useHttp2Cleartext =
-            http2CleartextMode != KhHttp2CleartextMode::Disabled;
+            http2CleartextMode != Http2CleartextMode::Disabled;
         if (useHttp2Cleartext && session->Options.Proxy.Enabled) {
             return STATUS_NOT_SUPPORTED;
         }
         if (useHttp2Cleartext && useExpectContinue) {
             return STATUS_NOT_SUPPORTED;
         }
-        if (http2CleartextMode == KhHttp2CleartextMode::Upgrade &&
+        if (http2CleartextMode == Http2CleartextMode::Upgrade &&
             (request.HasBody || request.BodySourceCallback != nullptr || request.TrailerCount != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -5017,7 +5017,7 @@ namespace session
                 return STATUS_INVALID_DEVICE_STATE;
             }
 
-            if (http2CleartextMode == KhHttp2CleartextMode::Upgrade &&
+            if (http2CleartextMode == Http2CleartextMode::Upgrade &&
                 pooledConnection->Http2 == nullptr) {
                 status = SendH2cUpgradeViaTransport(
                     request,
@@ -5114,8 +5114,8 @@ namespace session
         }
 
         if (allowHttp11Pipeline) {
-            if (!KhConnectionPoolHasHttp1PipelineLease(pooledConnection)) {
-                status = KhConnectionPoolPromoteHttp1PipelineLease(
+            if (!ConnectionPoolHasHttp1PipelineLease(pooledConnection)) {
+                status = ConnectionPoolPromoteHttp1PipelineLease(
                     &session->ConnectionPool,
                     pooledConnection,
                     http11PipelineMaxDepth);
@@ -5135,7 +5135,7 @@ namespace session
                 workspace,
                 workspace.Request.Data,
                 builtRequestLength,
-                request.Method == KhHttpMethod::Head,
+                request.Method == HttpMethod::Head,
                 &acceptPolicy,
                 sendOptions.ContentCodingMaterials,
                 parsed,
@@ -5156,7 +5156,7 @@ namespace session
                     workspace.Request.Data,
                     builtRequestLength,
                     EffectiveExpectContinueTimeoutMilliseconds(sendOptions),
-                    request.Method == KhHttpMethod::Head,
+                    request.Method == HttpMethod::Head,
                     &acceptPolicy,
                     sendOptions.ContentCodingMaterials,
                     parsed,
@@ -5173,7 +5173,7 @@ namespace session
                     workspace.Request.Data,
                     builtRequestLength,
                     EffectiveExpectContinueTimeoutMilliseconds(sendOptions),
-                    request.Method == KhHttpMethod::Head,
+                    request.Method == HttpMethod::Head,
                     &acceptPolicy,
                     sendOptions.ContentCodingMaterials,
                     parsed,
@@ -5205,7 +5205,7 @@ namespace session
             status = ReadHttpResponseFromSocket(
                 *pooledConnection->Transport,
                 workspace,
-                request.Method == KhHttpMethod::Head,
+                request.Method == HttpMethod::Head,
                 &acceptPolicy,
                 sendOptions.ContentCodingMaterials,
                 parsed,
@@ -5271,35 +5271,35 @@ namespace session
             statusCode == 308;
     }
 
-    bool ShouldRewriteRedirectToGet(USHORT statusCode, KhHttpMethod method) noexcept
+    bool ShouldRewriteRedirectToGet(USHORT statusCode, HttpMethod method) noexcept
     {
         if (statusCode == 303) {
-            return method != KhHttpMethod::Head;
+            return method != HttpMethod::Head;
         }
 
         if (statusCode != 301 && statusCode != 302) {
             return false;
         }
 
-        return method == KhHttpMethod::Post;
+        return method == HttpMethod::Post;
     }
 
 #if !defined(WKNET_USER_MODE_TEST)
     static bool IsHttpAsyncCancellationRequested(_In_opt_ void* context) noexcept
     {
         return context != nullptr &&
-            KhAsyncOperationIsCanceled(static_cast<KH_ASYNC_OPERATION>(context));
+            AsyncOperationIsCanceled(static_cast<AsyncOperationHandle>(context));
     }
 #endif
 
-    bool RedirectsEnabled(const KhHttpSendOptions& options) noexcept
+    bool RedirectsEnabled(const HttpSendOptions& options) noexcept
     {
-        return (options.Flags & KhHttpSendFlagDisableAutoRedirect) == 0;
+        return (options.Flags & HttpSendFlagDisableAutoRedirect) == 0;
     }
 
-    ULONG EffectiveMaxRedirects(const KhHttpSendOptions& options) noexcept
+    ULONG EffectiveMaxRedirects(const HttpSendOptions& options) noexcept
     {
-        return options.MaxRedirects != 0 ? options.MaxRedirects : KhDefaultMaxRedirects;
+        return options.MaxRedirects != 0 ? options.MaxRedirects : DefaultMaxRedirects;
     }
 
     http1::HttpText FindLocationHeader(const http1::HttpResponse& response) noexcept
@@ -5500,7 +5500,7 @@ namespace session
         return textLength;
     }
 
-    http1::HttpText BaseRequestFragment(const KhRequest& request) noexcept
+    http1::HttpText BaseRequestFragment(const Request& request) noexcept
     {
         if (request.Url == nullptr || request.UrlLength == 0) {
             return {};
@@ -5515,7 +5515,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS AppendRedirectOrigin(
-        const KhRequest& request,
+        const Request& request,
         _Out_writes_bytes_(destinationCapacity) char* destination,
         SIZE_T destinationCapacity,
         _Inout_ SIZE_T* offset) noexcept
@@ -5601,7 +5601,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS AppendRedirectPathAndSuffix(
-        const KhRequest& request,
+        const Request& request,
         http1::HttpText location,
         _Out_writes_bytes_(destinationCapacity) char* destination,
         SIZE_T destinationCapacity,
@@ -5711,18 +5711,18 @@ namespace session
         return status;
     }
 
-    void ReleaseStoredRedirectHeader(_Inout_ KhStoredHeader& header) noexcept
+    void ReleaseStoredRedirectHeader(_Inout_ StoredHeader& header) noexcept
     {
         FreeApiMemory(header.Name);
         FreeApiMemory(header.Value);
         header = {};
     }
 
-    void RemoveRedirectSensitiveHeaders(_Inout_ KhRequest& request) noexcept
+    void RemoveRedirectSensitiveHeaders(_Inout_ Request& request) noexcept
     {
         SIZE_T index = 0;
         while (index < request.HeaderCount) {
-            const KhStoredHeader& header = request.Headers[index];
+            const StoredHeader& header = request.Headers[index];
             const bool sensitive =
                 TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, "Authorization") ||
                 TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, "Cookie") ||
@@ -5747,7 +5747,7 @@ namespace session
         const char* oldHost,
         SIZE_T oldHostLength,
         USHORT oldPort,
-        const KhRequest& redirected) noexcept
+        const Request& redirected) noexcept
     {
         return oldPort != redirected.Port ||
             !TextEqualsIgnoreCase(oldScheme, oldSchemeLength, redirected.Scheme, redirected.SchemeLength) ||
@@ -5755,7 +5755,7 @@ namespace session
     }
 
     bool IsHttpsDowngradeRedirect(
-        const KhRequest& request,
+        const Request& request,
         http1::HttpText redirectUrl) noexcept
     {
         return TextEqualsLiteralIgnoreCase(request.Scheme, request.SchemeLength, "https") &&
@@ -5764,7 +5764,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS BuildRedirectUrl(
-        const KhRequest& request,
+        const Request& request,
         http1::HttpText location,
         _Out_writes_bytes_(destinationCapacity) char* destination,
         SIZE_T destinationCapacity,
@@ -5864,10 +5864,10 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS ApplyRedirectToRequest(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         USHORT statusCode,
         http1::HttpText location,
-        _Inout_ KhWorkspace& workspace) noexcept
+        _Inout_ Workspace& workspace) noexcept
     {
         HeapObject<RedirectOriginSnapshot> oldOrigin;
         if (!oldOrigin.IsValid()) {
@@ -5903,7 +5903,7 @@ namespace session
             return STATUS_NOT_SUPPORTED;
         }
 
-        status = KhHttpRequestSetUrl(&request, redirectUrl, redirectUrlLength);
+        status = HttpRequestSetUrl(&request, redirectUrl, redirectUrlLength);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -5928,12 +5928,12 @@ namespace session
         }
 
         if (ShouldRewriteRedirectToGet(statusCode, request.Method)) {
-            status = KhHttpRequestSetMethod(&request, KhHttpMethod::Get);
+            status = HttpRequestSetMethod(&request, HttpMethod::Get);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
 
-            status = KhHttpRequestClearBody(&request);
+            status = HttpRequestClearBody(&request);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -5944,14 +5944,14 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendSingleHttpRequest(
-        KH_SESSION session,
-        const KhRequest& request,
-        const KhHttpSendOptions& sendOptions,
-        _Inout_ KhWorkspace& workspace,
+        SessionHandle session,
+        const Request& request,
+        const HttpSendOptions& sendOptions,
+        _Inout_ Workspace& workspace,
         _Inout_ ApiHttpHeaderScratch& headerScratch,
         _Out_ http1::HttpResponse* parsed,
         _Out_ SIZE_T* rawResponseLength,
-        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
+        _In_opt_ AsyncOperationHandle cancellationOperation) noexcept
     {
         if (parsed != nullptr) {
             *parsed = {};
@@ -5963,7 +5963,7 @@ namespace session
             return STATUS_INVALID_PARAMETER;
         }
 
-        KhWorkspaceReset(&workspace);
+        WorkspaceReset(&workspace);
 
         NTSTATUS status = PrepareApiHttpHeaderScratch(workspace, &headerScratch);
         if (!NT_SUCCESS(status)) {
@@ -5973,7 +5973,7 @@ namespace session
         SIZE_T builtRequestLength = 0;
         SIZE_T requestHeaderCount = 0;
         const bool useExpectContinue = RequestUsesExpectContinue(sendOptions, request);
-        const bool allowTrace = (sendOptions.Flags & KhHttpSendFlagAllowTrace) != 0;
+        const bool allowTrace = (sendOptions.Flags & HttpSendFlagAllowTrace) != 0;
         const bool useProxyAbsoluteForm = session->Options.Proxy.Enabled && !IsHttpsRequest(request);
         status = BuildRequestBytes(
             request,
@@ -5988,21 +5988,21 @@ namespace session
             headerScratch.RequestTarget,
             headerScratch.RequestTargetCapacity,
             headerScratch.RequestHeaders,
-            KhMaxHeadersPerRequest,
+            MaxHeadersPerRequest,
             headerScratch.RequestTrailers,
-            KhMaxHeadersPerRequest,
+            MaxHeadersPerRequest,
             &builtRequestLength,
             &requestHeaderCount);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        HeapObject<KhConnectionPoolKey> poolKey;
+        HeapObject<ConnectionPoolKey> poolKey;
         if (!poolKey.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        KhHttp2CleartextMode http2CleartextMode = KhHttp2CleartextMode::Disabled;
+        Http2CleartextMode http2CleartextMode = Http2CleartextMode::Disabled;
         status = EffectiveHttp2CleartextMode(sendOptions, request, &http2CleartextMode);
         if (!NT_SUCCESS(status)) {
             return status;
@@ -6015,10 +6015,10 @@ namespace session
 
         const bool allowHttp11Pipeline =
             IsHttp11PipelineCandidate(*session, request, sendOptions, http2CleartextMode);
-        KhPooledConnection* pooledConnection = nullptr;
+        PooledConnection* pooledConnection = nullptr;
         bool reusedConnection = false;
         if (allowHttp11Pipeline) {
-            status = KhConnectionPoolAcquireHttp1Pipeline(
+            status = ConnectionPoolAcquireHttp1Pipeline(
                 &session->ConnectionPool,
                 *poolKey.Get(),
                 request.ConnectionPolicy,
@@ -6027,7 +6027,7 @@ namespace session
                 &reusedConnection);
         }
         else {
-            status = KhConnectionPoolAcquire(
+            status = ConnectionPoolAcquire(
                 &session->ConnectionPool,
                 *poolKey.Get(),
                 request.ConnectionPolicy,
@@ -6057,7 +6057,7 @@ namespace session
             headerScratch.ResponseHeaders,
             responseHeaderCapacity,
             headerScratch.ResponseTrailers,
-            KhMaxTrailersPerResponse,
+            MaxTrailersPerResponse,
             rawResponseLength,
             &connectionReusable,
             &usedHttp11Pipeline,
@@ -6068,19 +6068,19 @@ namespace session
             ShouldRetryWithFreshConnection(request, status, reusedConnection);
 
         if (shouldRetryWithFreshConnection) {
-            KhConnectionPoolClose(&session->ConnectionPool, pooledConnection);
+            ConnectionPoolClose(&session->ConnectionPool, pooledConnection);
             pooledConnection = nullptr;
 
-            KhPooledConnection* retryConnection = nullptr;
+            PooledConnection* retryConnection = nullptr;
             bool retryReused = false;
-            NTSTATUS retryStatus = KhConnectionPoolAcquire(
+            NTSTATUS retryStatus = ConnectionPoolAcquire(
                 &session->ConnectionPool,
                 *poolKey.Get(),
-                KhConnectionPolicy::ForceNew,
+                ConnectionPolicy::ForceNew,
                 &retryConnection,
                 &retryReused);
             if (NT_SUCCESS(retryStatus) && !retryReused) {
-                KhWorkspaceReset(&workspace);
+                WorkspaceReset(&workspace);
                 retryStatus = PrepareApiHttpHeaderScratch(workspace, &headerScratch);
                 if (NT_SUCCESS(retryStatus)) {
                     retryStatus = BuildRequestBytes(
@@ -6096,14 +6096,14 @@ namespace session
                         headerScratch.RequestTarget,
                         headerScratch.RequestTargetCapacity,
                         headerScratch.RequestHeaders,
-                        KhMaxHeadersPerRequest,
+                        MaxHeadersPerRequest,
                         headerScratch.RequestTrailers,
-                        KhMaxHeadersPerRequest,
+                        MaxHeadersPerRequest,
                         &builtRequestLength,
                         &requestHeaderCount);
                 }
                 if (!NT_SUCCESS(retryStatus)) {
-                    KhConnectionPoolRelease(&session->ConnectionPool, retryConnection, false);
+                    ConnectionPoolRelease(&session->ConnectionPool, retryConnection, false);
                     return retryStatus;
                 }
 
@@ -6126,14 +6126,14 @@ namespace session
                     headerScratch.ResponseHeaders,
                     responseHeaderCapacity,
                     headerScratch.ResponseTrailers,
-                    KhMaxTrailersPerResponse,
+                    MaxTrailersPerResponse,
                     rawResponseLength,
                     &connectionReusable,
                     &usedHttp11Pipeline,
                     cancellationOperation);
 
                 if (!NT_SUCCESS(status)) {
-                    KhConnectionPoolRelease(&session->ConnectionPool, retryConnection, false);
+                    ConnectionPoolRelease(&session->ConnectionPool, retryConnection, false);
                     retryConnection = nullptr;
                 }
                 else {
@@ -6145,41 +6145,41 @@ namespace session
         const bool canReturnToPool =
             NT_SUCCESS(status) &&
             connectionReusable &&
-            request.ConnectionPolicy == KhConnectionPolicy::ReuseOrCreate;
-        KhConnectionPoolRelease(&session->ConnectionPool, pooledConnection, canReturnToPool);
+            request.ConnectionPolicy == ConnectionPolicy::ReuseOrCreate;
+        ConnectionPoolRelease(&session->ConnectionPool, pooledConnection, canReturnToPool);
         return status;
     }
 
 
-    struct KhAsyncHttpContext final
+    struct AsyncHttpContext final
     {
-        KH_SESSION Session = nullptr;
-        KH_REQUEST Request = nullptr;
-        KhHttpSendOptions Options = {};
+        SessionHandle Session = nullptr;
+        RequestHandle Request = nullptr;
+        HttpSendOptions Options = {};
         http1::HttpAcceptEncodingPreference AcceptEncodingPreferences[http1::HttpMaxAcceptEncodingPreferences] = {};
-        KH_RESPONSE Response = nullptr;
+        ResponseHandle Response = nullptr;
         volatile LONG SessionOperationEnded = 0;
     };
 
     _Ret_maybenull_
-    KH_RESPONSE TakeAsyncHttpResponse(_Inout_ KhAsyncHttpContext* context) noexcept
+    ResponseHandle TakeAsyncHttpResponse(_Inout_ AsyncHttpContext* context) noexcept
     {
         if (context == nullptr) {
             return nullptr;
         }
 
 #if defined(WKNET_USER_MODE_TEST)
-        KH_RESPONSE response = context->Response;
+        ResponseHandle response = context->Response;
         context->Response = nullptr;
         return response;
 #else
-        return static_cast<KH_RESPONSE>(InterlockedExchangePointer(
+        return static_cast<ResponseHandle>(InterlockedExchangePointer(
             reinterpret_cast<PVOID volatile*>(&context->Response),
             nullptr));
 #endif
     }
 
-    void EndAsyncHttpSessionOperation(_Inout_ KhAsyncHttpContext* context) noexcept
+    void EndAsyncHttpSessionOperation(_Inout_ AsyncHttpContext* context) noexcept
     {
         if (context == nullptr || context->Session == nullptr) {
             return;
@@ -6195,21 +6195,21 @@ namespace session
             return;
         }
 #endif
-        KhSessionEndOperation(context->Session);
+        SessionEndOperation(context->Session);
     }
 
 
     _Ret_maybenull_
-    KhAsyncHttpContext* AllocateAsyncHttpContext() noexcept
+    AsyncHttpContext* AllocateAsyncHttpContext() noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
-        return static_cast<KhAsyncHttpContext*>(calloc(1, sizeof(KhAsyncHttpContext)));
+        return static_cast<AsyncHttpContext*>(calloc(1, sizeof(AsyncHttpContext)));
 #else
-        return AllocateNonPagedObject<KhAsyncHttpContext>();
+        return AllocateNonPagedObject<AsyncHttpContext>();
 #endif
     }
 
-    void FreeAsyncHttpContext(_In_opt_ KhAsyncHttpContext* context) noexcept
+    void FreeAsyncHttpContext(_In_opt_ AsyncHttpContext* context) noexcept
     {
         if (context == nullptr) {
             return;
@@ -6224,57 +6224,57 @@ namespace session
 
     void CleanupAsyncHttpContext(void* context) noexcept
     {
-        auto* httpContext = static_cast<KhAsyncHttpContext*>(context);
+        auto* httpContext = static_cast<AsyncHttpContext*>(context);
         if (httpContext == nullptr) {
             return;
         }
 
         EndAsyncHttpSessionOperation(httpContext);
 
-        KH_RESPONSE response = TakeAsyncHttpResponse(httpContext);
+        ResponseHandle response = TakeAsyncHttpResponse(httpContext);
         if (response != nullptr) {
-            KhResponseRelease(response);
+            ResponseRelease(response);
         }
 
         if (httpContext->Request != nullptr) {
-            KhHttpRequestRelease(httpContext->Request);
+            HttpRequestRelease(httpContext->Request);
             httpContext->Request = nullptr;
         }
         FreeAsyncHttpContext(httpContext);
     }
 
     _Must_inspect_result_
-    NTSTATUS KhHttpSendSyncImpl(
-        _In_ KH_SESSION session,
-        _In_ KH_REQUEST request,
-        _In_opt_ const KhHttpSendOptions* options,
-        KH_RESPONSE* response,
-        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept;
+    NTSTATUS HttpSendSyncImpl(
+        _In_ SessionHandle session,
+        _In_ RequestHandle request,
+        _In_opt_ const HttpSendOptions* options,
+        ResponseHandle* response,
+        _In_opt_ AsyncOperationHandle cancellationOperation) noexcept;
 
-    NTSTATUS RunHttpAsyncOperation(KH_ASYNC_OPERATION operation, void* context) noexcept
+    NTSTATUS RunHttpAsyncOperation(AsyncOperationHandle operation, void* context) noexcept
     {
-        auto* httpContext = static_cast<KhAsyncHttpContext*>(context);
+        auto* httpContext = static_cast<AsyncHttpContext*>(context);
         if (httpContext == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
         NTSTATUS status = STATUS_SUCCESS;
-        if (KhAsyncOperationIsCanceled(operation)) {
+        if (AsyncOperationIsCanceled(operation)) {
             status = STATUS_CANCELLED;
             EndAsyncHttpSessionOperation(httpContext);
             return status;
         }
 
-        KH_RESPONSE response = nullptr;
-        KH_RESPONSE* responseOutput = nullptr;
+        ResponseHandle response = nullptr;
+        ResponseHandle* responseOutput = nullptr;
         const bool bodyCallbackOnly =
             httpContext->Options.BodyCallback != nullptr &&
-            ((httpContext->Options.Flags & KhHttpSendFlagAggregateWithCallbacks) == 0);
+            ((httpContext->Options.Flags & HttpSendFlagAggregateWithCallbacks) == 0);
         if (!bodyCallbackOnly) {
             responseOutput = &response;
         }
 
-        status = KhHttpSendSyncImpl(
+        status = HttpSendSyncImpl(
             httpContext->Session,
             httpContext->Request,
             &httpContext->Options,
@@ -6284,10 +6284,10 @@ namespace session
             httpContext->Response = response;
         }
         else if (response != nullptr) {
-            KhResponseRelease(response);
+            ResponseRelease(response);
         }
 
-        if (KhAsyncOperationIsCanceled(operation) && status == STATUS_SUCCESS) {
+        if (AsyncOperationIsCanceled(operation) && status == STATUS_SUCCESS) {
             status = STATUS_CANCELLED;
         }
 
@@ -6296,12 +6296,12 @@ namespace session
     }
 
 
-    NTSTATUS KhHttpSendSyncImpl(
-        KH_SESSION session,
-        KH_REQUEST request,
-        const KhHttpSendOptions* options,
-        KH_RESPONSE* response,
-        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
+    NTSTATUS HttpSendSyncImpl(
+        SessionHandle session,
+        RequestHandle request,
+        const HttpSendOptions* options,
+        ResponseHandle* response,
+        _In_opt_ AsyncOperationHandle cancellationOperation) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -6312,12 +6312,12 @@ namespace session
             *response = nullptr;
         }
 
-        KhSessionOperationScope sessionScope(session);
+        SessionOperationScope sessionScope(session);
         if (!sessionScope.IsActive()) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        KhRequestOperationScope requestScope(request);
+        RequestOperationScope requestScope(request);
         if (!requestScope.IsActive() || request->Session != session) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -6333,7 +6333,7 @@ namespace session
             return STATUS_NOT_SUPPORTED;
         }
 
-        KhHttpSendOptions effectiveOptions = {};
+        HttpSendOptions effectiveOptions = {};
         if (options != nullptr) {
             effectiveOptions = *options;
         }
@@ -6344,27 +6344,27 @@ namespace session
 
         if (effectiveOptions.BodyCallback != nullptr &&
             response == nullptr &&
-            ((effectiveOptions.Flags & KhHttpSendFlagAggregateWithCallbacks) != 0)) {
+            ((effectiveOptions.Flags & HttpSendFlagAggregateWithCallbacks) != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
 
         const bool bodyCallbackOnly =
             effectiveOptions.BodyCallback != nullptr &&
-            ((effectiveOptions.Flags & KhHttpSendFlagAggregateWithCallbacks) == 0);
+            ((effectiveOptions.Flags & HttpSendFlagAggregateWithCallbacks) == 0);
         const bool shouldAggregate = !bodyCallbackOnly;
         if (shouldAggregate && response == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        KH_HTTP_CACHE effectiveCache = effectiveOptions.Cache != nullptr ? effectiveOptions.Cache : session->Cache;
-        KhHttpCacheLookupResult cacheLookup = {};
-        KhHttpCacheSnapshot activeCacheSnapshot = {};
+        HttpCacheHandle effectiveCache = effectiveOptions.Cache != nullptr ? effectiveOptions.Cache : session->Cache;
+        HttpCacheLookupResult cacheLookup = {};
+        HttpCacheSnapshot activeCacheSnapshot = {};
         bool activeCacheSnapshotValid = false;
-        KH_REQUEST redirectRequest = nullptr;
-        KhRequest* currentRequest = request;
+        RequestHandle redirectRequest = nullptr;
+        Request* currentRequest = request;
 
         if (effectiveCache != nullptr) {
-            status = KhHttpCacheLookup(effectiveCache, *currentRequest, effectiveOptions, &cacheLookup);
+            status = HttpCacheLookup(effectiveCache, *currentRequest, effectiveOptions, &cacheLookup);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -6378,11 +6378,11 @@ namespace session
                 if (NT_SUCCESS(status) && shouldAggregate) {
                     status = CreateOwnedResponse(cachedParsed, nullptr, 0, response);
                 }
-                KhHttpCacheFreeSnapshot(&cacheLookup.Snapshot);
+                HttpCacheFreeSnapshot(&cacheLookup.Snapshot);
                 return status;
             }
             if (cacheLookup.Found && cacheLookup.RequiresValidation) {
-                if ((effectiveOptions.Flags & KhHttpSendFlagOnlyIfCached) != 0) {
+                if ((effectiveOptions.Flags & HttpSendFlagOnlyIfCached) != 0) {
                     return STATUS_NOT_FOUND;
                 }
                 status = CloneRequestForAsync(*currentRequest, &redirectRequest);
@@ -6392,7 +6392,7 @@ namespace session
                 currentRequest = redirectRequest;
                 if (cacheLookup.IfNoneMatchLength != 0 &&
                     !RequestHasHeader(*currentRequest, "If-None-Match")) {
-                    status = KhHttpRequestSetHeader(
+                    status = HttpRequestSetHeader(
                         currentRequest,
                         "If-None-Match",
                         sizeof("If-None-Match") - 1,
@@ -6401,7 +6401,7 @@ namespace session
                 }
                 else if (cacheLookup.IfModifiedSinceLength != 0 &&
                     !RequestHasHeader(*currentRequest, "If-Modified-Since")) {
-                    status = KhHttpRequestSetHeader(
+                    status = HttpRequestSetHeader(
                         currentRequest,
                         "If-Modified-Since",
                         sizeof("If-Modified-Since") - 1,
@@ -6409,7 +6409,7 @@ namespace session
                         cacheLookup.IfModifiedSinceLength);
                 }
                 if (!NT_SUCCESS(status)) {
-                    KhHttpRequestRelease(redirectRequest);
+                    HttpRequestRelease(redirectRequest);
                     return status;
                 }
             }
@@ -6423,7 +6423,7 @@ namespace session
         if (!NT_SUCCESS(status) || !requestWorkspace.IsValid()) {
             return !NT_SUCCESS(status) ? status : STATUS_INSUFFICIENT_RESOURCES;
         }
-        KhWorkspace& workspace = *requestWorkspace.Get();
+        Workspace& workspace = *requestWorkspace.Get();
 
         HeapObject<ApiHttpHeaderScratch> headerScratch;
         if (!headerScratch.IsValid()) {
@@ -6437,7 +6437,7 @@ namespace session
         ULONG redirectCount = 0;
 
         for (;;) {
-            if (cancellationOperation != nullptr && KhAsyncOperationIsCanceled(cancellationOperation)) {
+            if (cancellationOperation != nullptr && AsyncOperationIsCanceled(cancellationOperation)) {
                 status = STATUS_CANCELLED;
                 break;
             }
@@ -6489,7 +6489,7 @@ namespace session
         if (NT_SUCCESS(status) &&
             effectiveCache != nullptr &&
             parsed.StatusCode == 304) {
-            status = KhHttpCacheUpdateNotModified(
+            status = HttpCacheUpdateNotModified(
                 effectiveCache,
                 *currentRequest,
                 parsed,
@@ -6515,10 +6515,10 @@ namespace session
             if (http1::IsUnsafeMethodForInvalidation(static_cast<ULONG>(currentRequest->Method)) &&
                 parsed.StatusCode >= 200 &&
                 parsed.StatusCode < 400) {
-                KhHttpCacheInvalidateForRequest(effectiveCache, *currentRequest);
+                HttpCacheInvalidateForRequest(effectiveCache, *currentRequest);
             }
             else {
-                NTSTATUS cacheStatus = KhHttpCacheStoreResponse(
+                NTSTATUS cacheStatus = HttpCacheStoreResponse(
                     effectiveCache,
                     *currentRequest,
                     effectiveOptions,
@@ -6538,19 +6538,19 @@ namespace session
         }
 
         if (activeCacheSnapshotValid) {
-            KhHttpCacheFreeSnapshot(&activeCacheSnapshot);
+            HttpCacheFreeSnapshot(&activeCacheSnapshot);
         }
         if (redirectRequest != nullptr) {
-            KhHttpRequestRelease(redirectRequest);
+            HttpRequestRelease(redirectRequest);
         }
         return status;
     }
 
-    NTSTATUS KhHttpSendAsyncImpl(
-        KH_SESSION session,
-        KH_REQUEST request,
-        const KhHttpSendOptions* options,
-        KH_ASYNC_OPERATION* operation) noexcept
+    NTSTATUS HttpSendAsyncImpl(
+        SessionHandle session,
+        RequestHandle request,
+        const HttpSendOptions* options,
+        AsyncOperationHandle* operation) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -6561,34 +6561,34 @@ namespace session
             *operation = nullptr;
         }
 
-        if (!KhSessionBeginOperation(session)) {
+        if (!SessionBeginOperation(session)) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        KhRequestOperationScope requestScope(request);
+        RequestOperationScope requestScope(request);
         if (!requestScope.IsActive() || operation == nullptr || request->Session != session) {
-            KhSessionEndOperation(session);
+            SessionEndOperation(session);
             return STATUS_INVALID_PARAMETER;
         }
 
         if (request->Url == nullptr || request->UrlLength == 0) {
-            KhSessionEndOperation(session);
+            SessionEndOperation(session);
             return STATUS_INVALID_PARAMETER;
         }
 
-        KhHttpSendOptions effectiveOptions = {};
+        HttpSendOptions effectiveOptions = {};
         if (options != nullptr) {
             effectiveOptions = *options;
         }
 
         if (!IsValidSendOptions(effectiveOptions, *session)) {
-            KhSessionEndOperation(session);
+            SessionEndOperation(session);
             return STATUS_INVALID_PARAMETER;
         }
 
         auto* context = AllocateAsyncHttpContext();
         if (context == nullptr) {
-            KhSessionEndOperation(session);
+            SessionEndOperation(session);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
@@ -6610,8 +6610,8 @@ namespace session
             return status;
         }
 
-        KhAsyncCreateOptions createOptions = {};
-        createOptions.Kind = KhAsyncOperationKind::HttpSend;
+        AsyncCreateOptions createOptions = {};
+        createOptions.Kind = AsyncOperationKind::HttpSend;
         createOptions.WorkerRoutine = RunHttpAsyncOperation;
         createOptions.CleanupRoutine = CleanupAsyncHttpContext;
         createOptions.Context = context;
@@ -6619,15 +6619,15 @@ namespace session
         createOptions.CompletionContext = effectiveOptions.CompletionContext;
         createOptions.StartSuspended = true;
 
-        status = KhAsyncOperationCreate(createOptions, operation);
+        status = AsyncOperationCreate(createOptions, operation);
         if (!NT_SUCCESS(status)) {
             CleanupAsyncHttpContext(context);
             return status;
         }
 
-        status = KhAsyncOperationQueue(*operation);
+        status = AsyncOperationQueue(*operation);
         if (!NT_SUCCESS(status)) {
-            KhAsyncOperationRelease(*operation);
+            AsyncOperationRelease(*operation);
             *operation = nullptr;
         }
 
@@ -6635,7 +6635,7 @@ namespace session
     }
 
 
-    NTSTATUS KhAsyncGetHttpResponse(KH_ASYNC_OPERATION operation, KH_RESPONSE* response) noexcept
+    NTSTATUS AsyncGetHttpResponse(AsyncOperationHandle operation, ResponseHandle* response) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -6646,19 +6646,19 @@ namespace session
             *response = nullptr;
         }
 
-        if (!KhAsyncOperationIsValid(operation) ||
+        if (!AsyncOperationIsValid(operation) ||
             response == nullptr ||
-            KhAsyncOperationGetKind(operation) != KhAsyncOperationKind::HttpSend) {
+            AsyncOperationGetKind(operation) != AsyncOperationKind::HttpSend) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        status = KhAsyncOperationStatus(operation);
+        status = AsyncOperationStatus(operation);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        auto* context = static_cast<KhAsyncHttpContext*>(KhAsyncOperationContext(operation));
-        KH_RESPONSE asyncResponse = TakeAsyncHttpResponse(context);
+        auto* context = static_cast<AsyncHttpContext*>(AsyncOperationContext(operation));
+        ResponseHandle asyncResponse = TakeAsyncHttpResponse(context);
         if (asyncResponse == nullptr) {
             return STATUS_NOT_FOUND;
         }
@@ -6668,14 +6668,14 @@ namespace session
     }
 
 #if defined(WKNET_USER_MODE_TEST)
-    bool KhTestIsHttpTls12ConfirmationCandidate(
-        KhTlsVersion minVersion,
-        KhTlsVersion maxVersion,
+    bool TestIsHttpTls12ConfirmationCandidate(
+        TlsVersion minVersion,
+        TlsVersion maxVersion,
         ULONG category,
         NTSTATUS status,
         bool beforeTls13FirstServerHello) noexcept
     {
-        KhRequest request = {};
+        Request request = {};
         request.Tls.MinVersion = minVersion;
         request.Tls.MaxVersion = maxVersion;
         tls::TlsHandshakeFailure failure = {};
@@ -6686,22 +6686,22 @@ namespace session
     }
 #endif
 
-NTSTATUS KhHttpSendSync(
-    KH_SESSION session,
-    KH_REQUEST request,
-    const KhHttpSendOptions* options,
-    KH_RESPONSE* response) noexcept
+NTSTATUS HttpSendSync(
+    SessionHandle session,
+    RequestHandle request,
+    const HttpSendOptions* options,
+    ResponseHandle* response) noexcept
 {
-    return KhHttpSendSyncImpl(session, request, options, response, nullptr);
+    return HttpSendSyncImpl(session, request, options, response, nullptr);
 }
 
-NTSTATUS KhHttpSendAsync(
-    KH_SESSION session,
-    KH_REQUEST request,
-    const KhHttpSendOptions* options,
-    KH_ASYNC_OPERATION* operation) noexcept
+NTSTATUS HttpSendAsync(
+    SessionHandle session,
+    RequestHandle request,
+    const HttpSendOptions* options,
+    AsyncOperationHandle* operation) noexcept
 {
-    return KhHttpSendAsyncImpl(session, request, options, operation);
+    return HttpSendAsyncImpl(session, request, options, operation);
 }
 }
 }

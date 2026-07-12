@@ -1,4 +1,4 @@
-#include <wknet/http/Test.h>
+#include <wknet/test/Test.h>
 #include "Detail.h"
 #include "session/Engine.h"
 #include "http1/HttpTypes.h"
@@ -9,7 +9,7 @@ namespace test
 {
     void SetHttpTransport(HttpTransportCallback callback, void* context) noexcept
     {
-        ::wknet::session::KhTestSetHttpTransport(callback, context);
+        ::wknet::session::TestSetHttpTransport(callback, context);
     }
 
     void SetWebSocketTransport(
@@ -19,7 +19,7 @@ namespace test
         WebSocketCloseCallback closeCallback,
         void* context) noexcept
     {
-        ::wknet::session::KhTestSetWebSocketTransport(
+        ::wknet::session::TestSetWebSocketTransport(
             connectCallback,
             sendCallback,
             receiveCallback,
@@ -29,32 +29,32 @@ namespace test
 
     void SetCurrentIrql(ULONG irql) noexcept
     {
-        ::wknet::session::KhTestSetCurrentIrql(irql);
+        ::wknet::session::TestSetCurrentIrql(irql);
     }
 
     void ResetCurrentIrql() noexcept
     {
-        ::wknet::session::KhTestResetCurrentIrql();
+        ::wknet::session::TestResetCurrentIrql();
     }
 
     void SetAsyncAutoRun(bool enabled) noexcept
     {
-        ::wknet::session::KhTestSetAsyncAutoRun(enabled);
+        ::wknet::session::TestSetAsyncAutoRun(enabled);
     }
 
     NTSTATUS RunAsyncOperation(AsyncOp* operation) noexcept
     {
-        return ::wknet::session::KhTestRunAsyncOperation(detail::ToApiAsyncOp(operation));
+        return ::wknet::session::TestRunAsyncOperation(detail::ToApiAsyncOp(operation));
     }
 
     bool IsHttpTls12ConfirmationCandidate(
-        ::wknet::session::KhTlsVersion minVersion,
-        ::wknet::session::KhTlsVersion maxVersion,
+        ::wknet::session::TlsVersion minVersion,
+        ::wknet::session::TlsVersion maxVersion,
         ULONG category,
         NTSTATUS status,
         bool beforeTls13FirstServerHello) noexcept
     {
-        return ::wknet::session::KhTestIsHttpTls12ConfirmationCandidate(
+        return ::wknet::session::TestIsHttpTls12ConfirmationCandidate(
             minVersion,
             maxVersion,
             category,

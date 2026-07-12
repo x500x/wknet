@@ -23,10 +23,10 @@ namespace
     SIZE_T InitialResponseBytes(SIZE_T maxResponseBytes) noexcept
     {
         if (!HasResponseByteLimit(maxResponseBytes)) {
-            return KhWorkspaceResponseInitialBytes;
+            return WorkspaceResponseInitialBytes;
         }
 
-        return MinimumSize(KhWorkspaceResponseInitialBytes, maxResponseBytes);
+        return MinimumSize(WorkspaceResponseInitialBytes, maxResponseBytes);
     }
 
     _Must_inspect_result_
@@ -36,20 +36,20 @@ namespace
     }
 
     _Must_inspect_result_
-    bool IsSupportedWorkspacePoolType(KhPoolType poolType) noexcept
+    bool IsSupportedWorkspacePoolType(PoolType poolType) noexcept
     {
-        return poolType == KhPoolType::NonPaged;
+        return poolType == PoolType::NonPaged;
     }
 
     _Must_inspect_result_
-    bool IsValidOptions(const KhWorkspaceOptions& options) noexcept
+    bool IsValidOptions(const WorkspaceOptions& options) noexcept
     {
         return IsSupportedWorkspacePoolType(options.PoolType) &&
             options.RequestBufferBytes != 0;
     }
 
     _Ret_maybenull_
-    void* AllocateWorkspaceMemory(KhPoolType poolType, SIZE_T length) noexcept
+    void* AllocateWorkspaceMemory(PoolType poolType, SIZE_T length) noexcept
     {
         if (!IsSupportedWorkspacePoolType(poolType)) {
             return nullptr;
@@ -63,24 +63,24 @@ namespace
     }
 
     _Ret_maybenull_
-    KhWorkspace* AllocateWorkspaceObject(
-        KhPoolType poolType,
-        _In_opt_ core::KhLookasideList* lookaside) noexcept
+    Workspace* AllocateWorkspaceObject(
+        PoolType poolType,
+        _In_opt_ core::LookasideList* lookaside) noexcept
     {
         if (!IsSupportedWorkspacePoolType(poolType)) {
             return nullptr;
         }
 
         if (lookaside != nullptr && lookaside->IsInitialized()) {
-            return static_cast<KhWorkspace*>(lookaside->Allocate());
+            return static_cast<Workspace*>(lookaside->Allocate());
         }
 
-        return static_cast<KhWorkspace*>(AllocateWorkspaceMemory(poolType, sizeof(KhWorkspace)));
+        return static_cast<Workspace*>(AllocateWorkspaceMemory(poolType, sizeof(Workspace)));
     }
 
     void FreeWorkspaceObject(
-        _In_opt_ KhWorkspace* workspace,
-        _In_opt_ core::KhLookasideList* lookaside) noexcept
+        _In_opt_ Workspace* workspace,
+        _In_opt_ core::LookasideList* lookaside) noexcept
     {
         if (workspace == nullptr) {
             return;
@@ -96,9 +96,9 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS AllocateBuffer(
-        KhPoolType poolType,
+        PoolType poolType,
         SIZE_T length,
-        _Out_ KhWorkspaceBuffer* buffer) noexcept
+        _Out_ WorkspaceBuffer* buffer) noexcept
     {
         if (buffer == nullptr || length == 0) {
             return STATUS_INVALID_PARAMETER;
@@ -114,7 +114,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    void ReleaseBuffer(_Inout_ KhWorkspaceBuffer* buffer) noexcept
+    void ReleaseBuffer(_Inout_ WorkspaceBuffer* buffer) noexcept
     {
         if (buffer == nullptr) {
             return;
@@ -130,8 +130,8 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS GrowBuffer(
-        KhPoolType poolType,
-        _Inout_ KhWorkspaceBuffer* buffer,
+        PoolType poolType,
+        _Inout_ WorkspaceBuffer* buffer,
         SIZE_T newLength) noexcept
     {
         if (buffer == nullptr || newLength == 0) {
@@ -159,10 +159,10 @@ namespace
     }
 }
 
-    NTSTATUS KhWorkspaceCreateFromLookaside(
-        const KhWorkspaceOptions* options,
-        core::KhLookasideList* lookaside,
-        KhWorkspace** workspace) noexcept
+    NTSTATUS WorkspaceCreateFromLookaside(
+        const WorkspaceOptions* options,
+        core::LookasideList* lookaside,
+        Workspace** workspace) noexcept
     {
         if (workspace == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -170,7 +170,7 @@ namespace
 
         *workspace = nullptr;
 
-        KhWorkspaceOptions effectiveOptions = {};
+        WorkspaceOptions effectiveOptions = {};
         if (options != nullptr) {
             effectiveOptions = *options;
         }
@@ -179,7 +179,7 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        KhWorkspace* newWorkspace = AllocateWorkspaceObject(effectiveOptions.PoolType, lookaside);
+        Workspace* newWorkspace = AllocateWorkspaceObject(effectiveOptions.PoolType, lookaside);
         if (newWorkspace == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -195,29 +195,29 @@ namespace
             status = AllocateBuffer(effectiveOptions.PoolType, initialResponseBytes, &newWorkspace->Response);
         }
         if (NT_SUCCESS(status)) {
-            status = AllocateBuffer(effectiveOptions.PoolType, KhWorkspaceDecodedBodyBytes, &newWorkspace->DecodedBody);
+            status = AllocateBuffer(effectiveOptions.PoolType, WorkspaceDecodedBodyBytes, &newWorkspace->DecodedBody);
         }
         if (NT_SUCCESS(status)) {
-            status = AllocateBuffer(effectiveOptions.PoolType, KhWorkspaceHttpHeaderScratchBytes, &newWorkspace->HttpHeaderScratch);
+            status = AllocateBuffer(effectiveOptions.PoolType, WorkspaceHttpHeaderScratchBytes, &newWorkspace->HttpHeaderScratch);
         }
         if (NT_SUCCESS(status)) {
-            status = AllocateBuffer(effectiveOptions.PoolType, KhWorkspaceHttp2HeaderScratchBytes, &newWorkspace->Http2HeaderScratch);
+            status = AllocateBuffer(effectiveOptions.PoolType, WorkspaceHttp2HeaderScratchBytes, &newWorkspace->Http2HeaderScratch);
         }
         if (NT_SUCCESS(status)) {
-            status = AllocateBuffer(effectiveOptions.PoolType, KhWorkspaceTlsHandshakeScratchBytes, &newWorkspace->TlsHandshakeScratch);
+            status = AllocateBuffer(effectiveOptions.PoolType, WorkspaceTlsHandshakeScratchBytes, &newWorkspace->TlsHandshakeScratch);
         }
         if (NT_SUCCESS(status)) {
-            status = AllocateBuffer(effectiveOptions.PoolType, KhWorkspaceCertificateScratchBytes, &newWorkspace->CertificateScratch);
+            status = AllocateBuffer(effectiveOptions.PoolType, WorkspaceCertificateScratchBytes, &newWorkspace->CertificateScratch);
         }
         if (NT_SUCCESS(status)) {
-            status = AllocateBuffer(effectiveOptions.PoolType, KhWorkspaceWebSocketFrameScratchBytes, &newWorkspace->WebSocketFrameScratch);
+            status = AllocateBuffer(effectiveOptions.PoolType, WorkspaceWebSocketFrameScratchBytes, &newWorkspace->WebSocketFrameScratch);
         }
         if (NT_SUCCESS(status)) {
-            status = AllocateBuffer(effectiveOptions.PoolType, KhWorkspaceWebSocketFrameScratchBytes, &newWorkspace->WebSocketSendFrameScratch);
+            status = AllocateBuffer(effectiveOptions.PoolType, WorkspaceWebSocketFrameScratchBytes, &newWorkspace->WebSocketSendFrameScratch);
         }
 
         if (!NT_SUCCESS(status)) {
-            KhWorkspaceRelease(newWorkspace);
+            WorkspaceRelease(newWorkspace);
             return status;
         }
 
@@ -225,12 +225,12 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhWorkspaceCreate(const KhWorkspaceOptions* options, KhWorkspace** workspace) noexcept
+    NTSTATUS WorkspaceCreate(const WorkspaceOptions* options, Workspace** workspace) noexcept
     {
-        return KhWorkspaceCreateFromLookaside(options, nullptr, workspace);
+        return WorkspaceCreateFromLookaside(options, nullptr, workspace);
     }
 
-    void KhWorkspaceReset(KhWorkspace* workspace) noexcept
+    void WorkspaceReset(Workspace* workspace) noexcept
     {
         if (workspace == nullptr) {
             return;
@@ -272,7 +272,7 @@ namespace
         workspace->ResponseLength = 0;
     }
 
-    void KhWorkspaceReleaseToLookaside(KhWorkspace* workspace, core::KhLookasideList* lookaside) noexcept
+    void WorkspaceReleaseToLookaside(Workspace* workspace, core::LookasideList* lookaside) noexcept
     {
         if (workspace == nullptr) {
             return;
@@ -292,12 +292,12 @@ namespace
         FreeWorkspaceObject(workspace, lookaside);
     }
 
-    void KhWorkspaceRelease(KhWorkspace* workspace) noexcept
+    void WorkspaceRelease(Workspace* workspace) noexcept
     {
-        KhWorkspaceReleaseToLookaside(workspace, nullptr);
+        WorkspaceReleaseToLookaside(workspace, nullptr);
     }
 
-    NTSTATUS KhWorkspaceEnsureResponseCapacity(KhWorkspace* workspace, SIZE_T requiredCapacity) noexcept
+    NTSTATUS WorkspaceEnsureResponseCapacity(Workspace* workspace, SIZE_T requiredCapacity) noexcept
     {
         if (workspace == nullptr || requiredCapacity == 0) {
             return STATUS_INVALID_PARAMETER;
@@ -336,7 +336,7 @@ namespace
         return GrowBuffer(workspace->PoolType, &workspace->Response, newLength);
     }
 
-    NTSTATUS KhWorkspaceAppendResponse(KhWorkspace* workspace, const UCHAR* data, SIZE_T dataLength) noexcept
+    NTSTATUS WorkspaceAppendResponse(Workspace* workspace, const UCHAR* data, SIZE_T dataLength) noexcept
     {
         if (workspace == nullptr || (data == nullptr && dataLength != 0)) {
             return STATUS_INVALID_PARAMETER;
@@ -351,7 +351,7 @@ namespace
         }
 
         const SIZE_T requiredCapacity = workspace->ResponseLength + dataLength;
-        NTSTATUS status = KhWorkspaceEnsureResponseCapacity(workspace, requiredCapacity);
+        NTSTATUS status = WorkspaceEnsureResponseCapacity(workspace, requiredCapacity);
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -361,7 +361,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhWorkspaceEnsureDecodedBodyCapacity(KhWorkspace* workspace, SIZE_T requiredCapacity) noexcept
+    NTSTATUS WorkspaceEnsureDecodedBodyCapacity(Workspace* workspace, SIZE_T requiredCapacity) noexcept
     {
         if (workspace == nullptr || requiredCapacity == 0) {
             return STATUS_INVALID_PARAMETER;
@@ -379,8 +379,8 @@ namespace
         SIZE_T newLength = workspace->DecodedBody.Length;
         if (newLength == 0) {
             newLength = hasLimit ?
-                MinimumSize(KhWorkspaceDecodedBodyBytes, workspace->MaxResponseBytes) :
-                KhWorkspaceDecodedBodyBytes;
+                MinimumSize(WorkspaceDecodedBodyBytes, workspace->MaxResponseBytes) :
+                WorkspaceDecodedBodyBytes;
         }
 
         while (newLength < requiredCapacity) {
@@ -402,8 +402,8 @@ namespace
         return GrowBuffer(workspace->PoolType, &workspace->DecodedBody, newLength);
     }
 
-    NTSTATUS KhWorkspaceEnsureWebSocketPayloadCapacity(
-        KhWorkspace* workspace,
+    NTSTATUS WorkspaceEnsureWebSocketPayloadCapacity(
+        Workspace* workspace,
         SIZE_T requiredCapacity) noexcept
     {
         if (workspace == nullptr || requiredCapacity == 0) {

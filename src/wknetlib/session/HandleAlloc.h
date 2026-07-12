@@ -6,24 +6,24 @@ namespace wknet
 {
 namespace session
 {
-    inline KhSession* AllocateSessionHandle() noexcept
+    inline Session* AllocateSessionHandle() noexcept
     {
-        return AllocateNonPagedObject<KhSession>();
+        return AllocateNonPagedObject<Session>();
     }
 
-    inline KhRequest* AllocateRequestHandle() noexcept
+    inline Request* AllocateRequestHandle() noexcept
     {
-        return AllocateNonPagedObject<KhRequest>();
+        return AllocateNonPagedObject<Request>();
     }
 
-    inline KhResponse* AllocateResponseHandle() noexcept
+    inline Response* AllocateResponseHandle() noexcept
     {
-        return AllocateNonPagedObject<KhResponse>();
+        return AllocateNonPagedObject<Response>();
     }
 
-    inline KhWebSocket* AllocateWebSocketHandle() noexcept
+    inline WebSocket* AllocateWebSocketHandle() noexcept
     {
-        return AllocateNonPagedObject<KhWebSocket>();
+        return AllocateNonPagedObject<WebSocket>();
     }
 
     inline crypto::CngProviderCache* AllocateProviderCacheHandle() noexcept
@@ -31,7 +31,7 @@ namespace session
         return AllocateNonPagedObject<crypto::CngProviderCache>();
     }
 
-    inline void FreeHandle(_In_opt_ KhSession* handle) noexcept
+    inline void FreeHandle(_In_opt_ Session* handle) noexcept
     {
         if (handle == nullptr) {
             return;
@@ -39,7 +39,7 @@ namespace session
         FreeNonPagedObject(handle);
     }
 
-    inline void FreeHandle(_In_opt_ KhRequest* handle) noexcept
+    inline void FreeHandle(_In_opt_ Request* handle) noexcept
     {
         if (handle == nullptr) {
             return;
@@ -47,7 +47,7 @@ namespace session
         FreeNonPagedObject(handle);
     }
 
-    inline void FreeHandle(_In_opt_ KhResponse* handle) noexcept
+    inline void FreeHandle(_In_opt_ Response* handle) noexcept
     {
         if (handle == nullptr) {
             return;
@@ -55,7 +55,7 @@ namespace session
         FreeNonPagedObject(handle);
     }
 
-    inline void FreeHandle(_In_opt_ KhWebSocket* handle) noexcept
+    inline void FreeHandle(_In_opt_ WebSocket* handle) noexcept
     {
         if (handle == nullptr) {
             return;
@@ -71,12 +71,12 @@ namespace session
         FreeNonPagedObject(handle);
     }
 
-    inline bool IsHandleHeader(const KhHandleHeader* header, KhHandleKind expectedKind) noexcept
+    inline bool IsHandleHeader(const HandleHeader* header, HandleKind expectedKind) noexcept
     {
         return header != nullptr && header->Kind == expectedKind && header->Closed == 0;
     }
 
-    inline bool TryCloseHandleHeader(KhHandleHeader* header, KhHandleKind expectedKind) noexcept
+    inline bool TryCloseHandleHeader(HandleHeader* header, HandleKind expectedKind) noexcept
     {
         if (header == nullptr || header->Kind != expectedKind) {
             return false;

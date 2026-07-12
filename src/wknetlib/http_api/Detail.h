@@ -8,11 +8,11 @@
 namespace wknet::http {
 namespace detail
 {
-    constexpr ULONG KhHighSessionMagic = 0x4B485331;
-    constexpr ULONG KhHighRequestMagic = 0x4B485232;
-    constexpr ULONG KhHighHeadersMagic = 0x4B484432;
-    constexpr ULONG KhHighBodyMagic = 0x4B484232;
-    constexpr ULONG KhHighCacheMagic = 0x4B484332;
+    constexpr ULONG HighSessionMagic = 0x4B485331;
+    constexpr ULONG HighRequestMagic = 0x4B485232;
+    constexpr ULONG HighHeadersMagic = 0x4B484432;
+    constexpr ULONG HighBodyMagic = 0x4B484232;
+    constexpr ULONG HighCacheMagic = 0x4B484332;
 
     enum class BodyStorageKind : ULONG
     {
@@ -49,16 +49,16 @@ namespace detail
 
 struct Session final
 {
-    ULONG Magic = detail::KhHighSessionMagic;
+    ULONG Magic = detail::HighSessionMagic;
     volatile LONG Closed = 0;
     volatile LONG RefCount = 1;
     ::wknet::net::WskClient* Wsk = nullptr;
-    ::wknet::session::KH_SESSION Engine = nullptr;
+    ::wknet::session::SessionHandle Engine = nullptr;
 };
 
 struct Request final
 {
-    ULONG Magic = detail::KhHighRequestMagic;
+    ULONG Magic = detail::HighRequestMagic;
     volatile LONG Closed = 0;
     Session* Parent = nullptr;
 #if defined(WKNET_USER_MODE_TEST)
@@ -73,14 +73,14 @@ struct Request final
 
 struct Headers final
 {
-    ULONG Magic = detail::KhHighHeadersMagic;
-    detail::StoredHeader Items[::wknet::session::KhMaxHeadersPerRequest] = {};
+    ULONG Magic = detail::HighHeadersMagic;
+    detail::StoredHeader Items[::wknet::session::MaxHeadersPerRequest] = {};
     SIZE_T Count = 0;
 };
 
 struct Body final
 {
-    ULONG Magic = detail::KhHighBodyMagic;
+    ULONG Magic = detail::HighBodyMagic;
     detail::BodyStorageKind Kind = detail::BodyStorageKind::Empty;
     RequestBodyMode Mode = RequestBodyMode::ContentLength;
     bool OwnsData = false;
@@ -98,95 +98,95 @@ struct Body final
     void* StreamContext = nullptr;
     SIZE_T StreamContentLength = 0;
     bool StreamContentLengthKnown = false;
-    detail::StoredHeader Trailers[::wknet::session::KhMaxHeadersPerRequest] = {};
+    detail::StoredHeader Trailers[::wknet::session::MaxHeadersPerRequest] = {};
     SIZE_T TrailerCount = 0;
 };
 
 struct Cache final
 {
-    ULONG Magic = detail::KhHighCacheMagic;
-    ::wknet::session::KH_HTTP_CACHE Engine = nullptr;
+    ULONG Magic = detail::HighCacheMagic;
+    ::wknet::session::HttpCacheHandle Engine = nullptr;
 };
 
 namespace detail
 {
-    inline ::wknet::session::KhSession* ToApiSession(Session* s) noexcept
+    inline ::wknet::session::Session* ToApiSession(Session* s) noexcept
     {
-        if (s == nullptr || s->Magic != KhHighSessionMagic || s->Closed != 0) {
+        if (s == nullptr || s->Magic != HighSessionMagic || s->Closed != 0) {
             return nullptr;
         }
         return s->Engine;
     }
 
-    inline ::wknet::session::KhSession* ToApiSession(Request* request) noexcept
+    inline ::wknet::session::Session* ToApiSession(Request* request) noexcept
     {
         return request == nullptr ? nullptr : ToApiSession(request->Parent);
     }
 
-    inline ::wknet::session::KhRequest* ToApiRequest(Request* r) noexcept
+    inline ::wknet::session::Request* ToApiRequest(Request* r) noexcept
     {
         UNREFERENCED_PARAMETER(r);
         return nullptr;
     }
 
-    inline ::wknet::session::KhResponse* ToApiResponse(Response* r) noexcept
+    inline ::wknet::session::Response* ToApiResponse(Response* r) noexcept
     {
-        return reinterpret_cast<::wknet::session::KhResponse*>(r);
+        return reinterpret_cast<::wknet::session::Response*>(r);
     }
 
-    inline const ::wknet::session::KhResponse* ToApiResponseConst(const Response* r) noexcept
+    inline const ::wknet::session::Response* ToApiResponseConst(const Response* r) noexcept
     {
-        return reinterpret_cast<const ::wknet::session::KhResponse*>(r);
+        return reinterpret_cast<const ::wknet::session::Response*>(r);
     }
 
-    inline ::wknet::session::KhWebSocket* ToApiWebSocket(wknet::websocket::WebSocket* ws) noexcept
+    inline ::wknet::session::WebSocket* ToApiWebSocket(wknet::websocket::WebSocket* ws) noexcept
     {
-        return reinterpret_cast<::wknet::session::KhWebSocket*>(ws);
+        return reinterpret_cast<::wknet::session::WebSocket*>(ws);
     }
 
-    inline ::wknet::session::KhAsyncOperation* ToApiAsyncOp(AsyncOp* op) noexcept
+    inline ::wknet::session::AsyncOperation* ToApiAsyncOp(AsyncOp* op) noexcept
     {
-        return reinterpret_cast<::wknet::session::KhAsyncOperation*>(op);
+        return reinterpret_cast<::wknet::session::AsyncOperation*>(op);
     }
 
-    inline ::wknet::session::KhHttpCache* ToApiCache(Cache* cache) noexcept
+    inline ::wknet::session::HttpCache* ToApiCache(Cache* cache) noexcept
     {
-        if (cache == nullptr || cache->Magic != KhHighCacheMagic) {
+        if (cache == nullptr || cache->Magic != HighCacheMagic) {
             return nullptr;
         }
         return cache->Engine;
     }
 
-    inline const ::wknet::session::KhHttpCache* ToApiCacheConst(const Cache* cache) noexcept
+    inline const ::wknet::session::HttpCache* ToApiCacheConst(const Cache* cache) noexcept
     {
-        if (cache == nullptr || cache->Magic != KhHighCacheMagic) {
+        if (cache == nullptr || cache->Magic != HighCacheMagic) {
             return nullptr;
         }
         return cache->Engine;
     }
 
-    inline Response* FromApiResponse(::wknet::session::KhResponse* r) noexcept
+    inline Response* FromApiResponse(::wknet::session::Response* r) noexcept
     {
         return reinterpret_cast<Response*>(r);
     }
 
-    inline wknet::websocket::WebSocket* FromApiWebSocket(::wknet::session::KhWebSocket* ws) noexcept
+    inline wknet::websocket::WebSocket* FromApiWebSocket(::wknet::session::WebSocket* ws) noexcept
     {
         return reinterpret_cast<wknet::websocket::WebSocket*>(ws);
     }
 
-    inline AsyncOp* FromApiAsyncOp(::wknet::session::KhAsyncOperation* op) noexcept
+    inline AsyncOp* FromApiAsyncOp(::wknet::session::AsyncOperation* op) noexcept
     {
         return reinterpret_cast<AsyncOp*>(op);
     }
 
-    inline Session* FromApiSession(::wknet::session::KhSession* s) noexcept
+    inline Session* FromApiSession(::wknet::session::Session* s) noexcept
     {
         UNREFERENCED_PARAMETER(s);
         return nullptr;
     }
 
-    inline Request* FromApiRequest(::wknet::session::KhRequest* r) noexcept
+    inline Request* FromApiRequest(::wknet::session::Request* r) noexcept
     {
         UNREFERENCED_PARAMETER(r);
         return nullptr;
@@ -195,7 +195,7 @@ namespace detail
     inline bool IsValidSession(const Session* session) noexcept
     {
         return session != nullptr &&
-            session->Magic == KhHighSessionMagic &&
+            session->Magic == HighSessionMagic &&
             session->Closed == 0 &&
             session->Engine != nullptr;
     }
@@ -203,7 +203,7 @@ namespace detail
     inline bool IsValidRequest(const Request* request) noexcept
     {
         return request != nullptr &&
-            request->Magic == KhHighRequestMagic &&
+            request->Magic == HighRequestMagic &&
             request->Closed == 0 &&
             IsValidSession(request->Parent);
     }
@@ -223,7 +223,7 @@ namespace detail
 
     inline bool ReleaseSessionRef(Session* session) noexcept
     {
-        if (session == nullptr || session->Magic != KhHighSessionMagic) {
+        if (session == nullptr || session->Magic != HighSessionMagic) {
             return false;
         }
 #if defined(WKNET_USER_MODE_TEST)
@@ -240,7 +240,7 @@ namespace detail
             return;
         }
         if (session->Engine != nullptr) {
-            ::wknet::session::KhSessionClose(session->Engine);
+            ::wknet::session::SessionClose(session->Engine);
             session->Engine = nullptr;
         }
         if (session->Wsk != nullptr) {
@@ -262,135 +262,135 @@ namespace detail
         return IsValidRequest(request) ? request->Parent : nullptr;
     }
 
-    inline ::wknet::session::KhPoolType ToApiPoolType(PoolType t) noexcept
+    inline ::wknet::session::PoolType ToApiPoolType(PoolType t) noexcept
     {
-        return t == PoolType::Paged ? ::wknet::session::KhPoolType::Paged : ::wknet::session::KhPoolType::NonPaged;
+        return t == PoolType::Paged ? ::wknet::session::PoolType::Paged : ::wknet::session::PoolType::NonPaged;
     }
 
-    inline ::wknet::session::KhTlsVersion ToApiTlsVersion(TlsVersion v) noexcept
+    inline ::wknet::session::TlsVersion ToApiTlsVersion(TlsVersion v) noexcept
     {
-        return v == TlsVersion::Tls13 ? ::wknet::session::KhTlsVersion::Tls13 : ::wknet::session::KhTlsVersion::Tls12;
+        return v == TlsVersion::Tls13 ? ::wknet::session::TlsVersion::Tls13 : ::wknet::session::TlsVersion::Tls12;
     }
 
-    inline ::wknet::session::KhCertificatePolicy ToApiCertPolicy(CertPolicy p) noexcept
+    inline ::wknet::session::CertificatePolicy ToApiCertPolicy(CertPolicy p) noexcept
     {
-        return p == CertPolicy::NoVerify ? ::wknet::session::KhCertificatePolicy::NoVerify : ::wknet::session::KhCertificatePolicy::Verify;
+        return p == CertPolicy::NoVerify ? ::wknet::session::CertificatePolicy::NoVerify : ::wknet::session::CertificatePolicy::Verify;
     }
 
-    inline ::wknet::session::KhAddressFamily ToApiAddressFamily(AddressFamily f) noexcept
+    inline ::wknet::session::AddressFamily ToApiAddressFamily(AddressFamily f) noexcept
     {
         switch (f) {
-        case AddressFamily::Ipv4: return ::wknet::session::KhAddressFamily::Ipv4;
-        case AddressFamily::Ipv6: return ::wknet::session::KhAddressFamily::Ipv6;
+        case AddressFamily::Ipv4: return ::wknet::session::AddressFamily::Ipv4;
+        case AddressFamily::Ipv6: return ::wknet::session::AddressFamily::Ipv6;
         case AddressFamily::Any:
-        default: return ::wknet::session::KhAddressFamily::Any;
+        default: return ::wknet::session::AddressFamily::Any;
         }
     }
 
-    inline ::wknet::session::KhConnectionPolicy ToApiConnPolicy(ConnPolicy p) noexcept
+    inline ::wknet::session::ConnectionPolicy ToApiConnPolicy(ConnPolicy p) noexcept
     {
         switch (p) {
-        case ConnPolicy::ForceNew: return ::wknet::session::KhConnectionPolicy::ForceNew;
-        case ConnPolicy::NoPool: return ::wknet::session::KhConnectionPolicy::NoPool;
+        case ConnPolicy::ForceNew: return ::wknet::session::ConnectionPolicy::ForceNew;
+        case ConnPolicy::NoPool: return ::wknet::session::ConnectionPolicy::NoPool;
         case ConnPolicy::ReuseOrCreate:
-        default: return ::wknet::session::KhConnectionPolicy::ReuseOrCreate;
+        default: return ::wknet::session::ConnectionPolicy::ReuseOrCreate;
         }
     }
 
-    inline ::wknet::session::KhHttpMethod ToApiMethod(Method m) noexcept
+    inline ::wknet::session::HttpMethod ToApiMethod(Method m) noexcept
     {
         switch (m) {
-        case Method::Post: return ::wknet::session::KhHttpMethod::Post;
-        case Method::Put: return ::wknet::session::KhHttpMethod::Put;
-        case Method::Patch: return ::wknet::session::KhHttpMethod::Patch;
-        case Method::Delete: return ::wknet::session::KhHttpMethod::Delete;
-        case Method::Head: return ::wknet::session::KhHttpMethod::Head;
-        case Method::Options: return ::wknet::session::KhHttpMethod::Options;
-        case Method::Connect: return ::wknet::session::KhHttpMethod::Connect;
-        case Method::Trace: return ::wknet::session::KhHttpMethod::Trace;
+        case Method::Post: return ::wknet::session::HttpMethod::Post;
+        case Method::Put: return ::wknet::session::HttpMethod::Put;
+        case Method::Patch: return ::wknet::session::HttpMethod::Patch;
+        case Method::Delete: return ::wknet::session::HttpMethod::Delete;
+        case Method::Head: return ::wknet::session::HttpMethod::Head;
+        case Method::Options: return ::wknet::session::HttpMethod::Options;
+        case Method::Connect: return ::wknet::session::HttpMethod::Connect;
+        case Method::Trace: return ::wknet::session::HttpMethod::Trace;
         case Method::Get:
-        default: return ::wknet::session::KhHttpMethod::Get;
+        default: return ::wknet::session::HttpMethod::Get;
         }
     }
 
-    inline wknet::websocket::MsgType FromApiWsMsgType(::wknet::session::KhWebSocketMessageType t) noexcept
+    inline wknet::websocket::MsgType FromApiWsMsgType(::wknet::session::WebSocketMessageType t) noexcept
     {
         switch (t) {
-        case ::wknet::session::KhWebSocketMessageType::Text: return wknet::websocket::MsgType::Text;
-        case ::wknet::session::KhWebSocketMessageType::Close: return wknet::websocket::MsgType::Close;
-        case ::wknet::session::KhWebSocketMessageType::Continuation: return wknet::websocket::MsgType::Continuation;
-        case ::wknet::session::KhWebSocketMessageType::Ping: return wknet::websocket::MsgType::Ping;
-        case ::wknet::session::KhWebSocketMessageType::Pong: return wknet::websocket::MsgType::Pong;
-        case ::wknet::session::KhWebSocketMessageType::Binary:
+        case ::wknet::session::WebSocketMessageType::Text: return wknet::websocket::MsgType::Text;
+        case ::wknet::session::WebSocketMessageType::Close: return wknet::websocket::MsgType::Close;
+        case ::wknet::session::WebSocketMessageType::Continuation: return wknet::websocket::MsgType::Continuation;
+        case ::wknet::session::WebSocketMessageType::Ping: return wknet::websocket::MsgType::Ping;
+        case ::wknet::session::WebSocketMessageType::Pong: return wknet::websocket::MsgType::Pong;
+        case ::wknet::session::WebSocketMessageType::Binary:
         default: return wknet::websocket::MsgType::Binary;
         }
     }
 
-    inline ::wknet::session::KhWebSocketTransportMode ToApiWebSocketTransportMode(
+    inline ::wknet::session::WebSocketTransportMode ToApiWebSocketTransportMode(
         WebSocketTransportMode mode) noexcept
     {
         switch (mode) {
         case WebSocketTransportMode::Http11Only:
-            return ::wknet::session::KhWebSocketTransportMode::Http11Only;
+            return ::wknet::session::WebSocketTransportMode::Http11Only;
         case WebSocketTransportMode::Auto:
-            return ::wknet::session::KhWebSocketTransportMode::Auto;
+            return ::wknet::session::WebSocketTransportMode::Auto;
         case WebSocketTransportMode::Http2Required:
-            return ::wknet::session::KhWebSocketTransportMode::Http2Required;
+            return ::wknet::session::WebSocketTransportMode::Http2Required;
         case WebSocketTransportMode::LegacyBoolean:
         default:
-            return ::wknet::session::KhWebSocketTransportMode::LegacyBoolean;
+            return ::wknet::session::WebSocketTransportMode::LegacyBoolean;
         }
     }
 
-    inline ::wknet::session::KhWebSocketMessageType ToApiWsMsgType(wknet::websocket::MsgType t) noexcept
+    inline ::wknet::session::WebSocketMessageType ToApiWsMsgType(wknet::websocket::MsgType t) noexcept
     {
         switch (t) {
-        case wknet::websocket::MsgType::Text: return ::wknet::session::KhWebSocketMessageType::Text;
-        case wknet::websocket::MsgType::Close: return ::wknet::session::KhWebSocketMessageType::Close;
-        case wknet::websocket::MsgType::Continuation: return ::wknet::session::KhWebSocketMessageType::Continuation;
-        case wknet::websocket::MsgType::Ping: return ::wknet::session::KhWebSocketMessageType::Ping;
-        case wknet::websocket::MsgType::Pong: return ::wknet::session::KhWebSocketMessageType::Pong;
+        case wknet::websocket::MsgType::Text: return ::wknet::session::WebSocketMessageType::Text;
+        case wknet::websocket::MsgType::Close: return ::wknet::session::WebSocketMessageType::Close;
+        case wknet::websocket::MsgType::Continuation: return ::wknet::session::WebSocketMessageType::Continuation;
+        case wknet::websocket::MsgType::Ping: return ::wknet::session::WebSocketMessageType::Ping;
+        case wknet::websocket::MsgType::Pong: return ::wknet::session::WebSocketMessageType::Pong;
         case wknet::websocket::MsgType::Binary:
-        default: return ::wknet::session::KhWebSocketMessageType::Binary;
+        default: return ::wknet::session::WebSocketMessageType::Binary;
         }
     }
 
-    inline ::wknet::session::KhRequestBodyPartKind ToApiBodyPartKind(BodyPartKind k) noexcept
+    inline ::wknet::session::RequestBodyPartKind ToApiBodyPartKind(BodyPartKind k) noexcept
     {
         switch (k) {
-        case BodyPartKind::FileBytes: return ::wknet::session::KhRequestBodyPartKind::FileBytes;
-        case BodyPartKind::FilePath: return ::wknet::session::KhRequestBodyPartKind::FilePath;
+        case BodyPartKind::FileBytes: return ::wknet::session::RequestBodyPartKind::FileBytes;
+        case BodyPartKind::FilePath: return ::wknet::session::RequestBodyPartKind::FilePath;
         case BodyPartKind::Field:
-        default: return ::wknet::session::KhRequestBodyPartKind::Field;
+        default: return ::wknet::session::RequestBodyPartKind::Field;
         }
     }
 
-    inline ::wknet::session::KhRequestBodyMode ToApiRequestBodyMode(RequestBodyMode mode) noexcept
+    inline ::wknet::session::RequestBodyMode ToApiRequestBodyMode(RequestBodyMode mode) noexcept
     {
         return mode == RequestBodyMode::Chunked ?
-            ::wknet::session::KhRequestBodyMode::Chunked :
-            ::wknet::session::KhRequestBodyMode::ContentLength;
+            ::wknet::session::RequestBodyMode::Chunked :
+            ::wknet::session::RequestBodyMode::ContentLength;
     }
 
-    inline ::wknet::session::KhHttp2CleartextMode ToApiHttp2CleartextMode(
+    inline ::wknet::session::Http2CleartextMode ToApiHttp2CleartextMode(
         Http2CleartextMode mode) noexcept
     {
         switch (mode) {
         case Http2CleartextMode::PriorKnowledge:
-            return ::wknet::session::KhHttp2CleartextMode::PriorKnowledge;
+            return ::wknet::session::Http2CleartextMode::PriorKnowledge;
         case Http2CleartextMode::Upgrade:
-            return ::wknet::session::KhHttp2CleartextMode::Upgrade;
+            return ::wknet::session::Http2CleartextMode::Upgrade;
         case Http2CleartextMode::Disabled:
         default:
-            return ::wknet::session::KhHttp2CleartextMode::Disabled;
+            return ::wknet::session::Http2CleartextMode::Disabled;
         }
     }
 
-    inline ::wknet::session::KhHttpCacheMode ToApiCacheMode(CacheMode mode) noexcept
+    inline ::wknet::session::HttpCacheMode ToApiCacheMode(CacheMode mode) noexcept
     {
         return mode == CacheMode::Shared ?
-            ::wknet::session::KhHttpCacheMode::Shared :
-            ::wknet::session::KhHttpCacheMode::Private;
+            ::wknet::session::HttpCacheMode::Shared :
+            ::wknet::session::HttpCacheMode::Private;
     }
 
     inline ::wknet::tls::TlsPolicy ToApiTlsPolicy(const TlsPolicy& src) noexcept
@@ -408,7 +408,7 @@ namespace detail
         return dst;
     }
 
-    inline void FillApiTlsOptions(const TlsConfig& src, ::wknet::session::KhTlsOptions& dst) noexcept
+    inline void FillApiTlsOptions(const TlsConfig& src, ::wknet::session::TlsOptions& dst) noexcept
     {
         dst.MinVersion = ToApiTlsVersion(src.MinVersion);
         dst.MaxVersion = ToApiTlsVersion(src.MaxVersion);
@@ -456,15 +456,15 @@ namespace detail
         return dst;
     }
 
-    inline ::wknet::session::KhWebSocketHandshakeChallengeCallback ToApiHandshakeChallengeCallback(
+    inline ::wknet::session::WebSocketHandshakeChallengeCallback ToApiHandshakeChallengeCallback(
         wknet::websocket::HandshakeChallengeCallback callback) noexcept
     {
-        return reinterpret_cast<::wknet::session::KhWebSocketHandshakeChallengeCallback>(callback);
+        return reinterpret_cast<::wknet::session::WebSocketHandshakeChallengeCallback>(callback);
     }
 
     void FillApiSendOptions(
         const SendOptions& src,
-        ::wknet::session::KhHttpSendOptions& dst) noexcept;
+        ::wknet::session::HttpSendOptions& dst) noexcept;
 
     _Must_inspect_result_
     NTSTATUS PrepareHttpRequest(
@@ -475,6 +475,6 @@ namespace detail
         const Headers* headers,
         const Body* body,
         const SendOptions* options,
-        ::wknet::session::KH_REQUEST* request) noexcept;
+        ::wknet::session::RequestHandle* request) noexcept;
 }
 }

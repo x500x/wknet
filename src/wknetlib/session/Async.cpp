@@ -24,31 +24,31 @@ namespace
     volatile LONG g_asyncInFlight = 0;
     volatile LONG g_asyncRuntimeState = 0;
     KEVENT g_asyncDrainEvent = {};
-    constexpr ULONG KhAsyncWorkerCount = 4;
-    constexpr ULONG KhMaxAsyncQueueDepth = 256;
+    constexpr ULONG AsyncWorkerCount = 4;
+    constexpr ULONG MaxAsyncQueueDepth = 256;
     FAST_MUTEX g_asyncQueueLock = {};
     KSEMAPHORE g_asyncQueueSemaphore = {};
     KEVENT g_asyncWorkersExitedEvent = {};
     volatile LONG g_asyncQueueStopped = 0;
     volatile LONG g_asyncQueueDepth = 0;
     volatile LONG g_asyncWorkerExitCount = 0;
-    KhAsyncOperation* g_asyncQueueHead = nullptr;
-    KhAsyncOperation* g_asyncQueueTail = nullptr;
-    PETHREAD g_asyncWorkers[KhAsyncWorkerCount] = {};
-    KhAsyncOperation* g_asyncWorkerOperations[KhAsyncWorkerCount] = {};
+    AsyncOperation* g_asyncQueueHead = nullptr;
+    AsyncOperation* g_asyncQueueTail = nullptr;
+    PETHREAD g_asyncWorkers[AsyncWorkerCount] = {};
+    AsyncOperation* g_asyncWorkerOperations[AsyncWorkerCount] = {};
 #endif
 
     _Ret_maybenull_
-    KhAsyncOperation* AllocateOperation() noexcept
+    AsyncOperation* AllocateOperation() noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
-        return static_cast<KhAsyncOperation*>(calloc(1, sizeof(KhAsyncOperation)));
+        return static_cast<AsyncOperation*>(calloc(1, sizeof(AsyncOperation)));
 #else
-        return AllocateNonPagedObject<KhAsyncOperation>();
+        return AllocateNonPagedObject<AsyncOperation>();
 #endif
     }
 
-    void FreeOperation(_In_opt_ KhAsyncOperation* operation) noexcept
+    void FreeOperation(_In_opt_ AsyncOperation* operation) noexcept
     {
         if (operation == nullptr) {
             return;
@@ -61,7 +61,7 @@ namespace
 #endif
     }
 
-    void AddRef(_In_ KhAsyncOperation* operation) noexcept
+    void AddRef(_In_ AsyncOperation* operation) noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
         ++operation->ReferenceCount;
@@ -70,7 +70,7 @@ namespace
 #endif
     }
 
-    void ReleaseRef(_In_ KhAsyncOperation* operation) noexcept
+    void ReleaseRef(_In_ AsyncOperation* operation) noexcept
     {
         LONG newCount = 0;
 #if defined(WKNET_USER_MODE_TEST)
@@ -106,23 +106,23 @@ namespace
 #endif
     }
 
-    KhAsyncState ReadState(_In_ const KhAsyncOperation* operation) noexcept
+    AsyncState ReadState(_In_ const AsyncOperation* operation) noexcept
     {
         if (operation == nullptr) {
-            return KhAsyncState::Completed;
+            return AsyncState::Completed;
         }
 
 #if defined(WKNET_USER_MODE_TEST)
-        return static_cast<KhAsyncState>(operation->State);
+        return static_cast<AsyncState>(operation->State);
 #else
-        return static_cast<KhAsyncState>(InterlockedCompareExchange(
+        return static_cast<AsyncState>(InterlockedCompareExchange(
             const_cast<volatile LONG*>(&operation->State),
             0,
             0));
 #endif
     }
 
-    void WriteState(_In_ KhAsyncOperation* operation, KhAsyncState state) noexcept
+    void WriteState(_In_ AsyncOperation* operation, AsyncState state) noexcept
     {
         if (operation == nullptr) {
             return;
@@ -135,8 +135,8 @@ namespace
 #endif
     }
 
-    void CompleteOperation(_In_ KhAsyncOperation* operation, NTSTATUS status) noexcept;
-    NTSTATUS RunOperation(_In_ KhAsyncOperation* operation) noexcept;
+    void CompleteOperation(_In_ AsyncOperation* operation, NTSTATUS status) noexcept;
+    NTSTATUS RunOperation(_In_ AsyncOperation* operation) noexcept;
     void EndAsyncOperation() noexcept;
 
 #if !defined(WKNET_USER_MODE_TEST)
@@ -150,7 +150,7 @@ namespace
         ExReleaseFastMutex(&g_asyncQueueLock);
     }
 
-    void UnlinkAllQueuedOperationsLocked(_Out_ KhAsyncOperation** head) noexcept
+    void UnlinkAllQueuedOperationsLocked(_Out_ AsyncOperation** head) noexcept
     {
         if (head != nullptr) {
             *head = g_asyncQueueHead;
@@ -161,7 +161,7 @@ namespace
     }
 
     _Must_inspect_result_
-    NTSTATUS EnqueueAsyncOperation(_In_ KhAsyncOperation* operation) noexcept
+    NTSTATUS EnqueueAsyncOperation(_In_ AsyncOperation* operation) noexcept
     {
         if (operation == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -172,7 +172,7 @@ namespace
         if (InterlockedCompareExchange(&g_asyncQueueStopped, 0, 0) != 0) {
             status = STATUS_DEVICE_NOT_READY;
         }
-        else if (InterlockedCompareExchange(&g_asyncQueueDepth, 0, 0) >= static_cast<LONG>(KhMaxAsyncQueueDepth)) {
+        else if (InterlockedCompareExchange(&g_asyncQueueDepth, 0, 0) >= static_cast<LONG>(MaxAsyncQueueDepth)) {
             status = STATUS_INSUFFICIENT_RESOURCES;
         }
         else {
@@ -195,9 +195,9 @@ namespace
     }
 
     _Ret_maybenull_
-    KhAsyncOperation* DequeueAsyncOperation(ULONG workerIndex) noexcept
+    AsyncOperation* DequeueAsyncOperation(ULONG workerIndex) noexcept
     {
-        KhAsyncOperation* operation = nullptr;
+        AsyncOperation* operation = nullptr;
         AcquireAsyncQueueLock();
         operation = g_asyncQueueHead;
         if (operation != nullptr) {
@@ -207,7 +207,7 @@ namespace
             }
             operation->QueueNext = nullptr;
             InterlockedDecrement(&g_asyncQueueDepth);
-            if (workerIndex < KhAsyncWorkerCount) {
+            if (workerIndex < AsyncWorkerCount) {
                 g_asyncWorkerOperations[workerIndex] = operation;
             }
         }
@@ -217,13 +217,13 @@ namespace
 
     void CompleteQueuedOperationsForShutdown() noexcept
     {
-        KhAsyncOperation* head = nullptr;
+        AsyncOperation* head = nullptr;
         AcquireAsyncQueueLock();
         UnlinkAllQueuedOperationsLocked(&head);
         ReleaseAsyncQueueLock();
 
         while (head != nullptr) {
-            KhAsyncOperation* operation = head;
+            AsyncOperation* operation = head;
             head = head->QueueNext;
             operation->QueueNext = nullptr;
             CompleteOperation(operation, STATUS_CANCELLED);
@@ -234,7 +234,7 @@ namespace
 
     void ClearWorkerOperation(ULONG workerIndex) noexcept
     {
-        if (workerIndex >= KhAsyncWorkerCount) {
+        if (workerIndex >= AsyncWorkerCount) {
             return;
         }
 
@@ -246,8 +246,8 @@ namespace
     void CancelRunningOperationsForShutdown() noexcept
     {
         AcquireAsyncQueueLock();
-        for (ULONG index = 0; index < KhAsyncWorkerCount; ++index) {
-            KhAsyncOperation* operation = g_asyncWorkerOperations[index];
+        for (ULONG index = 0; index < AsyncWorkerCount; ++index) {
+            AsyncOperation* operation = g_asyncWorkerOperations[index];
             if (operation != nullptr) {
                 InterlockedExchange(&operation->Canceled, 1);
             }
@@ -260,7 +260,7 @@ namespace
         KeReleaseSemaphore(
             &g_asyncQueueSemaphore,
             IO_NO_INCREMENT,
-            static_cast<LONG>(KhAsyncWorkerCount),
+            static_cast<LONG>(AsyncWorkerCount),
             FALSE);
     }
 
@@ -285,7 +285,7 @@ namespace
 
     NTSTATUS JoinReferencedAsyncWorkers(_In_opt_ LARGE_INTEGER* timeout) noexcept
     {
-        for (ULONG index = 0; index < KhAsyncWorkerCount; ++index) {
+        for (ULONG index = 0; index < AsyncWorkerCount; ++index) {
             PETHREAD thread = g_asyncWorkers[index];
             if (thread == nullptr) {
                 continue;
@@ -324,7 +324,7 @@ namespace
                 break;
             }
 
-            KhAsyncOperation* operation = DequeueAsyncOperation(workerIndex);
+            AsyncOperation* operation = DequeueAsyncOperation(workerIndex);
             if (operation == nullptr) {
                 if (InterlockedCompareExchange(&g_asyncQueueStopped, 0, 0) != 0) {
                     break;
@@ -339,7 +339,7 @@ namespace
             EndAsyncOperation();
         }
 
-        if (InterlockedIncrement(&g_asyncWorkerExitCount) == static_cast<LONG>(KhAsyncWorkerCount)) {
+        if (InterlockedIncrement(&g_asyncWorkerExitCount) == static_cast<LONG>(AsyncWorkerCount)) {
             KeSetEvent(&g_asyncWorkersExitedEvent, IO_NO_INCREMENT, FALSE);
         }
 
@@ -349,7 +349,7 @@ namespace
     _Must_inspect_result_
     NTSTATUS StartAsyncWorkers() noexcept
     {
-        for (ULONG index = 0; index < KhAsyncWorkerCount; ++index) {
+        for (ULONG index = 0; index < AsyncWorkerCount; ++index) {
             if (g_asyncWorkers[index] != nullptr) {
                 continue;
             }
@@ -407,7 +407,7 @@ namespace
             KeInitializeSemaphore(
                 &g_asyncQueueSemaphore,
                 0,
-                static_cast<LONG>(KhMaxAsyncQueueDepth + KhAsyncWorkerCount));
+                static_cast<LONG>(MaxAsyncQueueDepth + AsyncWorkerCount));
             KeInitializeEvent(&g_asyncDrainEvent, NotificationEvent, TRUE);
             KeInitializeEvent(&g_asyncWorkersExitedEvent, NotificationEvent, FALSE);
             InterlockedExchange(&g_asyncQueueStopped, 0);
@@ -469,24 +469,24 @@ namespace
 #endif
     }
 
-    bool IsLiveOperation(KH_ASYNC_OPERATION operation) noexcept
+    bool IsLiveOperation(AsyncOperationHandle operation) noexcept
     {
-        return operation != nullptr && operation->Magic == KhAsyncOperationMagic;
+        return operation != nullptr && operation->Magic == AsyncOperationMagic;
     }
 
-    bool IsOpenOperation(KH_ASYNC_OPERATION operation) noexcept
+    bool IsOpenOperation(AsyncOperationHandle operation) noexcept
     {
-        return operation != nullptr && operation->Magic == KhAsyncOperationMagic && operation->Closed == 0;
+        return operation != nullptr && operation->Magic == AsyncOperationMagic && operation->Closed == 0;
     }
 
-    void CompleteOperation(_In_ KhAsyncOperation* operation, NTSTATUS status) noexcept
+    void CompleteOperation(_In_ AsyncOperation* operation, NTSTATUS status) noexcept
     {
         if (!TryExchangeFlag(&operation->Completed, 1, 0)) {
             return;
         }
 
         operation->Status = status;
-        WriteState(operation, KhAsyncState::Completed);
+        WriteState(operation, AsyncState::Completed);
 
 #if defined(WKNET_USER_MODE_TEST)
         operation->CompletionSignaled = true;
@@ -499,7 +499,7 @@ namespace
         }
     }
 
-    NTSTATUS RunOperation(_In_ KhAsyncOperation* operation) noexcept
+    NTSTATUS RunOperation(_In_ AsyncOperation* operation) noexcept
     {
         if (!IsLiveOperation(operation)) {
             return STATUS_INVALID_PARAMETER;
@@ -514,7 +514,7 @@ namespace
             return STATUS_CANCELLED;
         }
 
-        WriteState(operation, KhAsyncState::Running);
+        WriteState(operation, AsyncState::Running);
         NTSTATUS status = STATUS_INVALID_PARAMETER;
         if (operation->WorkerRoutine != nullptr) {
             status = operation->WorkerRoutine(operation, operation->Context);
@@ -531,9 +531,9 @@ namespace
 
 }
 
-    NTSTATUS KhAsyncOperationCreate(
-        const KhAsyncCreateOptions& options,
-        KH_ASYNC_OPERATION* operation) noexcept
+    NTSTATUS AsyncOperationCreate(
+        const AsyncCreateOptions& options,
+        AsyncOperationHandle* operation) noexcept
     {
         if (operation != nullptr) {
             *operation = nullptr;
@@ -548,13 +548,13 @@ namespace
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        newOperation->Magic = KhAsyncOperationMagic;
+        newOperation->Magic = AsyncOperationMagic;
         newOperation->Closed = 0;
         newOperation->Kind = options.Kind;
         newOperation->ReferenceCount = 1;
         newOperation->Canceled = 0;
         newOperation->Completed = 0;
-        newOperation->State = static_cast<LONG>(KhAsyncState::Pending);
+        newOperation->State = static_cast<LONG>(AsyncState::Pending);
         newOperation->Status = STATUS_PENDING;
         newOperation->WorkerRoutine = options.WorkerRoutine;
         newOperation->CleanupRoutine = options.CleanupRoutine;
@@ -572,9 +572,9 @@ namespace
         *operation = newOperation;
 
         if (!options.StartSuspended) {
-            NTSTATUS status = KhAsyncOperationQueue(newOperation);
+            NTSTATUS status = AsyncOperationQueue(newOperation);
             if (!NT_SUCCESS(status)) {
-                KhAsyncOperationRelease(newOperation);
+                AsyncOperationRelease(newOperation);
                 *operation = nullptr;
                 return status;
             }
@@ -583,7 +583,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhAsyncOperationQueue(KH_ASYNC_OPERATION operation) noexcept
+    NTSTATUS AsyncOperationQueue(AsyncOperationHandle operation) noexcept
     {
         if (!IsOpenOperation(operation)) {
             return STATUS_INVALID_PARAMETER;
@@ -600,7 +600,7 @@ namespace
         }
 #endif
 
-        if (ReadState(operation) != KhAsyncState::Pending ||
+        if (ReadState(operation) != AsyncState::Pending ||
             !TryExchangeFlag(&operation->Queued, 1, 0)) {
             return STATUS_INVALID_DEVICE_STATE;
         }
@@ -636,7 +636,7 @@ namespace
 #endif
     }
 
-    NTSTATUS KhAsyncOperationCancel(KH_ASYNC_OPERATION operation) noexcept
+    NTSTATUS AsyncOperationCancel(AsyncOperationHandle operation) noexcept
     {
         if (!IsOpenOperation(operation)) {
             return STATUS_INVALID_PARAMETER;
@@ -653,15 +653,15 @@ namespace
 #else
         InterlockedExchange(&operation->Canceled, 1);
 #endif
-        if (ReadState(operation) == KhAsyncState::Pending) {
+        if (ReadState(operation) == AsyncState::Pending) {
             CompleteOperation(operation, STATUS_CANCELLED);
         }
 
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhAsyncOperationWait(
-        KH_ASYNC_OPERATION operation,
+    NTSTATUS AsyncOperationWait(
+        AsyncOperationHandle operation,
         ULONG timeoutMilliseconds) noexcept
     {
         if (!IsOpenOperation(operation)) {
@@ -699,7 +699,7 @@ namespace
 #endif
     }
 
-    void KhAsyncOperationRelease(KH_ASYNC_OPERATION operation) noexcept
+    void AsyncOperationRelease(AsyncOperationHandle operation) noexcept
     {
         if (!IsOpenOperation(operation)) {
             return;
@@ -717,7 +717,7 @@ namespace
         ReleaseRef(operation);
     }
 
-    NTSTATUS KhAsyncOperationStatus(KH_ASYNC_OPERATION operation) noexcept
+    NTSTATUS AsyncOperationStatus(AsyncOperationHandle operation) noexcept
     {
         if (!IsOpenOperation(operation)) {
             return STATUS_INVALID_PARAMETER;
@@ -726,40 +726,40 @@ namespace
         return operation->Status;
     }
 
-    bool KhAsyncOperationIsCanceled(KH_ASYNC_OPERATION operation) noexcept
+    bool AsyncOperationIsCanceled(AsyncOperationHandle operation) noexcept
     {
         return IsLiveOperation(operation) && operation->Canceled != 0;
     }
 
-    bool KhAsyncOperationIsCompleted(KH_ASYNC_OPERATION operation) noexcept
+    bool AsyncOperationIsCompleted(AsyncOperationHandle operation) noexcept
     {
         return IsLiveOperation(operation) && operation->Completed != 0;
     }
 
-    KhAsyncState KhAsyncOperationState(KH_ASYNC_OPERATION operation) noexcept
+    AsyncState AsyncOperationState(AsyncOperationHandle operation) noexcept
     {
         if (!IsLiveOperation(operation)) {
-            return KhAsyncState::Completed;
+            return AsyncState::Completed;
         }
 
         return ReadState(operation);
     }
 
-    bool KhAsyncOperationIsValid(KH_ASYNC_OPERATION operation) noexcept
+    bool AsyncOperationIsValid(AsyncOperationHandle operation) noexcept
     {
         return IsOpenOperation(operation);
     }
 
-    KhAsyncOperationKind KhAsyncOperationGetKind(KH_ASYNC_OPERATION operation) noexcept
+    AsyncOperationKind AsyncOperationGetKind(AsyncOperationHandle operation) noexcept
     {
         if (!IsOpenOperation(operation)) {
-            return KhAsyncOperationKind::HttpSend;
+            return AsyncOperationKind::HttpSend;
         }
 
         return operation->Kind;
     }
 
-    void* KhAsyncOperationContext(KH_ASYNC_OPERATION operation) noexcept
+    void* AsyncOperationContext(AsyncOperationHandle operation) noexcept
     {
         if (!IsOpenOperation(operation)) {
             return nullptr;
@@ -768,7 +768,7 @@ namespace
         return operation->Context;
     }
 
-    NTSTATUS KhEngineDrainAsync() noexcept
+    NTSTATUS EngineDrainAsync() noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
         return g_asyncInFlight == 0 ? STATUS_SUCCESS : STATUS_IO_TIMEOUT;
@@ -823,12 +823,12 @@ namespace
     }
 
 #if defined(WKNET_USER_MODE_TEST)
-    void KhTestSetAsyncAutoRun(bool enabled) noexcept
+    void TestSetAsyncAutoRun(bool enabled) noexcept
     {
         g_testAsyncAutoRun = enabled;
     }
 
-    NTSTATUS KhTestRunAsyncOperation(KH_ASYNC_OPERATION operation) noexcept
+    NTSTATUS TestRunAsyncOperation(AsyncOperationHandle operation) noexcept
     {
         if (!IsLiveOperation(operation)) {
             return STATUS_INVALID_PARAMETER;

@@ -8,9 +8,9 @@ namespace
 {
     void FillApiConnectOptions(
         const ConnectConfig& src,
-        ::wknet::session::KhWebSocketHeader* headerBuffer,
+        ::wknet::session::WebSocketHeader* headerBuffer,
         SIZE_T headerBufferCount,
-        ::wknet::session::KhWebSocketConnectOptions& dst) noexcept
+        ::wknet::session::WebSocketConnectOptions& dst) noexcept
     {
         dst.Url = src.Url;
         dst.UrlLength = src.UrlLength;
@@ -40,7 +40,7 @@ namespace
         }
     }
 
-    // Mirrors session::KhMaxHeadersPerRequest (the engine validates against the same cap).
+    // Mirrors session::MaxHeadersPerRequest (the engine validates against the same cap).
     constexpr SIZE_T kMaxConnectHeaders = 16;
 }
 
@@ -68,16 +68,16 @@ NTSTATUS ConnectEx(wknet::http::Session* session, const ConnectConfig* config, W
         return STATUS_INVALID_PARAMETER;
     }
 
-    ::wknet::HeapArray<::wknet::session::KhWebSocketHeader> headerBuffer(kMaxConnectHeaders);
+    ::wknet::HeapArray<::wknet::session::WebSocketHeader> headerBuffer(kMaxConnectHeaders);
     if (!headerBuffer.IsValid()) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    ::wknet::session::KhWebSocketConnectOptions apiOptions = {};
+    ::wknet::session::WebSocketConnectOptions apiOptions = {};
     FillApiConnectOptions(*config, headerBuffer.Get(), headerBuffer.Count(), apiOptions);
 
-    ::wknet::session::KH_WEBSOCKET apiWs = nullptr;
-    NTSTATUS status = ::wknet::session::KhWebSocketConnectSync(
+    ::wknet::session::WebSocketHandle apiWs = nullptr;
+    NTSTATUS status = ::wknet::session::WebSocketConnectSync(
         wknet::http::detail::ToApiSession(session),
         &apiOptions,
         &apiWs);
@@ -116,16 +116,16 @@ NTSTATUS ConnectAsyncEx(wknet::http::Session* session, const ConnectConfig* conf
         return STATUS_INVALID_PARAMETER;
     }
 
-    ::wknet::HeapArray<::wknet::session::KhWebSocketHeader> headerBuffer(kMaxConnectHeaders);
+    ::wknet::HeapArray<::wknet::session::WebSocketHeader> headerBuffer(kMaxConnectHeaders);
     if (!headerBuffer.IsValid()) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    ::wknet::session::KhWebSocketConnectOptions apiOptions = {};
+    ::wknet::session::WebSocketConnectOptions apiOptions = {};
     FillApiConnectOptions(*config, headerBuffer.Get(), headerBuffer.Count(), apiOptions);
 
-    ::wknet::session::KH_ASYNC_OPERATION apiOp = nullptr;
-    NTSTATUS status = ::wknet::session::KhWebSocketConnectAsync(
+    ::wknet::session::AsyncOperationHandle apiOp = nullptr;
+    NTSTATUS status = ::wknet::session::WebSocketConnectAsync(
         wknet::http::detail::ToApiSession(session),
         &apiOptions,
         &apiOp);
@@ -142,7 +142,7 @@ NTSTATUS ConnectAsync(wknet::http::Session* session, const ConnectConfig* config
 
 NTSTATUS SendText(WebSocket* websocket, const char* text, SIZE_T textLength) noexcept
 {
-    return ::wknet::session::KhWebSocketSendTextSync(wknet::http::detail::ToApiWebSocket(websocket), text, textLength, nullptr);
+    return ::wknet::session::WebSocketSendTextSync(wknet::http::detail::ToApiWebSocket(websocket), text, textLength, nullptr);
 }
 
 NTSTATUS SendTextEx(
@@ -151,11 +151,11 @@ NTSTATUS SendTextEx(
     SIZE_T textLength,
     const SendOptions* options) noexcept
 {
-    ::wknet::session::KhWebSocketSendOptions apiOptions = {};
+    ::wknet::session::WebSocketSendOptions apiOptions = {};
     if (options != nullptr) {
         apiOptions.FinalFragment = options->FinalFragment;
     }
-    return ::wknet::session::KhWebSocketSendTextSync(
+    return ::wknet::session::WebSocketSendTextSync(
         wknet::http::detail::ToApiWebSocket(websocket),
         text,
         textLength,
@@ -164,7 +164,7 @@ NTSTATUS SendTextEx(
 
 NTSTATUS SendBinary(WebSocket* websocket, const UCHAR* data, SIZE_T dataLength) noexcept
 {
-    return ::wknet::session::KhWebSocketSendBinarySync(wknet::http::detail::ToApiWebSocket(websocket), data, dataLength, nullptr);
+    return ::wknet::session::WebSocketSendBinarySync(wknet::http::detail::ToApiWebSocket(websocket), data, dataLength, nullptr);
 }
 
 NTSTATUS SendBinaryEx(
@@ -173,11 +173,11 @@ NTSTATUS SendBinaryEx(
     SIZE_T dataLength,
     const SendOptions* options) noexcept
 {
-    ::wknet::session::KhWebSocketSendOptions apiOptions = {};
+    ::wknet::session::WebSocketSendOptions apiOptions = {};
     if (options != nullptr) {
         apiOptions.FinalFragment = options->FinalFragment;
     }
-    return ::wknet::session::KhWebSocketSendBinarySync(
+    return ::wknet::session::WebSocketSendBinarySync(
         wknet::http::detail::ToApiWebSocket(websocket),
         data,
         dataLength,
@@ -186,7 +186,7 @@ NTSTATUS SendBinaryEx(
 
 NTSTATUS SendContinuation(WebSocket* websocket, const UCHAR* data, SIZE_T dataLength) noexcept
 {
-    return ::wknet::session::KhWebSocketSendContinuationSync(wknet::http::detail::ToApiWebSocket(websocket), data, dataLength, nullptr);
+    return ::wknet::session::WebSocketSendContinuationSync(wknet::http::detail::ToApiWebSocket(websocket), data, dataLength, nullptr);
 }
 
 NTSTATUS SendContinuationEx(
@@ -195,11 +195,11 @@ NTSTATUS SendContinuationEx(
     SIZE_T dataLength,
     const SendOptions* options) noexcept
 {
-    ::wknet::session::KhWebSocketSendOptions apiOptions = {};
+    ::wknet::session::WebSocketSendOptions apiOptions = {};
     if (options != nullptr) {
         apiOptions.FinalFragment = options->FinalFragment;
     }
-    return ::wknet::session::KhWebSocketSendContinuationSync(
+    return ::wknet::session::WebSocketSendContinuationSync(
         wknet::http::detail::ToApiWebSocket(websocket),
         data,
         dataLength,
@@ -208,12 +208,12 @@ NTSTATUS SendContinuationEx(
 
 NTSTATUS SendPing(WebSocket* websocket, const UCHAR* payload, SIZE_T payloadLength) noexcept
 {
-    return ::wknet::session::KhWebSocketSendPingSync(wknet::http::detail::ToApiWebSocket(websocket), payload, payloadLength);
+    return ::wknet::session::WebSocketSendPingSync(wknet::http::detail::ToApiWebSocket(websocket), payload, payloadLength);
 }
 
 NTSTATUS SendPong(WebSocket* websocket, const UCHAR* payload, SIZE_T payloadLength) noexcept
 {
-    return ::wknet::session::KhWebSocketSendPongSync(wknet::http::detail::ToApiWebSocket(websocket), payload, payloadLength);
+    return ::wknet::session::WebSocketSendPongSync(wknet::http::detail::ToApiWebSocket(websocket), payload, payloadLength);
 }
 
 NTSTATUS Receive(WebSocket* websocket, Message* message) noexcept
@@ -221,8 +221,8 @@ NTSTATUS Receive(WebSocket* websocket, Message* message) noexcept
     if (message != nullptr) {
         *message = {};
     }
-    ::wknet::session::KhWebSocketMessage apiMessage = {};
-    NTSTATUS status = ::wknet::session::KhWebSocketReceiveSync(
+    ::wknet::session::WebSocketMessage apiMessage = {};
+    NTSTATUS status = ::wknet::session::WebSocketReceiveSync(
         wknet::http::detail::ToApiWebSocket(websocket),
         nullptr,
         &apiMessage);
@@ -245,17 +245,17 @@ NTSTATUS ReceiveEx(
         *message = {};
     }
 
-    ::wknet::session::KhWebSocketReceiveOptions apiOptions = {};
+    ::wknet::session::WebSocketReceiveOptions apiOptions = {};
     if (options != nullptr) {
         apiOptions.MaxMessageBytes = options->MaxMessageBytes;
         apiOptions.AutoAllocate = options->AutoAllocate;
         apiOptions.DeliverFragments = options->DeliverFragments;
-        apiOptions.MessageCallback = reinterpret_cast<::wknet::session::KhWebSocketMessageCallback>(options->OnMessage);
+        apiOptions.MessageCallback = reinterpret_cast<::wknet::session::WebSocketMessageCallback>(options->OnMessage);
         apiOptions.CallbackContext = options->CallbackContext;
     }
 
-    ::wknet::session::KhWebSocketMessage apiMessage = {};
-    NTSTATUS status = ::wknet::session::KhWebSocketReceiveSync(
+    ::wknet::session::WebSocketMessage apiMessage = {};
+    NTSTATUS status = ::wknet::session::WebSocketReceiveSync(
         wknet::http::detail::ToApiWebSocket(websocket),
         options != nullptr ? &apiOptions : nullptr,
         message != nullptr ? &apiMessage : nullptr);
@@ -271,7 +271,7 @@ NTSTATUS ReceiveEx(
 
 NTSTATUS Close(WebSocket* websocket) noexcept
 {
-    return ::wknet::session::KhWebSocketCloseSync(wknet::http::detail::ToApiWebSocket(websocket));
+    return ::wknet::session::WebSocketCloseSync(wknet::http::detail::ToApiWebSocket(websocket));
 }
 
 NTSTATUS CloseEx(
@@ -280,7 +280,7 @@ NTSTATUS CloseEx(
     const UCHAR* reason,
     SIZE_T reasonLength) noexcept
 {
-    return ::wknet::session::KhWebSocketCloseExSync(
+    return ::wknet::session::WebSocketCloseExSync(
         wknet::http::detail::ToApiWebSocket(websocket),
         statusCode,
         reason,
@@ -292,7 +292,7 @@ NTSTATUS SelectedSubprotocol(
     const char** subprotocol,
     SIZE_T* subprotocolLength) noexcept
 {
-    return ::wknet::session::KhWebSocketSelectedSubprotocol(
+    return ::wknet::session::WebSocketSelectedSubprotocol(
         wknet::http::detail::ToApiWebSocket(websocket),
         subprotocol,
         subprotocolLength);
@@ -303,8 +303,8 @@ NTSTATUS AsyncGetWebSocket(wknet::http::AsyncOp* operation, WebSocket** websocke
     if (websocket != nullptr) {
         *websocket = nullptr;
     }
-    ::wknet::session::KH_WEBSOCKET apiWs = nullptr;
-    NTSTATUS status = ::wknet::session::KhAsyncGetWebSocket(wknet::http::detail::ToApiAsyncOp(operation), &apiWs);
+    ::wknet::session::WebSocketHandle apiWs = nullptr;
+    NTSTATUS status = ::wknet::session::AsyncGetWebSocket(wknet::http::detail::ToApiAsyncOp(operation), &apiWs);
     if (NT_SUCCESS(status) && websocket != nullptr) {
         *websocket = wknet::http::detail::FromApiWebSocket(apiWs);
     }

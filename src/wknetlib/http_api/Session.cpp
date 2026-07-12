@@ -7,7 +7,7 @@ namespace
 {
     void FillApiSessionOptions(
         const SessionConfig* config,
-        ::wknet::session::KhSessionOptions& apiOptions) noexcept
+        ::wknet::session::SessionOptions& apiOptions) noexcept
     {
         apiOptions.ResponsePoolType = detail::ToApiPoolType(config != nullptr ? config->ResponsePool : PoolType::NonPaged);
         apiOptions.RequestBufferBytes = config != nullptr ? config->RequestBufferBytes : DefaultRequestBufferBytes;
@@ -123,10 +123,10 @@ NTSTATUS SessionCreate(const SessionConfig* config, Session** session) noexcept
         return status;
     }
 
-    ::wknet::session::KhSessionOptions apiOptions = {};
+    ::wknet::session::SessionOptions apiOptions = {};
     FillApiSessionOptions(config, apiOptions);
 
-    status = ::wknet::session::KhSessionCreate(highSession->Wsk, &apiOptions, &highSession->Engine);
+    status = ::wknet::session::SessionCreate(highSession->Wsk, &apiOptions, &highSession->Engine);
     if (!NT_SUCCESS(status)) {
         detail::FreeClosedSession(highSession);
         return status;
@@ -138,7 +138,7 @@ NTSTATUS SessionCreate(const SessionConfig* config, Session** session) noexcept
 
 void SessionClose(Session* session) noexcept
 {
-    if (session == nullptr || session->Magic != detail::KhHighSessionMagic) {
+    if (session == nullptr || session->Magic != detail::HighSessionMagic) {
         return;
     }
 
@@ -154,7 +154,7 @@ void SessionClose(Session* session) noexcept
 #endif
 
     if (session->Engine != nullptr) {
-        ::wknet::session::KhSessionClose(session->Engine);
+        ::wknet::session::SessionClose(session->Engine);
         session->Engine = nullptr;
     }
     if (session->Wsk != nullptr) {

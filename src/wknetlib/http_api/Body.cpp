@@ -52,7 +52,7 @@ namespace
 
     bool IsValidHeaderName(const char* name, SIZE_T nameLength) noexcept
     {
-        if (name == nullptr || nameLength == 0 || nameLength > ::wknet::session::KhMaxHeaderNameLength) {
+        if (name == nullptr || nameLength == 0 || nameLength > ::wknet::session::MaxHeaderNameLength) {
             return false;
         }
         for (SIZE_T index = 0; index < nameLength; ++index) {
@@ -75,7 +75,7 @@ namespace
         if (value == nullptr && valueLength != 0) {
             return false;
         }
-        if (valueLength > ::wknet::session::KhMaxHeaderValueLength) {
+        if (valueLength > ::wknet::session::MaxHeaderValueLength) {
             return false;
         }
         for (SIZE_T index = 0; index < valueLength; ++index) {
@@ -275,7 +275,7 @@ NTSTATUS BodyCreateJsonCopyEx(const char* json, SIZE_T jsonLength, Body** body) 
 
 NTSTATUS BodyCreateForm(const NameValuePair* pairs, SIZE_T pairCount, Body** body) noexcept
 {
-    if (pairs == nullptr || pairCount == 0 || pairCount > ::wknet::session::KhMaxHeadersPerRequest) {
+    if (pairs == nullptr || pairCount == 0 || pairCount > ::wknet::session::MaxHeadersPerRequest) {
         return STATUS_INVALID_PARAMETER;
     }
     Body* created = nullptr;
@@ -299,7 +299,7 @@ NTSTATUS BodyCreateForm(const NameValuePair* pairs, SIZE_T pairCount, Body** bod
 
 NTSTATUS BodyCreateMultipart(const MultipartPart* parts, SIZE_T partCount, Body** body) noexcept
 {
-    if (parts == nullptr || partCount == 0 || partCount > ::wknet::session::KhMaxHeadersPerRequest) {
+    if (parts == nullptr || partCount == 0 || partCount > ::wknet::session::MaxHeadersPerRequest) {
         return STATUS_INVALID_PARAMETER;
     }
     for (SIZE_T index = 0; index < partCount; ++index) {
@@ -409,7 +409,7 @@ NTSTATUS BodyCreateStream(
 
 NTSTATUS BodySetMode(Body* body, RequestBodyMode mode) noexcept
 {
-    if (body == nullptr || body->Magic != detail::KhHighBodyMagic) {
+    if (body == nullptr || body->Magic != detail::HighBodyMagic) {
         return STATUS_INVALID_PARAMETER;
     }
     if (mode != RequestBodyMode::ContentLength && mode != RequestBodyMode::Chunked) {
@@ -426,7 +426,7 @@ NTSTATUS BodyAddTrailer(Body* body, const char* name, const char* value) noexcep
 
 NTSTATUS BodyAddTrailerEx(Body* body, const char* name, SIZE_T nameLength, const char* value, SIZE_T valueLength) noexcept
 {
-    if (body == nullptr || body->Magic != detail::KhHighBodyMagic ||
+    if (body == nullptr || body->Magic != detail::HighBodyMagic ||
         !IsValidHeaderName(name, nameLength) ||
         !IsValidHeaderValue(value, valueLength)) {
         return STATUS_INVALID_PARAMETER;
@@ -434,7 +434,7 @@ NTSTATUS BodyAddTrailerEx(Body* body, const char* name, SIZE_T nameLength, const
     if (IsForbiddenTrailer(name, nameLength)) {
         return STATUS_NOT_SUPPORTED;
     }
-    if (body->TrailerCount >= ::wknet::session::KhMaxHeadersPerRequest) {
+    if (body->TrailerCount >= ::wknet::session::MaxHeadersPerRequest) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     char* nameCopy = CopyText(name, nameLength);
@@ -456,7 +456,7 @@ NTSTATUS BodyAddTrailerEx(Body* body, const char* name, SIZE_T nameLength, const
 
 void BodyRelease(Body* body) noexcept
 {
-    if (body == nullptr || body->Magic != detail::KhHighBodyMagic) {
+    if (body == nullptr || body->Magic != detail::HighBodyMagic) {
         return;
     }
     if (body->OwnsData) {

@@ -10,46 +10,46 @@ namespace wknet
 {
 namespace session
 {
-    constexpr ULONG KhAsyncOperationMagic = 0x4B484131;
+    constexpr ULONG AsyncOperationMagic = 0x4B484131;
 
-    enum class KhAsyncOperationKind : ULONG
+    enum class AsyncOperationKind : ULONG
     {
         HttpSend = 0,
         WebSocketConnect = 1
     };
 
-    typedef NTSTATUS (*KhAsyncWorkerRoutine)(
-        _In_ KH_ASYNC_OPERATION operation,
+    typedef NTSTATUS (*AsyncWorkerRoutine)(
+        _In_ AsyncOperationHandle operation,
         _In_opt_ void* context);
 
-    typedef void (*KhAsyncCleanupRoutine)(_In_opt_ void* context);
+    typedef void (*AsyncCleanupRoutine)(_In_opt_ void* context);
 
-    enum class KhAsyncState : ULONG
+    enum class AsyncState : ULONG
     {
         Pending = 0,
         Running = 1,
         Completed = 2
     };
 
-    struct KhAsyncOperation
+    struct AsyncOperation
     {
-        ULONG Magic = KhAsyncOperationMagic;
+        ULONG Magic = AsyncOperationMagic;
         // User-visible handle state only. Internal worker references keep the
         // operation object alive and must still be able to observe cancellation.
         volatile LONG Closed = 0;
-        KhAsyncOperationKind Kind = KhAsyncOperationKind::HttpSend;
+        AsyncOperationKind Kind = AsyncOperationKind::HttpSend;
         volatile LONG ReferenceCount = 1;
         volatile LONG Canceled = 0;
         volatile LONG Completed = 0;
-        volatile LONG State = static_cast<LONG>(KhAsyncState::Pending);
+        volatile LONG State = static_cast<LONG>(AsyncState::Pending);
         NTSTATUS Status = STATUS_PENDING;
-        KhAsyncWorkerRoutine WorkerRoutine = nullptr;
-        KhAsyncCleanupRoutine CleanupRoutine = nullptr;
+        AsyncWorkerRoutine WorkerRoutine = nullptr;
+        AsyncCleanupRoutine CleanupRoutine = nullptr;
         void* Context = nullptr;
-        KhAsyncCompletionCallback CompletionCallback = nullptr;
+        AsyncCompletionCallback CompletionCallback = nullptr;
         void* CompletionContext = nullptr;
         volatile LONG Queued = 0;
-        KhAsyncOperation* QueueNext = nullptr;
+        AsyncOperation* QueueNext = nullptr;
 #if defined(WKNET_USER_MODE_TEST)
         bool CompletionSignaled = false;
         bool TestWorkerReferenceHeld = false;
@@ -58,65 +58,65 @@ namespace session
 #endif
     };
 
-    struct KhAsyncCreateOptions final
+    struct AsyncCreateOptions final
     {
-        KhAsyncOperationKind Kind = KhAsyncOperationKind::HttpSend;
-        KhAsyncWorkerRoutine WorkerRoutine = nullptr;
-        KhAsyncCleanupRoutine CleanupRoutine = nullptr;
+        AsyncOperationKind Kind = AsyncOperationKind::HttpSend;
+        AsyncWorkerRoutine WorkerRoutine = nullptr;
+        AsyncCleanupRoutine CleanupRoutine = nullptr;
         void* Context = nullptr;
-        KhAsyncCompletionCallback CompletionCallback = nullptr;
+        AsyncCompletionCallback CompletionCallback = nullptr;
         void* CompletionContext = nullptr;
         bool StartSuspended = false;
     };
 
     _Must_inspect_result_
-    NTSTATUS KhAsyncOperationCreate(
-        _In_ const KhAsyncCreateOptions& options,
-        _Out_ KH_ASYNC_OPERATION* operation) noexcept;
+    NTSTATUS AsyncOperationCreate(
+        _In_ const AsyncCreateOptions& options,
+        _Out_ AsyncOperationHandle* operation) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhAsyncOperationQueue(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    NTSTATUS AsyncOperationQueue(_In_ AsyncOperationHandle operation) noexcept;
 
     // Cancel completes pending operations immediately. Running HTTP/WebSocket workers
     // observe the flag and pass it to WSK-backed transport waits, which cancel the
     // active IRP where that lower layer supports cancellation.
     _Must_inspect_result_
-    NTSTATUS KhAsyncOperationCancel(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    NTSTATUS AsyncOperationCancel(_In_ AsyncOperationHandle operation) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhAsyncOperationWait(
-        _In_ KH_ASYNC_OPERATION operation,
+    NTSTATUS AsyncOperationWait(
+        _In_ AsyncOperationHandle operation,
         ULONG timeoutMilliseconds) noexcept;
 
-    void KhAsyncOperationRelease(_In_opt_ KH_ASYNC_OPERATION operation) noexcept;
+    void AsyncOperationRelease(_In_opt_ AsyncOperationHandle operation) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhAsyncOperationStatus(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    NTSTATUS AsyncOperationStatus(_In_ AsyncOperationHandle operation) noexcept;
 
     _Must_inspect_result_
-    bool KhAsyncOperationIsCanceled(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    bool AsyncOperationIsCanceled(_In_ AsyncOperationHandle operation) noexcept;
 
     _Must_inspect_result_
-    bool KhAsyncOperationIsCompleted(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    bool AsyncOperationIsCompleted(_In_ AsyncOperationHandle operation) noexcept;
 
     _Must_inspect_result_
-    KhAsyncState KhAsyncOperationState(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    AsyncState AsyncOperationState(_In_ AsyncOperationHandle operation) noexcept;
 
     _Must_inspect_result_
-    bool KhAsyncOperationIsValid(_In_opt_ KH_ASYNC_OPERATION operation) noexcept;
+    bool AsyncOperationIsValid(_In_opt_ AsyncOperationHandle operation) noexcept;
 
     _Must_inspect_result_
-    KhAsyncOperationKind KhAsyncOperationGetKind(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    AsyncOperationKind AsyncOperationGetKind(_In_ AsyncOperationHandle operation) noexcept;
 
     _Ret_maybenull_
-    void* KhAsyncOperationContext(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    void* AsyncOperationContext(_In_ AsyncOperationHandle operation) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhEngineDrainAsync() noexcept;
+    NTSTATUS EngineDrainAsync() noexcept;
 
 #if defined(WKNET_USER_MODE_TEST)
-    void KhTestSetAsyncAutoRun(bool enabled) noexcept;
-    NTSTATUS KhTestRunAsyncOperation(_In_ KH_ASYNC_OPERATION operation) noexcept;
+    void TestSetAsyncAutoRun(bool enabled) noexcept;
+    NTSTATUS TestRunAsyncOperation(_In_ AsyncOperationHandle operation) noexcept;
 #endif
 }
 }

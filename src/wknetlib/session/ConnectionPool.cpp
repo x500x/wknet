@@ -22,7 +22,7 @@ namespace session
 {
 namespace
 {
-    struct KhDetachedConnectionResources final
+    struct DetachedConnectionResources final
     {
 #if !defined(WKNET_USER_MODE_TEST)
         net::WskSocket* Socket = nullptr;
@@ -34,10 +34,10 @@ namespace
     };
 
     void DetachConnectionResources(
-        _Inout_ KhPooledConnection& connection,
-        _Out_ KhDetachedConnectionResources* detached) noexcept;
+        _Inout_ PooledConnection& connection,
+        _Out_ DetachedConnectionResources* detached) noexcept;
 
-    void InitializePoolLock(_Inout_ KhConnectionPool* pool) noexcept
+    void InitializePoolLock(_Inout_ ConnectionPool* pool) noexcept
     {
 #if !defined(WKNET_USER_MODE_TEST)
         ExInitializeFastMutex(&pool->Lock);
@@ -46,7 +46,7 @@ namespace
 #endif
     }
 
-    void LockPool(_Inout_ KhConnectionPool* pool) noexcept
+    void LockPool(_Inout_ ConnectionPool* pool) noexcept
     {
 #if !defined(WKNET_USER_MODE_TEST)
         ExAcquireFastMutex(&pool->Lock);
@@ -55,7 +55,7 @@ namespace
 #endif
     }
 
-    void UnlockPool(_Inout_ KhConnectionPool* pool) noexcept
+    void UnlockPool(_Inout_ ConnectionPool* pool) noexcept
     {
 #if !defined(WKNET_USER_MODE_TEST)
         ExReleaseFastMutex(&pool->Lock);
@@ -91,7 +91,7 @@ namespace
 #endif
     }
 
-    void InitializePooledConnectionSlot(_Inout_ KhPooledConnection& connection) noexcept
+    void InitializePooledConnectionSlot(_Inout_ PooledConnection& connection) noexcept
     {
         connection.Http1PipelineNextSequence = 1;
         connection.Http1PipelineNextReceiveSequence = 1;
@@ -102,7 +102,7 @@ namespace
 #endif
     }
 
-    void SignalHttp1PipelineReceiveEvent(_Inout_ KhPooledConnection& connection) noexcept
+    void SignalHttp1PipelineReceiveEvent(_Inout_ PooledConnection& connection) noexcept
     {
 #if !defined(WKNET_USER_MODE_TEST)
         KeSetEvent(&connection.Http1PipelineReceiveEvent, IO_NO_INCREMENT, FALSE);
@@ -111,7 +111,7 @@ namespace
 #endif
     }
 
-    void ClearHttp1PipelineReceiveEvent(_Inout_ KhPooledConnection& connection) noexcept
+    void ClearHttp1PipelineReceiveEvent(_Inout_ PooledConnection& connection) noexcept
     {
 #if !defined(WKNET_USER_MODE_TEST)
         KeClearEvent(&connection.Http1PipelineReceiveEvent);
@@ -120,7 +120,7 @@ namespace
 #endif
     }
 
-    void FreeHttp1PipelineBuffer(_Inout_ KhPooledConnection& connection) noexcept
+    void FreeHttp1PipelineBuffer(_Inout_ PooledConnection& connection) noexcept
     {
         FreePoolMemory(connection.Http1PipelineBufferedBytes);
         connection.Http1PipelineBufferedBytes = nullptr;
@@ -128,7 +128,7 @@ namespace
         connection.Http1PipelineBufferedCapacity = 0;
     }
 
-    void ResetHttp1PipelineLeaseState(_Inout_ KhPooledConnection& connection) noexcept
+    void ResetHttp1PipelineLeaseState(_Inout_ PooledConnection& connection) noexcept
     {
         connection.Http1PipelineLeases = 0;
         connection.Http1MaxPipelineLeases = 0;
@@ -139,7 +139,7 @@ namespace
         SignalHttp1PipelineReceiveEvent(connection);
     }
 
-    NTSTATUS ActiveHttp1PipelineFailureStatus(_In_ const KhPooledConnection& connection) noexcept
+    NTSTATUS ActiveHttp1PipelineFailureStatus(_In_ const PooledConnection& connection) noexcept
     {
         if (!NT_SUCCESS(connection.Http1PipelineFailureStatus)) {
             return connection.Http1PipelineFailureStatus;
@@ -162,8 +162,8 @@ namespace
 
     _Must_inspect_result_
     bool IsIdleExpired(
-        _In_ const KhConnectionPool& pool,
-        _In_ const KhPooledConnection& connection,
+        _In_ const ConnectionPool& pool,
+        _In_ const PooledConnection& connection,
         ULONGLONG now) noexcept
     {
         if (pool.IdleTimeoutMilliseconds == 0 || connection.LastUsedTime == 0 || now < connection.LastUsedTime) {
@@ -218,8 +218,8 @@ namespace
     }
 
     bool ProxyIdentityEquals(
-        const KhConnectionPoolKey& left,
-        const KhConnectionPoolKey& right) noexcept
+        const ConnectionPoolKey& left,
+        const ConnectionPoolKey& right) noexcept
     {
         if (left.ProxyEnabled != right.ProxyEnabled) {
             return false;
@@ -238,7 +238,7 @@ namespace
     }
 
     _Must_inspect_result_
-    bool HasConnectionState(_In_ const KhPooledConnection& connection) noexcept
+    bool HasConnectionState(_In_ const PooledConnection& connection) noexcept
     {
         if (connection.InUse ||
             connection.Connected ||
@@ -263,7 +263,7 @@ namespace
     }
 
     _Must_inspect_result_
-    bool HasDetachedConnectionResources(_In_ const KhDetachedConnectionResources& detached) noexcept
+    bool HasDetachedConnectionResources(_In_ const DetachedConnectionResources& detached) noexcept
     {
         bool hasResources = false;
 #if !defined(WKNET_USER_MODE_TEST)
@@ -278,15 +278,15 @@ namespace
 
     _Must_inspect_result_
     bool CanShareHttp2Connection(
-        _In_ const KhPooledConnection& connection,
-        _In_ const KhConnectionPoolKey& key) noexcept
+        _In_ const PooledConnection& connection,
+        _In_ const ConnectionPoolKey& key) noexcept
     {
         if (!connection.Connected ||
             connection.CloseWhenIdle ||
             connection.Http2StreamLeases == 0 ||
             connection.Http2MaxStreamLeases == 0 ||
             connection.Http2StreamLeases >= connection.Http2MaxStreamLeases ||
-            !KhConnectionPoolKeysEqualForAutoAlpnAcquire(key, connection.Key)) {
+            !ConnectionPoolKeysEqualForAutoAlpnAcquire(key, connection.Key)) {
             return false;
         }
 
@@ -299,8 +299,8 @@ namespace
 
     _Must_inspect_result_
     bool CanShareHttp1PipelineConnection(
-        _In_ const KhPooledConnection& connection,
-        _In_ const KhConnectionPoolKey& key,
+        _In_ const PooledConnection& connection,
+        _In_ const ConnectionPoolKey& key,
         ULONG maxPipelineLeases) noexcept
     {
         if (!connection.Connected ||
@@ -311,7 +311,7 @@ namespace
             connection.Http1PipelineLeases >= connection.Http1MaxPipelineLeases ||
             maxPipelineLeases == 0 ||
             connection.Http2StreamLeases != 0 ||
-            !KhConnectionPoolKeysEqualForAutoAlpnAcquire(key, connection.Key)) {
+            !ConnectionPoolKeysEqualForAutoAlpnAcquire(key, connection.Key)) {
             return false;
         }
 
@@ -320,8 +320,8 @@ namespace
 
     _Must_inspect_result_
     bool ConnectionPoolHostQuotaKeysEqual(
-        _In_ const KhConnectionPoolKey& left,
-        _In_ const KhConnectionPoolKey& right) noexcept
+        _In_ const ConnectionPoolKey& left,
+        _In_ const ConnectionPoolKey& right) noexcept
     {
         return left.Port == right.Port &&
             left.AddressFamily == right.AddressFamily &&
@@ -331,8 +331,8 @@ namespace
 
     _Must_inspect_result_
     ULONG CountConnectionsForHostQuota(
-        _In_ const KhConnectionPool& pool,
-        _In_ const KhConnectionPoolKey& key) noexcept
+        _In_ const ConnectionPool& pool,
+        _In_ const ConnectionPoolKey& key) noexcept
     {
         ULONG count = 0;
         if (pool.Entries == nullptr) {
@@ -340,7 +340,7 @@ namespace
         }
 
         for (ULONG index = 0; index < pool.Capacity; ++index) {
-            const KhPooledConnection& candidate = pool.Entries[index];
+            const PooledConnection& candidate = pool.Entries[index];
             if ((candidate.Connected || candidate.InUse) &&
                 ConnectionPoolHostQuotaKeysEqual(candidate.Key, key)) {
                 ++count;
@@ -351,16 +351,16 @@ namespace
 
     _Must_inspect_result_
     bool DetachIdleConnectionForHostQuotaLocked(
-        _Inout_ KhConnectionPool& pool,
-        _In_ const KhConnectionPoolKey& key,
-        _Out_ KhDetachedConnectionResources* detached) noexcept
+        _Inout_ ConnectionPool& pool,
+        _In_ const ConnectionPoolKey& key,
+        _Out_ DetachedConnectionResources* detached) noexcept
     {
         if (pool.Entries == nullptr || detached == nullptr) {
             return false;
         }
 
         for (ULONG index = 0; index < pool.Capacity; ++index) {
-            KhPooledConnection& candidate = pool.Entries[index];
+            PooledConnection& candidate = pool.Entries[index];
             if (candidate.Connected &&
                 !candidate.InUse &&
                 candidate.Http2StreamLeases == 0 &&
@@ -378,8 +378,8 @@ namespace
     }
 
     void DetachConnectionResources(
-        _Inout_ KhPooledConnection& connection,
-        _Out_ KhDetachedConnectionResources* detached) noexcept
+        _Inout_ PooledConnection& connection,
+        _Out_ DetachedConnectionResources* detached) noexcept
     {
         if (detached == nullptr) {
             return;
@@ -397,7 +397,7 @@ namespace
         InitializePooledConnectionSlot(connection);
     }
 
-    void CloseDetachedConnectionResources(_Inout_ KhDetachedConnectionResources* detached) noexcept
+    void CloseDetachedConnectionResources(_Inout_ DetachedConnectionResources* detached) noexcept
     {
         if (detached == nullptr) {
             return;
@@ -434,27 +434,27 @@ namespace
 #endif
     }
 
-    KhHttp2KeepAliveOptions NormalizeHttp2KeepAliveOptions(
-        const KhHttp2KeepAliveOptions* options) noexcept
+    Http2KeepAliveOptions NormalizeHttp2KeepAliveOptions(
+        const Http2KeepAliveOptions* options) noexcept
     {
-        KhHttp2KeepAliveOptions normalized = {};
+        Http2KeepAliveOptions normalized = {};
         if (options != nullptr) {
             normalized = *options;
         }
 
         if (normalized.IdleMilliseconds == 0) {
-            normalized.IdleMilliseconds = KhDefaultHttp2KeepAliveIdleMilliseconds;
+            normalized.IdleMilliseconds = DefaultHttp2KeepAliveIdleMilliseconds;
         }
         if (normalized.IntervalMilliseconds == 0) {
-            normalized.IntervalMilliseconds = KhDefaultHttp2KeepAliveIntervalMilliseconds;
+            normalized.IntervalMilliseconds = DefaultHttp2KeepAliveIntervalMilliseconds;
         }
         if (normalized.AckTimeoutMilliseconds == 0) {
-            normalized.AckTimeoutMilliseconds = KhDefaultHttp2KeepAliveAckTimeoutMilliseconds;
+            normalized.AckTimeoutMilliseconds = DefaultHttp2KeepAliveAckTimeoutMilliseconds;
         }
         return normalized;
     }
 
-    bool IsValidHttp2KeepAliveOptions(const KhHttp2KeepAliveOptions& options) noexcept
+    bool IsValidHttp2KeepAliveOptions(const Http2KeepAliveOptions& options) noexcept
     {
         if (!options.Enabled) {
             return true;
@@ -466,7 +466,7 @@ namespace
             options.AckTimeoutMilliseconds <= WskOperationTimeoutMilliseconds;
     }
 
-    void StoreHttp2KeepAliveOpaqueData(_Inout_ KhPooledConnection& connection) noexcept
+    void StoreHttp2KeepAliveOpaqueData(_Inout_ PooledConnection& connection) noexcept
     {
         const ULONGLONG first =
             (static_cast<ULONGLONG>(connection.Id) << 32) ^
@@ -485,8 +485,8 @@ namespace
     }
 
     bool IsHttp2KeepAliveDue(
-        _In_ const KhConnectionPool& pool,
-        _In_ const KhPooledConnection& connection,
+        _In_ const ConnectionPool& pool,
+        _In_ const PooledConnection& connection,
         ULONGLONG now) noexcept
     {
         if (!pool.Http2KeepAlive.Enabled ||
@@ -526,7 +526,7 @@ namespace
 #if !defined(WKNET_USER_MODE_TEST)
     void Http2KeepAliveWorkerRoutine(_In_ void* context)
     {
-        auto* pool = static_cast<KhConnectionPool*>(context);
+        auto* pool = static_cast<ConnectionPool*>(context);
         if (pool == nullptr) {
             PsTerminateSystemThread(STATUS_INVALID_PARAMETER);
         }
@@ -547,7 +547,7 @@ namespace
             }
 
             bool attempted = false;
-            const NTSTATUS sweepStatus = KhConnectionPoolRunHttp2KeepAliveSweep(pool, &attempted);
+            const NTSTATUS sweepStatus = ConnectionPoolRunHttp2KeepAliveSweep(pool, &attempted);
             UNREFERENCED_PARAMETER(sweepStatus);
             UNREFERENCED_PARAMETER(attempted);
         }
@@ -558,12 +558,12 @@ namespace
 #endif
 }
 
-    NTSTATUS KhConnectionPoolInitialize(
-        KhConnectionPool* pool,
+    NTSTATUS ConnectionPoolInitialize(
+        ConnectionPool* pool,
         ULONG capacity,
         ULONG maxConnectionsPerHost,
         ULONG idleTimeoutMilliseconds,
-        const KhHttp2KeepAliveOptions* http2KeepAlive) noexcept
+        const Http2KeepAliveOptions* http2KeepAlive) noexcept
     {
         if (pool == nullptr ||
             capacity == 0 ||
@@ -581,8 +581,8 @@ namespace
 #if !defined(WKNET_USER_MODE_TEST)
         KeInitializeEvent(&pool->Http2KeepAliveStopEvent, NotificationEvent, FALSE);
 #endif
-        pool->Entries = static_cast<KhPooledConnection*>(
-            AllocatePoolMemory(sizeof(KhPooledConnection) * capacity));
+        pool->Entries = static_cast<PooledConnection*>(
+            AllocatePoolMemory(sizeof(PooledConnection) * capacity));
         if (pool->Entries == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -597,7 +597,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhConnectionPoolStartHttp2KeepAlive(KhConnectionPool* pool) noexcept
+    NTSTATUS ConnectionPoolStartHttp2KeepAlive(ConnectionPool* pool) noexcept
     {
         if (pool == nullptr || pool->Entries == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -658,7 +658,7 @@ namespace
 #endif
     }
 
-    void KhConnectionPoolStopHttp2KeepAlive(KhConnectionPool* pool) noexcept
+    void ConnectionPoolStopHttp2KeepAlive(ConnectionPool* pool) noexcept
     {
         if (pool == nullptr) {
             return;
@@ -691,8 +691,8 @@ namespace
 #endif
     }
 
-    NTSTATUS KhConnectionPoolRunHttp2KeepAliveSweep(
-        KhConnectionPool* pool,
+    NTSTATUS ConnectionPoolRunHttp2KeepAliveSweep(
+        ConnectionPool* pool,
         bool* attempted) noexcept
     {
         if (attempted != nullptr) {
@@ -705,7 +705,7 @@ namespace
             return STATUS_SUCCESS;
         }
 
-        KhPooledConnection* selected = nullptr;
+        PooledConnection* selected = nullptr;
         core::ITransport* transport = nullptr;
         http2::Http2Connection* http2Connection = nullptr;
         const UCHAR* opaqueData = nullptr;
@@ -713,7 +713,7 @@ namespace
 
         LockPool(pool);
         for (ULONG index = 0; index < pool->Capacity; ++index) {
-            KhPooledConnection& candidate = pool->Entries[index];
+            PooledConnection& candidate = pool->Entries[index];
             if (!IsHttp2KeepAliveDue(*pool, candidate, now)) {
                 continue;
             }
@@ -742,7 +742,7 @@ namespace
             opaqueData,
             pool->Http2KeepAlive.AckTimeoutMilliseconds);
 
-        KhDetachedConnectionResources detached = {};
+        DetachedConnectionResources detached = {};
         LockPool(pool);
         selected->Http2KeepAliveInProgress = false;
         if (NT_SUCCESS(status) && selected->Http2 != nullptr && selected->Http2->IsReusable()) {
@@ -766,13 +766,13 @@ namespace
         return status;
     }
 
-    void KhConnectionPoolShutdown(KhConnectionPool* pool) noexcept
+    void ConnectionPoolShutdown(ConnectionPool* pool) noexcept
     {
         if (pool == nullptr) {
             return;
         }
 
-        KhConnectionPoolStopHttp2KeepAlive(pool);
+        ConnectionPoolStopHttp2KeepAlive(pool);
 
         if (pool->Entries == nullptr) {
             RtlZeroMemory(pool, sizeof(*pool));
@@ -780,12 +780,12 @@ namespace
         }
 
         for (;;) {
-            KhDetachedConnectionResources detached = {};
+            DetachedConnectionResources detached = {};
             bool found = false;
 
             LockPool(pool);
             for (ULONG index = 0; index < pool->Capacity; ++index) {
-                KhPooledConnection& entry = pool->Entries[index];
+                PooledConnection& entry = pool->Entries[index];
                 if (!HasConnectionState(entry)) {
                     continue;
                 }
@@ -806,15 +806,15 @@ namespace
             }
         }
 
-        RtlSecureZeroMemory(pool->Entries, sizeof(KhPooledConnection) * pool->Capacity);
+        RtlSecureZeroMemory(pool->Entries, sizeof(PooledConnection) * pool->Capacity);
         FreePoolMemory(pool->Entries);
         RtlZeroMemory(pool, sizeof(*pool));
     }
 
     _Must_inspect_result_
-    bool KhConnectionPoolKeysEqualExceptAlpn(
-        const KhConnectionPoolKey& left,
-        const KhConnectionPoolKey& right) noexcept
+    bool ConnectionPoolKeysEqualExceptAlpn(
+        const ConnectionPoolKey& left,
+        const ConnectionPoolKey& right) noexcept
     {
         return left.Port == right.Port &&
             left.AddressFamily == right.AddressFamily &&
@@ -839,34 +839,34 @@ namespace
             TextEquals(left.TlsServerName, left.TlsServerNameLength, right.TlsServerName, right.TlsServerNameLength);
     }
 
-    bool KhConnectionPoolKeysEqual(
-        const KhConnectionPoolKey& left,
-        const KhConnectionPoolKey& right) noexcept
+    bool ConnectionPoolKeysEqual(
+        const ConnectionPoolKey& left,
+        const ConnectionPoolKey& right) noexcept
     {
-        return KhConnectionPoolKeysEqualExceptAlpn(left, right) &&
+        return ConnectionPoolKeysEqualExceptAlpn(left, right) &&
             TextEquals(left.Alpn, left.AlpnLength, right.Alpn, right.AlpnLength);
     }
 
-    bool KhConnectionPoolKeysEqualForAutoAlpnAcquire(
-        const KhConnectionPoolKey& left,
-        const KhConnectionPoolKey& right) noexcept
+    bool ConnectionPoolKeysEqualForAutoAlpnAcquire(
+        const ConnectionPoolKey& left,
+        const ConnectionPoolKey& right) noexcept
     {
         if (left.AlpnLength != 0 || right.AlpnLength == 0) {
-            return KhConnectionPoolKeysEqual(left, right);
+            return ConnectionPoolKeysEqual(left, right);
         }
 
         if (!left.AutomaticAlpn || !right.AutomaticAlpn) {
-            return KhConnectionPoolKeysEqual(left, right);
+            return ConnectionPoolKeysEqual(left, right);
         }
 
-        return KhConnectionPoolKeysEqualExceptAlpn(left, right);
+        return ConnectionPoolKeysEqualExceptAlpn(left, right);
     }
 
-    NTSTATUS KhConnectionPoolAcquire(
-        KhConnectionPool* pool,
-        const KhConnectionPoolKey& key,
-        KhConnectionPolicy policy,
-        KhPooledConnection** connection,
+    NTSTATUS ConnectionPoolAcquire(
+        ConnectionPool* pool,
+        const ConnectionPoolKey& key,
+        ConnectionPolicy policy,
+        PooledConnection** connection,
         bool* reused) noexcept
     {
         if (connection != nullptr) {
@@ -880,14 +880,14 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        KhDetachedConnectionResources detached = {};
-        KhPooledConnection* selected = nullptr;
+        DetachedConnectionResources detached = {};
+        PooledConnection* selected = nullptr;
         const ULONGLONG now = QueryPoolTime();
 
         LockPool(pool);
-        if (policy != KhConnectionPolicy::ForceNew && policy != KhConnectionPolicy::NoPool) {
+        if (policy != ConnectionPolicy::ForceNew && policy != ConnectionPolicy::NoPool) {
             for (ULONG index = 0; index < pool->Capacity; ++index) {
-                KhPooledConnection& candidate = pool->Entries[index];
+                PooledConnection& candidate = pool->Entries[index];
                 if (candidate.InUse && CanShareHttp2Connection(candidate, key)) {
                     ++candidate.Http2StreamLeases;
                     selected = &candidate;
@@ -899,7 +899,7 @@ namespace
                     !candidate.InUse &&
                     candidate.Http2StreamLeases == 0 &&
                     candidate.Http1PipelineLeases == 0 &&
-                    KhConnectionPoolKeysEqualForAutoAlpnAcquire(key, candidate.Key)) {
+                    ConnectionPoolKeysEqualForAutoAlpnAcquire(key, candidate.Key)) {
                     if (IsIdleExpired(*pool, candidate, now)) {
                         DetachConnectionResources(candidate, &detached);
                         if (pool->ActiveCount != 0) {
@@ -931,7 +931,7 @@ namespace
             }
 
             for (ULONG index = 0; index < pool->Capacity; ++index) {
-                KhPooledConnection& candidate = pool->Entries[index];
+                PooledConnection& candidate = pool->Entries[index];
                 if (!candidate.Connected &&
                     !candidate.InUse &&
                     candidate.Http2StreamLeases == 0 &&
@@ -957,9 +957,9 @@ namespace
             }
         }
 
-        if (selected == nullptr && policy != KhConnectionPolicy::NoPool) {
+        if (selected == nullptr && policy != ConnectionPolicy::NoPool) {
             for (ULONG index = 0; index < pool->Capacity; ++index) {
-                KhPooledConnection& candidate = pool->Entries[index];
+                PooledConnection& candidate = pool->Entries[index];
                 if (!candidate.InUse &&
                     candidate.Http2StreamLeases == 0 &&
                     candidate.Http1PipelineLeases == 0) {
@@ -998,12 +998,12 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhConnectionPoolAcquireHttp1Pipeline(
-        KhConnectionPool* pool,
-        const KhConnectionPoolKey& key,
-        KhConnectionPolicy policy,
+    NTSTATUS ConnectionPoolAcquireHttp1Pipeline(
+        ConnectionPool* pool,
+        const ConnectionPoolKey& key,
+        ConnectionPolicy policy,
         ULONG maxPipelineLeases,
-        KhPooledConnection** connection,
+        PooledConnection** connection,
         bool* reused) noexcept
     {
         if (connection != nullptr) {
@@ -1021,10 +1021,10 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (policy == KhConnectionPolicy::ReuseOrCreate) {
+        if (policy == ConnectionPolicy::ReuseOrCreate) {
             LockPool(pool);
             for (ULONG index = 0; index < pool->Capacity; ++index) {
-                KhPooledConnection& candidate = pool->Entries[index];
+                PooledConnection& candidate = pool->Entries[index];
                 if (CanShareHttp1PipelineConnection(candidate, key, maxPipelineLeases)) {
                     ++candidate.Http1PipelineLeases;
                     *connection = &candidate;
@@ -1036,12 +1036,12 @@ namespace
             UnlockPool(pool);
         }
 
-        return KhConnectionPoolAcquire(pool, key, policy, connection, reused);
+        return ConnectionPoolAcquire(pool, key, policy, connection, reused);
     }
 
-    void KhConnectionPoolRelease(
-        KhConnectionPool* pool,
-        KhPooledConnection* connection,
+    void ConnectionPoolRelease(
+        ConnectionPool* pool,
+        PooledConnection* connection,
         bool reusable) noexcept
     {
         if (pool == nullptr || pool->Entries == nullptr || connection == nullptr) {
@@ -1049,7 +1049,7 @@ namespace
         }
 
         if (!reusable) {
-            KhDetachedConnectionResources detached = {};
+            DetachedConnectionResources detached = {};
             LockPool(pool);
             if (connection->Http2StreamLeases != 0) {
                 --connection->Http2StreamLeases;
@@ -1089,7 +1089,7 @@ namespace
             return;
         }
 
-        KhDetachedConnectionResources detached = {};
+        DetachedConnectionResources detached = {};
         LockPool(pool);
         if (connection->Http2StreamLeases != 0) {
             --connection->Http2StreamLeases;
@@ -1132,14 +1132,14 @@ namespace
         CloseDetachedConnectionResources(&detached);
     }
 
-    bool KhConnectionPoolHasHttp2StreamLease(const KhPooledConnection* connection) noexcept
+    bool ConnectionPoolHasHttp2StreamLease(const PooledConnection* connection) noexcept
     {
         return connection != nullptr && connection->Http2StreamLeases != 0;
     }
 
-    NTSTATUS KhConnectionPoolPromoteHttp2StreamLease(
-        KhConnectionPool* pool,
-        KhPooledConnection* connection,
+    NTSTATUS ConnectionPoolPromoteHttp2StreamLease(
+        ConnectionPool* pool,
+        PooledConnection* connection,
         ULONG maxConcurrentStreams) noexcept
     {
         if (pool == nullptr ||
@@ -1172,14 +1172,14 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    bool KhConnectionPoolHasHttp1PipelineLease(const KhPooledConnection* connection) noexcept
+    bool ConnectionPoolHasHttp1PipelineLease(const PooledConnection* connection) noexcept
     {
         return connection != nullptr && connection->Http1PipelineLeases != 0;
     }
 
-    NTSTATUS KhConnectionPoolPromoteHttp1PipelineLease(
-        KhConnectionPool* pool,
-        KhPooledConnection* connection,
+    NTSTATUS ConnectionPoolPromoteHttp1PipelineLease(
+        ConnectionPool* pool,
+        PooledConnection* connection,
         ULONG maxPipelineLeases) noexcept
     {
         if (pool == nullptr ||
@@ -1210,9 +1210,9 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhConnectionPoolBeginHttp1PipelineSend(
-        KhConnectionPool* pool,
-        KhPooledConnection* connection,
+    NTSTATUS ConnectionPoolBeginHttp1PipelineSend(
+        ConnectionPool* pool,
+        PooledConnection* connection,
         ULONG* sequence) noexcept
     {
         if (sequence != nullptr) {
@@ -1252,12 +1252,12 @@ namespace
         UnlockPool(pool);
 
         if (!NT_SUCCESS(status)) {
-            KhConnectionPoolEndHttp1PipelineSend(connection);
+            ConnectionPoolEndHttp1PipelineSend(connection);
         }
         return status;
     }
 
-    void KhConnectionPoolEndHttp1PipelineSend(KhPooledConnection* connection) noexcept
+    void ConnectionPoolEndHttp1PipelineSend(PooledConnection* connection) noexcept
     {
         if (connection == nullptr) {
             return;
@@ -1268,9 +1268,9 @@ namespace
 #endif
     }
 
-    NTSTATUS KhConnectionPoolWaitHttp1PipelineReceiveTurn(
-        KhConnectionPool* pool,
-        KhPooledConnection* connection,
+    NTSTATUS ConnectionPoolWaitHttp1PipelineReceiveTurn(
+        ConnectionPool* pool,
+        PooledConnection* connection,
         ULONG sequence) noexcept
     {
         if (pool == nullptr ||
@@ -1321,9 +1321,9 @@ namespace
         }
     }
 
-    void KhConnectionPoolCompleteHttp1PipelineReceive(
-        KhConnectionPool* pool,
-        KhPooledConnection* connection,
+    void ConnectionPoolCompleteHttp1PipelineReceive(
+        ConnectionPool* pool,
+        PooledConnection* connection,
         ULONG sequence) noexcept
     {
         if (pool == nullptr ||
@@ -1342,9 +1342,9 @@ namespace
         UnlockPool(pool);
     }
 
-    void KhConnectionPoolFailHttp1Pipeline(
-        KhConnectionPool* pool,
-        KhPooledConnection* connection,
+    void ConnectionPoolFailHttp1Pipeline(
+        ConnectionPool* pool,
+        PooledConnection* connection,
         NTSTATUS status) noexcept
     {
         if (pool == nullptr || pool->Entries == nullptr || connection == nullptr) {
@@ -1366,9 +1366,9 @@ namespace
         UnlockPool(pool);
     }
 
-    NTSTATUS KhConnectionPoolHttp1PipelineBufferedLength(
-        KhConnectionPool* pool,
-        KhPooledConnection* connection,
+    NTSTATUS ConnectionPoolHttp1PipelineBufferedLength(
+        ConnectionPool* pool,
+        PooledConnection* connection,
         SIZE_T* length) noexcept
     {
         if (length != nullptr) {
@@ -1384,9 +1384,9 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhConnectionPoolTakeHttp1PipelineBufferedBytes(
-        KhConnectionPool* pool,
-        KhPooledConnection* connection,
+    NTSTATUS ConnectionPoolTakeHttp1PipelineBufferedBytes(
+        ConnectionPool* pool,
+        PooledConnection* connection,
         UCHAR* destination,
         SIZE_T destinationCapacity,
         SIZE_T* bytesCopied) noexcept
@@ -1421,9 +1421,9 @@ namespace
         return status;
     }
 
-    NTSTATUS KhConnectionPoolStoreHttp1PipelineBufferedBytes(
-        KhConnectionPool* pool,
-        KhPooledConnection* connection,
+    NTSTATUS ConnectionPoolStoreHttp1PipelineBufferedBytes(
+        ConnectionPool* pool,
+        PooledConnection* connection,
         const UCHAR* bytes,
         SIZE_T length) noexcept
     {
@@ -1471,13 +1471,13 @@ namespace
         return status;
     }
 
-    void KhConnectionPoolClose(KhConnectionPool* pool, KhPooledConnection* connection) noexcept
+    void ConnectionPoolClose(ConnectionPool* pool, PooledConnection* connection) noexcept
     {
         if (pool == nullptr || pool->Entries == nullptr || connection == nullptr) {
             return;
         }
 
-        KhDetachedConnectionResources detached = {};
+        DetachedConnectionResources detached = {};
         LockPool(pool);
         if (connection->Http1PipelineLeases != 0 || connection->Http2StreamLeases != 0) {
             connection->CloseWhenIdle = true;

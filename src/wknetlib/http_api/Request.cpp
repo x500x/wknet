@@ -26,7 +26,7 @@ namespace
     bool IsValidRequestBuilder(Request* request) noexcept
     {
         return request != nullptr &&
-            request->Magic == detail::KhHighRequestMagic &&
+            request->Magic == detail::HighRequestMagic &&
             request->Closed == 0;
     }
 
@@ -119,13 +119,13 @@ NTSTATUS RequestCreate(Session* session, Request** out) noexcept
     }
 
 #if defined(WKNET_USER_MODE_TEST)
-    ::wknet::session::KH_REQUEST validationRequest = nullptr;
-    NTSTATUS validationStatus = ::wknet::session::KhHttpRequestCreate(session->Engine, &validationRequest);
+    ::wknet::session::RequestHandle validationRequest = nullptr;
+    NTSTATUS validationStatus = ::wknet::session::HttpRequestCreate(session->Engine, &validationRequest);
     if (!NT_SUCCESS(validationStatus)) {
         detail::ReleaseSessionRef(session);
         return validationStatus;
     }
-    ::wknet::session::KhHttpRequestRelease(validationRequest);
+    ::wknet::session::HttpRequestRelease(validationRequest);
 #endif
 
     auto* request = ::wknet::AllocateNonPagedObject<Request>();
@@ -141,7 +141,7 @@ NTSTATUS RequestCreate(Session* session, Request** out) noexcept
 
 void RequestRelease(Request* request) noexcept
 {
-    if (request == nullptr || request->Magic != detail::KhHighRequestMagic) {
+    if (request == nullptr || request->Magic != detail::HighRequestMagic) {
         return;
     }
     if (request->Closed != 0) {
@@ -170,13 +170,13 @@ NTSTATUS RequestSetUrl(Request* request, const char* url, SIZE_T urlLength) noex
         return STATUS_INVALID_PARAMETER;
     }
 
-    ::wknet::session::KH_REQUEST validationRequest = nullptr;
-    NTSTATUS status = ::wknet::session::KhHttpRequestCreate(request->Parent->Engine, &validationRequest);
+    ::wknet::session::RequestHandle validationRequest = nullptr;
+    NTSTATUS status = ::wknet::session::HttpRequestCreate(request->Parent->Engine, &validationRequest);
     if (!NT_SUCCESS(status)) {
         return status;
     }
-    status = ::wknet::session::KhHttpRequestSetUrl(validationRequest, url, urlLength);
-    ::wknet::session::KhHttpRequestRelease(validationRequest);
+    status = ::wknet::session::HttpRequestSetUrl(validationRequest, url, urlLength);
+    ::wknet::session::HttpRequestRelease(validationRequest);
     if (!NT_SUCCESS(status)) {
         return status;
     }
@@ -219,13 +219,13 @@ NTSTATUS RequestSetHeader(Request* request, const char* name, SIZE_T nameLength,
         return STATUS_INVALID_PARAMETER;
     }
 
-    ::wknet::session::KH_REQUEST validationRequest = nullptr;
-    NTSTATUS status = ::wknet::session::KhHttpRequestCreate(request->Parent->Engine, &validationRequest);
+    ::wknet::session::RequestHandle validationRequest = nullptr;
+    NTSTATUS status = ::wknet::session::HttpRequestCreate(request->Parent->Engine, &validationRequest);
     if (!NT_SUCCESS(status)) {
         return status;
     }
-    status = ::wknet::session::KhHttpRequestSetHeader(validationRequest, name, nameLength, value, valueLength);
-    ::wknet::session::KhHttpRequestRelease(validationRequest);
+    status = ::wknet::session::HttpRequestSetHeader(validationRequest, name, nameLength, value, valueLength);
+    ::wknet::session::HttpRequestRelease(validationRequest);
     if (!NT_SUCCESS(status)) {
         return status;
     }
@@ -236,7 +236,7 @@ NTSTATUS RequestSetHeader(Request* request, const char* name, SIZE_T nameLength,
             return status;
         }
     }
-    if (request->BuilderHeaders->Count >= ::wknet::session::KhMaxHeadersPerRequest) {
+    if (request->BuilderHeaders->Count >= ::wknet::session::MaxHeadersPerRequest) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     char* nameCopy = CopyText(name, nameLength);

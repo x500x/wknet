@@ -40,7 +40,7 @@ wknet separates implemented behavior, default-off capabilities, security refusal
 
 | Protocol | Current usable behavior |
 |----------|-------------------------|
-| HTTP/1.1 | `Content-Length`, library-generated chunked, true streaming request bodies (`BodyCreateStream` / `KhHttpRequestSetBodySource`), request trailers on the chunked path, `Expect: 100-continue`, explicit opt-in TRACE, typed Range/conditional request helpers, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer validation and read-only API exposure, read-only `206` / `Content-Range` parsing, RFC 3986 relative redirects, CONNECT request construction, HTTPS CONNECT proxy, plaintext HTTP proxy absolute-form, session-enabled HTTP/1.1 pipelining (off by default, FIFO response binding) |
+| HTTP/1.1 | `Content-Length`, library-generated chunked, true streaming request bodies (`BodyCreateStream` / `HttpRequestSetBodySource`), request trailers on the chunked path, `Expect: 100-continue`, explicit opt-in TRACE, typed Range/conditional request helpers, response `Transfer-Encoding` chains (`chunked`/`gzip`/`deflate`/`compress`), close-delimited responses, HEAD/101/no-body status codes, intermediate 1xx skipping, chunked trailer validation and read-only API exposure, read-only `206` / `Content-Range` parsing, RFC 3986 relative redirects, CONNECT request construction, HTTPS CONNECT proxy, plaintext HTTP proxy absolute-form, session-enabled HTTP/1.1 pipelining (off by default, FIFO response binding) |
 | HTTP/2 | TLS ALPN, h2c prior knowledge / Upgrade, SETTINGS including `ENABLE_CONNECT_PROTOCOL`, HEADERS/CONTINUATION, DATA body sources, request/response trailers, explicit per-request PRIORITY, explicit `SendPing`, session-enabled background PING keepalive (off by default), GOAWAY/RST retry semantics, WINDOW_UPDATE, HPACK, header-block semantic validation, HPACK header-list/table-size limits, active-stream table, two-stage `BeginRequest` / `ReceiveResponse(streamId)`, RFC 8441 extended CONNECT DATA tunnel, high-level pooled multi-stream reuse |
 | WebSocket | ws/wss handshake, constant-time accept check, caller-supplied opening handshake headers, text/binary send, empty messages, fragment send (`wknet::websocket::SendContinuation`), receive-fragment callback (`ReceiveOptions.DeliverFragments` / `OnMessage`), control-frame validation, auto-Pong, public Ping/Pong/CloseEx, selected subprotocol query, cross-fragment UTF-8 validation, complete-message aggregation by default, automatic-by-default RFC 8441 WebSocket over HTTP/2 for `wss` (`h2,http/1.1` offer; use `Http11Only` to force HTTP/1.1) |
 | TLS and certificates | TLS 1.2/1.3, standard TLS 1.3 cipher suites, TLS 1.2 ECDHE/DHE plus compatibility-profile RSA key exchange, AES-GCM/AES-CBC/ChaCha20-Poly1305, X25519/X448/NIST P curves/FFDHE, RSA-PSS/RSA-PKCS1/ECDSA/Ed25519/Ed448 signature schemes, SNI, ALPN, PSK/session ticket, 0-RTT, reactive KeyUpdate, record padding, client certificates (mTLS), OCSP stapling parse, certificate chain reordering and validation, Name Constraints, certificatePolicies, IDNA, OCSP/CRL DER revocation evidence validation, revocation provider callback, SPKI pin |
@@ -58,7 +58,7 @@ These capabilities are implemented but not enabled by default; they are not miss
 | HTTP/1.1 pipelining | Session `EnableHttp11Pipeline=true`; depth and method mask are configurable, defaulting to `GET`/`HEAD`/`OPTIONS` only |
 | h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode`; plaintext HTTP/2 is off by default |
 | HTTP/2 background PING keepalive | Session `Http2KeepAlive.Enabled=true`; idle, interval, and ACK timeout values are configurable |
-| HTTP/2 per-request priority | `SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority` |
+| HTTP/2 per-request priority | `SendOptions.Http2Priority` / `HttpSendOptions.Http2Priority` |
 | WebSocket permessage-deflate | `ConnectConfig.PerMessageDeflate.Enable=true`; compression is not offered by default |
 | TLS 1.2 RSA key exchange / CBC / SHA-1 signatures | `CompatibilityExplicit` policy plus the matching compatibility switches |
 | TLS 1.2 true renegotiation | `CompatibilityExplicit` + `EnableTls12Renegotiation`, limited by `MaxTls12Renegotiations` |
@@ -275,47 +275,47 @@ NTSTATUS SimpleHttpGet() {
 // Fine-grained HTTPS request
 NTSTATUS AdvancedHttpsRequest(net::WskClient& wskClient) {
     // Create session with TLS configuration
-    KH_SESSION session = nullptr;
-    KhSessionOptions sessionOptions = {};
-    sessionOptions.Tls.CertificatePolicy = KhCertificatePolicy::Verify;
-    sessionOptions.Tls.MinVersion = KhTlsVersion::Tls13;
+    SessionHandle session = nullptr;
+    SessionOptions sessionOptions = {};
+    sessionOptions.Tls.CertificatePolicy = CertificatePolicy::Verify;
+    sessionOptions.Tls.MinVersion = TlsVersion::Tls13;
     
-    NTSTATUS status = KhSessionCreate(&wskClient, &sessionOptions, &session);
+    NTSTATUS status = SessionCreate(&wskClient, &sessionOptions, &session);
     if (!NT_SUCCESS(status)) {
         return status;
     }
 
     // Create request
-    KH_REQUEST request = nullptr;
-    status = KhHttpRequestCreate(session, &request);
+    RequestHandle request = nullptr;
+    status = HttpRequestCreate(session, &request);
     if (!NT_SUCCESS(status)) {
-        KhSessionClose(session);
+        SessionClose(session);
         return status;
     }
 
     // Configure request
     const char* url = "https://api.example.com/data";
-    KhHttpRequestSetUrl(request, url, strlen(url));
-    KhHttpRequestSetMethod(request, KhHttpMethod::Get);
-    KhHttpRequestSetHeader(request, "User-Agent", 10, "wknet/1.0", 14);
+    HttpRequestSetUrl(request, url, strlen(url));
+    HttpRequestSetMethod(request, HttpMethod::Get);
+    HttpRequestSetHeader(request, "User-Agent", 10, "wknet/1.0", 14);
 
     // Send request
-    KH_RESPONSE response = nullptr;
-    status = KhHttpSendSync(session, request, nullptr, &response);
+    ResponseHandle response = nullptr;
+    status = HttpSendSync(session, request, nullptr, &response);
     
     if (NT_SUCCESS(status)) {
         // Get response view
-        KhResponseView view = {};
-        KhResponseGetView(response, &view);
+        ResponseView view = {};
+        ResponseGetView(response, &view);
         
         // Process response...
         
-        KhResponseRelease(response);
+        ResponseRelease(response);
     }
 
     // Cleanup resources
-    KhHttpRequestRelease(request);
-    KhSessionClose(session);
+    HttpRequestRelease(request);
+    SessionClose(session);
     return status;
 }
 ```

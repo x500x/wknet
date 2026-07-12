@@ -6,90 +6,90 @@ namespace wknet
 {
 namespace core
 {
-    class KhLookasideList;
+    class LookasideList;
 }
 
 namespace session
 {
-    constexpr SIZE_T KhWorkspaceRequestBufferBytes = KhDefaultRequestBufferBytes;
-    constexpr SIZE_T KhWorkspaceResponseInitialBytes = 4 * 1024;
-    constexpr SIZE_T KhWorkspaceDecodedBodyBytes = 16 * 1024;
-    constexpr SIZE_T KhWorkspaceHttpHeaderScratchBytes = 24 * 1024;
-    constexpr SIZE_T KhWorkspaceHttp2HeaderScratchBytes = 16 * 1024;
-    constexpr SIZE_T KhWorkspaceTlsHandshakeScratchBytes = 32 * 1024;
-    constexpr SIZE_T KhWorkspaceCertificateScratchBytes = 64 * 1024;
-    constexpr SIZE_T KhWorkspaceWebSocketFrameScratchBytes = 16 * 1024;
+    constexpr SIZE_T WorkspaceRequestBufferBytes = DefaultRequestBufferBytes;
+    constexpr SIZE_T WorkspaceResponseInitialBytes = 4 * 1024;
+    constexpr SIZE_T WorkspaceDecodedBodyBytes = 16 * 1024;
+    constexpr SIZE_T WorkspaceHttpHeaderScratchBytes = 24 * 1024;
+    constexpr SIZE_T WorkspaceHttp2HeaderScratchBytes = 16 * 1024;
+    constexpr SIZE_T WorkspaceTlsHandshakeScratchBytes = 32 * 1024;
+    constexpr SIZE_T WorkspaceCertificateScratchBytes = 64 * 1024;
+    constexpr SIZE_T WorkspaceWebSocketFrameScratchBytes = 16 * 1024;
 
-    struct KhWorkspaceBuffer final
+    struct WorkspaceBuffer final
     {
         UCHAR* Data = nullptr;
         SIZE_T Length = 0;
     };
 
-    struct KhWorkspaceOptions final
+    struct WorkspaceOptions final
     {
-        KhPoolType PoolType = KhPoolType::NonPaged;
-        SIZE_T RequestBufferBytes = KhDefaultRequestBufferBytes;
+        PoolType PoolType = PoolType::NonPaged;
+        SIZE_T RequestBufferBytes = DefaultRequestBufferBytes;
         // 0 means the response buffer grows until allocation failure.
-        SIZE_T MaxResponseBytes = KhDefaultMaxResponseBytes;
+        SIZE_T MaxResponseBytes = DefaultMaxResponseBytes;
     };
 
-    struct KhWorkspace final
+    struct Workspace final
     {
-        KhPoolType PoolType = KhPoolType::NonPaged;
+        PoolType PoolType = PoolType::NonPaged;
         // 0 means no caller-imposed response byte limit.
-        SIZE_T MaxResponseBytes = KhDefaultMaxResponseBytes;
-        KhWorkspaceBuffer Request = {};
-        KhWorkspaceBuffer Response = {};
-        KhWorkspaceBuffer DecodedBody = {};
-        KhWorkspaceBuffer HttpHeaderScratch = {};
-        KhWorkspaceBuffer Http2HeaderScratch = {};
-        KhWorkspaceBuffer TlsHandshakeScratch = {};
-        KhWorkspaceBuffer CertificateScratch = {};
-        KhWorkspaceBuffer WebSocketFrameScratch = {};
-        KhWorkspaceBuffer WebSocketSendFrameScratch = {};
-        KhWorkspaceBuffer WebSocketPayloadScratch = {};
+        SIZE_T MaxResponseBytes = DefaultMaxResponseBytes;
+        WorkspaceBuffer Request = {};
+        WorkspaceBuffer Response = {};
+        WorkspaceBuffer DecodedBody = {};
+        WorkspaceBuffer HttpHeaderScratch = {};
+        WorkspaceBuffer Http2HeaderScratch = {};
+        WorkspaceBuffer TlsHandshakeScratch = {};
+        WorkspaceBuffer CertificateScratch = {};
+        WorkspaceBuffer WebSocketFrameScratch = {};
+        WorkspaceBuffer WebSocketSendFrameScratch = {};
+        WorkspaceBuffer WebSocketPayloadScratch = {};
         SIZE_T ResponseLength = 0;
     };
 
     _Must_inspect_result_
-    NTSTATUS KhWorkspaceCreate(
-        _In_opt_ const KhWorkspaceOptions* options,
-        _Out_ KhWorkspace** workspace) noexcept;
+    NTSTATUS WorkspaceCreate(
+        _In_opt_ const WorkspaceOptions* options,
+        _Out_ Workspace** workspace) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWorkspaceCreateFromLookaside(
-        _In_opt_ const KhWorkspaceOptions* options,
-        _In_opt_ core::KhLookasideList* lookaside,
-        _Out_ KhWorkspace** workspace) noexcept;
+    NTSTATUS WorkspaceCreateFromLookaside(
+        _In_opt_ const WorkspaceOptions* options,
+        _In_opt_ core::LookasideList* lookaside,
+        _Out_ Workspace** workspace) noexcept;
 
-    void KhWorkspaceReset(_In_opt_ KhWorkspace* workspace) noexcept;
+    void WorkspaceReset(_In_opt_ Workspace* workspace) noexcept;
 
-    void KhWorkspaceRelease(_In_opt_ KhWorkspace* workspace) noexcept;
+    void WorkspaceRelease(_In_opt_ Workspace* workspace) noexcept;
 
-    void KhWorkspaceReleaseToLookaside(
-        _In_opt_ KhWorkspace* workspace,
-        _In_opt_ core::KhLookasideList* lookaside) noexcept;
+    void WorkspaceReleaseToLookaside(
+        _In_opt_ Workspace* workspace,
+        _In_opt_ core::LookasideList* lookaside) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWorkspaceEnsureResponseCapacity(
-        _Inout_ KhWorkspace* workspace,
+    NTSTATUS WorkspaceEnsureResponseCapacity(
+        _Inout_ Workspace* workspace,
         SIZE_T requiredCapacity) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWorkspaceAppendResponse(
-        _Inout_ KhWorkspace* workspace,
+    NTSTATUS WorkspaceAppendResponse(
+        _Inout_ Workspace* workspace,
         _In_reads_bytes_opt_(dataLength) const UCHAR* data,
         SIZE_T dataLength) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWorkspaceEnsureDecodedBodyCapacity(
-        _Inout_ KhWorkspace* workspace,
+    NTSTATUS WorkspaceEnsureDecodedBodyCapacity(
+        _Inout_ Workspace* workspace,
         SIZE_T requiredCapacity) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS KhWorkspaceEnsureWebSocketPayloadCapacity(
-        _Inout_ KhWorkspace* workspace,
+    NTSTATUS WorkspaceEnsureWebSocketPayloadCapacity(
+        _Inout_ Workspace* workspace,
         SIZE_T requiredCapacity) noexcept;
 }
 }

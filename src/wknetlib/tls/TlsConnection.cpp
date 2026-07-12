@@ -4770,7 +4770,7 @@ namespace tls
             if (!NT_SUCCESS(status)) {
                 return status;
             }
-            if (++messageCount > KhTlsMaxPostHandshakeMessagesPerRecord) {
+            if (++messageCount > TlsMaxPostHandshakeMessagesPerRecord) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
@@ -5480,7 +5480,7 @@ namespace tls
             if (!NT_SUCCESS(status)) {
                 return status == STATUS_MORE_PROCESSING_REQUIRED ? STATUS_INVALID_NETWORK_RESPONSE : status;
             }
-            if (++messageCount > KhTlsMaxPostHandshakeMessagesPerRecord) {
+            if (++messageCount > TlsMaxPostHandshakeMessagesPerRecord) {
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 

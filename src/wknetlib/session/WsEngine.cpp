@@ -13,41 +13,41 @@ namespace session
     static bool IsWebSocketAsyncCancellationRequested(_In_opt_ void* context) noexcept
     {
         return context != nullptr &&
-            KhAsyncOperationIsCanceled(static_cast<KH_ASYNC_OPERATION>(context));
+            AsyncOperationIsCanceled(static_cast<AsyncOperationHandle>(context));
     }
 #endif
 
-    bool WebSocketModeAllowsHttp2(const KhWebSocketConnectOptions& options) noexcept
+    bool WebSocketModeAllowsHttp2(const WebSocketConnectOptions& options) noexcept
     {
         switch (options.TransportMode) {
-        case KhWebSocketTransportMode::Http11Only:
+        case WebSocketTransportMode::Http11Only:
             return false;
-        case KhWebSocketTransportMode::Auto:
-        case KhWebSocketTransportMode::Http2Required:
+        case WebSocketTransportMode::Auto:
+        case WebSocketTransportMode::Http2Required:
             return true;
-        case KhWebSocketTransportMode::LegacyBoolean:
+        case WebSocketTransportMode::LegacyBoolean:
         default:
             return options.AllowWebSocketOverHttp2;
         }
     }
 
-    bool WebSocketModeRequiresWss(const KhWebSocketConnectOptions& options) noexcept
+    bool WebSocketModeRequiresWss(const WebSocketConnectOptions& options) noexcept
     {
-        return options.TransportMode == KhWebSocketTransportMode::Http2Required ||
-            (options.TransportMode == KhWebSocketTransportMode::LegacyBoolean &&
+        return options.TransportMode == WebSocketTransportMode::Http2Required ||
+            (options.TransportMode == WebSocketTransportMode::LegacyBoolean &&
                 options.AllowWebSocketOverHttp2);
     }
 
-    client::WebSocketTransportMode ToClientWebSocketTransportMode(KhWebSocketTransportMode mode) noexcept
+    client::WebSocketTransportMode ToClientWebSocketTransportMode(WebSocketTransportMode mode) noexcept
     {
         switch (mode) {
-        case KhWebSocketTransportMode::Http11Only:
+        case WebSocketTransportMode::Http11Only:
             return client::WebSocketTransportMode::Http11Only;
-        case KhWebSocketTransportMode::Auto:
+        case WebSocketTransportMode::Auto:
             return client::WebSocketTransportMode::Auto;
-        case KhWebSocketTransportMode::Http2Required:
+        case WebSocketTransportMode::Http2Required:
             return client::WebSocketTransportMode::Http2Required;
-        case KhWebSocketTransportMode::LegacyBoolean:
+        case WebSocketTransportMode::LegacyBoolean:
         default:
             return client::WebSocketTransportMode::LegacyBoolean;
         }
@@ -55,7 +55,7 @@ namespace session
 
     struct WebSocketChallengeBridgeContext final
     {
-        KhWebSocketHandshakeChallengeCallback Callback = nullptr;
+        WebSocketHandshakeChallengeCallback Callback = nullptr;
         void* Context = nullptr;
     };
 
@@ -72,14 +72,14 @@ namespace session
             return STATUS_INVALID_PARAMETER;
         }
 
-        KhWebSocketHandshakeChallenge apiChallenge = {};
+        WebSocketHandshakeChallenge apiChallenge = {};
         apiChallenge.StatusCode = challenge->StatusCode;
         apiChallenge.Headers = challenge->Headers;
         apiChallenge.HeaderCount = challenge->HeaderCount;
         apiChallenge.Redirect = challenge->Redirect;
         apiChallenge.AuthenticationChallenge = challenge->AuthenticationChallenge;
 
-        KhWebSocketHandshakeRetryAction apiAction = {};
+        WebSocketHandshakeRetryAction apiAction = {};
         NTSTATUS status = bridge->Callback(bridge->Context, &apiChallenge, &apiAction);
         if (!NT_SUCCESS(status)) {
             return status;
@@ -165,8 +165,8 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS BuildWebSocketHandshakeRequest(
-        const KhWebSocket& websocket,
-        _Inout_ KhWorkspace& workspace,
+        const WebSocket& websocket,
+        _Inout_ Workspace& workspace,
         _Out_ SIZE_T* requestLength) noexcept
     {
         if (requestLength != nullptr) {
@@ -177,17 +177,17 @@ namespace session
             return STATUS_INVALID_PARAMETER;
         }
 
-        HeapArray<char> hostHeader(KhMaxHostHeaderLength);
+        HeapArray<char> hostHeader(MaxHostHeaderLength);
         if (!hostHeader.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
         SIZE_T hostLength = 0;
-        HeapArray<KhRequest> hostRequestStorage(1);
+        HeapArray<Request> hostRequestStorage(1);
         if (!hostRequestStorage.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
-        KhRequest& hostRequest = hostRequestStorage[0];
+        Request& hostRequest = hostRequestStorage[0];
         RtlCopyMemory(hostRequest.Scheme, websocket.Scheme, sizeof(hostRequest.Scheme));
         hostRequest.SchemeLength = websocket.SchemeLength;
         RtlCopyMemory(hostRequest.Host, websocket.Host, sizeof(hostRequest.Host));
@@ -228,7 +228,7 @@ namespace session
             }
         }
 
-        HeapArray<http1::HttpHeader> headers(5 + KhMaxHeadersPerRequest);
+        HeapArray<http1::HttpHeader> headers(5 + MaxHeadersPerRequest);
         if (!headers.IsValid()) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -250,8 +250,8 @@ namespace session
             };
         }
 
-        for (SIZE_T index = 0; index < websocket.ExtraHeaderCount && index < KhMaxHeadersPerRequest; ++index) {
-            const KhStoredHeader& stored = websocket.ExtraHeaders[index];
+        for (SIZE_T index = 0; index < websocket.ExtraHeaderCount && index < MaxHeadersPerRequest; ++index) {
+            const StoredHeader& stored = websocket.ExtraHeaders[index];
             headers[headerCount++] = {
                 { stored.Name, stored.NameLength },
                 { stored.Value, stored.ValueLength }
@@ -274,22 +274,22 @@ namespace session
     }
 
 
-    struct KhAsyncWebSocketConnectContext final
+    struct AsyncWebSocketConnectContext final
     {
-        KH_SESSION Session = nullptr;
-        KhWebSocketConnectOptions Options = {};
+        SessionHandle Session = nullptr;
+        WebSocketConnectOptions Options = {};
         char* Url = nullptr;
         char* Subprotocol = nullptr;
-        KhStoredHeader HeaderStorage[KhMaxHeadersPerRequest] = {};
-        KhWebSocketHeader HeaderViews[KhMaxHeadersPerRequest] = {};
+        StoredHeader HeaderStorage[MaxHeadersPerRequest] = {};
+        WebSocketHeader HeaderViews[MaxHeadersPerRequest] = {};
         SIZE_T HeaderCount = 0;
-        KH_WEBSOCKET WebSocket = nullptr;
+        WebSocketHandle WebSocket = nullptr;
         volatile LONG SessionOperationEnded = 0;
     };
 
-    void KhWebSocketEndOperation(_In_opt_ KH_WEBSOCKET websocket) noexcept
+    void WebSocketEndOperation(_In_opt_ WebSocketHandle websocket) noexcept
     {
-        if (websocket == nullptr || websocket->Header.Kind != KhHandleKind::WebSocket) {
+        if (websocket == nullptr || websocket->Header.Kind != HandleKind::WebSocket) {
             return;
         }
 
@@ -305,7 +305,7 @@ namespace session
 #endif
     }
 
-    void WaitForWebSocketDrain(_In_opt_ KH_WEBSOCKET websocket) noexcept
+    void WaitForWebSocketDrain(_In_opt_ WebSocketHandle websocket) noexcept
     {
         if (websocket == nullptr) {
             return;
@@ -328,24 +328,24 @@ namespace session
 #endif
     }
 
-    class KhWebSocketOperationScope final
+    class WebSocketOperationScope final
     {
     public:
-        explicit KhWebSocketOperationScope(_In_opt_ KH_WEBSOCKET websocket) noexcept :
+        explicit WebSocketOperationScope(_In_opt_ WebSocketHandle websocket) noexcept :
             websocket_(websocket),
-            active_(KhWebSocketBeginOperation(websocket))
+            active_(WebSocketBeginOperation(websocket))
         {
         }
 
-        ~KhWebSocketOperationScope() noexcept
+        ~WebSocketOperationScope() noexcept
         {
             if (active_) {
-                KhWebSocketEndOperation(websocket_);
+                WebSocketEndOperation(websocket_);
             }
         }
 
-        KhWebSocketOperationScope(const KhWebSocketOperationScope&) = delete;
-        KhWebSocketOperationScope& operator=(const KhWebSocketOperationScope&) = delete;
+        WebSocketOperationScope(const WebSocketOperationScope&) = delete;
+        WebSocketOperationScope& operator=(const WebSocketOperationScope&) = delete;
 
         _Must_inspect_result_
         bool IsActive() const noexcept
@@ -354,7 +354,7 @@ namespace session
         }
 
     private:
-        KH_WEBSOCKET websocket_ = nullptr;
+        WebSocketHandle websocket_ = nullptr;
         bool active_ = false;
     };
 
@@ -387,12 +387,12 @@ namespace session
 
     _Must_inspect_result_
     bool TryUseWebSocketSendFrameScratch(
-        _In_ const KhWebSocket& websocket,
+        _In_ const WebSocket& websocket,
         _Inout_ client::WebSocketIoBuffers& buffers) noexcept
     {
         if (websocket.Workspace == nullptr ||
             websocket.Workspace->WebSocketSendFrameScratch.Data == nullptr ||
-            websocket.Workspace->WebSocketSendFrameScratch.Length < KhWorkspaceWebSocketFrameScratchBytes) {
+            websocket.Workspace->WebSocketSendFrameScratch.Length < WorkspaceWebSocketFrameScratchBytes) {
             return false;
         }
 
@@ -403,26 +403,26 @@ namespace session
 #endif
 
     _Ret_maybenull_
-    KH_WEBSOCKET TakeAsyncWebSocketConnectResult(
-        _Inout_ KhAsyncWebSocketConnectContext* context) noexcept
+    WebSocketHandle TakeAsyncWebSocketConnectResult(
+        _Inout_ AsyncWebSocketConnectContext* context) noexcept
     {
         if (context == nullptr) {
             return nullptr;
         }
 
 #if defined(WKNET_USER_MODE_TEST)
-        KH_WEBSOCKET websocket = context->WebSocket;
+        WebSocketHandle websocket = context->WebSocket;
         context->WebSocket = nullptr;
         return websocket;
 #else
-        return static_cast<KH_WEBSOCKET>(InterlockedExchangePointer(
+        return static_cast<WebSocketHandle>(InterlockedExchangePointer(
             reinterpret_cast<PVOID volatile*>(&context->WebSocket),
             nullptr));
 #endif
     }
 
     void EndAsyncWebSocketSessionOperation(
-        _Inout_ KhAsyncWebSocketConnectContext* context) noexcept
+        _Inout_ AsyncWebSocketConnectContext* context) noexcept
     {
         if (context == nullptr || context->Session == nullptr) {
             return;
@@ -438,21 +438,21 @@ namespace session
             return;
         }
 #endif
-        KhSessionEndOperation(context->Session);
+        SessionEndOperation(context->Session);
     }
 
 
     _Ret_maybenull_
-    KhAsyncWebSocketConnectContext* AllocateAsyncWebSocketConnectContext() noexcept
+    AsyncWebSocketConnectContext* AllocateAsyncWebSocketConnectContext() noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
-        return static_cast<KhAsyncWebSocketConnectContext*>(calloc(1, sizeof(KhAsyncWebSocketConnectContext)));
+        return static_cast<AsyncWebSocketConnectContext*>(calloc(1, sizeof(AsyncWebSocketConnectContext)));
 #else
-        return AllocateNonPagedObject<KhAsyncWebSocketConnectContext>();
+        return AllocateNonPagedObject<AsyncWebSocketConnectContext>();
 #endif
     }
 
-    void FreeAsyncWebSocketConnectContext(_In_opt_ KhAsyncWebSocketConnectContext* context) noexcept
+    void FreeAsyncWebSocketConnectContext(_In_opt_ AsyncWebSocketConnectContext* context) noexcept
     {
         if (context == nullptr) {
             return;
@@ -467,7 +467,7 @@ namespace session
 
     void CleanupAsyncWebSocketConnectContext(void* context) noexcept
     {
-        auto* connectContext = static_cast<KhAsyncWebSocketConnectContext*>(context);
+        auto* connectContext = static_cast<AsyncWebSocketConnectContext*>(context);
         if (connectContext == nullptr) {
             return;
         }
@@ -476,14 +476,14 @@ namespace session
 
         FreeApiMemory(connectContext->Url);
         FreeApiMemory(connectContext->Subprotocol);
-        for (SIZE_T index = 0; index < connectContext->HeaderCount && index < KhMaxHeadersPerRequest; ++index) {
+        for (SIZE_T index = 0; index < connectContext->HeaderCount && index < MaxHeadersPerRequest; ++index) {
             FreeApiMemory(connectContext->HeaderStorage[index].Name);
             FreeApiMemory(connectContext->HeaderStorage[index].Value);
         }
         connectContext->HeaderCount = 0;
-        KH_WEBSOCKET websocket = TakeAsyncWebSocketConnectResult(connectContext);
+        WebSocketHandle websocket = TakeAsyncWebSocketConnectResult(connectContext);
         if (websocket != nullptr) {
-            const NTSTATUS status = KhWebSocketCloseSync(websocket);
+            const NTSTATUS status = WebSocketCloseSync(websocket);
             UNREFERENCED_PARAMETER(status);
         }
         FreeAsyncWebSocketConnectContext(connectContext);
@@ -492,8 +492,8 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS StoreWebSocketMessage(
-        _Inout_ KhWebSocket& websocket,
-        KhWebSocketMessageType type,
+        _Inout_ WebSocket& websocket,
+        WebSocketMessageType type,
         _In_reads_bytes_opt_(dataLength) const UCHAR* data,
         SIZE_T dataLength) noexcept
     {
@@ -622,10 +622,10 @@ namespace session
             &expected));
     }
 
-    void ResetWebSocketSendFragmentState(_Inout_ KhWebSocket& websocket) noexcept
+    void ResetWebSocketSendFragmentState(_Inout_ WebSocket& websocket) noexcept
     {
         websocket.SendFragmentOpen = false;
-        websocket.SendFragmentType = KhWebSocketMessageType::Binary;
+        websocket.SendFragmentType = WebSocketMessageType::Binary;
         websocket.SendFragmentLength = 0;
         websocket.SendTextUtf8CodePoint = 0;
         websocket.SendTextUtf8Remaining = 0;
@@ -644,7 +644,7 @@ namespace session
             status == STATUS_INVALID_NETWORK_RESPONSE;
     }
 
-    NTSTATUS CloseWebSocketTransport(_Inout_ KhWebSocket& websocket) noexcept
+    NTSTATUS CloseWebSocketTransport(_Inout_ WebSocket& websocket) noexcept
     {
         websocket.Connected = false;
         ResetWebSocketSendFragmentState(websocket);
@@ -663,7 +663,7 @@ namespace session
             return STATUS_SUCCESS;
         }
 
-        HeapArray<UCHAR> frameBuffer(KhWorkspaceWebSocketFrameScratchBytes);
+        HeapArray<UCHAR> frameBuffer(WorkspaceWebSocketFrameScratchBytes);
         client::WebSocketIoBuffers buffers = {};
         if (frameBuffer.IsValid()) {
             buffers.FrameBuffer = frameBuffer.Get();
@@ -673,7 +673,7 @@ namespace session
 #endif
     }
 
-    void DisconnectWebSocketOnTerminalStatus(_Inout_ KhWebSocket& websocket, NTSTATUS status) noexcept
+    void DisconnectWebSocketOnTerminalStatus(_Inout_ WebSocket& websocket, NTSTATUS status) noexcept
     {
         if (IsWebSocketTransportTerminalStatus(status)) {
             const NTSTATUS closeStatus = CloseWebSocketTransport(websocket);
@@ -682,8 +682,8 @@ namespace session
     }
 
     NTSTATUS ValidateWebSocketOutgoingText(
-        const KhWebSocket& websocket,
-        KhWebSocketMessageType type,
+        const WebSocket& websocket,
+        WebSocketMessageType type,
         const UCHAR* data,
         SIZE_T dataLength,
         bool finalFragment,
@@ -695,10 +695,10 @@ namespace session
             return STATUS_INVALID_PARAMETER;
         }
 
-        const bool continuation = type == KhWebSocketMessageType::Continuation;
+        const bool continuation = type == WebSocketMessageType::Continuation;
         const bool textFragment =
-            type == KhWebSocketMessageType::Text ||
-            (continuation && websocket.SendFragmentType == KhWebSocketMessageType::Text);
+            type == WebSocketMessageType::Text ||
+            (continuation && websocket.SendFragmentType == WebSocketMessageType::Text);
         if (!textFragment) {
             *codePoint = 0;
             *remaining = 0;
@@ -719,8 +719,8 @@ namespace session
     }
 
     void CompleteWebSocketSendFragment(
-        _Inout_ KhWebSocket& websocket,
-        KhWebSocketMessageType type,
+        _Inout_ WebSocket& websocket,
+        WebSocketMessageType type,
         SIZE_T dataLength,
         bool finalFragment,
         ULONG codePoint,
@@ -740,7 +740,7 @@ namespace session
             websocket.SendFragmentLength += dataLength;
         }
         websocket.SendFragmentOpen = true;
-        if (websocket.SendFragmentType == KhWebSocketMessageType::Text) {
+        if (websocket.SendFragmentType == WebSocketMessageType::Text) {
             websocket.SendTextUtf8CodePoint = codePoint;
             websocket.SendTextUtf8Remaining = remaining;
             websocket.SendTextUtf8Expected = expected;
@@ -754,7 +754,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS StoreWebSocketSubprotocol(
-        _Inout_ KhWebSocket& websocket,
+        _Inout_ WebSocket& websocket,
         _In_reads_bytes_opt_(subprotocolLength) const char* subprotocol,
         SIZE_T subprotocolLength) noexcept
     {
@@ -778,10 +778,10 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS CompleteWebSocketConnect(
-        KH_SESSION session,
-        const KhWebSocketConnectOptions& options,
-        _Out_ KH_WEBSOCKET* websocket,
-        _In_opt_ KH_ASYNC_OPERATION cancellationOperation) noexcept
+        SessionHandle session,
+        const WebSocketConnectOptions& options,
+        _Out_ WebSocketHandle* websocket,
+        _In_opt_ AsyncOperationHandle cancellationOperation) noexcept
     {
         if (websocket != nullptr) {
             *websocket = nullptr;
@@ -796,13 +796,13 @@ namespace session
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        KH_WEBSOCKET newWebSocket = AllocateWebSocketHandle();
+        WebSocketHandle newWebSocket = AllocateWebSocketHandle();
         if (newWebSocket == nullptr) {
             FreeApiMemory(urlCopy);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        newWebSocket->Header = { KhHandleKind::WebSocket, 0, nullptr };
+        newWebSocket->Header = { HandleKind::WebSocket, 0, nullptr };
         newWebSocket->Session = session;
         newWebSocket->Url = urlCopy;
         newWebSocket->UrlLength = options.UrlLength;
@@ -816,10 +816,10 @@ namespace session
         KeInitializeEvent(&newWebSocket->DrainEvent, NotificationEvent, TRUE);
 #endif
 
-        KhWorkspaceOptions workspaceOptions = {};
-        workspaceOptions.PoolType = KhPoolType::NonPaged;
+        WorkspaceOptions workspaceOptions = {};
+        workspaceOptions.PoolType = PoolType::NonPaged;
         workspaceOptions.MaxResponseBytes = options.MaxMessageBytes;
-        NTSTATUS status = KhWorkspaceCreateFromLookaside(
+        NTSTATUS status = WorkspaceCreateFromLookaside(
             &workspaceOptions,
             &session->WorkspaceLookaside,
             &newWebSocket->Workspace);
@@ -828,7 +828,7 @@ namespace session
             FreeHandle(newWebSocket);
             return status;
         }
-        status = KhWorkspaceEnsureWebSocketPayloadCapacity(
+        status = WorkspaceEnsureWebSocketPayloadCapacity(
             newWebSocket->Workspace,
             newWebSocket->MaxMessageBytes);
         if (!NT_SUCCESS(status)) {
@@ -880,15 +880,15 @@ namespace session
             return status;
         }
 
-        KhTlsOptions effectiveTls = options.Tls;
-        if (options.Tls.CertificatePolicy == KhCertificatePolicy::Verify &&
+        TlsOptions effectiveTls = options.Tls;
+        if (options.Tls.CertificatePolicy == CertificatePolicy::Verify &&
             options.Tls.CertificateStore == nullptr &&
             options.Tls.ServerName == nullptr &&
             options.Tls.ServerNameLength == 0 &&
             options.Tls.Alpn == nullptr &&
             options.Tls.AlpnLength == 0 &&
-            options.Tls.MinVersion == KhTlsVersion::Tls12 &&
-            options.Tls.MaxVersion == KhTlsVersion::Tls13 &&
+            options.Tls.MinVersion == TlsVersion::Tls12 &&
+            options.Tls.MaxVersion == TlsVersion::Tls13 &&
             options.Tls.Policy.Profile == tls::TlsSecurityProfile::ModernDefault &&
             !options.Tls.Policy.EnableTls12RsaKeyExchange &&
             !options.Tls.Policy.EnableTls12Cbc &&
@@ -896,8 +896,8 @@ namespace session
             !options.Tls.Policy.EnableTls12Sha1Signatures &&
             !options.Tls.Policy.EnablePostHandshakeClientAuth &&
             !options.Tls.Policy.RequireRevocationCheck &&
-            options.Tls.HandshakeReceiveTimeoutMilliseconds == KhDefaultTlsHandshakeReceiveTimeoutMilliseconds &&
-            options.Tls.MaxTls12Renegotiations == KhDefaultMaxTls12Renegotiations) {
+            options.Tls.HandshakeReceiveTimeoutMilliseconds == DefaultTlsHandshakeReceiveTimeoutMilliseconds &&
+            options.Tls.MaxTls12Renegotiations == DefaultMaxTls12Renegotiations) {
             effectiveTls = session->Options.Tls;
         }
         if (effectiveTls.ServerName == nullptr &&
@@ -907,7 +907,7 @@ namespace session
         }
 
         newWebSocket->Workspace->MaxResponseBytes = options.MaxMessageBytes;
-        KhWorkspaceReset(newWebSocket->Workspace);
+        WorkspaceReset(newWebSocket->Workspace);
 
         SIZE_T handshakeLength = 0;
         status = BuildWebSocketHandshakeRequest(*newWebSocket, *newWebSocket->Workspace, &handshakeLength);
@@ -930,7 +930,7 @@ namespace session
             return STATUS_NOT_SUPPORTED;
         }
 
-        KhTestWebSocketConnectRequest testRequest = {};
+        TestWebSocketConnectRequest testRequest = {};
         testRequest.Scheme = newWebSocket->Scheme;
         testRequest.SchemeLength = newWebSocket->SchemeLength;
         testRequest.Host = newWebSocket->Host;
@@ -980,8 +980,8 @@ namespace session
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        HeapArray<wchar_t> serverName(KhMaxHostLength + 1);
-        HeapArray<wchar_t> serviceName(KhMaxServiceNameLength + 1);
+        HeapArray<wchar_t> serverName(MaxHostLength + 1);
+        HeapArray<wchar_t> serviceName(MaxServiceNameLength + 1);
         if (!serverName.IsValid() || !serviceName.IsValid()) {
             ReleaseWebSocketStorage(*newWebSocket);
             FreeHandle(newWebSocket);
@@ -1002,25 +1002,25 @@ namespace session
         buffers.FrameBufferLength = newWebSocket->Workspace->WebSocketFrameScratch.Length;
         buffers.PayloadBuffer = newWebSocket->Workspace->WebSocketPayloadScratch.Data;
         buffers.PayloadBufferLength = newWebSocket->Workspace->WebSocketPayloadScratch.Length;
-        HeapArray<http1::HttpHeader> responseHeaders(KhMaxHeadersPerResponse);
+        HeapArray<http1::HttpHeader> responseHeaders(MaxHeadersPerResponse);
         if (!responseHeaders.IsValid()) {
             ReleaseWebSocketStorage(*newWebSocket);
             FreeHandle(newWebSocket);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
         buffers.Headers = responseHeaders.Get();
-        buffers.HeaderCapacity = KhMaxHeadersPerResponse;
+        buffers.HeaderCapacity = MaxHeadersPerResponse;
 
         client::WebSocketConnectOptions connectOptions = {};
-        HeapArray<http1::HttpHeader> extraHeaderViews(KhMaxHeadersPerRequest);
+        HeapArray<http1::HttpHeader> extraHeaderViews(MaxHeadersPerRequest);
         if (!extraHeaderViews.IsValid()) {
             ReleaseWebSocketStorage(*newWebSocket);
             FreeHandle(newWebSocket);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
         SIZE_T extraHeaderViewCount = 0;
-        for (SIZE_T index = 0; index < newWebSocket->ExtraHeaderCount && index < KhMaxHeadersPerRequest; ++index) {
-            const KhStoredHeader& stored = newWebSocket->ExtraHeaders[index];
+        for (SIZE_T index = 0; index < newWebSocket->ExtraHeaderCount && index < MaxHeadersPerRequest; ++index) {
+            const StoredHeader& stored = newWebSocket->ExtraHeaders[index];
             extraHeaderViews[extraHeaderViewCount++] = {
                 { stored.Name, stored.NameLength },
                 { stored.Value, stored.ValueLength }
@@ -1058,7 +1058,7 @@ namespace session
             connectOptions.Cancellation = &cancellation;
         }
         connectOptions.UseTls = TextEqualsLiteralIgnoreCase(newWebSocket->Scheme, newWebSocket->SchemeLength, "wss");
-        connectOptions.VerifyCertificate = effectiveTls.CertificatePolicy == KhCertificatePolicy::Verify;
+        connectOptions.VerifyCertificate = effectiveTls.CertificatePolicy == CertificatePolicy::Verify;
         connectOptions.AllowWebSocketOverHttp2 = options.AllowWebSocketOverHttp2;
         connectOptions.TransportMode = ToClientWebSocketTransportMode(options.TransportMode);
         connectOptions.PerMessageDeflate = options.PerMessageDeflate;
@@ -1107,31 +1107,31 @@ namespace session
 #endif
     }
 
-    NTSTATUS RunWebSocketConnectAsyncOperation(KH_ASYNC_OPERATION operation, void* context) noexcept
+    NTSTATUS RunWebSocketConnectAsyncOperation(AsyncOperationHandle operation, void* context) noexcept
     {
-        auto* connectContext = static_cast<KhAsyncWebSocketConnectContext*>(context);
+        auto* connectContext = static_cast<AsyncWebSocketConnectContext*>(context);
         if (connectContext == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
         NTSTATUS status = STATUS_SUCCESS;
-        if (KhAsyncOperationIsCanceled(operation)) {
+        if (AsyncOperationIsCanceled(operation)) {
             status = STATUS_CANCELLED;
             EndAsyncWebSocketSessionOperation(connectContext);
             return status;
         }
 
-        KH_WEBSOCKET websocket = nullptr;
+        WebSocketHandle websocket = nullptr;
         status = CompleteWebSocketConnect(connectContext->Session, connectContext->Options, &websocket, operation);
         if (NT_SUCCESS(status)) {
             connectContext->WebSocket = websocket;
         }
         else if (websocket != nullptr) {
-            const NTSTATUS closeStatus = KhWebSocketCloseSync(websocket);
+            const NTSTATUS closeStatus = WebSocketCloseSync(websocket);
             UNREFERENCED_PARAMETER(closeStatus);
         }
 
-        if (KhAsyncOperationIsCanceled(operation) && status == STATUS_SUCCESS) {
+        if (AsyncOperationIsCanceled(operation) && status == STATUS_SUCCESS) {
             status = STATUS_CANCELLED;
         }
 
@@ -1139,10 +1139,10 @@ namespace session
         return status;
     }
 
-    NTSTATUS KhWebSocketConnectSyncImpl(
-        KH_SESSION session,
-        const KhWebSocketConnectOptions* options,
-        KH_WEBSOCKET* websocket) noexcept
+    NTSTATUS WebSocketConnectSyncImpl(
+        SessionHandle session,
+        const WebSocketConnectOptions* options,
+        WebSocketHandle* websocket) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -1153,7 +1153,7 @@ namespace session
             *websocket = nullptr;
         }
 
-        KhSessionOperationScope sessionScope(session);
+        SessionOperationScope sessionScope(session);
         if (!sessionScope.IsActive()) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -1165,10 +1165,10 @@ namespace session
         return CompleteWebSocketConnect(session, *options, websocket, nullptr);
     }
 
-    NTSTATUS KhWebSocketConnectAsyncImpl(
-        KH_SESSION session,
-        const KhWebSocketConnectOptions* options,
-        KH_ASYNC_OPERATION* operation) noexcept
+    NTSTATUS WebSocketConnectAsyncImpl(
+        SessionHandle session,
+        const WebSocketConnectOptions* options,
+        AsyncOperationHandle* operation) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -1179,18 +1179,18 @@ namespace session
             *operation = nullptr;
         }
 
-        if (!KhSessionBeginOperation(session)) {
+        if (!SessionBeginOperation(session)) {
             return STATUS_INVALID_PARAMETER;
         }
 
         if (options == nullptr || operation == nullptr || !IsValidWebSocketConnectOptions(*options)) {
-            KhSessionEndOperation(session);
+            SessionEndOperation(session);
             return STATUS_INVALID_PARAMETER;
         }
 
         auto* context = AllocateAsyncWebSocketConnectContext();
         if (context == nullptr) {
-            KhSessionEndOperation(session);
+            SessionEndOperation(session);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
@@ -1214,14 +1214,14 @@ namespace session
         }
 
         if (options->Headers != nullptr && options->HeaderCount != 0) {
-            if (options->HeaderCount > KhMaxHeadersPerRequest) {
+            if (options->HeaderCount > MaxHeadersPerRequest) {
                 CleanupAsyncWebSocketConnectContext(context);
                 return STATUS_INVALID_PARAMETER;
             }
 
             for (SIZE_T index = 0; index < options->HeaderCount; ++index) {
-                const KhWebSocketHeader& src = options->Headers[index];
-                KhStoredHeader& dst = context->HeaderStorage[index];
+                const WebSocketHeader& src = options->Headers[index];
+                StoredHeader& dst = context->HeaderStorage[index];
 
                 dst.Name = AllocateTextCopy(src.Name, src.NameLength);
                 if (dst.Name == nullptr) {
@@ -1250,33 +1250,33 @@ namespace session
             context->Options.Headers = context->HeaderViews;
         }
 
-        KhAsyncCreateOptions createOptions = {};
-        createOptions.Kind = KhAsyncOperationKind::WebSocketConnect;
+        AsyncCreateOptions createOptions = {};
+        createOptions.Kind = AsyncOperationKind::WebSocketConnect;
         createOptions.WorkerRoutine = RunWebSocketConnectAsyncOperation;
         createOptions.CleanupRoutine = CleanupAsyncWebSocketConnectContext;
         createOptions.Context = context;
         createOptions.StartSuspended = true;
 
-        status = KhAsyncOperationCreate(createOptions, operation);
+        status = AsyncOperationCreate(createOptions, operation);
         if (!NT_SUCCESS(status)) {
             CleanupAsyncWebSocketConnectContext(context);
             return status;
         }
 
-        status = KhAsyncOperationQueue(*operation);
+        status = AsyncOperationQueue(*operation);
         if (!NT_SUCCESS(status)) {
-            KhAsyncOperationRelease(*operation);
+            AsyncOperationRelease(*operation);
             *operation = nullptr;
         }
 
         return status;
     }
 
-    NTSTATUS KhWebSocketSendTextSyncImpl(
-        KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSendTextSyncImpl(
+        WebSocketHandle websocket,
         const char* text,
         SIZE_T textLength,
-        const KhWebSocketSendOptions* options) noexcept
+        const WebSocketSendOptions* options) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -1284,7 +1284,7 @@ namespace session
         }
 
         const bool finalFragment = options == nullptr ? true : options->FinalFragment;
-        KhWebSocketOperationScope operation(websocket);
+        WebSocketOperationScope operation(websocket);
         if (!operation.IsActive() || (text == nullptr && textLength != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -1305,7 +1305,7 @@ namespace session
         UCHAR nextExpected = 0;
         status = ValidateWebSocketOutgoingText(
             *websocket,
-            KhWebSocketMessageType::Text,
+            WebSocketMessageType::Text,
             reinterpret_cast<const UCHAR*>(text),
             textLength,
             finalFragment,
@@ -1324,14 +1324,14 @@ namespace session
         status = g_testWebSocketSend(
             g_testWebSocketTransportContext,
             websocket,
-            KhWebSocketMessageType::Text,
+            WebSocketMessageType::Text,
             reinterpret_cast<const UCHAR*>(text),
             textLength,
             finalFragment);
         if (NT_SUCCESS(status)) {
             CompleteWebSocketSendFragment(
                 *websocket,
-                KhWebSocketMessageType::Text,
+                WebSocketMessageType::Text,
                 textLength,
                 finalFragment,
                 nextCodePoint,
@@ -1354,13 +1354,13 @@ namespace session
         }
         status = websocket->Client->SendText(text, textLength, buffers, finalFragment);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("KhWebSocketSendTextSync Client->SendText failed: 0x%08X\r\n",
+            WKNET_DBG_PRINT("WebSocketSendTextSync Client->SendText failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
         }
         if (NT_SUCCESS(status)) {
             CompleteWebSocketSendFragment(
                 *websocket,
-                KhWebSocketMessageType::Text,
+                WebSocketMessageType::Text,
                 textLength,
                 finalFragment,
                 nextCodePoint,
@@ -1374,11 +1374,11 @@ namespace session
 #endif
     }
 
-    NTSTATUS KhWebSocketSendBinarySyncImpl(
-        KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSendBinarySyncImpl(
+        WebSocketHandle websocket,
         const UCHAR* data,
         SIZE_T dataLength,
-        const KhWebSocketSendOptions* options) noexcept
+        const WebSocketSendOptions* options) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -1386,7 +1386,7 @@ namespace session
         }
 
         const bool finalFragment = options == nullptr ? true : options->FinalFragment;
-        KhWebSocketOperationScope operation(websocket);
+        WebSocketOperationScope operation(websocket);
         if (!operation.IsActive() || (data == nullptr && dataLength != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -1407,7 +1407,7 @@ namespace session
         UCHAR nextExpected = 0;
         status = ValidateWebSocketOutgoingText(
             *websocket,
-            KhWebSocketMessageType::Binary,
+            WebSocketMessageType::Binary,
             data,
             dataLength,
             finalFragment,
@@ -1426,14 +1426,14 @@ namespace session
         status = g_testWebSocketSend(
             g_testWebSocketTransportContext,
             websocket,
-            KhWebSocketMessageType::Binary,
+            WebSocketMessageType::Binary,
             data,
             dataLength,
             finalFragment);
         if (NT_SUCCESS(status)) {
             CompleteWebSocketSendFragment(
                 *websocket,
-                KhWebSocketMessageType::Binary,
+                WebSocketMessageType::Binary,
                 dataLength,
                 finalFragment,
                 nextCodePoint,
@@ -1456,13 +1456,13 @@ namespace session
         }
         status = websocket->Client->SendBinary(data, dataLength, buffers, finalFragment);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("KhWebSocketSendBinarySync Client->SendBinary failed: 0x%08X\r\n",
+            WKNET_DBG_PRINT("WebSocketSendBinarySync Client->SendBinary failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
         }
         if (NT_SUCCESS(status)) {
             CompleteWebSocketSendFragment(
                 *websocket,
-                KhWebSocketMessageType::Binary,
+                WebSocketMessageType::Binary,
                 dataLength,
                 finalFragment,
                 nextCodePoint,
@@ -1476,11 +1476,11 @@ namespace session
 #endif
     }
 
-    NTSTATUS KhWebSocketSendContinuationSyncImpl(
-        KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSendContinuationSyncImpl(
+        WebSocketHandle websocket,
         const UCHAR* data,
         SIZE_T dataLength,
-        const KhWebSocketSendOptions* options) noexcept
+        const WebSocketSendOptions* options) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -1488,7 +1488,7 @@ namespace session
         }
 
         const bool finalFragment = options == nullptr ? true : options->FinalFragment;
-        KhWebSocketOperationScope operation(websocket);
+        WebSocketOperationScope operation(websocket);
         if (!operation.IsActive() || (data == nullptr && dataLength != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -1510,7 +1510,7 @@ namespace session
         UCHAR nextExpected = 0;
         status = ValidateWebSocketOutgoingText(
             *websocket,
-            KhWebSocketMessageType::Continuation,
+            WebSocketMessageType::Continuation,
             data,
             dataLength,
             finalFragment,
@@ -1529,14 +1529,14 @@ namespace session
         status = g_testWebSocketSend(
             g_testWebSocketTransportContext,
             websocket,
-            KhWebSocketMessageType::Continuation,
+            WebSocketMessageType::Continuation,
             data,
             dataLength,
             finalFragment);
         if (NT_SUCCESS(status)) {
             CompleteWebSocketSendFragment(
                 *websocket,
-                KhWebSocketMessageType::Continuation,
+                WebSocketMessageType::Continuation,
                 dataLength,
                 finalFragment,
                 nextCodePoint,
@@ -1559,13 +1559,13 @@ namespace session
         }
         status = websocket->Client->SendContinuation(data, dataLength, buffers, finalFragment);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("KhWebSocketSendContinuationSync Client->SendContinuation failed: 0x%08X\r\n",
+            WKNET_DBG_PRINT("WebSocketSendContinuationSync Client->SendContinuation failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
         }
         if (NT_SUCCESS(status)) {
             CompleteWebSocketSendFragment(
                 *websocket,
-                KhWebSocketMessageType::Continuation,
+                WebSocketMessageType::Continuation,
                 dataLength,
                 finalFragment,
                 nextCodePoint,
@@ -1579,9 +1579,9 @@ namespace session
 #endif
     }
 
-    NTSTATUS KhWebSocketSendControlSyncImpl(
-        KH_WEBSOCKET websocket,
-        KhWebSocketMessageType type,
+    NTSTATUS WebSocketSendControlSyncImpl(
+        WebSocketHandle websocket,
+        WebSocketMessageType type,
         const UCHAR* payload,
         SIZE_T payloadLength) noexcept
     {
@@ -1590,12 +1590,12 @@ namespace session
             return status;
         }
 
-        if (type != KhWebSocketMessageType::Ping &&
-            type != KhWebSocketMessageType::Pong) {
+        if (type != WebSocketMessageType::Ping &&
+            type != WebSocketMessageType::Pong) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        KhWebSocketOperationScope operation(websocket);
+        WebSocketOperationScope operation(websocket);
         if (!operation.IsActive() ||
             (payload == nullptr && payloadLength != 0) ||
             payloadLength > ws::WebSocketMaxControlPayloadLength) {
@@ -1631,14 +1631,14 @@ namespace session
         if (!TryUseWebSocketSendFrameScratch(*websocket, buffers)) {
             return STATUS_INVALID_DEVICE_STATE;
         }
-        if (type == KhWebSocketMessageType::Ping) {
+        if (type == WebSocketMessageType::Ping) {
             status = websocket->Client->SendPing(payload, payloadLength, buffers);
         }
         else {
             status = websocket->Client->SendPong(payload, payloadLength, buffers);
         }
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("KhWebSocketSendControlSync Client->SendControl failed: 0x%08X\r\n",
+            WKNET_DBG_PRINT("WebSocketSendControlSync Client->SendControl failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
             DisconnectWebSocketOnTerminalStatus(*websocket, status);
         }
@@ -1646,34 +1646,34 @@ namespace session
 #endif
     }
 
-    NTSTATUS KhWebSocketSendPingSyncImpl(
-        KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSendPingSyncImpl(
+        WebSocketHandle websocket,
         const UCHAR* payload,
         SIZE_T payloadLength) noexcept
     {
-        return KhWebSocketSendControlSyncImpl(
+        return WebSocketSendControlSyncImpl(
             websocket,
-            KhWebSocketMessageType::Ping,
+            WebSocketMessageType::Ping,
             payload,
             payloadLength);
     }
 
-    NTSTATUS KhWebSocketSendPongSyncImpl(
-        KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSendPongSyncImpl(
+        WebSocketHandle websocket,
         const UCHAR* payload,
         SIZE_T payloadLength) noexcept
     {
-        return KhWebSocketSendControlSyncImpl(
+        return WebSocketSendControlSyncImpl(
             websocket,
-            KhWebSocketMessageType::Pong,
+            WebSocketMessageType::Pong,
             payload,
             payloadLength);
     }
 
-    NTSTATUS KhWebSocketReceiveSyncImpl(
-        KH_WEBSOCKET websocket,
-        const KhWebSocketReceiveOptions* options,
-        KhWebSocketMessage* message) noexcept
+    NTSTATUS WebSocketReceiveSyncImpl(
+        WebSocketHandle websocket,
+        const WebSocketReceiveOptions* options,
+        WebSocketMessage* message) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -1684,7 +1684,7 @@ namespace session
             *message = {};
         }
 
-        KhWebSocketOperationScope operation(websocket);
+        WebSocketOperationScope operation(websocket);
         if (!operation.IsActive()) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -1692,7 +1692,7 @@ namespace session
             return websocket->TransportClosed ? STATUS_CONNECTION_DISCONNECTED : STATUS_INVALID_PARAMETER;
         }
 
-        KhWebSocketReceiveOptions effectiveOptions = {};
+        WebSocketReceiveOptions effectiveOptions = {};
         effectiveOptions.AutoAllocate = true;
         if (options != nullptr) {
             effectiveOptions = *options;
@@ -1711,7 +1711,7 @@ namespace session
             return STATUS_NOT_SUPPORTED;
         }
 
-        KhTestWebSocketMessage received = {};
+        TestWebSocketMessage received = {};
         status = g_testWebSocketReceive(g_testWebSocketTransportContext, websocket, &received);
         if (!NT_SUCCESS(status)) {
             DisconnectWebSocketOnTerminalStatus(*websocket, status);
@@ -1757,7 +1757,7 @@ namespace session
             message->FinalFragment = received.FinalFragment;
         }
 
-        if (received.Type == KhWebSocketMessageType::Close) {
+        if (received.Type == WebSocketMessageType::Close) {
             const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
             UNREFERENCED_PARAMETER(closeStatus);
         }
@@ -1775,7 +1775,7 @@ namespace session
         }
         if (websocket->Workspace == nullptr ||
             websocket->Workspace->WebSocketFrameScratch.Data == nullptr ||
-            websocket->Workspace->WebSocketFrameScratch.Length < KhWorkspaceWebSocketFrameScratchBytes ||
+            websocket->Workspace->WebSocketFrameScratch.Length < WorkspaceWebSocketFrameScratchBytes ||
             websocket->Workspace->WebSocketPayloadScratch.Data == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
@@ -1800,7 +1800,7 @@ namespace session
             effectiveOptions.DeliverFragments,
             &finalFragment);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("KhWebSocketReceiveSync Client->ReceiveMessage failed: 0x%08X\r\n",
+            WKNET_DBG_PRINT("WebSocketReceiveSync Client->ReceiveMessage failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
             if (status == STATUS_BUFFER_TOO_SMALL || IsWebSocketTransportTerminalStatus(status)) {
                 const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
@@ -1809,21 +1809,21 @@ namespace session
             return status;
         }
 
-        KhWebSocketMessageType type = KhWebSocketMessageType::Binary;
+        WebSocketMessageType type = WebSocketMessageType::Binary;
         if (opcode == wknet::ws::WebSocketOpcode::Text) {
-            type = KhWebSocketMessageType::Text;
+            type = WebSocketMessageType::Text;
         }
         else if (opcode == wknet::ws::WebSocketOpcode::Close) {
-            type = KhWebSocketMessageType::Close;
+            type = WebSocketMessageType::Close;
         }
         else if (opcode == wknet::ws::WebSocketOpcode::Ping) {
-            type = KhWebSocketMessageType::Ping;
+            type = WebSocketMessageType::Ping;
         }
         else if (opcode == wknet::ws::WebSocketOpcode::Pong) {
-            type = KhWebSocketMessageType::Pong;
+            type = WebSocketMessageType::Pong;
         }
         else if (opcode == wknet::ws::WebSocketOpcode::Continuation) {
-            type = KhWebSocketMessageType::Continuation;
+            type = WebSocketMessageType::Continuation;
         }
 
         const UCHAR* data = websocket->Workspace->WebSocketPayloadScratch.Data;
@@ -1851,7 +1851,7 @@ namespace session
             message->FinalFragment = finalFragment;
         }
 
-        if (type == KhWebSocketMessageType::Close) {
+        if (type == WebSocketMessageType::Close) {
             const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);
             UNREFERENCED_PARAMETER(closeStatus);
         }
@@ -1860,7 +1860,7 @@ namespace session
 #endif
     }
 
-    NTSTATUS KhWebSocketCloseSyncImpl(KH_WEBSOCKET websocket) noexcept
+    NTSTATUS WebSocketCloseSyncImpl(WebSocketHandle websocket) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -1884,8 +1884,8 @@ namespace session
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhWebSocketCloseExSyncImpl(
-        KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketCloseExSyncImpl(
+        WebSocketHandle websocket,
         USHORT statusCode,
         const UCHAR* reason,
         SIZE_T reasonLength) noexcept
@@ -1931,7 +1931,7 @@ namespace session
             status = g_testWebSocketSend(
                 g_testWebSocketTransportContext,
                 websocket,
-                KhWebSocketMessageType::Close,
+                WebSocketMessageType::Close,
                 closePayload.Get(),
                 closePayload.Count(),
                 true);
@@ -1959,8 +1959,8 @@ namespace session
         return status;
     }
 
-    NTSTATUS KhWebSocketSelectedSubprotocol(
-        KH_WEBSOCKET websocket,
+    NTSTATUS WebSocketSelectedSubprotocol(
+        WebSocketHandle websocket,
         const char** subprotocol,
         SIZE_T* subprotocolLength) noexcept
     {
@@ -1976,7 +1976,7 @@ namespace session
             *subprotocolLength = 0;
         }
 
-        KhWebSocketOperationScope operation(websocket);
+        WebSocketOperationScope operation(websocket);
         if (!operation.IsActive() ||
             subprotocol == nullptr ||
             subprotocolLength == nullptr) {
@@ -1993,7 +1993,7 @@ namespace session
     }
 
 
-    NTSTATUS KhAsyncGetWebSocket(KH_ASYNC_OPERATION operation, KH_WEBSOCKET* websocket) noexcept
+    NTSTATUS AsyncGetWebSocket(AsyncOperationHandle operation, WebSocketHandle* websocket) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2004,19 +2004,19 @@ namespace session
             *websocket = nullptr;
         }
 
-        if (!KhAsyncOperationIsValid(operation) ||
+        if (!AsyncOperationIsValid(operation) ||
             websocket == nullptr ||
-            KhAsyncOperationGetKind(operation) != KhAsyncOperationKind::WebSocketConnect) {
+            AsyncOperationGetKind(operation) != AsyncOperationKind::WebSocketConnect) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        status = KhAsyncOperationStatus(operation);
+        status = AsyncOperationStatus(operation);
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        auto* context = static_cast<KhAsyncWebSocketConnectContext*>(KhAsyncOperationContext(operation));
-        KH_WEBSOCKET asyncWebSocket = TakeAsyncWebSocketConnectResult(context);
+        auto* context = static_cast<AsyncWebSocketConnectContext*>(AsyncOperationContext(operation));
+        WebSocketHandle asyncWebSocket = TakeAsyncWebSocketConnectResult(context);
         if (asyncWebSocket == nullptr) {
             return STATUS_NOT_FOUND;
         }
@@ -2027,85 +2027,85 @@ namespace session
 
 
 
-NTSTATUS KhWebSocketConnectSync(
-    KH_SESSION session,
-    const KhWebSocketConnectOptions* options,
-    KH_WEBSOCKET* websocket) noexcept
+NTSTATUS WebSocketConnectSync(
+    SessionHandle session,
+    const WebSocketConnectOptions* options,
+    WebSocketHandle* websocket) noexcept
 {
-    return KhWebSocketConnectSyncImpl(session, options, websocket);
+    return WebSocketConnectSyncImpl(session, options, websocket);
 }
 
-NTSTATUS KhWebSocketConnectAsync(
-    KH_SESSION session,
-    const KhWebSocketConnectOptions* options,
-    KH_ASYNC_OPERATION* operation) noexcept
+NTSTATUS WebSocketConnectAsync(
+    SessionHandle session,
+    const WebSocketConnectOptions* options,
+    AsyncOperationHandle* operation) noexcept
 {
-    return KhWebSocketConnectAsyncImpl(session, options, operation);
+    return WebSocketConnectAsyncImpl(session, options, operation);
 }
 
-NTSTATUS KhWebSocketSendTextSync(
-    KH_WEBSOCKET websocket,
+NTSTATUS WebSocketSendTextSync(
+    WebSocketHandle websocket,
     const char* text,
     SIZE_T textLength,
-    const KhWebSocketSendOptions* options) noexcept
+    const WebSocketSendOptions* options) noexcept
 {
-    return KhWebSocketSendTextSyncImpl(websocket, text, textLength, options);
+    return WebSocketSendTextSyncImpl(websocket, text, textLength, options);
 }
 
-NTSTATUS KhWebSocketSendBinarySync(
-    KH_WEBSOCKET websocket,
+NTSTATUS WebSocketSendBinarySync(
+    WebSocketHandle websocket,
     const UCHAR* data,
     SIZE_T dataLength,
-    const KhWebSocketSendOptions* options) noexcept
+    const WebSocketSendOptions* options) noexcept
 {
-    return KhWebSocketSendBinarySyncImpl(websocket, data, dataLength, options);
+    return WebSocketSendBinarySyncImpl(websocket, data, dataLength, options);
 }
 
-NTSTATUS KhWebSocketSendContinuationSync(
-    KH_WEBSOCKET websocket,
+NTSTATUS WebSocketSendContinuationSync(
+    WebSocketHandle websocket,
     const UCHAR* data,
     SIZE_T dataLength,
-    const KhWebSocketSendOptions* options) noexcept
+    const WebSocketSendOptions* options) noexcept
 {
-    return KhWebSocketSendContinuationSyncImpl(websocket, data, dataLength, options);
+    return WebSocketSendContinuationSyncImpl(websocket, data, dataLength, options);
 }
 
-NTSTATUS KhWebSocketSendPingSync(
-    KH_WEBSOCKET websocket,
+NTSTATUS WebSocketSendPingSync(
+    WebSocketHandle websocket,
     const UCHAR* payload,
     SIZE_T payloadLength) noexcept
 {
-    return KhWebSocketSendPingSyncImpl(websocket, payload, payloadLength);
+    return WebSocketSendPingSyncImpl(websocket, payload, payloadLength);
 }
 
-NTSTATUS KhWebSocketSendPongSync(
-    KH_WEBSOCKET websocket,
+NTSTATUS WebSocketSendPongSync(
+    WebSocketHandle websocket,
     const UCHAR* payload,
     SIZE_T payloadLength) noexcept
 {
-    return KhWebSocketSendPongSyncImpl(websocket, payload, payloadLength);
+    return WebSocketSendPongSyncImpl(websocket, payload, payloadLength);
 }
 
-NTSTATUS KhWebSocketReceiveSync(
-    KH_WEBSOCKET websocket,
-    const KhWebSocketReceiveOptions* options,
-    KhWebSocketMessage* message) noexcept
+NTSTATUS WebSocketReceiveSync(
+    WebSocketHandle websocket,
+    const WebSocketReceiveOptions* options,
+    WebSocketMessage* message) noexcept
 {
-    return KhWebSocketReceiveSyncImpl(websocket, options, message);
+    return WebSocketReceiveSyncImpl(websocket, options, message);
 }
 
-NTSTATUS KhWebSocketCloseSync(KH_WEBSOCKET websocket) noexcept
+NTSTATUS WebSocketCloseSync(WebSocketHandle websocket) noexcept
 {
-    return KhWebSocketCloseSyncImpl(websocket);
+    return WebSocketCloseSyncImpl(websocket);
 }
 
-NTSTATUS KhWebSocketCloseExSync(
-    KH_WEBSOCKET websocket,
+NTSTATUS WebSocketCloseExSync(
+    WebSocketHandle websocket,
     USHORT statusCode,
     const UCHAR* reason,
     SIZE_T reasonLength) noexcept
 {
-    return KhWebSocketCloseExSyncImpl(websocket, statusCode, reason, reasonLength);
+    return WebSocketCloseExSyncImpl(websocket, statusCode, reason, reasonLength);
 }
 }
 }

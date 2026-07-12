@@ -37,16 +37,16 @@
 > - 第三小步已完成：engine 可配置响应头数量收敛到 `WKNET_HARD_MAX_HEADERS`，显式超限会话创建 fail-closed。
 > - 第四小步已完成：engine 与低层 HTTP/2 header block 上限收敛到 `WKNET_HARD_MAX_HEADER_SECTION`。
 > - 第五小步已完成并校正：内容解码取消固定 16 MiB 绝对顶，decoded aggregate 跟随响应/调用方容量；解压炸弹防护保留单级膨胀比限制。
-> - 第六小步已完成：新增 `KhLookasideList` 固定块池封装，归还前清零，并接入 session 级 `KhWorkspace` 对象分配/释放路径；scratch buffer 内容仍按现状分配。
+> - 第六小步已完成：新增 `LookasideList` 固定块池封装，归还前清零，并接入 session 级 `Workspace` 对象分配/释放路径；scratch buffer 内容仍按现状分配。
 > - 第七小步已完成：`Http2Connection` 接入 per-connection 入站帧数、累计字节与连接级控制信令账本，越限发送 `ENHANCE_YOUR_CALM` GOAWAY；新增 HTTP/2 控制信令洪泛测试覆盖。
 > - 第八小步已完成并校正：`TlsConnection`/HTTP/2 保留入站 record/frame 计数账本；连接生命周期累计字节低位硬顶关闭，避免误伤长连接和大流式响应。
-> - 第九小步已完成：高层 WebSocket 连接使用的 `KhWorkspace` 创建/释放接入 session 级 lookaside，覆盖 HTTP 与 WS 两条 workspace 热路径；已通过 WebSocket client / khttp 回归与 Debug 构建。
+> - 第九小步已完成：高层 WebSocket 连接使用的 `Workspace` 创建/释放接入 session 级 lookaside，覆盖 HTTP 与 WS 两条 workspace 热路径；已通过 WebSocket client / khttp 回归与 Debug 构建。
 > - 第十小步已完成：高层 WebSocket 发送 text/binary/continuation/ping/pong 与 CloseEx 复用 workspace 的独立 `WebSocketSendFrameScratch`，移除这些路径每次调用的 16 KiB frame buffer 堆分配，同时避免与接收路径 `WebSocketFrameScratch` 并发共享；已通过 WebSocket client / khttp 回归与 Debug 构建。
 > - P0 当前可交付范围已完成：header/frame/message 等协议安全上限、入口 fail-closed、HTTP/2 与 TLS 连接账本、workspace lookaside 与 WS 发送热路径池化均已落地并验证。HTTP buffered response 默认按需堆增长，流式/长连接不受低位总量硬顶限制。剩余 H2/TLS 内部缓冲为连接生命周期常驻缓冲，暂不作为 P0 阻塞项；后续若继续池化需单独设计连接级池生命周期。
 
 ### 现状
 
-- 上限基本由**调用方容量驱动**：`include/wknet/engine/Workspace.h:9-46` 定义全部 scratch 尺寸（Request/Response/DecodedBody/HttpHeaderScratch/Http2HeaderScratch/TlsHandshakeScratch/CertificateScratch/WebSocketFrame 等）；`include/wknet/http/Types.h:183-188` 的 `SessionConfig` 与 `include/wknet/engine/Engine.h:169-173` 的 `KhSessionOptions` 暴露 `RequestBufferBytes`/`MaxResponseBytes`/`MaxResponseHeaders`/`Http2MaxHeaderBlockBytes`。
+- 上限基本由**调用方容量驱动**：`include/wknet/engine/Workspace.h:9-46` 定义全部 scratch 尺寸（Request/Response/DecodedBody/HttpHeaderScratch/Http2HeaderScratch/TlsHandshakeScratch/CertificateScratch/WebSocketFrame 等）；`include/wknet/http/Types.h:183-188` 的 `SessionConfig` 与 `include/wknet/engine/Engine.h:169-173` 的 `SessionOptions` 暴露 `RequestBufferBytes`/`MaxResponseBytes`/`MaxResponseHeaders`/`Http2MaxHeaderBlockBytes`。
 - 单次调用与会话 `MaxResponseBytes` **0 = 不设调用方响应体上限**；buffered response 使用堆内存按需增长，非零值才主动限制聚合大小。
 - 旧实现曾把响应体 64 MiB、decoded 16 MiB、连接累计 512 MiB 作为低位硬顶；这与通用 HTTP 客户端 / `requests` 风格不符，已校正为按需堆增长 + 协议安全边界。
 - 热路径分配统一走 `include/wknet/WknetConfig.h:51-108`（`AllocateNonPagedPoolBytes` = `ExAllocatePool2`，:61），**无 lookaside**，H2 帧 / HPACK scratch / TLS 记录 / WS 帧高频分配产生碎片与开销。
@@ -60,7 +60,7 @@
 
 1. 新增 `include/wknet/WknetLimits.h`，集中安全边界编译期常量：`WKNET_HARD_MAX_HEADER_SECTION`、`WKNET_HARD_MAX_HEADERS`、`WKNET_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL`、per-connection 帧/控制信号计数等。`WKNET_HARD_MAX_RESPONSE_BYTES`、`WKNET_HARD_MAX_DECODED_BYTES`、`WKNET_HARD_MAX_CONNECTION_BYTES` 使用 0 表示不启用低位总量硬顶。
 2. **入口语义**：`MaxResponseBytes=0` 保持不限制；非零调用方容量作为真实上限执行，超过时 fail-closed；不再把旧 64 MiB 当作正式架构上限。
-3. **lookaside 封装**：新增 `KhLookasideList`（`ExInitializeLookasideListEx` / `ExAllocateFromLookasideListEx` / `ExFreeToLookasideListEx`），用于固定大小块（H2 帧头、HPACK scratch、WS 帧缓冲）；大不定块仍走 `AllocateNonPagedPoolBytes`。生命周期挂在会话 / 连接对象，PASSIVE_LEVEL 初始化与销毁。
+3. **lookaside 封装**：新增 `LookasideList`（`ExInitializeLookasideListEx` / `ExAllocateFromLookasideListEx` / `ExFreeToLookasideListEx`），用于固定大小块（H2 帧头、HPACK scratch、WS 帧缓冲）；大不定块仍走 `AllocateNonPagedPoolBytes`。生命周期挂在会话 / 连接对象，PASSIVE_LEVEL 初始化与销毁。
 4. **per-connection 账本**：在 `Http2Connection` 与 TLS 记录层累计「已处理字节 / 帧数 / 控制信令次数」，越限即 GOAWAY / 关闭，补强已有抗洪泛上限（CONTINUATION ≤64、记录上限等）。
 
 ### 安全护栏
@@ -81,13 +81,13 @@
 
 ## P1 — 高层 Session 代理（CONNECT 隧道）配置
 
-> 进度（截至 2026-06-19）：P1 已按路线 A 完成：高层 `SessionConfig` / `KhSessionOptions` 已接入显式代理配置，引擎在 HTTPS 传输装配中对代理建 TCP、通过共享 `client::ProxyTunnel` 建立 HTTP/1.1 CONNECT 隧道，再对目标主机执行 TLS；连接池按代理身份分桶，明文 HTTP over proxy 仍作为二期能力显式拒绝。已通过 `khttp_tests`、`http2_client_tests` 与 Debug x64 构建（0 警告）。
+> 进度（截至 2026-06-19）：P1 已按路线 A 完成：高层 `SessionConfig` / `SessionOptions` 已接入显式代理配置，引擎在 HTTPS 传输装配中对代理建 TCP、通过共享 `client::ProxyTunnel` 建立 HTTP/1.1 CONNECT 隧道，再对目标主机执行 TLS；连接池按代理身份分桶，明文 HTTP over proxy 仍作为二期能力显式拒绝。已通过 `khttp_tests`、`http2_client_tests` 与 Debug x64 构建（0 警告）。
 
 ### 现状
 
 - 低层 `client::HttpsClient` 已支持显式 HTTP/1.1 CONNECT 隧道：`include/wknet/client/HttpsClient.h:23-53` 的 `HttpsRequestOptions`（`ProxyAddress:26`、`ProxyAuthority/Length:27-28`、`ProxyHeaders/Count:29-30`、`RemoteAddress:25` 为目标）；实现见 `HttpsClient.cpp:52-54`（`UsesProxyTunnel`）、`:58-70`（`IsValidProxyTunnelOptions`）、`:74-90`（`BuildProxyConnectRequest`）、`:305`（连接目标选择）、`:327-370`（建隧道 + 读代理响应 + 2xx 校验）、`:411-443`（对**目标**主机再次 TLS）。
 - **关键事实**：`HttpsClient` **未被高层引擎调用**——`src/wknetlib/session/HttpEngine.cpp` 走 `Http2Client`/`Http2Connection` 与自有传输 / TLS 装配路径；`HttpsClient::SendRequest` 当前仅测试调用（`tests/http2_client_tests.cpp:413-416`）。
-- 高层 `SessionConfig` 已新增 `Proxy`，并由 `src/wknetlib/http_api/Session.cpp` 透传到 `KhSessionOptions`；代理地址、CONNECT authority 与 opaque `Proxy-Authorization` 头均由显式配置提供。
+- 高层 `SessionConfig` 已新增 `Proxy`，并由 `src/wknetlib/http_api/Session.cpp` 透传到 `SessionOptions`；代理地址、CONNECT authority 与 opaque `Proxy-Authorization` 头均由显式配置提供。
 - 引擎路径已接入代理隧道：HTTPS 请求先连接代理地址、发送 CONNECT 并校验 2xx，再在隧道上针对目标主机执行 TLS；HTTP 明文代理转发当前显式返回 `STATUS_NOT_SUPPORTED`。
 - 连接池键已纳入代理身份，避免不同代理的连接混用；每 host quota 仍按目标 host / scheme / port / address family 计数，防止通过多代理绕过目标主机上限。
 
@@ -98,7 +98,7 @@
 
 ### 实施步骤（路线 A）
 
-1. **配置面（已完成）**：`SessionConfig` 增 `Proxy`（`Address`、`Authority`、`AuthHeader` opaque）；透传到 `KhSessionOptions`；翻译点 `Session.cpp` 已接入。
+1. **配置面（已完成）**：`SessionConfig` 增 `Proxy`（`Address`、`Authority`、`AuthHeader` opaque）；透传到 `SessionOptions`；翻译点 `Session.cpp` 已接入。
 2. **连接池键（已完成）**：`ConnectionPool` 复用比较纳入代理身份，经不同代理的连接不可混用复用。
 3. **传输装配（已完成）**：配置代理且目标为 https 时，先对 proxy 建 TCP → 发 CONNECT（共享 helper）→ 校验 2xx → 在 raw 隧道上对**目标主机** TLS（SNI / 证书校验始终针对**目标**，不是代理）。
 4. **明文 over proxy（二期）**：以绝对 URI 形式经代理转发；当前实现显式拒绝，不静默降级。
@@ -130,7 +130,7 @@
 
 - `HttpEngine.cpp:1239-1252` 已**惰性创建并缓存单个** `Http2Connection` 于 `pooledConnection.Http2`，但 `:1261` 调用**阻塞式单流** `SendRequest`；连接池把一个 `Http2Connection` 绑定到一个 `InUse` 槽（`ConnectionPool.cpp` Acquire `:399` / Release `:521`），阻止并发分发——**这是核心 gap**。
 - 低层两阶段接口已就绪：`BeginRequest`（`Http2Connection.h:230-260`，`_Out_ streamId`）、`ReceiveResponse(streamId)`（`:262-268`）、活动 stream 表字段（`Http2Connection.h:450-451`），`ReserveActiveStream` 受 `peerSettings_.MaxConcurrentStreams` 限制（`Http2Connection.cpp:489-503`），帧循环按 streamId 交错分发 HEADERS/DATA/WINDOW_UPDATE/RST_STREAM。**无高层调用者**。
-- 异步面 `include/wknet/engine/Async.h`：`KhAsyncOperation`(:34) 仅 `HttpSend`/`WebSocketConnect`(:15)，无 per-stream kind。
+- 异步面 `include/wknet/engine/Async.h`：`AsyncOperation`(:34) 仅 `HttpSend`/`WebSocketConnect`(:15)，无 per-stream kind。
 - IRQL / 串行：所有 H2/TLS/传输路径 PASSIVE_LEVEL（`HttpEngine.cpp:3346,3494,3572` 的 `CheckPassiveLevel`）；连接池由 `FAST_MUTEX`（`ConnectionPool.h:80`）串行；**`Http2Connection` 内部无锁**，当前串行化靠 `InUse` 单槽标志。
 
 ### 目标
@@ -140,7 +140,7 @@
 ### 前置与设计难点（**本项必须单独 EnterPlanMode 详设**，呼应第一阶段对 P2.1 的判断）
 
 1. **并发模型**（核心难点）：`Http2Connection` 当前无内部锁。需决定锁粒度（连接级 `FAST_MUTEX` vs 更细）、帧读循环驱动方（专用 worker vs 调用方借用），以及在 PASSIVE_LEVEL 契约下的阻塞语义。
-2. **流表 ↔ 连接池交互**：`KhPooledConnection` 的 `InUse` 单槽需改为「可承载 N 个并发流」，Acquire/Release 语义随之变化。
+2. **流表 ↔ 连接池交互**：`PooledConnection` 的 `InUse` 单槽需改为「可承载 N 个并发流」，Acquire/Release 语义随之变化。
 3. **异步 API 扩展**：`Async.h` 增 per-stream 操作类型与完成事件。
 4. **流控账本**：per-stream + 连接级窗口在低层已具备，需在高层并发下保证账本线程安全。
 

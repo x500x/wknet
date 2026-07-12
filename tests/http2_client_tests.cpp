@@ -23,12 +23,12 @@ using wknet::client::Http2TransportMode;
 using wknet::client::HttpsClient;
 using wknet::client::HttpsRequestOptions;
 using wknet::client::HttpsResponseBuffers;
-using wknet::session::KhWorkspace;
-using wknet::session::KhWorkspaceAppendResponse;
-using wknet::session::KhWorkspaceCreate;
-using wknet::session::KhWorkspaceOptions;
-using wknet::session::KhWorkspaceRelease;
-using wknet::session::KhWorkspaceResponseInitialBytes;
+using wknet::session::Workspace;
+using wknet::session::WorkspaceAppendResponse;
+using wknet::session::WorkspaceCreate;
+using wknet::session::WorkspaceOptions;
+using wknet::session::WorkspaceRelease;
+using wknet::session::WorkspaceResponseInitialBytes;
 using wknet::http1::HttpHeader;
 using wknet::http1::HttpMethod;
 using wknet::http1::HttpText;
@@ -446,7 +446,7 @@ namespace
         const UCHAR* data,
         SIZE_T dataLength) noexcept
     {
-        return KhWorkspaceAppendResponse(static_cast<KhWorkspace*>(context), data, dataLength);
+        return WorkspaceAppendResponse(static_cast<Workspace*>(context), data, dataLength);
     }
 
     NTSTATUS IgnoreResponseBodyForTest(
@@ -2311,14 +2311,14 @@ namespace
         };
 
         {
-            KhWorkspaceOptions options = {};
+            WorkspaceOptions options = {};
             options.MaxResponseBytes = 0;
-            KhWorkspace* workspace = nullptr;
-            NTSTATUS status = KhWorkspaceCreate(&options, &workspace);
+            Workspace* workspace = nullptr;
+            NTSTATUS status = WorkspaceCreate(&options, &workspace);
             Expect(NT_SUCCESS(status) && workspace != nullptr, "workspace creates for large H2 response");
             Expect(
                 workspace != nullptr &&
-                    workspace->Response.Length == KhWorkspaceResponseInitialBytes,
+                    workspace->Response.Length == WorkspaceResponseInitialBytes,
                 "workspace starts with initial response capacity");
 
             ScriptedHttp2Transport transport(script, scriptLength);
@@ -2363,14 +2363,14 @@ namespace
                 CountSentFrames(transport, wknet::http2::Http2FrameType::WindowUpdate, 1) >= 2,
                 "HTTP/2 workspace sink still sends stream WINDOW_UPDATE frames");
 
-            KhWorkspaceRelease(workspace);
+            WorkspaceRelease(workspace);
         }
 
         {
-            KhWorkspaceOptions options = {};
+            WorkspaceOptions options = {};
             options.MaxResponseBytes = 64 * 1024;
-            KhWorkspace* workspace = nullptr;
-            NTSTATUS status = KhWorkspaceCreate(&options, &workspace);
+            Workspace* workspace = nullptr;
+            NTSTATUS status = WorkspaceCreate(&options, &workspace);
             Expect(NT_SUCCESS(status) && workspace != nullptr, "limited workspace creates for H2 response");
 
             ScriptedHttp2Transport transport(script, scriptLength);
@@ -2407,7 +2407,7 @@ namespace
             Expect(workspace != nullptr && workspace->ResponseLength == 64 * 1024,
                 "limited workspace keeps received bytes up to response limit");
 
-            KhWorkspaceRelease(workspace);
+            WorkspaceRelease(workspace);
         }
     }
 

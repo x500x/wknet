@@ -32,7 +32,7 @@
 | 用户设置 `Transfer-Encoding`/`TE` | MAY | 安全拒绝 | `HttpRequest.cpp`、`HttpEngine.cpp` | `tests/http_parser_tests.cpp` | 调用方不能破坏 framing，库自己生成 chunked。 |
 | 请求 `Content-Length` body | MUST | 已实现/已验证 | `HttpRequest.cpp`、`HttpEngine.cpp` | `tests/http_parser_tests.cpp` | 小 body 当前一次性写入。 |
 | 请求 chunked body 与 trailer | MUST when chunked | 已实现/已验证 | `HttpRequest.cpp`、`Engine.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | trailer 禁止字段已拒绝。 |
-| 真流式请求体上传 | SHOULD for large clients | 已实现/已验证 | `HttpEngine.cpp`、`khttp/Body.cpp`、`khttp/Http.cpp` | `tests/khttp_tests.cpp`、`tests/high_level_api_tests.cpp` | `BodyCreateStream` / `KhHttpRequestSetBodySource` 按块读取；已知长度走 `Content-Length`，未知长度走库生成 chunked。 |
+| 真流式请求体上传 | SHOULD for large clients | 已实现/已验证 | `HttpEngine.cpp`、`khttp/Body.cpp`、`khttp/Http.cpp` | `tests/khttp_tests.cpp`、`tests/high_level_api_tests.cpp` | `BodyCreateStream` / `HttpRequestSetBodySource` 按块读取；已知长度走 `Content-Length`，未知长度走库生成 chunked。 |
 | `Expect: 100-continue` | SHOULD | 已实现/已验证 | `HttpRequest.cpp`、`HttpParser.cpp`、`HttpEngine.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | 显式 opt-in；默认关闭；覆盖 100 后发 body、final/417 不发 body、超时后发 body、断连错误。 |
 | 响应状态行与 HTTP/1.0/1.1 版本 | MUST | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 拒绝非 1.x 与非法状态码。 |
 | header section、单行、头数量上限 | MUST/安全边界 | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 64 KiB header section、8 KiB 单行、≤200 headers。 |

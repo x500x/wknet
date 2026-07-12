@@ -7,21 +7,21 @@ namespace wknet
 namespace session
 {
 #if defined(WKNET_USER_MODE_TEST)
-    extern KhTestHttpTransportCallback g_testHttpTransport;
+    extern TestHttpTransportCallback g_testHttpTransport;
     extern void* g_testHttpTransportContext;
-    extern KhTestWebSocketConnectCallback g_testWebSocketConnect;
-    extern KhTestWebSocketSendCallback g_testWebSocketSend;
-    extern KhTestWebSocketReceiveCallback g_testWebSocketReceive;
-    extern KhTestWebSocketCloseCallback g_testWebSocketClose;
+    extern TestWebSocketConnectCallback g_testWebSocketConnect;
+    extern TestWebSocketSendCallback g_testWebSocketSend;
+    extern TestWebSocketReceiveCallback g_testWebSocketReceive;
+    extern TestWebSocketCloseCallback g_testWebSocketClose;
     extern void* g_testWebSocketTransportContext;
 #endif
 
     bool IsPassiveLevel() noexcept;
     NTSTATUS CheckPassiveLevel() noexcept;
-    SIZE_T EffectiveMaxResponseBytes(const KhHttpSendOptions* options, SIZE_T sessionValue) noexcept;
-    bool IsValidSendOptions(const KhHttpSendOptions& options, const KhSession& session) noexcept;
-    bool IsValidWebSocketConnectOptions(const KhWebSocketConnectOptions& options) noexcept;
-    bool IsValidReceiveOptions(const KhWebSocketReceiveOptions& options) noexcept;
+    SIZE_T EffectiveMaxResponseBytes(const HttpSendOptions* options, SIZE_T sessionValue) noexcept;
+    bool IsValidSendOptions(const HttpSendOptions& options, const Session& session) noexcept;
+    bool IsValidWebSocketConnectOptions(const WebSocketConnectOptions& options) noexcept;
+    bool IsValidReceiveOptions(const WebSocketReceiveOptions& options) noexcept;
 
     // Validates and deep-copies caller-supplied opening-handshake headers into the
     // WebSocket handle. Rejects (STATUS_INVALID_PARAMETER) any header whose name
@@ -30,11 +30,11 @@ namespace session
     // empty (caller frees the handle via ReleaseWebSocketStorage).
     _Must_inspect_result_
     NTSTATUS CopyWebSocketHeaders(
-        const KhWebSocketHeader* headers,
+        const WebSocketHeader* headers,
         SIZE_T headerCount,
-        _Inout_ KhWebSocket& websocket) noexcept;
-    bool IsValidAddressFamily(KhAddressFamily addressFamily) noexcept;
-    net::WskAddressFamily ToWskAddressFamily(KhAddressFamily addressFamily) noexcept;
+        _Inout_ WebSocket& websocket) noexcept;
+    bool IsValidAddressFamily(AddressFamily addressFamily) noexcept;
+    net::WskAddressFamily ToWskAddressFamily(AddressFamily addressFamily) noexcept;
 
     _Ret_maybenull_
     void* AllocateApiMemory(SIZE_T length) noexcept;
@@ -76,73 +76,73 @@ namespace session
         SIZE_T destinationCapacity,
         _Out_ SIZE_T* destinationLength) noexcept;
 
-    bool IsSessionHandle(KH_SESSION session) noexcept;
-    bool IsRequestHandle(KH_REQUEST request) noexcept;
-    bool IsResponseHandle(KH_RESPONSE response) noexcept;
-    bool IsWebSocketHandle(KH_WEBSOCKET websocket) noexcept;
+    bool IsSessionHandle(SessionHandle session) noexcept;
+    bool IsRequestHandle(RequestHandle request) noexcept;
+    bool IsResponseHandle(ResponseHandle response) noexcept;
+    bool IsWebSocketHandle(WebSocketHandle websocket) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS RegisterActiveSessionHandle(_In_ KH_SESSION session) noexcept;
+    NTSTATUS RegisterActiveSessionHandle(_In_ SessionHandle session) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS RegisterActiveRequestHandle(_In_ KH_REQUEST request) noexcept;
+    NTSTATUS RegisterActiveRequestHandle(_In_ RequestHandle request) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS RegisterActiveResponseHandle(_In_ KH_RESPONSE response) noexcept;
+    NTSTATUS RegisterActiveResponseHandle(_In_ ResponseHandle response) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS RegisterActiveWebSocketHandle(_In_ KH_WEBSOCKET websocket) noexcept;
+    NTSTATUS RegisterActiveWebSocketHandle(_In_ WebSocketHandle websocket) noexcept;
 
     _Must_inspect_result_
-    bool TryCloseActiveSessionHandle(_In_opt_ KH_SESSION session) noexcept;
+    bool TryCloseActiveSessionHandle(_In_opt_ SessionHandle session) noexcept;
 
     _Must_inspect_result_
-    bool TryCloseActiveRequestHandle(_In_opt_ KH_REQUEST request) noexcept;
+    bool TryCloseActiveRequestHandle(_In_opt_ RequestHandle request) noexcept;
 
     _Must_inspect_result_
-    bool TryCloseActiveResponseHandle(_In_opt_ KH_RESPONSE response) noexcept;
+    bool TryCloseActiveResponseHandle(_In_opt_ ResponseHandle response) noexcept;
 
     _Must_inspect_result_
-    bool TryCloseActiveWebSocketHandle(_In_opt_ KH_WEBSOCKET websocket) noexcept;
+    bool TryCloseActiveWebSocketHandle(_In_opt_ WebSocketHandle websocket) noexcept;
 
     _Must_inspect_result_
-    bool KhSessionBeginOperation(_In_opt_ KH_SESSION session) noexcept;
+    bool SessionBeginOperation(_In_opt_ SessionHandle session) noexcept;
 
-    void KhSessionEndOperation(_In_opt_ KH_SESSION session) noexcept;
-
-    _Must_inspect_result_
-    bool KhRequestBeginOperation(_In_opt_ KH_REQUEST request) noexcept;
-
-    void KhRequestEndOperation(_In_opt_ KH_REQUEST request) noexcept;
+    void SessionEndOperation(_In_opt_ SessionHandle session) noexcept;
 
     _Must_inspect_result_
-    bool KhResponseBeginOperation(_In_opt_ KH_RESPONSE response) noexcept;
+    bool RequestBeginOperation(_In_opt_ RequestHandle request) noexcept;
 
-    void KhResponseEndOperation(_In_opt_ KH_RESPONSE response) noexcept;
+    void RequestEndOperation(_In_opt_ RequestHandle request) noexcept;
 
     _Must_inspect_result_
-    bool KhWebSocketBeginOperation(_In_opt_ KH_WEBSOCKET websocket) noexcept;
+    bool ResponseBeginOperation(_In_opt_ ResponseHandle response) noexcept;
 
-    void KhWebSocketEndOperation(_In_opt_ KH_WEBSOCKET websocket) noexcept;
+    void ResponseEndOperation(_In_opt_ ResponseHandle response) noexcept;
 
-    class KhSessionOperationScope final
+    _Must_inspect_result_
+    bool WebSocketBeginOperation(_In_opt_ WebSocketHandle websocket) noexcept;
+
+    void WebSocketEndOperation(_In_opt_ WebSocketHandle websocket) noexcept;
+
+    class SessionOperationScope final
     {
     public:
-        explicit KhSessionOperationScope(_In_opt_ KH_SESSION session) noexcept :
+        explicit SessionOperationScope(_In_opt_ SessionHandle session) noexcept :
             session_(session),
-            active_(KhSessionBeginOperation(session))
+            active_(SessionBeginOperation(session))
         {
         }
 
-        ~KhSessionOperationScope() noexcept
+        ~SessionOperationScope() noexcept
         {
             if (active_) {
-                KhSessionEndOperation(session_);
+                SessionEndOperation(session_);
             }
         }
 
-        KhSessionOperationScope(const KhSessionOperationScope&) = delete;
-        KhSessionOperationScope& operator=(const KhSessionOperationScope&) = delete;
+        SessionOperationScope(const SessionOperationScope&) = delete;
+        SessionOperationScope& operator=(const SessionOperationScope&) = delete;
 
         _Must_inspect_result_
         bool IsActive() const noexcept
@@ -151,28 +151,28 @@ namespace session
         }
 
     private:
-        KH_SESSION session_ = nullptr;
+        SessionHandle session_ = nullptr;
         bool active_ = false;
     };
 
-    class KhRequestOperationScope final
+    class RequestOperationScope final
     {
     public:
-        explicit KhRequestOperationScope(_In_opt_ KH_REQUEST request) noexcept :
+        explicit RequestOperationScope(_In_opt_ RequestHandle request) noexcept :
             request_(request),
-            active_(KhRequestBeginOperation(request))
+            active_(RequestBeginOperation(request))
         {
         }
 
-        ~KhRequestOperationScope() noexcept
+        ~RequestOperationScope() noexcept
         {
             if (active_) {
-                KhRequestEndOperation(request_);
+                RequestEndOperation(request_);
             }
         }
 
-        KhRequestOperationScope(const KhRequestOperationScope&) = delete;
-        KhRequestOperationScope& operator=(const KhRequestOperationScope&) = delete;
+        RequestOperationScope(const RequestOperationScope&) = delete;
+        RequestOperationScope& operator=(const RequestOperationScope&) = delete;
 
         _Must_inspect_result_
         bool IsActive() const noexcept
@@ -181,28 +181,28 @@ namespace session
         }
 
     private:
-        KH_REQUEST request_ = nullptr;
+        RequestHandle request_ = nullptr;
         bool active_ = false;
     };
 
-    class KhResponseOperationScope final
+    class ResponseOperationScope final
     {
     public:
-        explicit KhResponseOperationScope(_In_opt_ KH_RESPONSE response) noexcept :
+        explicit ResponseOperationScope(_In_opt_ ResponseHandle response) noexcept :
             response_(response),
-            active_(KhResponseBeginOperation(response))
+            active_(ResponseBeginOperation(response))
         {
         }
 
-        ~KhResponseOperationScope() noexcept
+        ~ResponseOperationScope() noexcept
         {
             if (active_) {
-                KhResponseEndOperation(response_);
+                ResponseEndOperation(response_);
             }
         }
 
-        KhResponseOperationScope(const KhResponseOperationScope&) = delete;
-        KhResponseOperationScope& operator=(const KhResponseOperationScope&) = delete;
+        ResponseOperationScope(const ResponseOperationScope&) = delete;
+        ResponseOperationScope& operator=(const ResponseOperationScope&) = delete;
 
         _Must_inspect_result_
         bool IsActive() const noexcept
@@ -211,21 +211,21 @@ namespace session
         }
 
     private:
-        KH_RESPONSE response_ = nullptr;
+        ResponseHandle response_ = nullptr;
         bool active_ = false;
     };
 
-    void ReleaseRequestStorage(_Inout_ KhRequest& request) noexcept;
+    void ReleaseRequestStorage(_Inout_ Request& request) noexcept;
 
     _Must_inspect_result_
-    NTSTATUS CloneRequestForAsync(_In_ const KhRequest& source, _Out_ KH_REQUEST* clonedRequest) noexcept;
+    NTSTATUS CloneRequestForAsync(_In_ const Request& source, _Out_ RequestHandle* clonedRequest) noexcept;
 
-    void ReleaseResponseStorage(_Inout_ KhResponse& response) noexcept;
-    void ReleaseWebSocketStorage(_Inout_ KhWebSocket& websocket) noexcept;
+    void ReleaseResponseStorage(_Inout_ Response& response) noexcept;
+    void ReleaseWebSocketStorage(_Inout_ WebSocket& websocket) noexcept;
 
     _Must_inspect_result_
     NTSTATUS BuildHostHeaderValue(
-        const KhRequest& request,
+        const Request& request,
         _Out_writes_bytes_(destinationCapacity) char* destination,
         SIZE_T destinationCapacity,
         _Out_ SIZE_T* destinationLength) noexcept;
@@ -244,7 +244,7 @@ namespace session
         _Out_writes_(destinationCapacity) wchar_t* destination,
         SIZE_T destinationCapacity) noexcept;
 
-    tls::TlsProtocol ToTlsProtocol(KhTlsVersion version) noexcept;
+    tls::TlsProtocol ToTlsProtocol(TlsVersion version) noexcept;
 #endif
 }
 }

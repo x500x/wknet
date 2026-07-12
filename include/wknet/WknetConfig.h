@@ -1,7 +1,7 @@
 #pragma once
 
 #if defined(WKNET_USER_MODE_TEST)
-#include "http1/HttpTypes.h"
+#include <wknet/UmTypes.h>
 #else
 #include <ntddk.h>
 #endif
@@ -18,15 +18,15 @@ namespace wknet
     constexpr ULONG WskOperationTimeoutMilliseconds = 30000;
     constexpr ULONG WskCloseTimeoutMilliseconds = 3000;
     constexpr ULONG TlsHandshakeReceiveTimeoutMilliseconds = 120000;
-    constexpr SIZE_T KhMinRsaModulusBits = 2048;
-    constexpr SIZE_T KhHttpMaxHeaderLineBytes = 8 * 1024;
-    constexpr SIZE_T KhHttpMaxHeaderBytes = 64 * 1024;
-    constexpr SIZE_T KhHttpMaxHeaders = 200;
-    constexpr SIZE_T KhHttpMaxChunks = 8192;
-    constexpr SIZE_T KhHttpMaxTrailers = 256;
-    constexpr SIZE_T KhHttpMaxChunkSizeLineBytes = 32;
-    constexpr SIZE_T KhWsMaxControlFramesPerReceive = 100;
-    constexpr SIZE_T KhTlsMaxPostHandshakeMessagesPerRecord = 8;
+    constexpr SIZE_T MinRsaModulusBits = 2048;
+    constexpr SIZE_T HttpMaxHeaderLineBytes = 8 * 1024;
+    constexpr SIZE_T HttpMaxHeaderBytes = 64 * 1024;
+    constexpr SIZE_T HttpMaxHeaders = 200;
+    constexpr SIZE_T HttpMaxChunks = 8192;
+    constexpr SIZE_T HttpMaxTrailers = 256;
+    constexpr SIZE_T HttpMaxChunkSizeLineBytes = 32;
+    constexpr SIZE_T WsMaxControlFramesPerReceive = 100;
+    constexpr SIZE_T TlsMaxPostHandshakeMessagesPerRecord = 8;
 }
 
 // Graded trace lives in <wknet/Trace.h>. Default level is Off.

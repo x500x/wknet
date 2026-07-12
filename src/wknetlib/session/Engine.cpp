@@ -26,12 +26,12 @@ namespace wknet
 {
 namespace session
 {
-    constexpr ULONG KhMaxConnectionPoolCapacity = 1024;
+    constexpr ULONG MaxConnectionPoolCapacity = 1024;
     static_assert(
-        KhDefaultMaxTls12Renegotiations == tls::Tls12DefaultMaxRenegotiations,
+        DefaultMaxTls12Renegotiations == tls::Tls12DefaultMaxRenegotiations,
         "engine TLS 1.2 renegotiation default must match tls");
     static_assert(
-        KhHardMaxTls12Renegotiations == tls::Tls12HardMaxRenegotiations,
+        HardMaxTls12Renegotiations == tls::Tls12HardMaxRenegotiations,
         "engine TLS 1.2 renegotiation hard limit must match tls");
 #if defined(WKNET_USER_MODE_TEST)
     volatile LONG g_activeHandleTableLock = 0;
@@ -39,43 +39,43 @@ namespace session
     FAST_MUTEX g_activeHandleTableLock = {};
     volatile LONG g_activeHandleTableLockState = 0;
 #endif
-    KhHandleHeader* g_activeSessions = nullptr;
-    KhHandleHeader* g_activeRequests = nullptr;
-    KhHandleHeader* g_activeResponses = nullptr;
-    KhHandleHeader* g_activeWebSockets = nullptr;
+    HandleHeader* g_activeSessions = nullptr;
+    HandleHeader* g_activeRequests = nullptr;
+    HandleHeader* g_activeResponses = nullptr;
+    HandleHeader* g_activeWebSockets = nullptr;
 
 #if defined(WKNET_USER_MODE_TEST)
     constexpr ULONG PassiveLevel = 0;
     ULONG g_testCurrentIrql = PassiveLevel;
-    KhTestHttpTransportCallback g_testHttpTransport = nullptr;
+    TestHttpTransportCallback g_testHttpTransport = nullptr;
     void* g_testHttpTransportContext = nullptr;
-    KhTestWebSocketConnectCallback g_testWebSocketConnect = nullptr;
-    KhTestWebSocketSendCallback g_testWebSocketSend = nullptr;
-    KhTestWebSocketReceiveCallback g_testWebSocketReceive = nullptr;
-    KhTestWebSocketCloseCallback g_testWebSocketClose = nullptr;
+    TestWebSocketConnectCallback g_testWebSocketConnect = nullptr;
+    TestWebSocketSendCallback g_testWebSocketSend = nullptr;
+    TestWebSocketReceiveCallback g_testWebSocketReceive = nullptr;
+    TestWebSocketCloseCallback g_testWebSocketClose = nullptr;
     void* g_testWebSocketTransportContext = nullptr;
 #endif
 
 namespace
 {
-    KhHandleHeader* ToHandleHeader(KH_SESSION session) noexcept
+    HandleHeader* ToHandleHeader(SessionHandle session) noexcept
     {
-        return reinterpret_cast<KhHandleHeader*>(session);
+        return reinterpret_cast<HandleHeader*>(session);
     }
 
-    KhHandleHeader* ToHandleHeader(KH_REQUEST request) noexcept
+    HandleHeader* ToHandleHeader(RequestHandle request) noexcept
     {
-        return reinterpret_cast<KhHandleHeader*>(request);
+        return reinterpret_cast<HandleHeader*>(request);
     }
 
-    KhHandleHeader* ToHandleHeader(KH_RESPONSE response) noexcept
+    HandleHeader* ToHandleHeader(ResponseHandle response) noexcept
     {
-        return reinterpret_cast<KhHandleHeader*>(response);
+        return reinterpret_cast<HandleHeader*>(response);
     }
 
-    KhHandleHeader* ToHandleHeader(KH_WEBSOCKET websocket) noexcept
+    HandleHeader* ToHandleHeader(WebSocketHandle websocket) noexcept
     {
-        return reinterpret_cast<KhHandleHeader*>(websocket);
+        return reinterpret_cast<HandleHeader*>(websocket);
     }
 
 #if !defined(WKNET_USER_MODE_TEST)
@@ -121,16 +121,16 @@ namespace
     }
 
     _Ret_maybenull_
-    KhHandleHeader** ActiveHandleList(KhHandleKind kind) noexcept
+    HandleHeader** ActiveHandleList(HandleKind kind) noexcept
     {
         switch (kind) {
-        case KhHandleKind::Session:
+        case HandleKind::Session:
             return &g_activeSessions;
-        case KhHandleKind::Request:
+        case HandleKind::Request:
             return &g_activeRequests;
-        case KhHandleKind::Response:
+        case HandleKind::Response:
             return &g_activeResponses;
-        case KhHandleKind::WebSocket:
+        case HandleKind::WebSocket:
             return &g_activeWebSockets;
         default:
             return nullptr;
@@ -138,14 +138,14 @@ namespace
     }
 
     _Ret_maybenull_
-    KhHandleHeader* FindActiveHandleLocked(KhHandleHeader* target, KhHandleKind kind) noexcept
+    HandleHeader* FindActiveHandleLocked(HandleHeader* target, HandleKind kind) noexcept
     {
-        KhHandleHeader** list = ActiveHandleList(kind);
+        HandleHeader** list = ActiveHandleList(kind);
         if (target == nullptr || list == nullptr) {
             return nullptr;
         }
 
-        for (KhHandleHeader* current = *list; current != nullptr; current = current->TableNext) {
+        for (HandleHeader* current = *list; current != nullptr; current = current->TableNext) {
             if (current == target) {
                 return current;
             }
@@ -155,9 +155,9 @@ namespace
     }
 
     _Ret_maybenull_
-    KhHandleHeader** FindActiveHandleLinkLocked(KhHandleHeader* target, KhHandleKind kind) noexcept
+    HandleHeader** FindActiveHandleLinkLocked(HandleHeader* target, HandleKind kind) noexcept
     {
-        KhHandleHeader** link = ActiveHandleList(kind);
+        HandleHeader** link = ActiveHandleList(kind);
         if (target == nullptr || link == nullptr) {
             return nullptr;
         }
@@ -173,7 +173,7 @@ namespace
     }
 
     _Must_inspect_result_
-    bool IsActiveHandle(KhHandleHeader* target, KhHandleKind kind) noexcept
+    bool IsActiveHandle(HandleHeader* target, HandleKind kind) noexcept
     {
         bool active = false;
         AcquireActiveHandleTableLock();
@@ -183,7 +183,7 @@ namespace
     }
 
     _Must_inspect_result_
-    NTSTATUS RegisterActiveHandle(KhHandleHeader* header, KhHandleKind kind) noexcept
+    NTSTATUS RegisterActiveHandle(HandleHeader* header, HandleKind kind) noexcept
     {
         if (header == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -191,7 +191,7 @@ namespace
 
         NTSTATUS status = STATUS_INVALID_PARAMETER;
         AcquireActiveHandleTableLock();
-        KhHandleHeader** list = ActiveHandleList(kind);
+        HandleHeader** list = ActiveHandleList(kind);
         if (list != nullptr &&
             header->Kind == kind &&
             header->Closed == 0 &&
@@ -206,7 +206,7 @@ namespace
     }
 
     _Must_inspect_result_
-    bool TryCloseActiveHandle(KhHandleHeader* target, KhHandleKind kind) noexcept
+    bool TryCloseActiveHandle(HandleHeader* target, HandleKind kind) noexcept
     {
         if (target == nullptr) {
             return false;
@@ -214,9 +214,9 @@ namespace
 
         bool closed = false;
         AcquireActiveHandleTableLock();
-        KhHandleHeader** link = FindActiveHandleLinkLocked(target, kind);
+        HandleHeader** link = FindActiveHandleLinkLocked(target, kind);
         if (link != nullptr) {
-            KhHandleHeader* active = *link;
+            HandleHeader* active = *link;
             if (TryCloseHandleHeader(active, kind)) {
                 *link = active->TableNext;
                 active->TableNext = nullptr;
@@ -228,31 +228,31 @@ namespace
     }
 
     _Ret_maybenull_
-    KH_WEBSOCKET FirstActiveWebSocketHandle() noexcept
+    WebSocketHandle FirstActiveWebSocketHandle() noexcept
     {
-        KH_WEBSOCKET websocket = nullptr;
+        WebSocketHandle websocket = nullptr;
         AcquireActiveHandleTableLock();
         if (g_activeWebSockets != nullptr) {
-            websocket = reinterpret_cast<KH_WEBSOCKET>(g_activeWebSockets);
+            websocket = reinterpret_cast<WebSocketHandle>(g_activeWebSockets);
         }
         ReleaseActiveHandleTableLock();
         return websocket;
     }
 
     _Ret_maybenull_
-    KH_SESSION FirstActiveSessionHandle() noexcept
+    SessionHandle FirstActiveSessionHandle() noexcept
     {
-        KH_SESSION session = nullptr;
+        SessionHandle session = nullptr;
         AcquireActiveHandleTableLock();
         if (g_activeSessions != nullptr) {
-            session = reinterpret_cast<KH_SESSION>(g_activeSessions);
+            session = reinterpret_cast<SessionHandle>(g_activeSessions);
         }
         ReleaseActiveHandleTableLock();
         return session;
     }
 
     _Must_inspect_result_
-    bool BeginHandleOperation(KhHandleHeader* target, KhHandleKind kind) noexcept
+    bool BeginHandleOperation(HandleHeader* target, HandleKind kind) noexcept
     {
         if (target == nullptr) {
             return false;
@@ -260,35 +260,35 @@ namespace
 
         bool active = false;
         AcquireActiveHandleTableLock();
-        KhHandleHeader* tracked = FindActiveHandleLocked(target, kind);
+        HandleHeader* tracked = FindActiveHandleLocked(target, kind);
         if (tracked != nullptr && tracked->Closed == 0) {
             volatile LONG* inFlight = nullptr;
 #if !defined(WKNET_USER_MODE_TEST)
             KEVENT* drainEvent = nullptr;
 #endif
             switch (kind) {
-            case KhHandleKind::Session:
-                inFlight = &reinterpret_cast<KH_SESSION>(tracked)->InFlight;
+            case HandleKind::Session:
+                inFlight = &reinterpret_cast<SessionHandle>(tracked)->InFlight;
 #if !defined(WKNET_USER_MODE_TEST)
-                drainEvent = &reinterpret_cast<KH_SESSION>(tracked)->DrainEvent;
+                drainEvent = &reinterpret_cast<SessionHandle>(tracked)->DrainEvent;
 #endif
                 break;
-            case KhHandleKind::Request:
-                inFlight = &reinterpret_cast<KH_REQUEST>(tracked)->InFlight;
+            case HandleKind::Request:
+                inFlight = &reinterpret_cast<RequestHandle>(tracked)->InFlight;
 #if !defined(WKNET_USER_MODE_TEST)
-                drainEvent = &reinterpret_cast<KH_REQUEST>(tracked)->DrainEvent;
+                drainEvent = &reinterpret_cast<RequestHandle>(tracked)->DrainEvent;
 #endif
                 break;
-            case KhHandleKind::Response:
-                inFlight = &reinterpret_cast<KH_RESPONSE>(tracked)->InFlight;
+            case HandleKind::Response:
+                inFlight = &reinterpret_cast<ResponseHandle>(tracked)->InFlight;
 #if !defined(WKNET_USER_MODE_TEST)
-                drainEvent = &reinterpret_cast<KH_RESPONSE>(tracked)->DrainEvent;
+                drainEvent = &reinterpret_cast<ResponseHandle>(tracked)->DrainEvent;
 #endif
                 break;
-            case KhHandleKind::WebSocket:
-                inFlight = &reinterpret_cast<KH_WEBSOCKET>(tracked)->InFlight;
+            case HandleKind::WebSocket:
+                inFlight = &reinterpret_cast<WebSocketHandle>(tracked)->InFlight;
 #if !defined(WKNET_USER_MODE_TEST)
-                drainEvent = &reinterpret_cast<KH_WEBSOCKET>(tracked)->DrainEvent;
+                drainEvent = &reinterpret_cast<WebSocketHandle>(tracked)->DrainEvent;
 #endif
                 break;
             default:
@@ -310,8 +310,8 @@ namespace
     }
 
     void EndHandleOperation(
-        KhHandleHeader* target,
-        KhHandleKind kind,
+        HandleHeader* target,
+        HandleKind kind,
         _Inout_ volatile LONG* inFlight
 #if !defined(WKNET_USER_MODE_TEST)
         ,
@@ -397,7 +397,7 @@ namespace
 
     bool IsValidHttp2MaxHeaderBlockBytes(SIZE_T value) noexcept
     {
-        return value != 0 && value <= KhMaxHttp2HeaderBlockBytes;
+        return value != 0 && value <= MaxHttp2HeaderBlockBytes;
     }
 
     bool IsValidMaxMessageBytes(SIZE_T value) noexcept
@@ -490,7 +490,7 @@ namespace
         return true;
     }
 
-    SIZE_T EffectiveMaxResponseBytes(const KhHttpSendOptions* options, SIZE_T sessionValue) noexcept
+    SIZE_T EffectiveMaxResponseBytes(const HttpSendOptions* options, SIZE_T sessionValue) noexcept
     {
         if (options != nullptr && options->MaxResponseBytes != 0) {
             return NormalizeMaxResponseBytes(options->MaxResponseBytes);
@@ -499,7 +499,7 @@ namespace
         return NormalizeMaxResponseBytes(sessionValue);
     }
 
-    bool IsValidTlsOptions(const KhTlsOptions& options) noexcept
+    bool IsValidTlsOptions(const TlsOptions& options) noexcept
     {
         if (static_cast<ULONG>(options.MinVersion) > static_cast<ULONG>(options.MaxVersion)) {
             return false;
@@ -521,7 +521,7 @@ namespace
             return false;
         }
 
-        if (options.AlpnLength > KhPoolMaxAlpnLength) {
+        if (options.AlpnLength > PoolMaxAlpnLength) {
             return false;
         }
 
@@ -529,7 +529,7 @@ namespace
             return false;
         }
 
-        if (options.MaxTls12Renegotiations > KhHardMaxTls12Renegotiations) {
+        if (options.MaxTls12Renegotiations > HardMaxTls12Renegotiations) {
             return false;
         }
 
@@ -538,7 +538,7 @@ namespace
 
     bool IsValidProxyAuthorityText(const char* text, SIZE_T textLength) noexcept
     {
-        if (text == nullptr || textLength == 0 || textLength > KhPoolMaxProxyAuthorityLength) {
+        if (text == nullptr || textLength == 0 || textLength > PoolMaxProxyAuthorityLength) {
             return false;
         }
 
@@ -554,7 +554,7 @@ namespace
 
     bool IsValidProxyHeaderValueText(const char* text, SIZE_T textLength) noexcept
     {
-        if (text == nullptr || textLength == 0 || textLength > KhMaxHeaderValueLength) {
+        if (text == nullptr || textLength == 0 || textLength > MaxHeaderValueLength) {
             return false;
         }
 
@@ -568,7 +568,7 @@ namespace
         return true;
     }
 
-    bool IsValidProxyOptions(const KhProxyOptions& options) noexcept
+    bool IsValidProxyOptions(const ProxyOptions& options) noexcept
     {
         if (!options.Enabled) {
             return options.Address.ss_family == 0 &&
@@ -593,35 +593,35 @@ namespace
         return IsValidProxyHeaderValueText(options.AuthHeader, options.AuthHeaderLength);
     }
 
-    bool IsValidHttp11PipelineOptions(const KhSessionOptions& options) noexcept
+    bool IsValidHttp11PipelineOptions(const SessionOptions& options) noexcept
     {
         if (options.Http11PipelineMaxDepth == 0 ||
-            options.Http11PipelineMaxDepth > KhMaxHttp11PipelineDepth ||
+            options.Http11PipelineMaxDepth > MaxHttp11PipelineDepth ||
             options.Http11PipelineMethodMask == 0 ||
-            (options.Http11PipelineMethodMask & ~KhHttp11PipelineKnownMethodMask) != 0) {
+            (options.Http11PipelineMethodMask & ~Http11PipelineKnownMethodMask) != 0) {
             return false;
         }
 
         return true;
     }
 
-    KhHttp2KeepAliveOptions NormalizeHttp2KeepAliveOptions(
-        const KhHttp2KeepAliveOptions& options) noexcept
+    Http2KeepAliveOptions NormalizeHttp2KeepAliveOptions(
+        const Http2KeepAliveOptions& options) noexcept
     {
-        KhHttp2KeepAliveOptions normalized = options;
+        Http2KeepAliveOptions normalized = options;
         if (normalized.IdleMilliseconds == 0) {
-            normalized.IdleMilliseconds = KhDefaultHttp2KeepAliveIdleMilliseconds;
+            normalized.IdleMilliseconds = DefaultHttp2KeepAliveIdleMilliseconds;
         }
         if (normalized.IntervalMilliseconds == 0) {
-            normalized.IntervalMilliseconds = KhDefaultHttp2KeepAliveIntervalMilliseconds;
+            normalized.IntervalMilliseconds = DefaultHttp2KeepAliveIntervalMilliseconds;
         }
         if (normalized.AckTimeoutMilliseconds == 0) {
-            normalized.AckTimeoutMilliseconds = KhDefaultHttp2KeepAliveAckTimeoutMilliseconds;
+            normalized.AckTimeoutMilliseconds = DefaultHttp2KeepAliveAckTimeoutMilliseconds;
         }
         return normalized;
     }
 
-    bool IsValidHttp2KeepAliveOptions(const KhHttp2KeepAliveOptions& options) noexcept
+    bool IsValidHttp2KeepAliveOptions(const Http2KeepAliveOptions& options) noexcept
     {
         if (!options.Enabled) {
             return true;
@@ -633,7 +633,7 @@ namespace
             options.AckTimeoutMilliseconds <= WskOperationTimeoutMilliseconds;
     }
 
-    bool IsValidSessionOptions(const KhSessionOptions& options) noexcept
+    bool IsValidSessionOptions(const SessionOptions& options) noexcept
     {
         if (options.RequestBufferBytes == 0) {
             return false;
@@ -651,14 +651,14 @@ namespace
             return false;
         }
 
-        if (options.ResponsePoolType != KhPoolType::NonPaged) {
+        if (options.ResponsePoolType != PoolType::NonPaged) {
             return false;
         }
 
         if (options.ConnectionPoolCapacity == 0 ||
-            options.ConnectionPoolCapacity > KhMaxConnectionPoolCapacity ||
+            options.ConnectionPoolCapacity > MaxConnectionPoolCapacity ||
             options.MaxConnectionsPerHost == 0 ||
-            options.MaxConnectionsPerHost > KhMaxConnectionPoolCapacity ||
+            options.MaxConnectionsPerHost > MaxConnectionPoolCapacity ||
             options.MaxConnectionsPerHost > options.ConnectionPoolCapacity) {
             return false;
         }
@@ -669,47 +669,47 @@ namespace
             IsValidProxyOptions(options.Proxy);
     }
 
-    bool IsValidAddressFamily(KhAddressFamily addressFamily) noexcept
+    bool IsValidAddressFamily(AddressFamily addressFamily) noexcept
     {
-        return addressFamily == KhAddressFamily::Any ||
-            addressFamily == KhAddressFamily::Ipv4 ||
-            addressFamily == KhAddressFamily::Ipv6;
+        return addressFamily == AddressFamily::Any ||
+            addressFamily == AddressFamily::Ipv4 ||
+            addressFamily == AddressFamily::Ipv6;
     }
 
-    bool IsValidHttp2CleartextMode(KhHttp2CleartextMode mode) noexcept
+    bool IsValidHttp2CleartextMode(Http2CleartextMode mode) noexcept
     {
-        return mode == KhHttp2CleartextMode::Disabled ||
-            mode == KhHttp2CleartextMode::PriorKnowledge ||
-            mode == KhHttp2CleartextMode::Upgrade;
+        return mode == Http2CleartextMode::Disabled ||
+            mode == Http2CleartextMode::PriorKnowledge ||
+            mode == Http2CleartextMode::Upgrade;
     }
 
-    bool IsValidWebSocketTransportMode(KhWebSocketTransportMode mode) noexcept
+    bool IsValidWebSocketTransportMode(WebSocketTransportMode mode) noexcept
     {
-        return mode == KhWebSocketTransportMode::LegacyBoolean ||
-            mode == KhWebSocketTransportMode::Http11Only ||
-            mode == KhWebSocketTransportMode::Auto ||
-            mode == KhWebSocketTransportMode::Http2Required;
+        return mode == WebSocketTransportMode::LegacyBoolean ||
+            mode == WebSocketTransportMode::Http11Only ||
+            mode == WebSocketTransportMode::Auto ||
+            mode == WebSocketTransportMode::Http2Required;
     }
 
-    net::WskAddressFamily ToWskAddressFamily(KhAddressFamily addressFamily) noexcept
+    net::WskAddressFamily ToWskAddressFamily(AddressFamily addressFamily) noexcept
     {
         switch (addressFamily) {
-        case KhAddressFamily::Ipv4:
+        case AddressFamily::Ipv4:
             return net::WskAddressFamily::Ipv4;
-        case KhAddressFamily::Ipv6:
+        case AddressFamily::Ipv6:
             return net::WskAddressFamily::Ipv6;
-        case KhAddressFamily::Any:
+        case AddressFamily::Any:
         default:
             return net::WskAddressFamily::Any;
         }
     }
 
-    bool IsValidSendOptions(const KhHttpSendOptions& options, const KhSession& session) noexcept;
-    void ReleaseResponseStorage(_Inout_ KhResponse& response) noexcept;
+    bool IsValidSendOptions(const HttpSendOptions& options, const Session& session) noexcept;
+    void ReleaseResponseStorage(_Inout_ Response& response) noexcept;
 
-    bool IsValidWebSocketConnectOptions(const KhWebSocketConnectOptions& options) noexcept
+    bool IsValidWebSocketConnectOptions(const WebSocketConnectOptions& options) noexcept
     {
-        constexpr ULONG KhMaxWebSocketHandshakeRetries = 10;
+        constexpr ULONG MaxWebSocketHandshakeRetries = 10;
 
         if (options.Url == nullptr || options.UrlLength == 0) {
             return false;
@@ -733,10 +733,10 @@ namespace
             IsValidWebSocketTransportMode(options.TransportMode) &&
             ws::IsValidPerMessageDeflateOptions(options.PerMessageDeflate) &&
             !(options.ChallengeCallback == nullptr && options.ChallengeContext != nullptr) &&
-            options.MaxHandshakeRetries <= KhMaxWebSocketHandshakeRetries;
+            options.MaxHandshakeRetries <= MaxWebSocketHandshakeRetries;
     }
 
-    bool IsValidReceiveOptions(const KhWebSocketReceiveOptions& options) noexcept
+    bool IsValidReceiveOptions(const WebSocketReceiveOptions& options) noexcept
     {
         if (options.MessageCallback == nullptr && options.CallbackContext != nullptr) {
             return false;
@@ -933,23 +933,23 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    bool IsSessionHandle(KH_SESSION session) noexcept;
-    bool IsRequestHandle(KH_REQUEST request) noexcept;
-    bool IsResponseHandle(KH_RESPONSE response) noexcept;
-    bool IsWebSocketHandle(KH_WEBSOCKET websocket) noexcept;
+    bool IsSessionHandle(SessionHandle session) noexcept;
+    bool IsRequestHandle(RequestHandle request) noexcept;
+    bool IsResponseHandle(ResponseHandle response) noexcept;
+    bool IsWebSocketHandle(WebSocketHandle websocket) noexcept;
 
-    bool IsValidSendOptions(const KhHttpSendOptions& options, const KhSession& session) noexcept
+    bool IsValidSendOptions(const HttpSendOptions& options, const Session& session) noexcept
     {
         UNREFERENCED_PARAMETER(session);
 
         constexpr ULONG knownFlags =
-            KhHttpSendFlagAggregateWithCallbacks |
-            KhHttpSendFlagDisableAutoRedirect |
-            KhHttpSendFlagExpectContinue |
-            KhHttpSendFlagAllowTrace |
-            KhHttpSendFlagBypassCache |
-            KhHttpSendFlagNoCacheStore |
-            KhHttpSendFlagOnlyIfCached;
+            HttpSendFlagAggregateWithCallbacks |
+            HttpSendFlagDisableAutoRedirect |
+            HttpSendFlagExpectContinue |
+            HttpSendFlagAllowTrace |
+            HttpSendFlagBypassCache |
+            HttpSendFlagNoCacheStore |
+            HttpSendFlagOnlyIfCached;
 
         if (!IsValidMaxResponseBytes(options.MaxResponseBytes)) {
             return false;
@@ -959,7 +959,7 @@ namespace
             return false;
         }
 
-        if (options.ExpectContinueTimeoutMilliseconds > KhMaxExpectContinueTimeoutMilliseconds) {
+        if (options.ExpectContinueTimeoutMilliseconds > MaxExpectContinueTimeoutMilliseconds) {
             return false;
         }
 
@@ -983,87 +983,87 @@ namespace
             return false;
         }
 
-        if (options.BodyCallback == nullptr && ((options.Flags & KhHttpSendFlagAggregateWithCallbacks) != 0)) {
+        if (options.BodyCallback == nullptr && ((options.Flags & HttpSendFlagAggregateWithCallbacks) != 0)) {
             return false;
         }
 
         return true;
     }
 
-    bool IsSessionHandle(KH_SESSION session) noexcept
+    bool IsSessionHandle(SessionHandle session) noexcept
     {
-        return IsActiveHandle(ToHandleHeader(session), KhHandleKind::Session);
+        return IsActiveHandle(ToHandleHeader(session), HandleKind::Session);
     }
 
-    bool IsRequestHandle(KH_REQUEST request) noexcept
+    bool IsRequestHandle(RequestHandle request) noexcept
     {
-        return IsActiveHandle(ToHandleHeader(request), KhHandleKind::Request);
+        return IsActiveHandle(ToHandleHeader(request), HandleKind::Request);
     }
 
-    bool IsResponseHandle(KH_RESPONSE response) noexcept
+    bool IsResponseHandle(ResponseHandle response) noexcept
     {
-        return IsActiveHandle(ToHandleHeader(response), KhHandleKind::Response);
+        return IsActiveHandle(ToHandleHeader(response), HandleKind::Response);
     }
 
-    bool IsWebSocketHandle(KH_WEBSOCKET websocket) noexcept
+    bool IsWebSocketHandle(WebSocketHandle websocket) noexcept
     {
-        return IsActiveHandle(ToHandleHeader(websocket), KhHandleKind::WebSocket);
+        return IsActiveHandle(ToHandleHeader(websocket), HandleKind::WebSocket);
     }
 
-    NTSTATUS RegisterActiveSessionHandle(KH_SESSION session) noexcept
+    NTSTATUS RegisterActiveSessionHandle(SessionHandle session) noexcept
     {
-        return RegisterActiveHandle(ToHandleHeader(session), KhHandleKind::Session);
+        return RegisterActiveHandle(ToHandleHeader(session), HandleKind::Session);
     }
 
-    NTSTATUS RegisterActiveRequestHandle(KH_REQUEST request) noexcept
+    NTSTATUS RegisterActiveRequestHandle(RequestHandle request) noexcept
     {
-        return RegisterActiveHandle(ToHandleHeader(request), KhHandleKind::Request);
+        return RegisterActiveHandle(ToHandleHeader(request), HandleKind::Request);
     }
 
-    NTSTATUS RegisterActiveResponseHandle(KH_RESPONSE response) noexcept
+    NTSTATUS RegisterActiveResponseHandle(ResponseHandle response) noexcept
     {
-        return RegisterActiveHandle(ToHandleHeader(response), KhHandleKind::Response);
+        return RegisterActiveHandle(ToHandleHeader(response), HandleKind::Response);
     }
 
-    NTSTATUS RegisterActiveWebSocketHandle(KH_WEBSOCKET websocket) noexcept
+    NTSTATUS RegisterActiveWebSocketHandle(WebSocketHandle websocket) noexcept
     {
-        return RegisterActiveHandle(ToHandleHeader(websocket), KhHandleKind::WebSocket);
+        return RegisterActiveHandle(ToHandleHeader(websocket), HandleKind::WebSocket);
     }
 
-    bool TryCloseActiveSessionHandle(KH_SESSION session) noexcept
+    bool TryCloseActiveSessionHandle(SessionHandle session) noexcept
     {
-        return TryCloseActiveHandle(ToHandleHeader(session), KhHandleKind::Session);
+        return TryCloseActiveHandle(ToHandleHeader(session), HandleKind::Session);
     }
 
-    bool TryCloseActiveRequestHandle(KH_REQUEST request) noexcept
+    bool TryCloseActiveRequestHandle(RequestHandle request) noexcept
     {
-        return TryCloseActiveHandle(ToHandleHeader(request), KhHandleKind::Request);
+        return TryCloseActiveHandle(ToHandleHeader(request), HandleKind::Request);
     }
 
-    bool TryCloseActiveResponseHandle(KH_RESPONSE response) noexcept
+    bool TryCloseActiveResponseHandle(ResponseHandle response) noexcept
     {
-        return TryCloseActiveHandle(ToHandleHeader(response), KhHandleKind::Response);
+        return TryCloseActiveHandle(ToHandleHeader(response), HandleKind::Response);
     }
 
-    bool TryCloseActiveWebSocketHandle(KH_WEBSOCKET websocket) noexcept
+    bool TryCloseActiveWebSocketHandle(WebSocketHandle websocket) noexcept
     {
-        return TryCloseActiveHandle(ToHandleHeader(websocket), KhHandleKind::WebSocket);
+        return TryCloseActiveHandle(ToHandleHeader(websocket), HandleKind::WebSocket);
     }
 
-    bool KhSessionBeginOperation(KH_SESSION session) noexcept
+    bool SessionBeginOperation(SessionHandle session) noexcept
     {
-        return BeginHandleOperation(ToHandleHeader(session), KhHandleKind::Session);
+        return BeginHandleOperation(ToHandleHeader(session), HandleKind::Session);
     }
 
-    void KhSessionEndOperation(KH_SESSION session) noexcept
+    void SessionEndOperation(SessionHandle session) noexcept
     {
-        if (session == nullptr || session->Header.Kind != KhHandleKind::Session) {
+        if (session == nullptr || session->Header.Kind != HandleKind::Session) {
             return;
         }
 
         EndHandleOperation(
             ToHandleHeader(session),
-            KhHandleKind::Session,
+            HandleKind::Session,
             &session->InFlight
 #if !defined(WKNET_USER_MODE_TEST)
             ,
@@ -1072,20 +1072,20 @@ namespace
             );
     }
 
-    bool KhRequestBeginOperation(KH_REQUEST request) noexcept
+    bool RequestBeginOperation(RequestHandle request) noexcept
     {
-        return BeginHandleOperation(ToHandleHeader(request), KhHandleKind::Request);
+        return BeginHandleOperation(ToHandleHeader(request), HandleKind::Request);
     }
 
-    void KhRequestEndOperation(KH_REQUEST request) noexcept
+    void RequestEndOperation(RequestHandle request) noexcept
     {
-        if (request == nullptr || request->Header.Kind != KhHandleKind::Request) {
+        if (request == nullptr || request->Header.Kind != HandleKind::Request) {
             return;
         }
 
         EndHandleOperation(
             ToHandleHeader(request),
-            KhHandleKind::Request,
+            HandleKind::Request,
             &request->InFlight
 #if !defined(WKNET_USER_MODE_TEST)
             ,
@@ -1094,20 +1094,20 @@ namespace
             );
     }
 
-    bool KhResponseBeginOperation(KH_RESPONSE response) noexcept
+    bool ResponseBeginOperation(ResponseHandle response) noexcept
     {
-        return BeginHandleOperation(ToHandleHeader(response), KhHandleKind::Response);
+        return BeginHandleOperation(ToHandleHeader(response), HandleKind::Response);
     }
 
-    void KhResponseEndOperation(KH_RESPONSE response) noexcept
+    void ResponseEndOperation(ResponseHandle response) noexcept
     {
-        if (response == nullptr || response->Header.Kind != KhHandleKind::Response) {
+        if (response == nullptr || response->Header.Kind != HandleKind::Response) {
             return;
         }
 
         EndHandleOperation(
             ToHandleHeader(response),
-            KhHandleKind::Response,
+            HandleKind::Response,
             &response->InFlight
 #if !defined(WKNET_USER_MODE_TEST)
             ,
@@ -1116,12 +1116,12 @@ namespace
             );
     }
 
-    bool KhWebSocketBeginOperation(KH_WEBSOCKET websocket) noexcept
+    bool WebSocketBeginOperation(WebSocketHandle websocket) noexcept
     {
-        return BeginHandleOperation(ToHandleHeader(websocket), KhHandleKind::WebSocket);
+        return BeginHandleOperation(ToHandleHeader(websocket), HandleKind::WebSocket);
     }
 
-    void WaitForSessionDrain(KH_SESSION session) noexcept
+    void WaitForSessionDrain(SessionHandle session) noexcept
     {
         if (session == nullptr) {
             return;
@@ -1136,7 +1136,7 @@ namespace
             );
     }
 
-    void WaitForRequestDrain(KH_REQUEST request) noexcept
+    void WaitForRequestDrain(RequestHandle request) noexcept
     {
         if (request == nullptr) {
             return;
@@ -1151,7 +1151,7 @@ namespace
             );
     }
 
-    void WaitForResponseDrain(KH_RESPONSE response) noexcept
+    void WaitForResponseDrain(ResponseHandle response) noexcept
     {
         if (response == nullptr) {
             return;
@@ -1166,14 +1166,14 @@ namespace
             );
     }
 
-    void ReleaseStoredHeader(_Inout_ KhStoredHeader& header) noexcept
+    void ReleaseStoredHeader(_Inout_ StoredHeader& header) noexcept
     {
         FreeApiMemory(header.Name);
         FreeApiMemory(header.Value);
         header = {};
     }
 
-    void ReleaseOwnedBody(_Inout_ KhRequest& request) noexcept
+    void ReleaseOwnedBody(_Inout_ Request& request) noexcept
     {
         if (request.OwnedBody != nullptr && request.OwnedBodyCapacity != 0) {
             RtlSecureZeroMemory(request.OwnedBody, request.OwnedBodyCapacity);
@@ -1191,7 +1191,7 @@ namespace
         request.BodySourceContentLengthKnown = false;
     }
 
-    void ResetOwnedBodyContent(_Inout_ KhRequest& request) noexcept
+    void ResetOwnedBodyContent(_Inout_ Request& request) noexcept
     {
         if (request.OwnedBody != nullptr && request.OwnedBodyCapacity != 0) {
             RtlSecureZeroMemory(request.OwnedBody, request.OwnedBodyCapacity);
@@ -1204,7 +1204,7 @@ namespace
         request.BodySourceContentLengthKnown = false;
     }
 
-    void AbortOwnedBodyBuild(_Inout_ KhRequest& request) noexcept
+    void AbortOwnedBodyBuild(_Inout_ Request& request) noexcept
     {
         ResetOwnedBodyContent(request);
         request.Body = nullptr;
@@ -1226,7 +1226,7 @@ namespace
     }
 
     _Must_inspect_result_
-    NTSTATUS EnsureOwnedBodyCapacity(_Inout_ KhRequest& request, SIZE_T requiredCapacity) noexcept
+    NTSTATUS EnsureOwnedBodyCapacity(_Inout_ Request& request, SIZE_T requiredCapacity) noexcept
     {
         if (requiredCapacity == 0 || requiredCapacity <= request.OwnedBodyCapacity) {
             return STATUS_SUCCESS;
@@ -1234,7 +1234,7 @@ namespace
 
         SIZE_T newCapacity = request.OwnedBodyCapacity;
         if (newCapacity == 0) {
-            newCapacity = KhInitialOwnedBodyCapacity;
+            newCapacity = InitialOwnedBodyCapacity;
         }
 
         while (newCapacity < requiredCapacity) {
@@ -1267,7 +1267,7 @@ namespace
     }
 
     _Must_inspect_result_
-    NTSTATUS BeginOwnedBodyBuild(_Inout_ KhRequest& request) noexcept
+    NTSTATUS BeginOwnedBodyBuild(_Inout_ Request& request) noexcept
     {
         ResetOwnedBodyContent(request);
         request.Body = request.OwnedBody;
@@ -1278,7 +1278,7 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS AppendOwnedBody(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         _In_reads_bytes_opt_(dataLength) const UCHAR* data,
         SIZE_T dataLength) noexcept
     {
@@ -1312,13 +1312,13 @@ namespace
     }
 
     _Must_inspect_result_
-    NTSTATUS AppendOwnedText(_Inout_ KhRequest& request, _In_opt_ const char* text, SIZE_T textLength) noexcept
+    NTSTATUS AppendOwnedText(_Inout_ Request& request, _In_opt_ const char* text, SIZE_T textLength) noexcept
     {
         return AppendOwnedBody(request, reinterpret_cast<const UCHAR*>(text), textLength);
     }
 
     _Must_inspect_result_
-    NTSTATUS AppendOwnedLiteral(_Inout_ KhRequest& request, _In_z_ const char* text) noexcept
+    NTSTATUS AppendOwnedLiteral(_Inout_ Request& request, _In_z_ const char* text) noexcept
     {
         const http1::HttpText value = http1::MakeText(text);
         return AppendOwnedText(request, value.Data, value.Length);
@@ -1332,7 +1332,7 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS AddStoredHeader(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         _In_reads_bytes_(nameLength) const char* name,
         SIZE_T nameLength,
         _In_reads_bytes_(valueLength) const char* value,
@@ -1341,14 +1341,14 @@ namespace
         if (name == nullptr || nameLength == 0 || (value == nullptr && valueLength != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
-        if (nameLength > KhMaxHeaderNameLength || valueLength > KhMaxHeaderValueLength) {
+        if (nameLength > MaxHeaderNameLength || valueLength > MaxHeaderValueLength) {
             return STATUS_BUFFER_TOO_SMALL;
         }
         if (!IsValidHeaderText(name, nameLength, true) ||
             !IsValidHeaderText(value, valueLength, false)) {
             return STATUS_INVALID_PARAMETER;
         }
-        if (request.HeaderCount >= KhMaxHeadersPerRequest) {
+        if (request.HeaderCount >= MaxHeadersPerRequest) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
@@ -1366,7 +1366,7 @@ namespace
             }
         }
 
-        KhStoredHeader& header = request.Headers[request.HeaderCount++];
+        StoredHeader& header = request.Headers[request.HeaderCount++];
         header.Name = nameCopy;
         header.NameLength = nameLength;
         header.Value = valueCopy;
@@ -1386,7 +1386,7 @@ namespace
     }
 
     NTSTATUS AddStoredTrailer(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         _In_reads_bytes_(nameLength) const char* name,
         SIZE_T nameLength,
         _In_reads_bytes_(valueLength) const char* value,
@@ -1395,7 +1395,7 @@ namespace
         if (name == nullptr || nameLength == 0 || (value == nullptr && valueLength != 0)) {
             return STATUS_INVALID_PARAMETER;
         }
-        if (nameLength > KhMaxHeaderNameLength || valueLength > KhMaxHeaderValueLength) {
+        if (nameLength > MaxHeaderNameLength || valueLength > MaxHeaderValueLength) {
             return STATUS_BUFFER_TOO_SMALL;
         }
         if (!IsValidHeaderText(name, nameLength, true) ||
@@ -1405,7 +1405,7 @@ namespace
         if (IsForbiddenRequestTrailerField(name, nameLength)) {
             return STATUS_NOT_SUPPORTED;
         }
-        if (request.TrailerCount >= KhMaxHeadersPerRequest) {
+        if (request.TrailerCount >= MaxHeadersPerRequest) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
@@ -1423,7 +1423,7 @@ namespace
             }
         }
 
-        KhStoredHeader& trailer = request.Trailers[request.TrailerCount++];
+        StoredHeader& trailer = request.Trailers[request.TrailerCount++];
         trailer.Name = nameCopy;
         trailer.NameLength = nameLength;
         trailer.Value = valueCopy;
@@ -1431,7 +1431,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    void RemoveStoredHeadersByName(_Inout_ KhRequest& request, _In_z_ const char* name) noexcept
+    void RemoveStoredHeadersByName(_Inout_ Request& request, _In_z_ const char* name) noexcept
     {
         SIZE_T index = 0;
         while (index < request.HeaderCount) {
@@ -1451,7 +1451,7 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS ReplaceContentType(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         _In_reads_bytes_(contentTypeLength) const char* contentType,
         SIZE_T contentTypeLength) noexcept
     {
@@ -1488,7 +1488,7 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS AppendUrlEncodedText(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         _In_reads_bytes_opt_(textLength) const char* text,
         SIZE_T textLength) noexcept
     {
@@ -1603,7 +1603,7 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS AppendMultipartQuotedValue(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         _In_reads_bytes_(valueLength) const char* value,
         SIZE_T valueLength) noexcept
     {
@@ -1632,7 +1632,7 @@ namespace
     }
 
     _Must_inspect_result_
-    NTSTATUS GenerateMultipartBoundary(_Inout_ KhRequest& request, _Out_ SIZE_T* boundaryLength) noexcept
+    NTSTATUS GenerateMultipartBoundary(_Inout_ Request& request, _Out_ SIZE_T* boundaryLength) noexcept
     {
         if (boundaryLength != nullptr) {
             *boundaryLength = 0;
@@ -1642,7 +1642,7 @@ namespace
         }
 
         const http1::HttpText prefix = http1::MakeText("----KernelHttpBoundary");
-        if (prefix.Length + 8 >= KhMultipartBoundaryStorageLength) {
+        if (prefix.Length + 8 >= MultipartBoundaryStorageLength) {
             return STATUS_BUFFER_TOO_SMALL;
         }
 
@@ -1663,7 +1663,7 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS SetMultipartContentType(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         _In_reads_bytes_(boundaryLength) const char* boundary,
         SIZE_T boundaryLength) noexcept
     {
@@ -1689,7 +1689,7 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS AppendMultipartPartHeader(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         _In_reads_bytes_(boundaryLength) const char* boundary,
         SIZE_T boundaryLength,
         _In_reads_bytes_(nameLength) const char* name,
@@ -1800,7 +1800,7 @@ namespace
 
     _Must_inspect_result_
     NTSTATUS AppendFileToOwnedBody(
-        _Inout_ KhRequest& request,
+        _Inout_ Request& request,
         _In_reads_bytes_(filePathLength) const char* filePath,
         SIZE_T filePathLength) noexcept
     {
@@ -2005,7 +2005,7 @@ namespace
 #endif
     }
 
-    void ReleaseRequestStorage(_Inout_ KhRequest& request) noexcept
+    void ReleaseRequestStorage(_Inout_ Request& request) noexcept
     {
         FreeApiMemory(request.Url);
         request.Url = nullptr;
@@ -2020,34 +2020,34 @@ namespace
         request.OwnedTlsServerName = nullptr;
         request.OwnedTlsAlpn = nullptr;
 
-        for (SIZE_T index = 0; index < request.HeaderCount && index < KhMaxHeadersPerRequest; ++index) {
+        for (SIZE_T index = 0; index < request.HeaderCount && index < MaxHeadersPerRequest; ++index) {
             ReleaseStoredHeader(request.Headers[index]);
         }
         request.HeaderCount = 0;
 
-        for (SIZE_T index = 0; index < request.TrailerCount && index < KhMaxHeadersPerRequest; ++index) {
+        for (SIZE_T index = 0; index < request.TrailerCount && index < MaxHeadersPerRequest; ++index) {
             ReleaseStoredHeader(request.Trailers[index]);
         }
         request.TrailerCount = 0;
     }
 
     _Must_inspect_result_
-    NTSTATUS CloneRequestForAsync(_In_ const KhRequest& source, _Out_ KH_REQUEST* clonedRequest) noexcept
+    NTSTATUS CloneRequestForAsync(_In_ const Request& source, _Out_ RequestHandle* clonedRequest) noexcept
     {
         if (clonedRequest != nullptr) {
             *clonedRequest = nullptr;
         }
 
-        if (clonedRequest == nullptr || !IsRequestHandle(const_cast<KH_REQUEST>(&source))) {
+        if (clonedRequest == nullptr || !IsRequestHandle(const_cast<RequestHandle>(&source))) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        KH_REQUEST clone = AllocateRequestHandle();
+        RequestHandle clone = AllocateRequestHandle();
         if (clone == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        clone->Header = { KhHandleKind::Request, 0, nullptr };
+        clone->Header = { HandleKind::Request, 0, nullptr };
         clone->Session = source.Session;
         clone->Method = source.Method;
         clone->UrlLength = source.UrlLength;
@@ -2128,7 +2128,7 @@ namespace
             clone->BodyLength = 0;
         }
 
-        for (SIZE_T index = 0; index < source.HeaderCount && index < KhMaxHeadersPerRequest; ++index) {
+        for (SIZE_T index = 0; index < source.HeaderCount && index < MaxHeadersPerRequest; ++index) {
             NTSTATUS status = AddStoredHeader(
                 *clone,
                 source.Headers[index].Name,
@@ -2142,7 +2142,7 @@ namespace
             }
         }
 
-        for (SIZE_T index = 0; index < source.TrailerCount && index < KhMaxHeadersPerRequest; ++index) {
+        for (SIZE_T index = 0; index < source.TrailerCount && index < MaxHeadersPerRequest; ++index) {
             NTSTATUS status = AddStoredTrailer(
                 *clone,
                 source.Trailers[index].Name,
@@ -2167,7 +2167,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    void ReleaseResponseStorage(KhResponse& response) noexcept
+    void ReleaseResponseStorage(Response& response) noexcept
     {
         FreeApiMemory(response.RawResponse);
         FreeApiMemory(response.Body);
@@ -2197,9 +2197,9 @@ namespace
     }
 
     NTSTATUS CopyWebSocketHeaders(
-        const KhWebSocketHeader* headers,
+        const WebSocketHeader* headers,
         SIZE_T headerCount,
-        KhWebSocket& websocket) noexcept
+        WebSocket& websocket) noexcept
     {
         websocket.ExtraHeaderCount = 0;
 
@@ -2207,7 +2207,7 @@ namespace
             return STATUS_SUCCESS;
         }
 
-        if (headers == nullptr || headerCount > KhMaxHeadersPerRequest) {
+        if (headers == nullptr || headerCount > MaxHeadersPerRequest) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -2224,12 +2224,12 @@ namespace
         };
 
         for (SIZE_T index = 0; index < headerCount; ++index) {
-            const KhWebSocketHeader& header = headers[index];
+            const WebSocketHeader& header = headers[index];
             if (header.Name == nullptr || header.NameLength == 0) {
                 return STATUS_INVALID_PARAMETER;
             }
-            if (header.NameLength > KhMaxHeaderNameLength ||
-                header.ValueLength > KhMaxHeaderValueLength) {
+            if (header.NameLength > MaxHeaderNameLength ||
+                header.ValueLength > MaxHeaderValueLength) {
                 return STATUS_BUFFER_TOO_SMALL;
             }
             if (!IsValidHeaderText(header.Name, header.NameLength, true) ||
@@ -2259,7 +2259,7 @@ namespace
                 }
             }
 
-            KhStoredHeader& stored = websocket.ExtraHeaders[websocket.ExtraHeaderCount++];
+            StoredHeader& stored = websocket.ExtraHeaders[websocket.ExtraHeaderCount++];
             stored.Name = nameCopy;
             stored.NameLength = header.NameLength;
             stored.Value = valueCopy;
@@ -2269,9 +2269,9 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    void ReleaseWebSocketStorage(_Inout_ KhWebSocket& websocket) noexcept
+    void ReleaseWebSocketStorage(_Inout_ WebSocket& websocket) noexcept
     {
-        KhWorkspaceReleaseToLookaside(
+        WorkspaceReleaseToLookaside(
             websocket.Workspace,
             websocket.Session != nullptr ? &websocket.Session->WorkspaceLookaside : nullptr);
         websocket.Workspace = nullptr;
@@ -2284,7 +2284,7 @@ namespace
         FreeApiMemory(websocket.Url);
         FreeApiMemory(websocket.Subprotocol);
         FreeApiMemory(websocket.LastMessage);
-        for (SIZE_T index = 0; index < websocket.ExtraHeaderCount && index < KhMaxHeadersPerRequest; ++index) {
+        for (SIZE_T index = 0; index < websocket.ExtraHeaderCount && index < MaxHeadersPerRequest; ++index) {
             ReleaseStoredHeader(websocket.ExtraHeaders[index]);
         }
         websocket.ExtraHeaderCount = 0;
@@ -2301,17 +2301,17 @@ namespace
         websocket.Connected = false;
         websocket.TransportClosed = true;
         websocket.SendFragmentOpen = false;
-        websocket.SendFragmentType = KhWebSocketMessageType::Binary;
+        websocket.SendFragmentType = WebSocketMessageType::Binary;
         websocket.SendFragmentLength = 0;
         websocket.SendTextUtf8CodePoint = 0;
         websocket.SendTextUtf8Remaining = 0;
         websocket.SendTextUtf8Expected = 0;
     }
 
-    NTSTATUS KhSessionCreate(
+    NTSTATUS SessionCreate(
         net::WskClient* wskClient,
-        const KhSessionOptions* options,
-        KH_SESSION* session) noexcept
+        const SessionOptions* options,
+        SessionHandle* session) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2324,7 +2324,7 @@ namespace
 
         *session = nullptr;
 
-        KhSessionOptions effectiveOptions = {};
+        SessionOptions effectiveOptions = {};
         if (options != nullptr) {
             effectiveOptions = *options;
         }
@@ -2337,12 +2337,12 @@ namespace
 
         effectiveOptions.MaxResponseBytes = NormalizeMaxResponseBytes(effectiveOptions.MaxResponseBytes);
 
-        KH_SESSION newSession = AllocateSessionHandle();
+        SessionHandle newSession = AllocateSessionHandle();
         if (newSession == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        newSession->Header = { KhHandleKind::Session, 0, nullptr };
+        newSession->Header = { HandleKind::Session, 0, nullptr };
         newSession->WskClient = wskClient;
         newSession->Options = effectiveOptions;
         newSession->Cache = effectiveOptions.Cache;
@@ -2351,17 +2351,17 @@ namespace
         KeInitializeEvent(&newSession->DrainEvent, NotificationEvent, TRUE);
 #endif
 
-        status = newSession->WorkspaceLookaside.Initialize(sizeof(KhWorkspace));
+        status = newSession->WorkspaceLookaside.Initialize(sizeof(Workspace));
         if (!NT_SUCCESS(status)) {
             FreeHandle(newSession);
             return status;
         }
 
-        KhWorkspaceOptions workspaceOptions = {};
+        WorkspaceOptions workspaceOptions = {};
         workspaceOptions.PoolType = effectiveOptions.ResponsePoolType;
         workspaceOptions.RequestBufferBytes = effectiveOptions.RequestBufferBytes;
         workspaceOptions.MaxResponseBytes = effectiveOptions.MaxResponseBytes;
-        status = KhWorkspaceCreateFromLookaside(
+        status = WorkspaceCreateFromLookaside(
             &workspaceOptions,
             &newSession->WorkspaceLookaside,
             &newSession->Workspace);
@@ -2372,7 +2372,7 @@ namespace
 
         newSession->ProviderCache = AllocateProviderCacheHandle();
         if (newSession->ProviderCache == nullptr) {
-            KhWorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
+            WorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
             newSession->Workspace = nullptr;
             FreeHandle(newSession);
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -2382,13 +2382,13 @@ namespace
         if (!NT_SUCCESS(status)) {
             FreeHandle(newSession->ProviderCache);
             newSession->ProviderCache = nullptr;
-            KhWorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
+            WorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
             newSession->Workspace = nullptr;
             FreeHandle(newSession);
             return status;
         }
 
-        status = KhConnectionPoolInitialize(
+        status = ConnectionPoolInitialize(
             &newSession->ConnectionPool,
             effectiveOptions.ConnectionPoolCapacity,
             effectiveOptions.MaxConnectionsPerHost,
@@ -2398,19 +2398,19 @@ namespace
             newSession->ProviderCache->Shutdown();
             FreeHandle(newSession->ProviderCache);
             newSession->ProviderCache = nullptr;
-            KhWorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
+            WorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
             newSession->Workspace = nullptr;
             FreeHandle(newSession);
             return status;
         }
 
-        status = KhConnectionPoolStartHttp2KeepAlive(&newSession->ConnectionPool);
+        status = ConnectionPoolStartHttp2KeepAlive(&newSession->ConnectionPool);
         if (!NT_SUCCESS(status)) {
-            KhConnectionPoolShutdown(&newSession->ConnectionPool);
+            ConnectionPoolShutdown(&newSession->ConnectionPool);
             newSession->ProviderCache->Shutdown();
             FreeHandle(newSession->ProviderCache);
             newSession->ProviderCache = nullptr;
-            KhWorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
+            WorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
             newSession->Workspace = nullptr;
             FreeHandle(newSession);
             return status;
@@ -2418,11 +2418,11 @@ namespace
 
         status = RegisterActiveSessionHandle(newSession);
         if (!NT_SUCCESS(status)) {
-            KhConnectionPoolShutdown(&newSession->ConnectionPool);
+            ConnectionPoolShutdown(&newSession->ConnectionPool);
             newSession->ProviderCache->Shutdown();
             FreeHandle(newSession->ProviderCache);
             newSession->ProviderCache = nullptr;
-            KhWorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
+            WorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
             newSession->Workspace = nullptr;
             FreeHandle(newSession);
             return status;
@@ -2432,7 +2432,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    void KhSessionClose(KH_SESSION session) noexcept
+    void SessionClose(SessionHandle session) noexcept
     {
         if (!NT_SUCCESS(CheckPassiveLevel()) || session == nullptr) {
             return;
@@ -2443,38 +2443,38 @@ namespace
         }
 
         WaitForSessionDrain(session);
-        KhConnectionPoolShutdown(&session->ConnectionPool);
+        ConnectionPoolShutdown(&session->ConnectionPool);
         if (session->ProviderCache != nullptr) {
             session->ProviderCache->Shutdown();
             FreeHandle(session->ProviderCache);
             session->ProviderCache = nullptr;
         }
-        KhWorkspace* workspace = nullptr;
+        Workspace* workspace = nullptr;
 #if defined(WKNET_USER_MODE_TEST)
         workspace = session->Workspace;
         session->Workspace = nullptr;
 #else
-        workspace = static_cast<KhWorkspace*>(InterlockedExchangePointer(
+        workspace = static_cast<Workspace*>(InterlockedExchangePointer(
             reinterpret_cast<PVOID volatile*>(&session->Workspace),
             nullptr));
 #endif
-        KhWorkspaceReleaseToLookaside(workspace, &session->WorkspaceLookaside);
+        WorkspaceReleaseToLookaside(workspace, &session->WorkspaceLookaside);
         FreeHandle(session);
     }
 
-    void KhEngineCloseActiveHandles() noexcept
+    void EngineCloseActiveHandles() noexcept
     {
         if (!NT_SUCCESS(CheckPassiveLevel())) {
             return;
         }
 
         for (;;) {
-            KH_WEBSOCKET websocket = FirstActiveWebSocketHandle();
+            WebSocketHandle websocket = FirstActiveWebSocketHandle();
             if (websocket == nullptr) {
                 break;
             }
 
-            const NTSTATUS status = KhWebSocketCloseSyncImpl(websocket);
+            const NTSTATUS status = WebSocketCloseSyncImpl(websocket);
             if (!NT_SUCCESS(status)) {
                 WKNET_DBG_PRINT("卸载扫尾关闭 WebSocket 失败: 0x%08X\r\n", static_cast<ULONG>(status));
                 break;
@@ -2486,12 +2486,12 @@ namespace
         }
 
         for (;;) {
-            KH_SESSION session = FirstActiveSessionHandle();
+            SessionHandle session = FirstActiveSessionHandle();
             if (session == nullptr) {
                 break;
             }
 
-            KhSessionClose(session);
+            SessionClose(session);
             if (FirstActiveSessionHandle() == session) {
                 WKNET_DBG_PRINT("卸载扫尾关闭 session 未推进\r\n");
                 break;
@@ -2499,7 +2499,7 @@ namespace
         }
     }
 
-    NTSTATUS KhHttpRequestCreate(KH_SESSION session, KH_REQUEST* request) noexcept
+    NTSTATUS HttpRequestCreate(SessionHandle session, RequestHandle* request) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2512,19 +2512,19 @@ namespace
 
         *request = nullptr;
 
-        KhSessionOperationScope sessionScope(session);
+        SessionOperationScope sessionScope(session);
         if (!sessionScope.IsActive()) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        KH_REQUEST newRequest = AllocateRequestHandle();
+        RequestHandle newRequest = AllocateRequestHandle();
         if (newRequest == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        newRequest->Header = { KhHandleKind::Request, 0, nullptr };
+        newRequest->Header = { HandleKind::Request, 0, nullptr };
         newRequest->Session = session;
-        newRequest->Method = KhHttpMethod::Get;
+        newRequest->Method = HttpMethod::Get;
         newRequest->Tls = session->Options.Tls;
         newRequest->InFlight = 0;
 #if !defined(WKNET_USER_MODE_TEST)
@@ -2539,7 +2539,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    void KhHttpRequestRelease(KH_REQUEST request) noexcept
+    void HttpRequestRelease(RequestHandle request) noexcept
     {
         if (!NT_SUCCESS(CheckPassiveLevel()) || request == nullptr) {
             return;
@@ -2554,7 +2554,7 @@ namespace
         FreeHandle(request);
     }
 
-    NTSTATUS KhHttpRequestSetUrl(KH_REQUEST request, const char* url, SIZE_T urlLength) noexcept
+    NTSTATUS HttpRequestSetUrl(RequestHandle request, const char* url, SIZE_T urlLength) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2570,7 +2570,7 @@ namespace
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        HeapObject<KhRequest> parsed;
+        HeapObject<Request> parsed;
         if (!parsed.IsValid()) {
             FreeApiMemory(urlCopy);
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -2601,7 +2601,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhHttpRequestSetMethod(KH_REQUEST request, KhHttpMethod method) noexcept
+    NTSTATUS HttpRequestSetMethod(RequestHandle request, HttpMethod method) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2613,15 +2613,15 @@ namespace
         }
 
         switch (method) {
-        case KhHttpMethod::Get:
-        case KhHttpMethod::Post:
-        case KhHttpMethod::Put:
-        case KhHttpMethod::Patch:
-        case KhHttpMethod::Delete:
-        case KhHttpMethod::Head:
-        case KhHttpMethod::Options:
-        case KhHttpMethod::Connect:
-        case KhHttpMethod::Trace:
+        case HttpMethod::Get:
+        case HttpMethod::Post:
+        case HttpMethod::Put:
+        case HttpMethod::Patch:
+        case HttpMethod::Delete:
+        case HttpMethod::Head:
+        case HttpMethod::Options:
+        case HttpMethod::Connect:
+        case HttpMethod::Trace:
             request->Method = method;
             return STATUS_SUCCESS;
         default:
@@ -2629,8 +2629,8 @@ namespace
         }
     }
 
-    NTSTATUS KhHttpRequestSetHeader(
-        KH_REQUEST request,
+    NTSTATUS HttpRequestSetHeader(
+        RequestHandle request,
         const char* name,
         SIZE_T nameLength,
         const char* value,
@@ -2648,7 +2648,7 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (nameLength > KhMaxHeaderNameLength || valueLength > KhMaxHeaderValueLength) {
+        if (nameLength > MaxHeaderNameLength || valueLength > MaxHeaderValueLength) {
             return STATUS_BUFFER_TOO_SMALL;
         }
 
@@ -2725,12 +2725,12 @@ namespace
     }
 
     NTSTATUS StoreGeneratedHeader(
-        KH_REQUEST request,
+        RequestHandle request,
         const char* name,
         const char* value,
         SIZE_T valueLength) noexcept
     {
-        return KhHttpRequestSetHeader(
+        return HttpRequestSetHeader(
             request,
             name,
             HeaderLiteralLength(name),
@@ -2738,8 +2738,8 @@ namespace
             valueLength);
     }
 
-    NTSTATUS KhHttpRequestSetRangeBytes(
-        KH_REQUEST request,
+    NTSTATUS HttpRequestSetRangeBytes(
+        RequestHandle request,
         ULONGLONG firstByte,
         ULONGLONG lastByte,
         bool hasLastByte) noexcept
@@ -2779,7 +2779,7 @@ namespace
         return StoreGeneratedHeader(request, "Range", value.Get(), offset);
     }
 
-    NTSTATUS KhHttpRequestSetRangeSuffix(KH_REQUEST request, ULONGLONG suffixLength) noexcept
+    NTSTATUS HttpRequestSetRangeSuffix(RequestHandle request, ULONGLONG suffixLength) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2810,27 +2810,27 @@ namespace
         return StoreGeneratedHeader(request, "Range", value.Get(), offset);
     }
 
-    NTSTATUS KhHttpRequestSetIfMatch(KH_REQUEST request, const char* value, SIZE_T valueLength) noexcept
+    NTSTATUS HttpRequestSetIfMatch(RequestHandle request, const char* value, SIZE_T valueLength) noexcept
     {
         return StoreGeneratedHeader(request, "If-Match", value, valueLength);
     }
 
-    NTSTATUS KhHttpRequestSetIfNoneMatch(KH_REQUEST request, const char* value, SIZE_T valueLength) noexcept
+    NTSTATUS HttpRequestSetIfNoneMatch(RequestHandle request, const char* value, SIZE_T valueLength) noexcept
     {
         return StoreGeneratedHeader(request, "If-None-Match", value, valueLength);
     }
 
-    NTSTATUS KhHttpRequestSetIfModifiedSince(KH_REQUEST request, const char* value, SIZE_T valueLength) noexcept
+    NTSTATUS HttpRequestSetIfModifiedSince(RequestHandle request, const char* value, SIZE_T valueLength) noexcept
     {
         return StoreGeneratedHeader(request, "If-Modified-Since", value, valueLength);
     }
 
-    NTSTATUS KhHttpRequestSetIfUnmodifiedSince(KH_REQUEST request, const char* value, SIZE_T valueLength) noexcept
+    NTSTATUS HttpRequestSetIfUnmodifiedSince(RequestHandle request, const char* value, SIZE_T valueLength) noexcept
     {
         return StoreGeneratedHeader(request, "If-Unmodified-Since", value, valueLength);
     }
 
-    NTSTATUS KhHttpRequestSetBody(KH_REQUEST request, const UCHAR* body, SIZE_T bodyLength) noexcept
+    NTSTATUS HttpRequestSetBody(RequestHandle request, const UCHAR* body, SIZE_T bodyLength) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2852,9 +2852,9 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhHttpRequestSetBodySource(
-        KH_REQUEST request,
-        KhRequestBodyReadCallback callback,
+    NTSTATUS HttpRequestSetBodySource(
+        RequestHandle request,
+        RequestBodyReadCallback callback,
         void* context,
         SIZE_T contentLength,
         bool contentLengthKnown) noexcept
@@ -2873,8 +2873,8 @@ namespace
         request->BodyLength = contentLengthKnown ? contentLength : 0;
         request->HasBody = true;
         request->BodyMode = contentLengthKnown ?
-            KhRequestBodyMode::ContentLength :
-            KhRequestBodyMode::Chunked;
+            RequestBodyMode::ContentLength :
+            RequestBodyMode::Chunked;
         request->BodySourceCallback = callback;
         request->BodySourceContext = context;
         request->BodySourceContentLength = contentLength;
@@ -2882,7 +2882,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhHttpRequestSetBodyMode(KH_REQUEST request, KhRequestBodyMode mode) noexcept
+    NTSTATUS HttpRequestSetBodyMode(RequestHandle request, RequestBodyMode mode) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2893,13 +2893,13 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (mode != KhRequestBodyMode::ContentLength &&
-            mode != KhRequestBodyMode::Chunked) {
+        if (mode != RequestBodyMode::ContentLength &&
+            mode != RequestBodyMode::Chunked) {
             return STATUS_INVALID_PARAMETER;
         }
 
         if (request->BodySourceCallback != nullptr &&
-            mode == KhRequestBodyMode::ContentLength &&
+            mode == RequestBodyMode::ContentLength &&
             !request->BodySourceContentLengthKnown) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -2908,8 +2908,8 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhHttpRequestAddTrailer(
-        KH_REQUEST request,
+    NTSTATUS HttpRequestAddTrailer(
+        RequestHandle request,
         const char* name,
         SIZE_T nameLength,
         const char* value,
@@ -2927,14 +2927,14 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (nameLength > KhMaxHeaderNameLength || valueLength > KhMaxHeaderValueLength) {
+        if (nameLength > MaxHeaderNameLength || valueLength > MaxHeaderValueLength) {
             return STATUS_BUFFER_TOO_SMALL;
         }
 
         return AddStoredTrailer(*request, name, nameLength, value, valueLength);
     }
 
-    NTSTATUS KhHttpRequestClearBody(KH_REQUEST request) noexcept
+    NTSTATUS HttpRequestClearBody(RequestHandle request) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -2950,8 +2950,8 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhHttpRequestSetTextBody(
-        KH_REQUEST request,
+    NTSTATUS HttpRequestSetTextBody(
+        RequestHandle request,
         const char* text,
         SIZE_T textLength,
         const char* contentType,
@@ -2988,8 +2988,8 @@ namespace
         return ReplaceContentType(*request, contentType, contentTypeLength);
     }
 
-    NTSTATUS KhHttpRequestSetRawBody(
-        KH_REQUEST request,
+    NTSTATUS HttpRequestSetRawBody(
+        RequestHandle request,
         const UCHAR* data,
         SIZE_T dataLength,
         const char* contentType,
@@ -3024,9 +3024,9 @@ namespace
         return status;
     }
 
-    NTSTATUS KhHttpRequestSetUrlEncodedBody(
-        KH_REQUEST request,
-        const KhNameValuePair* pairs,
+    NTSTATUS HttpRequestSetUrlEncodedBody(
+        RequestHandle request,
+        const NameValuePair* pairs,
         SIZE_T pairCount) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
@@ -3041,7 +3041,7 @@ namespace
         }
 
         for (SIZE_T index = 0; index < pairCount; ++index) {
-            const KhNameValuePair& pair = pairs[index];
+            const NameValuePair& pair = pairs[index];
             if (pair.Name == nullptr ||
                 pair.NameLength == 0 ||
                 (pair.Value == nullptr && pair.ValueLength != 0)) {
@@ -3084,9 +3084,9 @@ namespace
         return ReplaceContentType(*request, contentType.Data, contentType.Length);
     }
 
-    NTSTATUS KhHttpRequestSetMultipartFormDataBody(
-        KH_REQUEST request,
-        const KhMultipartFormDataPart* parts,
+    NTSTATUS HttpRequestSetMultipartFormDataBody(
+        RequestHandle request,
+        const MultipartFormDataPart* parts,
         SIZE_T partCount) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
@@ -3101,7 +3101,7 @@ namespace
         }
 
         for (SIZE_T index = 0; index < partCount; ++index) {
-            const KhMultipartFormDataPart& part = parts[index];
+            const MultipartFormDataPart& part = parts[index];
             if (part.Name == nullptr ||
                 part.NameLength == 0 ||
                 !IsOptionalTextValid(part.FileName, part.FileNameLength) ||
@@ -3110,19 +3110,19 @@ namespace
             }
 
             switch (part.Kind) {
-            case KhRequestBodyPartKind::Field:
+            case RequestBodyPartKind::Field:
                 if (part.Value == nullptr && part.ValueLength != 0) {
                     return STATUS_INVALID_PARAMETER;
                 }
                 break;
-            case KhRequestBodyPartKind::FileBytes:
+            case RequestBodyPartKind::FileBytes:
                 if ((part.Data == nullptr && part.DataLength != 0) ||
                     part.FileName == nullptr ||
                     part.FileNameLength == 0) {
                     return STATUS_INVALID_PARAMETER;
                 }
                 break;
-            case KhRequestBodyPartKind::FilePath:
+            case RequestBodyPartKind::FilePath:
                 if (part.FilePath == nullptr || part.FilePathLength == 0) {
                     return STATUS_INVALID_PARAMETER;
                 }
@@ -3145,10 +3145,10 @@ namespace
         }
 
         for (SIZE_T index = 0; index < partCount; ++index) {
-            const KhMultipartFormDataPart& part = parts[index];
+            const MultipartFormDataPart& part = parts[index];
             const char* fileName = part.FileName;
             SIZE_T fileNameLength = part.FileNameLength;
-            if (part.Kind == KhRequestBodyPartKind::FilePath && fileName == nullptr) {
+            if (part.Kind == RequestBodyPartKind::FilePath && fileName == nullptr) {
                 DeriveFileNameFromPath(part.FilePath, part.FilePathLength, &fileName, &fileNameLength);
                 if (fileName == nullptr || fileNameLength == 0) {
                     AbortOwnedBodyBuild(*request);
@@ -3171,10 +3171,10 @@ namespace
                 return status;
             }
 
-            if (part.Kind == KhRequestBodyPartKind::Field) {
+            if (part.Kind == RequestBodyPartKind::Field) {
                 status = AppendOwnedText(*request, part.Value, part.ValueLength);
             }
-            else if (part.Kind == KhRequestBodyPartKind::FileBytes) {
+            else if (part.Kind == RequestBodyPartKind::FileBytes) {
                 status = AppendOwnedBody(*request, part.Data, part.DataLength);
             }
             else {
@@ -3211,8 +3211,8 @@ namespace
         return SetMultipartContentType(*request, request->MultipartBoundary, boundaryLength);
     }
 
-    NTSTATUS KhHttpRequestSetFileBody(
-        KH_REQUEST request,
+    NTSTATUS HttpRequestSetFileBody(
+        RequestHandle request,
         const char* filePath,
         SIZE_T filePathLength,
         const char* contentType,
@@ -3250,7 +3250,7 @@ namespace
         return ReplaceContentType(*request, contentType, contentTypeLength);
     }
 
-    NTSTATUS KhHttpRequestSetTlsOptions(KH_REQUEST request, const KhTlsOptions* options) noexcept
+    NTSTATUS HttpRequestSetTlsOptions(RequestHandle request, const TlsOptions* options) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -3266,7 +3266,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhHttpRequestSetConnectionPolicy(KH_REQUEST request, KhConnectionPolicy policy) noexcept
+    NTSTATUS HttpRequestSetConnectionPolicy(RequestHandle request, ConnectionPolicy policy) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -3278,9 +3278,9 @@ namespace
         }
 
         switch (policy) {
-        case KhConnectionPolicy::ReuseOrCreate:
-        case KhConnectionPolicy::ForceNew:
-        case KhConnectionPolicy::NoPool:
+        case ConnectionPolicy::ReuseOrCreate:
+        case ConnectionPolicy::ForceNew:
+        case ConnectionPolicy::NoPool:
             request->ConnectionPolicy = policy;
             return STATUS_SUCCESS;
         default:
@@ -3288,7 +3288,7 @@ namespace
         }
     }
 
-    NTSTATUS KhHttpRequestSetAddressFamily(KH_REQUEST request, KhAddressFamily addressFamily) noexcept
+    NTSTATUS HttpRequestSetAddressFamily(RequestHandle request, AddressFamily addressFamily) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -3303,7 +3303,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhResponseGetView(KH_RESPONSE response, KhResponseView* view) noexcept
+    NTSTATUS ResponseGetView(ResponseHandle response, ResponseView* view) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
@@ -3320,8 +3320,8 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS KhResponseGetHeader(
-        KH_RESPONSE response,
+    NTSTATUS ResponseGetHeader(
+        ResponseHandle response,
         const char* name,
         SIZE_T nameLength,
         const char** value,
@@ -3359,7 +3359,7 @@ namespace
         return STATUS_NOT_FOUND;
     }
 
-    SIZE_T KhResponseHeaderCount(KH_RESPONSE response) noexcept
+    SIZE_T ResponseHeaderCount(ResponseHandle response) noexcept
     {
         if (!NT_SUCCESS(CheckPassiveLevel()) || !IsResponseHandle(response)) {
             return 0;
@@ -3368,8 +3368,8 @@ namespace
         return response->HeaderCount;
     }
 
-    NTSTATUS KhResponseGetHeaderAt(
-        KH_RESPONSE response,
+    NTSTATUS ResponseGetHeaderAt(
+        ResponseHandle response,
         SIZE_T index,
         const char** name,
         SIZE_T* nameLength,
@@ -3414,7 +3414,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    SIZE_T KhResponseTrailerCount(KH_RESPONSE response) noexcept
+    SIZE_T ResponseTrailerCount(ResponseHandle response) noexcept
     {
         if (!NT_SUCCESS(CheckPassiveLevel()) || !IsResponseHandle(response)) {
             return 0;
@@ -3423,8 +3423,8 @@ namespace
         return response->TrailerCount;
     }
 
-    NTSTATUS KhResponseGetTrailer(
-        KH_RESPONSE response,
+    NTSTATUS ResponseGetTrailer(
+        ResponseHandle response,
         const char* name,
         SIZE_T nameLength,
         const char** value,
@@ -3462,8 +3462,8 @@ namespace
         return STATUS_NOT_FOUND;
     }
 
-    NTSTATUS KhResponseGetTrailerAt(
-        KH_RESPONSE response,
+    NTSTATUS ResponseGetTrailerAt(
+        ResponseHandle response,
         SIZE_T index,
         const char** name,
         SIZE_T* nameLength,
@@ -3508,7 +3508,7 @@ namespace
         return STATUS_SUCCESS;
     }
 
-    void KhResponseRelease(KH_RESPONSE response) noexcept
+    void ResponseRelease(ResponseHandle response) noexcept
     {
         if (!NT_SUCCESS(CheckPassiveLevel()) || response == nullptr) {
             return;
@@ -3523,47 +3523,47 @@ namespace
         FreeHandle(response);
     }
 
-    NTSTATUS KhAsyncCancel(KH_ASYNC_OPERATION operation) noexcept
+    NTSTATUS AsyncCancel(AsyncOperationHandle operation) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        return KhAsyncOperationCancel(operation);
+        return AsyncOperationCancel(operation);
     }
 
-    NTSTATUS KhAsyncWait(KH_ASYNC_OPERATION operation, ULONG timeoutMilliseconds) noexcept
+    NTSTATUS AsyncWait(AsyncOperationHandle operation, ULONG timeoutMilliseconds) noexcept
     {
         NTSTATUS status = CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             return status;
         }
 
-        return KhAsyncOperationWait(operation, timeoutMilliseconds);
+        return AsyncOperationWait(operation, timeoutMilliseconds);
     }
 
-    void KhAsyncRelease(KH_ASYNC_OPERATION operation) noexcept
+    void AsyncRelease(AsyncOperationHandle operation) noexcept
     {
         if (!NT_SUCCESS(CheckPassiveLevel()) || operation == nullptr) {
             return;
         }
 
-        KhAsyncOperationRelease(operation);
+        AsyncOperationRelease(operation);
     }
 
 #if defined(WKNET_USER_MODE_TEST)
-    void KhTestSetHttpTransport(KhTestHttpTransportCallback callback, void* context) noexcept
+    void TestSetHttpTransport(TestHttpTransportCallback callback, void* context) noexcept
     {
         g_testHttpTransport = callback;
         g_testHttpTransportContext = context;
     }
 
-    void KhTestSetWebSocketTransport(
-        KhTestWebSocketConnectCallback connectCallback,
-        KhTestWebSocketSendCallback sendCallback,
-        KhTestWebSocketReceiveCallback receiveCallback,
-        KhTestWebSocketCloseCallback closeCallback,
+    void TestSetWebSocketTransport(
+        TestWebSocketConnectCallback connectCallback,
+        TestWebSocketSendCallback sendCallback,
+        TestWebSocketReceiveCallback receiveCallback,
+        TestWebSocketCloseCallback closeCallback,
         void* context) noexcept
     {
         g_testWebSocketConnect = connectCallback;
@@ -3573,32 +3573,32 @@ namespace
         g_testWebSocketTransportContext = context;
     }
 
-    NTSTATUS KhTestAsyncStatus(KH_ASYNC_OPERATION operation) noexcept
+    NTSTATUS TestAsyncStatus(AsyncOperationHandle operation) noexcept
     {
-        return KhAsyncOperationStatus(operation);
+        return AsyncOperationStatus(operation);
     }
 
-    bool KhTestAsyncIsCompleted(KH_ASYNC_OPERATION operation) noexcept
+    bool TestAsyncIsCompleted(AsyncOperationHandle operation) noexcept
     {
-        return KhAsyncOperationIsCompleted(operation);
+        return AsyncOperationIsCompleted(operation);
     }
 
-    bool KhTestAsyncIsCanceled(KH_ASYNC_OPERATION operation) noexcept
+    bool TestAsyncIsCanceled(AsyncOperationHandle operation) noexcept
     {
-        return KhAsyncOperationIsCanceled(operation);
+        return AsyncOperationIsCanceled(operation);
     }
 
-    void KhTestSetCurrentIrql(ULONG irql) noexcept
+    void TestSetCurrentIrql(ULONG irql) noexcept
     {
         g_testCurrentIrql = irql;
     }
 
-    void KhTestResetCurrentIrql() noexcept
+    void TestResetCurrentIrql() noexcept
     {
         g_testCurrentIrql = PassiveLevel;
     }
 
-    bool KhTestSessionHasWorkspace(KH_SESSION session) noexcept
+    bool TestSessionHasWorkspace(SessionHandle session) noexcept
     {
         return IsSessionHandle(session) &&
             session->Workspace != nullptr &&
@@ -3612,7 +3612,7 @@ namespace
             session->Workspace->WebSocketSendFrameScratch.Data != nullptr;
     }
 
-    bool KhTestSessionHasProviderCache(KH_SESSION session) noexcept
+    bool TestSessionHasProviderCache(SessionHandle session) noexcept
     {
         return IsSessionHandle(session) &&
             session->ProviderCache != nullptr &&

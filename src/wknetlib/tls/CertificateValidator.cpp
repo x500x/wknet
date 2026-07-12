@@ -1766,7 +1766,7 @@ namespace tls
                     ++certificate.RsaModulus;
                     --certificate.RsaModulusLength;
                 }
-                if (certificate.RsaModulusLength * 8 < KhMinRsaModulusBits) {
+                if (certificate.RsaModulusLength * 8 < MinRsaModulusBits) {
                     return STATUS_NOT_SUPPORTED;
                 }
 

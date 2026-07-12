@@ -4,6 +4,6 @@
 namespace wknet::http {
     void Destroy() noexcept
     {
-        (void)::wknet::session::KhEngineDrainAsync();
+        (void)::wknet::session::EngineDrainAsync();
     }
 }

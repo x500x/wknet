@@ -5,10 +5,10 @@ namespace wknet
 {
 namespace session
 {
-struct KhHttpCacheEntry final
+struct HttpCacheEntry final
 {
-    KhHttpCacheEntry* Prev = nullptr;
-    KhHttpCacheEntry* Next = nullptr;
+    HttpCacheEntry* Prev = nullptr;
+    HttpCacheEntry* Next = nullptr;
     ULONG Method = 0;
     char* Key = nullptr;
     SIZE_T KeyLength = 0;
@@ -24,9 +24,9 @@ struct KhHttpCacheEntry final
     SIZE_T BodyCapacity = 0;
     bool Partial = false;
     ULONGLONG CompleteLength = 0;
-    KhHttpCacheRange Ranges[KhHttpCacheMaxPartialRanges] = {};
+    HttpCacheRange Ranges[HttpCacheMaxPartialRanges] = {};
     SIZE_T RangeCount = 0;
-    KhHttpCacheVaryField Vary[KhHttpCacheMaxVaryFields] = {};
+    HttpCacheVaryField Vary[HttpCacheMaxVaryFields] = {};
     SIZE_T VaryCount = 0;
     LONGLONG StoredAtSeconds = 0;
     SIZE_T ChargeBytes = 0;
@@ -38,14 +38,14 @@ namespace
     void AppendLiteral(char* buffer, SIZE_T capacity, SIZE_T* offset, const char* literal) noexcept;
     void AppendUnsignedDecimal(char* buffer, SIZE_T capacity, SIZE_T* offset, ULONGLONG value) noexcept;
 
-    bool IsCacheHandle(KH_HTTP_CACHE cache) noexcept
+    bool IsCacheHandle(HttpCacheHandle cache) noexcept
     {
         return cache != nullptr &&
-            cache->Header.Kind == KhHandleKind::HttpCache &&
+            cache->Header.Kind == HandleKind::HttpCache &&
             cache->Header.Closed == 0;
     }
 
-    void EnsureLockInitialized(KH_HTTP_CACHE cache) noexcept
+    void EnsureLockInitialized(HttpCacheHandle cache) noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
         UNREFERENCED_PARAMETER(cache);
@@ -67,7 +67,7 @@ namespace
 #endif
     }
 
-    void AcquireCacheLock(KH_HTTP_CACHE cache) noexcept
+    void AcquireCacheLock(HttpCacheHandle cache) noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
         while (cache->Lock != 0) {
@@ -79,7 +79,7 @@ namespace
 #endif
     }
 
-    void ReleaseCacheLock(KH_HTTP_CACHE cache) noexcept
+    void ReleaseCacheLock(HttpCacheHandle cache) noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
         cache->Lock = 0;
@@ -111,13 +111,13 @@ namespace
         return length;
     }
 
-    bool HeaderNameEquals(const KhStoredHeader& header, const char* name) noexcept
+    bool HeaderNameEquals(const StoredHeader& header, const char* name) noexcept
     {
         return TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, name);
     }
 
     bool FindRequestHeader(
-        const KhRequest& request,
+        const Request& request,
         const char* name,
         const char** value,
         SIZE_T* valueLength) noexcept
@@ -142,12 +142,12 @@ namespace
         return false;
     }
 
-    bool RequestHasHeader(const KhRequest& request, const char* name) noexcept
+    bool RequestHasHeader(const Request& request, const char* name) noexcept
     {
         return FindRequestHeader(request, name, nullptr, nullptr);
     }
 
-    bool BuildCacheKey(const KhRequest& request, char** key, SIZE_T* keyLength) noexcept
+    bool BuildCacheKey(const Request& request, char** key, SIZE_T* keyLength) noexcept
     {
         if (key != nullptr) {
             *key = nullptr;
@@ -188,7 +188,7 @@ namespace
         return true;
     }
 
-    bool SameUrlKey(const KhHttpCacheEntry& entry, const KhRequest& request) noexcept
+    bool SameUrlKey(const HttpCacheEntry& entry, const Request& request) noexcept
     {
         if (entry.Key == nullptr || request.Url == nullptr) {
             return false;
@@ -208,7 +208,7 @@ namespace
             RtlCompareMemory(separator, request.Url, request.UrlLength) == request.UrlLength;
     }
 
-    void FreeVary(KhHttpCacheEntry& entry) noexcept
+    void FreeVary(HttpCacheEntry& entry) noexcept
     {
         for (SIZE_T index = 0; index < entry.VaryCount; ++index) {
             FreeApiMemory(entry.Vary[index].Name);
@@ -218,7 +218,7 @@ namespace
         entry.VaryCount = 0;
     }
 
-    void FreeEntry(KhHttpCacheEntry* entry) noexcept
+    void FreeEntry(HttpCacheEntry* entry) noexcept
     {
         if (entry == nullptr) {
             return;
@@ -232,7 +232,7 @@ namespace
         FreeNonPagedObject(entry);
     }
 
-    void UnlinkEntry(KH_HTTP_CACHE cache, KhHttpCacheEntry* entry) noexcept
+    void UnlinkEntry(HttpCacheHandle cache, HttpCacheEntry* entry) noexcept
     {
         if (cache == nullptr || entry == nullptr) {
             return;
@@ -262,7 +262,7 @@ namespace
         }
     }
 
-    void LinkHead(KH_HTTP_CACHE cache, KhHttpCacheEntry* entry) noexcept
+    void LinkHead(HttpCacheHandle cache, HttpCacheEntry* entry) noexcept
     {
         entry->Prev = nullptr;
         entry->Next = cache->Head;
@@ -277,7 +277,7 @@ namespace
         cache->BytesUsed += entry->ChargeBytes;
     }
 
-    void MoveToHead(KH_HTTP_CACHE cache, KhHttpCacheEntry* entry) noexcept
+    void MoveToHead(HttpCacheHandle cache, HttpCacheEntry* entry) noexcept
     {
         if (cache->Head == entry) {
             return;
@@ -288,18 +288,18 @@ namespace
         LinkHead(cache, entry);
     }
 
-    void RemoveAndFree(KH_HTTP_CACHE cache, KhHttpCacheEntry* entry) noexcept
+    void RemoveAndFree(HttpCacheHandle cache, HttpCacheEntry* entry) noexcept
     {
         UnlinkEntry(cache, entry);
         FreeEntry(entry);
     }
 
-    void EvictToLimits(KH_HTTP_CACHE cache) noexcept
+    void EvictToLimits(HttpCacheHandle cache) noexcept
     {
         while (cache->Tail != nullptr &&
             (cache->EntryCount > cache->Options.MaxEntries ||
                 cache->BytesUsed > cache->Options.MaxBytes)) {
-            KhHttpCacheEntry* victim = cache->Tail;
+            HttpCacheEntry* victim = cache->Tail;
             RemoveAndFree(cache, victim);
             ++cache->Stats.Evictions;
         }
@@ -380,9 +380,9 @@ namespace
     }
 
     bool CopySnapshotFromEntry(
-        const KhHttpCacheEntry& entry,
+        const HttpCacheEntry& entry,
         const http1::HttpByteRange* range,
-        KhHttpCacheSnapshot* snapshot) noexcept
+        HttpCacheSnapshot* snapshot) noexcept
     {
         if (snapshot != nullptr) {
             *snapshot = {};
@@ -429,7 +429,7 @@ namespace
         }
 
         http1::HttpHeader* sourceHeaders = entry.Headers;
-        http1::HttpHeader smallHeaders[KhMaxHeadersPerResponse + 2] = {};
+        http1::HttpHeader smallHeaders[MaxHeadersPerResponse + 2] = {};
         char contentLength[32] = {};
         char contentRange[96] = {};
         if (rangeResponse) {
@@ -463,7 +463,7 @@ namespace
             &snapshot->HeaderNameStorageLength,
             &snapshot->HeaderValueStorage,
             &snapshot->HeaderValueStorageLength)) {
-            KhHttpCacheFreeSnapshot(snapshot);
+            HttpCacheFreeSnapshot(snapshot);
             return false;
         }
 
@@ -473,7 +473,7 @@ namespace
                 entry.Body + (rangeResponse ? static_cast<SIZE_T>(first) : 0),
                 bodyLength);
             if (snapshot->Body == nullptr) {
-                KhHttpCacheFreeSnapshot(snapshot);
+                HttpCacheFreeSnapshot(snapshot);
                 return false;
             }
         }
@@ -528,7 +528,7 @@ namespace
         }
     }
 
-    bool VaryMatches(const KhHttpCacheEntry& entry, const KhRequest& request) noexcept
+    bool VaryMatches(const HttpCacheEntry& entry, const Request& request) noexcept
     {
         for (SIZE_T index = 0; index < entry.VaryCount; ++index) {
             const char* value = nullptr;
@@ -543,14 +543,14 @@ namespace
         return true;
     }
 
-    bool CopyVaryFromResponse(KhHttpCacheEntry& entry, const KhRequest& request, http1::HttpText vary) noexcept
+    bool CopyVaryFromResponse(HttpCacheEntry& entry, const Request& request, http1::HttpText vary) noexcept
     {
         if (vary.Data == nullptr || vary.Length == 0) {
             return true;
         }
 
         SIZE_T start = 0;
-        while (start <= vary.Length && entry.VaryCount < KhHttpCacheMaxVaryFields) {
+        while (start <= vary.Length && entry.VaryCount < HttpCacheMaxVaryFields) {
             SIZE_T end = start;
             while (end < vary.Length && vary.Data[end] != ',') {
                 ++end;
@@ -564,7 +564,7 @@ namespace
                 --name.Length;
             }
             if (name.Length != 0 && !http1::TextEqualsIgnoreCase(name, http1::MakeText("*"))) {
-                KhHttpCacheVaryField& field = entry.Vary[entry.VaryCount];
+                HttpCacheVaryField& field = entry.Vary[entry.VaryCount];
                 field.Name = AllocateTextCopy(name.Data, name.Length);
                 field.NameLength = name.Length;
                 const char* value = nullptr;
@@ -587,7 +587,7 @@ namespace
         return true;
     }
 
-    bool RangeCovered(const KhHttpCacheEntry& entry, ULONGLONG first, ULONGLONG last) noexcept
+    bool RangeCovered(const HttpCacheEntry& entry, ULONGLONG first, ULONGLONG last) noexcept
     {
         if (!entry.Partial) {
             return last < entry.BodyLength;
@@ -596,7 +596,7 @@ namespace
         while (cursor <= last) {
             bool advanced = false;
             for (SIZE_T index = 0; index < entry.RangeCount; ++index) {
-                const KhHttpCacheRange& range = entry.Ranges[index];
+                const HttpCacheRange& range = entry.Ranges[index];
                 if (range.First <= cursor && range.Last >= cursor) {
                     if (range.Last == ~0ULL) {
                         return true;
@@ -614,7 +614,7 @@ namespace
     }
 
     bool RequestedRangeCovered(
-        const KhHttpCacheEntry& entry,
+        const HttpCacheEntry& entry,
         const http1::HttpByteRange& requestRange,
         http1::HttpByteRange* concreteRange) noexcept
     {
@@ -649,7 +649,7 @@ namespace
         return true;
     }
 
-    bool SameValidator(const KhHttpCacheEntry& entry, const http1::HttpCacheMetadata& metadata) noexcept
+    bool SameValidator(const HttpCacheEntry& entry, const http1::HttpCacheMetadata& metadata) noexcept
     {
         http1::HttpCacheMetadata entryMetadata = {};
         if (!http1::CollectCacheMetadata(entry.Headers, entry.HeaderCount, &entryMetadata)) {
@@ -671,7 +671,7 @@ namespace
     }
 }
 
-void KhHttpCacheFreeSnapshot(KhHttpCacheSnapshot* snapshot) noexcept
+void HttpCacheFreeSnapshot(HttpCacheSnapshot* snapshot) noexcept
 {
     if (snapshot == nullptr) {
         return;
@@ -683,11 +683,11 @@ void KhHttpCacheFreeSnapshot(KhHttpCacheSnapshot* snapshot) noexcept
     *snapshot = {};
 }
 
-NTSTATUS KhHttpCacheLookup(
-    KH_HTTP_CACHE cache,
-    const KhRequest& request,
-    const KhHttpSendOptions& options,
-    KhHttpCacheLookupResult* result) noexcept
+NTSTATUS HttpCacheLookup(
+    HttpCacheHandle cache,
+    const Request& request,
+    const HttpSendOptions& options,
+    HttpCacheLookupResult* result) noexcept
 {
     if (result != nullptr) {
         *result = {};
@@ -695,13 +695,13 @@ NTSTATUS KhHttpCacheLookup(
     if (result == nullptr || !IsCacheHandle(cache)) {
         return STATUS_INVALID_PARAMETER;
     }
-    if ((options.Flags & KhHttpSendFlagNoCacheStore) != 0) {
+    if ((options.Flags & HttpSendFlagNoCacheStore) != 0) {
         return STATUS_SUCCESS;
     }
 
     const bool onlyIfCached =
-        (options.Flags & KhHttpSendFlagOnlyIfCached) != 0;
-    if ((options.Flags & KhHttpSendFlagBypassCache) != 0 ||
+        (options.Flags & HttpSendFlagOnlyIfCached) != 0;
+    if ((options.Flags & HttpSendFlagBypassCache) != 0 ||
         !http1::IsMethodSafeForCache(static_cast<ULONG>(request.Method))) {
         if (onlyIfCached) {
             result->OnlyIfCachedMiss = true;
@@ -733,7 +733,7 @@ NTSTATUS KhHttpCacheLookup(
 
     const LONGLONG now = CurrentSeconds();
     AcquireCacheLock(cache);
-    for (KhHttpCacheEntry* entry = cache->Head; entry != nullptr; entry = entry->Next) {
+    for (HttpCacheEntry* entry = cache->Head; entry != nullptr; entry = entry->Next) {
         if (entry->KeyLength != keyLength ||
             RtlCompareMemory(entry->Key, key, keyLength) != keyLength ||
             !VaryMatches(*entry, request)) {
@@ -749,7 +749,7 @@ NTSTATUS KhHttpCacheLookup(
             entry->StatusCode,
             entry->StoredAtSeconds,
             now,
-            cache->Options.Mode == KhHttpCacheMode::Shared ? http1::HttpCacheScope::Shared : http1::HttpCacheScope::Private,
+            cache->Options.Mode == HttpCacheMode::Shared ? http1::HttpCacheScope::Shared : http1::HttpCacheScope::Private,
             &requiresValidation)) {
             continue;
         }
@@ -784,12 +784,12 @@ NTSTATUS KhHttpCacheLookup(
         }
 
         if (result->RequiresValidation) {
-            if (responseMetadata.HasETag && responseMetadata.ETag.Length <= KhMaxHeaderValueLength) {
+            if (responseMetadata.HasETag && responseMetadata.ETag.Length <= MaxHeaderValueLength) {
                 RtlCopyMemory(result->IfNoneMatch, responseMetadata.ETag.Data, responseMetadata.ETag.Length);
                 result->IfNoneMatchLength = responseMetadata.ETag.Length;
             }
             else if (responseMetadata.HasLastModified &&
-                responseMetadata.LastModified.Length <= KhMaxHeaderValueLength) {
+                responseMetadata.LastModified.Length <= MaxHeaderValueLength) {
                 RtlCopyMemory(
                     result->IfModifiedSince,
                     responseMetadata.LastModified.Data,
@@ -812,13 +812,13 @@ NTSTATUS KhHttpCacheLookup(
     return STATUS_SUCCESS;
 }
 
-NTSTATUS KhHttpCacheStoreResponse(
-    KH_HTTP_CACHE cache,
-    const KhRequest& request,
-    const KhHttpSendOptions& options,
+NTSTATUS HttpCacheStoreResponse(
+    HttpCacheHandle cache,
+    const Request& request,
+    const HttpSendOptions& options,
     const http1::HttpResponse& response) noexcept
 {
-    if (!IsCacheHandle(cache) || (options.Flags & KhHttpSendFlagNoCacheStore) != 0) {
+    if (!IsCacheHandle(cache) || (options.Flags & HttpSendFlagNoCacheStore) != 0) {
         return STATUS_SUCCESS;
     }
 
@@ -837,7 +837,7 @@ NTSTATUS KhHttpCacheStoreResponse(
             requestControl,
             response,
             metadata,
-            cache->Options.Mode == KhHttpCacheMode::Shared ? http1::HttpCacheScope::Shared : http1::HttpCacheScope::Private)) {
+            cache->Options.Mode == HttpCacheMode::Shared ? http1::HttpCacheScope::Shared : http1::HttpCacheScope::Private)) {
         return STATUS_SUCCESS;
     }
 
@@ -847,7 +847,7 @@ NTSTATUS KhHttpCacheStoreResponse(
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    auto* entry = AllocateNonPagedObject<KhHttpCacheEntry>();
+    auto* entry = AllocateNonPagedObject<HttpCacheEntry>();
     if (entry == nullptr) {
         FreeApiMemory(key);
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -915,19 +915,19 @@ NTSTATUS KhHttpCacheStoreResponse(
         entry->HeaderNameStorageLength +
         entry->HeaderValueStorageLength +
         entry->BodyCapacity +
-        sizeof(KhHttpCacheEntry);
+        sizeof(HttpCacheEntry);
 
     AcquireCacheLock(cache);
-    for (KhHttpCacheEntry* existing = cache->Head; existing != nullptr;) {
-        KhHttpCacheEntry* next = existing->Next;
+    for (HttpCacheEntry* existing = cache->Head; existing != nullptr;) {
+        HttpCacheEntry* next = existing->Next;
         if (existing->KeyLength == keyLength &&
             RtlCompareMemory(existing->Key, key, keyLength) == keyLength &&
             VaryMatches(*existing, request)) {
             if (entry->Partial && existing->Partial && SameValidator(*existing, metadata)) {
                 if (existing->BodyCapacity == entry->BodyCapacity &&
                     entry->RangeCount != 0 &&
-                    existing->RangeCount < KhHttpCacheMaxPartialRanges) {
-                    const KhHttpCacheRange added = entry->Ranges[0];
+                    existing->RangeCount < HttpCacheMaxPartialRanges) {
+                    const HttpCacheRange added = entry->Ranges[0];
                     const SIZE_T addedOffset = static_cast<SIZE_T>(added.First);
                     const SIZE_T addedLength = static_cast<SIZE_T>(added.Last - added.First + 1);
                     RtlCopyMemory(existing->Body + addedOffset, entry->Body + addedOffset, addedLength);
@@ -951,11 +951,11 @@ NTSTATUS KhHttpCacheStoreResponse(
     return STATUS_SUCCESS;
 }
 
-NTSTATUS KhHttpCacheUpdateNotModified(
-    KH_HTTP_CACHE cache,
-    const KhRequest& request,
+NTSTATUS HttpCacheUpdateNotModified(
+    HttpCacheHandle cache,
+    const Request& request,
     const http1::HttpResponse& response,
-    KhHttpCacheSnapshot* snapshot) noexcept
+    HttpCacheSnapshot* snapshot) noexcept
 {
     if (snapshot != nullptr) {
         *snapshot = {};
@@ -971,7 +971,7 @@ NTSTATUS KhHttpCacheUpdateNotModified(
     }
 
     AcquireCacheLock(cache);
-    for (KhHttpCacheEntry* entry = cache->Head; entry != nullptr; entry = entry->Next) {
+    for (HttpCacheEntry* entry = cache->Head; entry != nullptr; entry = entry->Next) {
         if (entry->KeyLength == keyLength &&
             RtlCompareMemory(entry->Key, key, keyLength) == keyLength &&
             VaryMatches(*entry, request) &&
@@ -991,14 +991,14 @@ NTSTATUS KhHttpCacheUpdateNotModified(
     return STATUS_NOT_FOUND;
 }
 
-void KhHttpCacheInvalidateForRequest(KH_HTTP_CACHE cache, const KhRequest& request) noexcept
+void HttpCacheInvalidateForRequest(HttpCacheHandle cache, const Request& request) noexcept
 {
     if (!IsCacheHandle(cache)) {
         return;
     }
     AcquireCacheLock(cache);
-    for (KhHttpCacheEntry* entry = cache->Head; entry != nullptr;) {
-        KhHttpCacheEntry* next = entry->Next;
+    for (HttpCacheEntry* entry = cache->Head; entry != nullptr;) {
+        HttpCacheEntry* next = entry->Next;
         if (SameUrlKey(*entry, request)) {
             RemoveAndFree(cache, entry);
             ++cache->Stats.Invalidations;
@@ -1008,7 +1008,7 @@ void KhHttpCacheInvalidateForRequest(KH_HTTP_CACHE cache, const KhRequest& reque
     ReleaseCacheLock(cache);
 }
 
-NTSTATUS KhHttpCacheCreate(const KhHttpCacheOptions* options, KH_HTTP_CACHE* cache) noexcept
+NTSTATUS HttpCacheCreate(const HttpCacheOptions* options, HttpCacheHandle* cache) noexcept
 {
     NTSTATUS status = CheckPassiveLevel();
     if (!NT_SUCCESS(status)) {
@@ -1021,20 +1021,20 @@ NTSTATUS KhHttpCacheCreate(const KhHttpCacheOptions* options, KH_HTTP_CACHE* cac
         return STATUS_INVALID_PARAMETER;
     }
 
-    KhHttpCacheOptions effective = {};
+    HttpCacheOptions effective = {};
     if (options != nullptr) {
         effective = *options;
     }
     if (effective.MaxBytes == 0 || effective.MaxEntries == 0 ||
-        (effective.Mode != KhHttpCacheMode::Private && effective.Mode != KhHttpCacheMode::Shared)) {
+        (effective.Mode != HttpCacheMode::Private && effective.Mode != HttpCacheMode::Shared)) {
         return STATUS_INVALID_PARAMETER;
     }
 
-    KH_HTTP_CACHE created = AllocateNonPagedObject<KhHttpCache>();
+    HttpCacheHandle created = AllocateNonPagedObject<HttpCache>();
     if (created == nullptr) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
-    created->Header = { KhHandleKind::HttpCache, 0, nullptr };
+    created->Header = { HandleKind::HttpCache, 0, nullptr };
     created->Options = effective;
 #if !defined(WKNET_USER_MODE_TEST)
     EnsureLockInitialized(created);
@@ -1043,7 +1043,7 @@ NTSTATUS KhHttpCacheCreate(const KhHttpCacheOptions* options, KH_HTTP_CACHE* cac
     return STATUS_SUCCESS;
 }
 
-NTSTATUS KhHttpCacheClear(KH_HTTP_CACHE cache) noexcept
+NTSTATUS HttpCacheClear(HttpCacheHandle cache) noexcept
 {
     NTSTATUS status = CheckPassiveLevel();
     if (!NT_SUCCESS(status)) {
@@ -1054,13 +1054,13 @@ NTSTATUS KhHttpCacheClear(KH_HTTP_CACHE cache) noexcept
     }
 
     AcquireCacheLock(cache);
-    KhHttpCacheEntry* entry = cache->Head;
+    HttpCacheEntry* entry = cache->Head;
     cache->Head = nullptr;
     cache->Tail = nullptr;
     cache->EntryCount = 0;
     cache->BytesUsed = 0;
     while (entry != nullptr) {
-        KhHttpCacheEntry* next = entry->Next;
+        HttpCacheEntry* next = entry->Next;
         FreeEntry(entry);
         entry = next;
     }
@@ -1068,7 +1068,7 @@ NTSTATUS KhHttpCacheClear(KH_HTTP_CACHE cache) noexcept
     return STATUS_SUCCESS;
 }
 
-NTSTATUS KhHttpCacheGetStats(KH_HTTP_CACHE cache, KhHttpCacheStats* stats) noexcept
+NTSTATUS HttpCacheGetStats(HttpCacheHandle cache, HttpCacheStats* stats) noexcept
 {
     if (stats != nullptr) {
         *stats = {};
@@ -1088,15 +1088,15 @@ NTSTATUS KhHttpCacheGetStats(KH_HTTP_CACHE cache, KhHttpCacheStats* stats) noexc
     return STATUS_SUCCESS;
 }
 
-void KhHttpCacheClose(KH_HTTP_CACHE cache) noexcept
+void HttpCacheClose(HttpCacheHandle cache) noexcept
 {
     if (!NT_SUCCESS(CheckPassiveLevel()) || cache == nullptr) {
         return;
     }
-    if (cache->Header.Kind != KhHandleKind::HttpCache) {
+    if (cache->Header.Kind != HandleKind::HttpCache) {
         return;
     }
-    KhHttpCacheClear(cache);
+    HttpCacheClear(cache);
 #if defined(WKNET_USER_MODE_TEST)
     if (cache->Header.Closed != 0) {
         return;

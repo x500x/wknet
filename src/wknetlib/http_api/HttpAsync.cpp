@@ -34,7 +34,7 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        ::wknet::session::KH_REQUEST apiRequest = nullptr;
+        ::wknet::session::RequestHandle apiRequest = nullptr;
         NTSTATUS status = detail::PrepareHttpRequest(
             session,
             method,
@@ -48,19 +48,19 @@ namespace
             return status;
         }
 
-        ::wknet::session::KhHttpSendOptions apiOptions = {};
-        const ::wknet::session::KhHttpSendOptions* apiOptionsPtr = nullptr;
+        ::wknet::session::HttpSendOptions apiOptions = {};
+        const ::wknet::session::HttpSendOptions* apiOptionsPtr = nullptr;
         if (options != nullptr) {
             detail::FillApiSendOptions(options->Send, apiOptions);
             apiOptions.CompletionCallback =
-                reinterpret_cast<::wknet::session::KhAsyncCompletionCallback>(options->OnComplete);
+                reinterpret_cast<::wknet::session::AsyncCompletionCallback>(options->OnComplete);
             apiOptions.CompletionContext = options->CompletionContext;
             apiOptionsPtr = &apiOptions;
         }
 
-        ::wknet::session::KH_ASYNC_OPERATION apiOp = nullptr;
-        status = ::wknet::session::KhHttpSendAsync(session->Engine, apiRequest, apiOptionsPtr, &apiOp);
-        ::wknet::session::KhHttpRequestRelease(apiRequest);
+        ::wknet::session::AsyncOperationHandle apiOp = nullptr;
+        status = ::wknet::session::HttpSendAsync(session->Engine, apiRequest, apiOptionsPtr, &apiOp);
+        ::wknet::session::HttpRequestRelease(apiRequest);
 
         if (NT_SUCCESS(status)) {
             *operation = detail::FromApiAsyncOp(apiOp);
@@ -154,7 +154,7 @@ NTSTATUS SendAsync(Session* session, Request* request, const SendOptions* option
 NTSTATUS SendAsyncEx(Session* session, Request* request, const SendOptions* options, AsyncOp** operation) noexcept
 {
     UNREFERENCED_PARAMETER(session);
-    if (request == nullptr || request->Magic != detail::KhHighRequestMagic ||
+    if (request == nullptr || request->Magic != detail::HighRequestMagic ||
         request->BuilderUrl == nullptr || request->BuilderUrlLength == 0) {
         if (operation != nullptr) {
             *operation = nullptr;
