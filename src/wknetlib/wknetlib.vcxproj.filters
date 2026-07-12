@@ -134,10 +134,61 @@
     <ClCompile Include="crypto\KeyExchange.cpp">
       <Filter>Source Files\crypto</Filter>
     </ClCompile>
-    <ClCompile Include="session\Engine.cpp">
+    <ClCompile Include="session\EngineAsyncApi.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
-    <ClCompile Include="session\HttpEngine.cpp">
+    <ClCompile Include="session\EngineHandleOps.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\EngineHandleTable.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\EngineRequestStorage.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\EngineResponseStorage.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\EngineTestHooks.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\EngineValidation.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\EngineWebSocketStorage.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\RequestApi.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\ResponseApi.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\SessionLife.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\HttpH1Dispatch.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\HttpH2Dispatch.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\HttpProxy.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\HttpRedirect.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\HttpResponseHandling.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\HttpRoute.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\HttpSend.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\HttpTransportDispatch.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
     <ClCompile Include="session\HttpCache.cpp">
@@ -146,7 +197,28 @@
     <ClCompile Include="rtl\UrlParser.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
-    <ClCompile Include="session\WsEngine.cpp">
+    <ClCompile Include="session\WsAsyncApi.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\WsClose.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\WsConnect.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\WsControl.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\WsHandshake.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\WsPublicApi.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\WsReceive.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\WsSendData.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
     <ClCompile Include="session\Async.cpp">
@@ -302,6 +374,12 @@
     <ClCompile Include="tls\TlsCapabilities.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
+    <ClCompile Include="tls\TlsConnect12.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsConnect13.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
     <ClCompile Include="tls\TlsConnection.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
@@ -314,7 +392,13 @@
     <ClCompile Include="tls\TlsPolicy.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
+    <ClCompile Include="tls\TlsPostHandshake.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
     <ClCompile Include="tls\TlsRecord.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsRecordIo.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
     <ClCompile Include="ws\WebSocketDeflate.cpp">
@@ -418,6 +502,9 @@
     <ClInclude Include="..\..\include\wknet\session\Engine.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
+    <ClInclude Include="session\EnginePrivate.hpp">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\include\wknet\session\EngineImpl.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
@@ -436,6 +523,9 @@
     <ClInclude Include="..\..\include\wknet\session\HttpEngine.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
+    <ClInclude Include="session\HttpEngineInternal.hpp">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\include\wknet\session\HttpCache.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
@@ -443,6 +533,9 @@
       <Filter>Header Files\engine</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\session\WsEngine.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="session\WsEngineInternal.hpp">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\session\Async.h">
@@ -620,6 +713,9 @@
       <Filter>Header Files\tls</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\tls\TlsConnection.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="tls\TlsConnectionInternal.hpp">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\tls\TlsHandshake12.h">

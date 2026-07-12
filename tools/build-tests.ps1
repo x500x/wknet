@@ -45,7 +45,10 @@ switch ($Test) {
     'http2_client_tests' {
         [void]$excludedLibSources.Remove('Http2Client.cpp')
         [void]$excludedLibSources.Remove('HttpsClient.cpp')
-        [void]$excludedLibSources.Add('TlsConnection.cpp')
+        @(
+            'TlsConnection.cpp', 'TlsConnect12.cpp', 'TlsConnect13.cpp',
+            'TlsPostHandshake.cpp', 'TlsRecordIo.cpp'
+        ) | ForEach-Object { [void]$excludedLibSources.Add($_) }
     }
     'khttp_tests' {
         [void]$excludedLibSources.Remove('WskClient.cpp')
