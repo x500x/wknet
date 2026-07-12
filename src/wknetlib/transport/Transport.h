@@ -62,5 +62,7 @@ namespace transport {
     void TransportSetCancellation(
         _Inout_opt_ Transport* transport,
         _In_opt_ const net::WskCancellationToken* cancellation) noexcept;
+    void TransportSetConnectionId(_Inout_opt_ Transport* transport, ULONGLONG connectionId) noexcept;
+    ULONGLONG TransportConnectionId(_In_opt_ const Transport* transport) noexcept;
 }
 }

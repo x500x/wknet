@@ -91,6 +91,8 @@ namespace session
         WsHandshakeChallengeCallback ChallengeCallback = nullptr;
         void* ChallengeContext = nullptr;
         ULONG MaxHandshakeRetries = 0;
+        ULONGLONG TraceOperationId = 0;
+        ULONGLONG TraceConnectionId = 0;
     };
 
     struct WsIoBuffers final
@@ -322,6 +324,8 @@ namespace session
         ws::WebSocketDeflateContext receiveDeflate_ = {};
         ws::WebSocketOpcode receiveFragmentOpcode_ = ws::WebSocketOpcode::Continuation;
         SIZE_T receiveFragmentLength_ = 0;
+        ULONGLONG traceOperationId_ = 0;
+        ULONGLONG traceConnectionId_ = 0;
         ULONG receiveTextUtf8CodePoint_ = 0;
         UCHAR receiveTextUtf8Remaining_ = 0;
         UCHAR receiveTextUtf8Expected_ = 0;

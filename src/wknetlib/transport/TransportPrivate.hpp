@@ -13,6 +13,7 @@ namespace wknet::transport {
     {
         const TransportOperations* Operations = nullptr;
         void* Context = nullptr;
+        ULONGLONG ConnectionId = 0;
         bool OwnsOperations = false;
     };
 }

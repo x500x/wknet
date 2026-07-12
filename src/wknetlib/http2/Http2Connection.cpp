@@ -59,7 +59,7 @@ namespace http2
             LONG streamWindow) noexcept
         {
             WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error,
-                "Http2Connection request body flow-control failed: status=0x%08X bodyOffset=%Iu bodyLength=%Iu connWindow=%ld streamWindow=%ld\r\n",
+                "http2.request_body.flow_control_failed status=0x%08X body_offset=%Iu body_length=%Iu connection_window=%ld stream_window=%ld",
                 static_cast<ULONG>(status),
                 bodyOffset,
                 bodyLength,
@@ -853,7 +853,7 @@ namespace http2
     {
         NTSTATUS status = STATUS_SUCCESS;
 
-        WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Verbose, "Http2Connection dispatch frame type=%u flags=0x%02X stream=%u length=%u\r\n",
+        WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Verbose, "http2.frame.dispatched type=%u flags=0x%02X stream_id=%u length=%u",
             static_cast<unsigned>(fh.Type),
             static_cast<unsigned>(fh.Flags),
             fh.StreamId,
@@ -1042,7 +1042,7 @@ namespace http2
         if (sendOffset != 0) {
             status = SendRaw(transport, sendBuf, sendOffset);
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "Http2Connection send HEADERS failed: 0x%08X stream=%u bytes=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "http2.headers.send_failed status=0x%08X stream_id=%u bytes=%Iu",
                     static_cast<ULONG>(status),
                     streamId,
                     sendOffset);
@@ -2389,7 +2389,7 @@ namespace http2
                     &nvUsed,
                     localSettings_.MaxHeaderListSize);
                 if (!NT_SUCCESS(status)) {
-                    WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "Http2Connection HPACK decode failed: 0x%08X block=%Iu stream=%u\r\n",
+                    WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "http2.hpack.decode_failed status=0x%08X block_bytes=%Iu stream_id=%u",
                         static_cast<ULONG>(status),
                         state.ResponseHeaderBlockLen,
                         stream.StreamId());
@@ -2592,7 +2592,7 @@ namespace http2
             ULONG errorCode = 0;
             status = Http2FrameCodec::DecodeRstStreamPayload(fp, fpLen, &errorCode);
             if (!NT_SUCCESS(status)) return status;
-            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Warning, "Http2Connection RST_STREAM stream=%u error=0x%08X\r\n",
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Warning, "http2.stream.reset stream_id=%u error_code=0x%08X",
                 fh.StreamId,
                 errorCode);
             stream.Reset();
@@ -2707,7 +2707,7 @@ namespace http2
 
             status = ReadFrame(transport, &fh, fp, framePayloadCapacity_, &fpLen);
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "Http2Connection ReadFrame failed: 0x%08X stream=%u headers=%u body=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "http2.frame.read_failed status=0x%08X stream_id=%u headers_complete=%u body_bytes=%Iu",
                     static_cast<ULONG>(status),
                     stream.StreamId(),
                     frameState.ResponseHeadersReceived ? 1u : 0u,
@@ -2715,7 +2715,7 @@ namespace http2
                 return HandleReadFrameFailure(transport, status);
             }
 
-            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Verbose, "Http2Connection frame type=%u flags=0x%02X stream=%u length=%u target=%u\r\n",
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Verbose, "http2.frame.received type=%u flags=0x%02X stream_id=%u length=%u target_stream_id=%u",
                 static_cast<unsigned>(fh.Type),
                 static_cast<unsigned>(fh.Flags),
                 fh.StreamId,
@@ -3320,7 +3320,7 @@ namespace http2
             ULONG errorCode = 0;
             NTSTATUS status = Http2FrameCodec::DecodeGoAwayPayload(payload, payloadLen, &lastStreamId, &errorCode);
             if (!NT_SUCCESS(status)) return status;
-            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Warning, "Http2Connection GOAWAY error=0x%08X lastStream=%u\r\n",
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Warning, "http2.connection.goaway error_code=0x%08X last_stream_id=%u",
                 errorCode,
                 lastStreamId);
             goAwayReceived_ = true;

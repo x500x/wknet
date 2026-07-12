@@ -70,7 +70,6 @@ namespace session
         ULONG Capacity = 0;
         ULONG ActiveCount = 0;
         ULONG MaxConnectionsPerHost = 0;
-        ULONG NextConnectionId = 1;
         ULONG IdleTimeoutMilliseconds = 0;
         Http2KeepAliveOptions Http2KeepAlive = {};
 #if !defined(WKNET_USER_MODE_TEST)
@@ -163,7 +162,7 @@ namespace session
         _Inout_ PooledConnection* connection,
         bool established) noexcept;
 
-    ULONG PooledConnectionId(_In_opt_ const PooledConnection* connection) noexcept;
+    ULONGLONG PooledConnectionId(_In_opt_ const PooledConnection* connection) noexcept;
     bool PooledConnectionProxyTunnelEstablished(_In_opt_ const PooledConnection* connection) noexcept;
     _Ret_maybenull_ transport::Transport* PooledConnectionTransport(
         _In_opt_ PooledConnection* connection) noexcept;

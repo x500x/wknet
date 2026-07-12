@@ -245,6 +245,16 @@ namespace tls
         const TlsClientConnectionOptions& options) noexcept
     {
         ClearHandshakeFailure();
+        const TraceCorrelation correlation = { 0, connectionId_, 0 };
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentTls,
+            ::wknet::TraceLevel::Info,
+            &correlation,
+            "tls.handshake.start min_version=%u max_version=%u verify=%u alpn_count=%Iu",
+            static_cast<ULONG>(options.MinimumProtocol),
+            static_cast<ULONG>(options.MaximumProtocol),
+            options.VerifyCertificate ? 1u : 0u,
+            options.AlpnProtocolCount);
         if (options.ServerName == nullptr ||
             options.ServerNameLength == 0 ||
             !IsValidBuffer(options.EarlyData, options.EarlyDataLength) ||
@@ -255,6 +265,13 @@ namespace tls
             !NT_SUCCESS(TlsValidatePolicy(options.Policy)) ||
             static_cast<UCHAR>(options.MinimumProtocol) > static_cast<UCHAR>(options.MaximumProtocol)) {
             RecordHandshakeFailure(TlsHandshakeFailureCategory::LocalPolicy, STATUS_INVALID_PARAMETER);
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentTls,
+                ::wknet::TraceLevel::Error,
+                &correlation,
+                "tls.handshake.failed status=0x%08X category=%u",
+                static_cast<ULONG>(STATUS_INVALID_PARAMETER),
+                static_cast<ULONG>(TlsHandshakeFailureCategory::LocalPolicy));
             return STATUS_INVALID_PARAMETER;
         }
         if (options.EnableEarlyData &&
@@ -321,6 +338,26 @@ namespace tls
         if (!NT_SUCCESS(status) &&
             lastHandshakeFailure_.Category == TlsHandshakeFailureCategory::None) {
             RecordHandshakeFailure(CategoryForStatus(status), status);
+        }
+        if (NT_SUCCESS(status)) {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentTls,
+                ::wknet::TraceLevel::Info,
+                &correlation,
+                "tls.handshake.complete protocol=%u alpn_bytes=%Iu encrypted=%u",
+                static_cast<ULONG>(context_.Protocol()),
+                negotiatedAlpnLength_,
+                encrypted_ ? 1u : 0u);
+        }
+        else {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentTls,
+                ::wknet::TraceLevel::Error,
+                &correlation,
+                "tls.handshake.failed status=0x%08X category=%u peer_alert=%u",
+                static_cast<ULONG>(status),
+                static_cast<ULONG>(lastHandshakeFailure_.Category),
+                lastHandshakeFailure_.HasPeerAlert ? 1u : 0u);
         }
         return status;
     }
@@ -407,7 +444,7 @@ namespace tls
             TlsMutablePlaintextRecord record = {};
             NTSTATUS status = ReadRecord(transport, record, receiveTimeoutMilliseconds, &receiveDeadline);
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection read record failed before HTTP: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls.application_record.read_failed status=0x%08X", static_cast<ULONG>(status));
                 return status;
             }
 
@@ -430,7 +467,7 @@ namespace tls
                 }
                 status = ConsumeTls12PostHandshakeRecord(transport, record.Fragment, record.FragmentLength);
                 if (!NT_SUCCESS(status)) {
-                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection consume TLS1.2 post-handshake message during HTTP read failed: 0x%08X length=%Iu\r\n",
+                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.post_handshake.consume_failed status=0x%08X length=%Iu",
                         static_cast<ULONG>(status),
                         record.FragmentLength);
                     return status;
@@ -442,13 +479,13 @@ namespace tls
                 TlsAlert alert = {};
                 status = TlsRecordLayer::DecodeAlert(record.Fragment, record.FragmentLength, alert);
                 if (!NT_SUCCESS(status)) {
-                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection decode alert during HTTP read failed: 0x%08X length=%Iu\r\n",
+                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls.alert.decode_failed status=0x%08X length=%Iu",
                         static_cast<ULONG>(status),
                         record.FragmentLength);
                     return status;
                 }
 
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning, "TlsConnection receive alert during HTTP read level=%u description=%u\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning, "tls.alert.received level=%u description=%u",
                     static_cast<unsigned>(alert.Level),
                     static_cast<unsigned>(alert.Description));
                 return alert.CloseNotify ? STATUS_CONNECTION_DISCONNECTED : STATUS_INVALID_NETWORK_RESPONSE;
@@ -457,14 +494,14 @@ namespace tls
             if (!tls13RecordProtection_ &&
                 context_.Protocol() == TlsProtocol::Tls12 &&
                 (handshakeLength_ != 0 || handshakeConsumed_ != 0)) {
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection incomplete TLS1.2 handshake before application data length=%Iu consumed=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.handshake.incomplete_before_application_data length=%Iu consumed=%Iu",
                     handshakeLength_,
                     handshakeConsumed_);
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
             if (record.ContentType != TlsContentType::ApplicationData) {
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection unexpected record during HTTP read type=%u length=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls.application_record.unexpected_type type=%u length=%Iu",
                     static_cast<unsigned>(record.ContentType),
                     record.FragmentLength);
                 return STATUS_INVALID_NETWORK_RESPONSE;
@@ -657,6 +694,18 @@ namespace tls
     TlsHandshakeFailure TlsConnectionLastHandshakeFailure(const TlsConnection* connection) noexcept
     {
         return connection != nullptr ? connection->LastHandshakeFailure() : TlsHandshakeFailure{};
+    }
+
+    void TlsConnectionSetConnectionId(TlsConnection* connection, ULONGLONG connectionId) noexcept
+    {
+        if (connection != nullptr) {
+            connection->SetConnectionId(connectionId);
+        }
+    }
+
+    ULONGLONG TlsConnectionId(const TlsConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->ConnectionId() : 0;
     }
 }
 }

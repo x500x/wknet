@@ -134,7 +134,7 @@ namespace session
             effectiveOptions.DeliverFragments,
             &finalFragment);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WebSocketReceiveSync Client->ReceiveMessage failed: 0x%08X\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "ws.message.receive_failed status=0x%08X",
                 static_cast<ULONG>(status));
             if (status == STATUS_BUFFER_TOO_SMALL || IsWebSocketTransportTerminalStatus(status)) {
                 const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);

@@ -317,6 +317,7 @@ namespace session
         const codec::DecodeMaterials* ContentCodingMaterials = nullptr;
         const http2::Http2Priority* Http2Priority = nullptr;
         HttpCacheHandle Cache = nullptr;
+        ULONGLONG TraceOperationId = 0;
     };
 
     struct NameValuePair final
@@ -780,7 +781,7 @@ namespace session
         SIZE_T ProxyAuthHeaderLength = 0;
         bool PoolableConnection = false;
         bool ReusedConnection = false;
-        ULONG ConnectionId = 0;
+        ULONGLONG ConnectionId = 0;
         bool Http11PipelineEnabled = false;
         bool Http11PipelineLease = false;
         ULONG Http11PipelineSequence = 0;

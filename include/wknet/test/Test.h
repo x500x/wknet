@@ -40,7 +40,7 @@ namespace wknet::http::test {
         SIZE_T ProxyAuthHeaderLength = 0;
         bool PoolableConnection = false;
         bool ReusedConnection = false;
-        ULONG ConnectionId = 0;
+        ULONGLONG ConnectionId = 0;
         bool Http11PipelineEnabled = false;
         bool Http11PipelineLease = false;
         ULONG Http11PipelineSequence = 0;

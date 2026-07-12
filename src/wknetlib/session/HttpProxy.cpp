@@ -172,6 +172,7 @@ namespace session
         if (!NT_SUCCESS(status)) {
             return status;
         }
+        net::WskSocketSetConnectionId(socket, PooledConnectionId(&connection));
 
         net::WskCancellationToken cancellation = {};
         if (cancellationOperation != nullptr) {
@@ -396,7 +397,7 @@ namespace session
                 }
 
                 lastStatus = status;
-                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Warning, "HttpEngine socket connect attempt failed: 0x%08X index=%Iu family=%u\r\n",
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Warning, "session.socket.connect_attempt_failed status=0x%08X address_index=%Iu family=%u",
                     static_cast<ULONG>(status),
                     addressIndex,
                     static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
@@ -434,6 +435,7 @@ namespace session
         if (!NT_SUCCESS(createStatus)) {
             return createStatus;
         }
+        tls::TlsConnectionSetConnectionId(tlsConnection, PooledConnectionId(&connection));
 
         tls::TlsAlpnProtocol explicitAlpn = {};
         static const tls::TlsAlpnProtocol automaticAlpnProtocols[] = {
@@ -588,7 +590,7 @@ namespace session
         status = EnsureSocketConnected(session, request, connection, cancellationOperation);
         if (!NT_SUCCESS(status)) {
             WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
-                "HttpEngine TLS1.2 confirmation reconnect failed: 0x%08X original=0x%08X\r\n",
+                "session.tls12_confirmation.reconnect_failed status=0x%08X original_status=0x%08X",
                 static_cast<ULONG>(status),
                 static_cast<ULONG>(originalStatus));
             return originalStatus;
@@ -606,7 +608,7 @@ namespace session
             cancellationOperation);
         if (!NT_SUCCESS(status)) {
             WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
-                "HttpEngine TLS1.2 confirmation proxy CONNECT failed: 0x%08X original=0x%08X\r\n",
+                "session.tls12_confirmation.proxy_connect_failed status=0x%08X original_status=0x%08X",
                 static_cast<ULONG>(status),
                 static_cast<ULONG>(originalStatus));
             return originalStatus;
@@ -621,12 +623,12 @@ namespace session
             cancellationOperation,
             nullptr);
         if (NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "HttpEngine TLS1.2 confirmed after version negotiation\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "session.tls12_confirmation.completed");
             return STATUS_SUCCESS;
         }
 
         WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
-            "HttpEngine TLS1.2 confirmation failed: 0x%08X original=0x%08X\r\n",
+            "session.tls12_confirmation.failed status=0x%08X original_status=0x%08X",
             static_cast<ULONG>(status),
             static_cast<ULONG>(originalStatus));
         PooledConnectionCloseTransportResources(&connection);

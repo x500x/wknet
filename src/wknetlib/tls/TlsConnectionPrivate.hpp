@@ -50,6 +50,8 @@ namespace tls
         const char* NegotiatedAlpn() const noexcept;
         SIZE_T NegotiatedAlpnLength() const noexcept;
         const TlsHandshakeFailure& LastHandshakeFailure() const noexcept;
+        void SetConnectionId(ULONGLONG connectionId) noexcept { connectionId_ = connectionId; }
+        ULONGLONG ConnectionId() const noexcept { return connectionId_; }
 
     private:
         void RecordTls13FirstServerHelloFailure(
@@ -227,6 +229,7 @@ namespace tls
         void RecordPeerAlertFailure(_In_ const TlsMutablePlaintextRecord& record) noexcept;
 
         TlsContext context_ = {};
+        ULONGLONG connectionId_ = 0;
         TlsAeadCipherState clientWriteState_ = {};
         TlsAeadCipherState serverWriteState_ = {};
         TlsAeadCipherState tls12PendingClientWriteState_ = {};

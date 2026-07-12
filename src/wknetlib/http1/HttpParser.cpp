@@ -700,6 +700,13 @@ namespace http1
     {
         response = {};
 
+        WKNET_TRACE(
+            ::wknet::ComponentHttp1,
+            ::wknet::TraceLevel::Max,
+            "http1.response.parse.start input_bytes=%Iu header_capacity=%Iu",
+            dataLength,
+            options.HeaderCapacity);
+
         if (data == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
@@ -753,6 +760,13 @@ namespace http1
             response.Body = nullptr;
             response.BodyLength = 0;
             response.BytesConsumed = headerEnd;
+            WKNET_TRACE(
+                ::wknet::ComponentHttp1,
+                ::wknet::TraceLevel::Verbose,
+                "http1.response.parse.complete status_code=%u headers=%Iu body_kind=%u body_bytes=0",
+                response.StatusCode,
+                response.HeaderCount,
+                static_cast<ULONG>(response.BodyKind));
             return STATUS_SUCCESS;
         }
 
@@ -804,6 +818,11 @@ namespace http1
                 decoded);
             if (!NT_SUCCESS(status)) {
                 response = {};
+                WKNET_TRACE(
+                    ::wknet::ComponentHttp1,
+                    ::wknet::TraceLevel::Error,
+                    "http1.response.transfer_decode.failed status=0x%08X",
+                    static_cast<ULONG>(status));
                 return status;
             }
 
@@ -818,9 +837,23 @@ namespace http1
             status = ApplyContentEncoding(options, response, decoded.Body, decoded.BodyLength);
             if (!NT_SUCCESS(status)) {
                 response = {};
+                WKNET_TRACE(
+                    ::wknet::ComponentHttp1,
+                    ::wknet::TraceLevel::Error,
+                    "http1.response.content_decode.failed status=0x%08X",
+                    static_cast<ULONG>(status));
                 return status;
             }
 
+            WKNET_TRACE(
+                ::wknet::ComponentHttp1,
+                ::wknet::TraceLevel::Verbose,
+                "http1.response.parse.complete status_code=%u headers=%Iu trailers=%Iu body_kind=%u body_bytes=%Iu",
+                response.StatusCode,
+                response.HeaderCount,
+                response.TrailerCount,
+                static_cast<ULONG>(response.BodyKind),
+                response.BodyLength);
             return STATUS_SUCCESS;
         }
 
@@ -839,9 +872,22 @@ namespace http1
                 contentLength);
             if (!NT_SUCCESS(status)) {
                 response = {};
+                WKNET_TRACE(
+                    ::wknet::ComponentHttp1,
+                    ::wknet::TraceLevel::Error,
+                    "http1.response.content_decode.failed status=0x%08X",
+                    static_cast<ULONG>(status));
                 return status;
             }
 
+            WKNET_TRACE(
+                ::wknet::ComponentHttp1,
+                ::wknet::TraceLevel::Verbose,
+                "http1.response.parse.complete status_code=%u headers=%Iu body_kind=%u body_bytes=%Iu",
+                response.StatusCode,
+                response.HeaderCount,
+                static_cast<ULONG>(response.BodyKind),
+                response.BodyLength);
             return STATUS_SUCCESS;
         }
 
@@ -856,9 +902,22 @@ namespace http1
                 dataLength - headerEnd);
             if (!NT_SUCCESS(status)) {
                 response = {};
+                WKNET_TRACE(
+                    ::wknet::ComponentHttp1,
+                    ::wknet::TraceLevel::Error,
+                    "http1.response.content_decode.failed status=0x%08X",
+                    static_cast<ULONG>(status));
                 return status;
             }
 
+            WKNET_TRACE(
+                ::wknet::ComponentHttp1,
+                ::wknet::TraceLevel::Verbose,
+                "http1.response.parse.complete status_code=%u headers=%Iu body_kind=%u body_bytes=%Iu close_delimited=1",
+                response.StatusCode,
+                response.HeaderCount,
+                static_cast<ULONG>(response.BodyKind),
+                response.BodyLength);
             return STATUS_SUCCESS;
         }
 

@@ -1068,7 +1068,7 @@ namespace tls
             ticket.NonceLength > Tls13MaxTicketNonceLength) {
 #if defined(DBG) && !defined(WKNET_USER_MODE_TEST)
             WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning,
-                "TlsConnection TLS1.3 skip uncacheable NewSessionTicket ticket=%Iu nonce=%Iu\r\n",
+                "tls13.session_ticket.cache_skipped ticket_bytes=%Iu nonce_bytes=%Iu reason=oversized",
                 ticket.TicketLength,
                 ticket.NonceLength);
 #endif

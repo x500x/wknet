@@ -3,7 +3,16 @@
 #endif
 
 #include <wknet/Trace.h>
+#include <wknet/codec/Codec.h>
+#include <wknet/crypto/Aead.h>
+#include "http1/HttpParser.h"
 #include "rtl/TraceInternal.h"
+#include "session/Async.h"
+#include "session/HandleTypes.h"
+#include "session/UrlParser.h"
+#include "tls/TlsConnection.h"
+#include "transport/Transport.h"
+#include "ws/WebSocketFrame.h"
 
 #include <atomic>
 #include <stdio.h>
@@ -32,6 +41,17 @@ namespace
     std::atomic<bool> g_badSinkContext = false;
     std::atomic<bool> g_startConcurrentWriter = false;
     char g_longMessage[8192] = {};
+    ULONG g_seenBusinessEvents = 0;
+    bool g_sensitiveValueLeaked = false;
+
+    constexpr ULONG SeenRtl = 1u << 0;
+    constexpr ULONG SeenCodec = 1u << 1;
+    constexpr ULONG SeenCrypto = 1u << 2;
+    constexpr ULONG SeenHttp1 = 1u << 3;
+    constexpr ULONG SeenWs = 1u << 4;
+    constexpr ULONG SeenTransport = 1u << 5;
+    constexpr ULONG SeenTls = 1u << 6;
+    constexpr ULONG SeenSession = 1u << 7;
 
     void Expect(bool condition, const char* message) noexcept
     {
@@ -60,6 +80,21 @@ namespace
         g_lastLevel = level;
         g_lastComponent = component;
         (void)strncpy_s(g_lastMessage, message, _TRUNCATE);
+        if (strstr(message, "rtl.url.parse_request.") != nullptr) g_seenBusinessEvents |= SeenRtl;
+        if (strstr(message, "codec.decode_one.") != nullptr) g_seenBusinessEvents |= SeenCodec;
+        if (strstr(message, "crypto.aead.") != nullptr) g_seenBusinessEvents |= SeenCrypto;
+        if (strstr(message, "http1.response.parse.") != nullptr) g_seenBusinessEvents |= SeenHttp1;
+        if (strstr(message, "ws.frame.") != nullptr) g_seenBusinessEvents |= SeenWs;
+        if (strstr(message, "transport.") != nullptr) g_seenBusinessEvents |= SeenTransport;
+        if (strstr(message, "tls.handshake.") != nullptr) g_seenBusinessEvents |= SeenTls;
+        if (strstr(message, "async.operation.") != nullptr) g_seenBusinessEvents |= SeenSession;
+        if (strstr(message, "Bearer-secret") != nullptr ||
+            strstr(message, "cookie-secret") != nullptr ||
+            strstr(message, "body-secret") != nullptr ||
+            strstr(message, "key-secret") != nullptr ||
+            strstr(message, "query-secret") != nullptr) {
+            g_sensitiveValueLeaked = true;
+        }
     }
 
     void RecursiveTraceSink(
@@ -116,6 +151,146 @@ namespace
                 "trace.concurrent index=%u",
                 index);
         }
+    }
+
+    NTSTATUS TestTransportSend(void*, const void*, SIZE_T length, SIZE_T* bytesSent) noexcept
+    {
+        if (bytesSent != nullptr) {
+            *bytesSent = length;
+        }
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS TestTransportReceive(void*, void*, SIZE_T, SIZE_T* bytesReceived) noexcept
+    {
+        if (bytesReceived != nullptr) {
+            *bytesReceived = 0;
+        }
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS TestAsyncWorker(wknet::session::AsyncOperationHandle, void*) noexcept
+    {
+        return STATUS_SUCCESS;
+    }
+
+    void TestBusinessEventCoverage() noexcept
+    {
+        g_seenBusinessEvents = 0;
+        g_sensitiveValueLeaked = false;
+        wknet::TraceSetSink(CaptureTrace, nullptr);
+        wknet::TraceSetComponents(wknet::ComponentAll);
+        wknet::TraceSetLevel(wknet::TraceLevel::Max);
+
+        wknet::session::Request request = {};
+        const char url[] = "https://example.test/path?token=query-secret";
+        (void)wknet::session::ParseUrlIntoRequest(request, url, sizeof(url) - 1);
+
+        const char body[] = "body-secret";
+        char decoded[32] = {};
+        SIZE_T decodedLength = 0;
+        (void)wknet::codec::DecodeOne(
+            wknet::codec::Coding::Identity,
+            body,
+            sizeof(body) - 1,
+            decoded,
+            sizeof(decoded),
+            &decodedLength);
+
+        const UCHAR keyBytes[] = "key-secret";
+        wknet::crypto::AeadKey key = {};
+        key.Algorithm = wknet::crypto::AeadAlgorithm::Aes128Gcm;
+        key.Key = keyBytes;
+        key.KeyLength = sizeof(keyBytes) - 1;
+        wknet::crypto::AeadParameters aeadParameters = {};
+        UCHAR ciphertext[32] = {};
+        UCHAR tag[16] = {};
+        (void)wknet::crypto::Aead::Encrypt(
+            nullptr,
+            key,
+            aeadParameters,
+            reinterpret_cast<const UCHAR*>(body),
+            sizeof(body) - 1,
+            ciphertext,
+            sizeof(ciphertext),
+            tag,
+            sizeof(tag),
+            nullptr);
+
+        const char responseText[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Authorization: Bearer-secret\r\n"
+            "Set-Cookie: cookie-secret\r\n"
+            "Content-Length: 11\r\n"
+            "\r\n"
+            "body-secret";
+        wknet::http1::HttpHeader headers[8] = {};
+        wknet::http1::HttpResponse response = {};
+        wknet::http1::HttpParseOptions parseOptions = {};
+        parseOptions.Headers = headers;
+        parseOptions.HeaderCapacity = sizeof(headers) / sizeof(headers[0]);
+        (void)wknet::http1::HttpParser::ParseResponse(
+            responseText,
+            sizeof(responseText) - 1,
+            parseOptions,
+            response);
+
+        const UCHAR framePayload[] = "body-secret";
+        const UCHAR maskingKey[4] = { 1, 2, 3, 4 };
+        UCHAR frame[64] = {};
+        SIZE_T frameLength = 0;
+        (void)wknet::ws::WebSocketCodec::EncodeClientFrame(
+            wknet::ws::WebSocketOpcode::Text,
+            true,
+            framePayload,
+            sizeof(framePayload) - 1,
+            maskingKey,
+            frame,
+            sizeof(frame),
+            &frameLength);
+
+        wknet::transport::TransportCallbacks callbacks = {};
+        callbacks.Send = TestTransportSend;
+        callbacks.Receive = TestTransportReceive;
+        wknet::transport::Transport* transport = nullptr;
+        if (NT_SUCCESS(wknet::transport::TransportCreateCallbacks(&callbacks, nullptr, &transport))) {
+            wknet::transport::TransportSetConnectionId(transport, 9001);
+            SIZE_T sent = 0;
+            (void)wknet::transport::TransportSend(
+                transport,
+                body,
+                sizeof(body) - 1,
+                &sent);
+            wknet::transport::TransportClose(transport);
+        }
+
+        wknet::tls::TlsConnection* tlsConnection = nullptr;
+        if (NT_SUCCESS(wknet::tls::TlsConnectionCreate(&tlsConnection))) {
+            wknet::tls::TlsConnectionSetConnectionId(tlsConnection, 9002);
+            wknet::tls::TlsClientConnectionOptions tlsOptions = {};
+            tlsOptions.ServerName = "secret.example";
+            tlsOptions.ServerNameLength = sizeof("secret.example") - 1;
+            tlsOptions.VerifyCertificate = true;
+            tlsOptions.CertificateStore = nullptr;
+            (void)wknet::tls::TlsConnectionConnect(tlsConnection, nullptr, &tlsOptions);
+            wknet::tls::TlsConnectionClose(tlsConnection);
+        }
+
+        wknet::session::AsyncCreateOptions asyncOptions = {};
+        asyncOptions.WorkerRoutine = TestAsyncWorker;
+        asyncOptions.StartSuspended = true;
+        wknet::session::AsyncOperationHandle operation = nullptr;
+        if (NT_SUCCESS(wknet::session::AsyncOperationCreate(asyncOptions, &operation))) {
+            (void)wknet::session::TestRunAsyncOperation(operation);
+            wknet::session::AsyncOperationRelease(operation);
+        }
+
+        const ULONG expected = SeenRtl | SeenCodec | SeenCrypto | SeenHttp1 |
+            SeenWs | SeenTransport | SeenTls | SeenSession;
+        Expect((g_seenBusinessEvents & expected) == expected,
+            "representative events cover every major logging component");
+        Expect(!g_sensitiveValueLeaked,
+            "representative business logs never expose sensitive values");
     }
 
     void TestLevelThresholds() noexcept
@@ -253,8 +428,10 @@ int main()
     Expect(g_contextA.Calls.load(std::memory_order_acquire) + g_contextB.Calls.load(std::memory_order_acquire) > 0,
         "concurrent writers reach installed sinks");
 
+    TestBusinessEventCoverage();
+
     Expect(wknet::TraceGetLevel() == wknet::TraceLevel::Max, "trace level getter reports Max");
-    Expect(wknet::TraceGetComponents() == wknet::ComponentRtl, "component getter reports the active mask");
+    Expect(wknet::TraceGetComponents() == wknet::ComponentAll, "component getter reports the active mask");
 
     wknet::TraceSetSink(nullptr, nullptr);
     wknet::TraceSetComponents(wknet::ComponentAll);

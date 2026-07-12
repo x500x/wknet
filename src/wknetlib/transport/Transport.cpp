@@ -94,6 +94,15 @@ NTSTATUS TransportCreateTls(
     if (!NT_SUCCESS(status)) {
         FreeNonPagedObject(context);
     }
+    else {
+        (*transport)->ConnectionId = rawTransport->ConnectionId;
+        const TraceCorrelation correlation = { 0, (*transport)->ConnectionId, 0 };
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentTransport,
+            ::wknet::TraceLevel::Info,
+            &correlation,
+            "transport.tls.created");
+    }
     return status;
 }
 
@@ -124,6 +133,12 @@ void TransportClose(Transport* transport) noexcept
     if (transport == nullptr) {
         return;
     }
+    const TraceCorrelation correlation = { 0, transport->ConnectionId, 0 };
+    WKNET_TRACE_CORRELATED(
+        ::wknet::ComponentTransport,
+        ::wknet::TraceLevel::Info,
+        &correlation,
+        "transport.closed");
     const TransportOperations* operations = transport->Operations;
     if (operations != nullptr && operations->CloseContext != nullptr) {
         operations->CloseContext(transport->Context);
@@ -139,7 +154,27 @@ NTSTATUS TransportSend(Transport* transport, const void* data, SIZE_T length, SI
     if (transport == nullptr || transport->Operations == nullptr || transport->Operations->Callbacks.Send == nullptr) {
         return STATUS_INVALID_PARAMETER;
     }
-    return transport->Operations->Callbacks.Send(transport->Context, data, length, bytesSent);
+    const NTSTATUS status = transport->Operations->Callbacks.Send(transport->Context, data, length, bytesSent);
+    const TraceCorrelation correlation = { 0, transport->ConnectionId, 0 };
+    if (NT_SUCCESS(status)) {
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentTransport,
+            ::wknet::TraceLevel::Max,
+            &correlation,
+            "transport.send bytes=%Iu requested=%Iu",
+            bytesSent != nullptr ? *bytesSent : length,
+            length);
+    }
+    else {
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentTransport,
+            ::wknet::TraceLevel::Error,
+            &correlation,
+            "transport.send.failed status=0x%08X requested=%Iu",
+            static_cast<ULONG>(status),
+            length);
+    }
+    return status;
 }
 
 NTSTATUS TransportReceive(Transport* transport, void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept
@@ -147,7 +182,27 @@ NTSTATUS TransportReceive(Transport* transport, void* buffer, SIZE_T length, SIZ
     if (transport == nullptr || transport->Operations == nullptr || transport->Operations->Callbacks.Receive == nullptr) {
         return STATUS_INVALID_PARAMETER;
     }
-    return transport->Operations->Callbacks.Receive(transport->Context, buffer, length, bytesReceived);
+    const NTSTATUS status = transport->Operations->Callbacks.Receive(transport->Context, buffer, length, bytesReceived);
+    const TraceCorrelation correlation = { 0, transport->ConnectionId, 0 };
+    if (NT_SUCCESS(status)) {
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentTransport,
+            ::wknet::TraceLevel::Max,
+            &correlation,
+            "transport.receive bytes=%Iu requested=%Iu",
+            bytesReceived != nullptr ? *bytesReceived : static_cast<SIZE_T>(0),
+            length);
+    }
+    else {
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentTransport,
+            ::wknet::TraceLevel::Error,
+            &correlation,
+            "transport.receive.failed status=0x%08X requested=%Iu",
+            static_cast<ULONG>(status),
+            length);
+    }
+    return status;
 }
 
 NTSTATUS TransportReceiveWithTimeout(
@@ -157,9 +212,38 @@ NTSTATUS TransportReceiveWithTimeout(
         return STATUS_INVALID_PARAMETER;
     }
     const auto callback = transport->Operations->Callbacks.ReceiveWithTimeout;
-    return callback != nullptr
-        ? callback(transport->Context, buffer, length, bytesReceived, timeoutMilliseconds)
-        : TransportReceive(transport, buffer, length, bytesReceived);
+    if (callback == nullptr) {
+        return TransportReceive(transport, buffer, length, bytesReceived);
+    }
+
+    const NTSTATUS status = callback(
+        transport->Context,
+        buffer,
+        length,
+        bytesReceived,
+        timeoutMilliseconds);
+    const TraceCorrelation correlation = { 0, transport->ConnectionId, 0 };
+    if (NT_SUCCESS(status)) {
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentTransport,
+            ::wknet::TraceLevel::Max,
+            &correlation,
+            "transport.receive_timeout bytes=%Iu requested=%Iu timeout_ms=%u",
+            bytesReceived != nullptr ? *bytesReceived : static_cast<SIZE_T>(0),
+            length,
+            timeoutMilliseconds);
+    }
+    else {
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentTransport,
+            ::wknet::TraceLevel::Error,
+            &correlation,
+            "transport.receive_timeout.failed status=0x%08X requested=%Iu timeout_ms=%u",
+            static_cast<ULONG>(status),
+            length,
+            timeoutMilliseconds);
+    }
+    return status;
 }
 
 void TransportSetCancellation(Transport* transport, const net::WskCancellationToken* cancellation) noexcept
@@ -168,5 +252,17 @@ void TransportSetCancellation(Transport* transport, const net::WskCancellationTo
         transport->Operations->Callbacks.SetCancellation != nullptr) {
         transport->Operations->Callbacks.SetCancellation(transport->Context, cancellation);
     }
+}
+
+void TransportSetConnectionId(Transport* transport, ULONGLONG connectionId) noexcept
+{
+    if (transport != nullptr) {
+        transport->ConnectionId = connectionId;
+    }
+}
+
+ULONGLONG TransportConnectionId(const Transport* transport) noexcept
+{
+    return transport != nullptr ? transport->ConnectionId : 0;
 }
 }

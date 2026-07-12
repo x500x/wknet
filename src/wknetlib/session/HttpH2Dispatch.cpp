@@ -250,7 +250,7 @@ namespace session
             status = http2::Http2ConnectionInitialize(
                 h2Connection, activeTransport, maxHeaderBlockBytes);
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level HTTP/2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "session.http2.initialize_failed status=0x%08X", static_cast<ULONG>(status));
                 http2::Http2ConnectionClose(h2Connection);
                 return status;
             }
@@ -300,10 +300,30 @@ namespace session
             workspace.Http2HeaderScratch.Length,
             &streamId);
 
+        const TraceCorrelation streamCorrelation = {
+            sendOptions.TraceOperationId,
+            PooledConnectionId(&pooledConnection),
+            streamId
+        };
+
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level HTTP/2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentHttp2,
+                ::wknet::TraceLevel::Error,
+                &streamCorrelation,
+                "http2.request.begin.failed status=0x%08X headers=%Iu body_bytes=%Iu",
+                static_cast<ULONG>(status),
+                h2HeaderCount,
+                h2Options.BodyLength);
             return status;
         }
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentHttp2,
+            ::wknet::TraceLevel::Info,
+            &streamCorrelation,
+            "http2.stream.open headers=%Iu body_bytes=%Iu",
+            h2HeaderCount,
+            h2Options.BodyLength);
 
         if (!h2LeaseAlreadyHeld) {
             status = ConnectionPoolPromoteHttp2StreamLease(
@@ -320,13 +340,21 @@ namespace session
         if (!NT_SUCCESS(status)) {
             http2::Http2ConnectionReleaseStream(activeHttp2, streamId);
             if (status == STATUS_BUFFER_TOO_SMALL && workspace.MaxResponseBytes != 0) {
-                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Verbose,
-                    "High-level HTTP/2 response reached MaxResponseBytes limit: status=0x%08X MaxResponseBytes=%Iu\r\n",
+                WKNET_TRACE_CORRELATED(
+                    ::wknet::ComponentHttp2,
+                    ::wknet::TraceLevel::Error,
+                    &streamCorrelation,
+                    "http2.response.limit status=0x%08X max_response_bytes=%Iu",
                     static_cast<ULONG>(status),
                     workspace.MaxResponseBytes);
             }
             else {
-                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level HTTP/2 response failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE_CORRELATED(
+                    ::wknet::ComponentHttp2,
+                    ::wknet::TraceLevel::Error,
+                    &streamCorrelation,
+                    "http2.response.failed status=0x%08X",
+                    static_cast<ULONG>(status));
             }
             return status;
         }
@@ -359,7 +387,13 @@ namespace session
             sendOptions.ContentCodingMaterials,
             &decoded);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level HTTP/2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentHttp2,
+                ::wknet::TraceLevel::Error,
+                &streamCorrelation,
+                "http2.content_decode.failed status=0x%08X body_bytes=%Iu",
+                static_cast<ULONG>(status),
+                responseBodyLength);
             return status;
         }
 
@@ -374,6 +408,14 @@ namespace session
         parsed->BodyKind = http1::HttpBodyKind::ContentLength;
         workspace.ResponseLength = responseBodyLength;
         *rawResponseLength = responseBodyLength;
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentHttp2,
+            ::wknet::TraceLevel::Info,
+            &streamCorrelation,
+            "http2.stream.complete status_code=%u headers=%Iu body_bytes=%Iu",
+            statusCode,
+            responseHeaderCount,
+            decoded.BodyLength);
         return STATUS_SUCCESS;
     }
 
@@ -916,7 +958,7 @@ namespace session
 
         status = http2::Http2ConnectionInitializeAfterUpgrade(h2Connection, activeTransport, maxHeaderBlockBytes);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level h2c Upgrade init failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "session.h2c_upgrade.initialize_failed status=0x%08X", static_cast<ULONG>(status));
             http2::Http2ConnectionClose(h2Connection);
             return status;
         }
@@ -950,7 +992,7 @@ namespace session
             reinterpret_cast<char*>(workspace.Http2HeaderScratch.Data),
             workspace.Http2HeaderScratch.Length);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level h2c Upgrade stream 1 failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "session.h2c_upgrade.stream1_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
@@ -982,7 +1024,7 @@ namespace session
             sendOptions.ContentCodingMaterials,
             &decoded);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level h2c Upgrade content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "session.h2c_upgrade.content_decode_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 

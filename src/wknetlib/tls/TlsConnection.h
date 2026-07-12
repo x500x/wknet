@@ -108,5 +108,7 @@ namespace tls
     SIZE_T TlsConnectionNegotiatedAlpnLength(_In_opt_ const TlsConnection* connection) noexcept;
     TlsHandshakeFailure TlsConnectionLastHandshakeFailure(
         _In_opt_ const TlsConnection* connection) noexcept;
+    void TlsConnectionSetConnectionId(_Inout_opt_ TlsConnection* connection, ULONGLONG connectionId) noexcept;
+    ULONGLONG TlsConnectionId(_In_opt_ const TlsConnection* connection) noexcept;
 }
 }

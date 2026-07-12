@@ -1,4 +1,5 @@
 #include "session/HttpEngineInternal.hpp"
+#include "rtl/TraceInternal.h"
 
 namespace wknet
 {
@@ -100,6 +101,19 @@ namespace session
             return status;
         }
 
+        const TraceCorrelation connectionCorrelation = {
+            sendOptions.TraceOperationId,
+            PooledConnectionId(pooledConnection),
+            0
+        };
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentSession,
+            ::wknet::TraceLevel::Verbose,
+            &connectionCorrelation,
+            "pool.connection.acquire reused=%u pipeline=%u",
+            reusedConnection ? 1u : 0u,
+            allowHttp11Pipeline ? 1u : 0u);
+
         bool connectionReusable = false;
         bool usedHttp11Pipeline = false;
         const SIZE_T responseHeaderCapacity = session->Options.MaxResponseHeaders;
@@ -130,6 +144,12 @@ namespace session
             ShouldRetryWithFreshConnection(request, status, reusedConnection);
 
         if (shouldRetryWithFreshConnection) {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentSession,
+                ::wknet::TraceLevel::Warning,
+                &connectionCorrelation,
+                "http.connection.retry status=0x%08X",
+                static_cast<ULONG>(status));
             ConnectionPoolClose(&session->ConnectionPool, pooledConnection);
             pooledConnection = nullptr;
 
@@ -404,6 +424,23 @@ namespace session
             return STATUS_INVALID_PARAMETER;
         }
 
+        if (effectiveOptions.TraceOperationId == 0) {
+            effectiveOptions.TraceOperationId = rtl::TraceAllocateCorrelationId();
+        }
+        const TraceCorrelation operationCorrelation = {
+            effectiveOptions.TraceOperationId,
+            0,
+            0
+        };
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentSession,
+            ::wknet::TraceLevel::Info,
+            &operationCorrelation,
+            "http.request.start method=%u body_bytes=%Iu async=%u",
+            static_cast<ULONG>(request->Method),
+            request->HasBody ? request->BodyLength : static_cast<SIZE_T>(0),
+            cancellationOperation != nullptr ? 1u : 0u);
+
         if (effectiveOptions.BodyCallback != nullptr &&
             response == nullptr &&
             ((effectiveOptions.Flags & HttpSendFlagAggregateWithCallbacks) != 0)) {
@@ -428,9 +465,20 @@ namespace session
         if (effectiveCache != nullptr) {
             status = HttpCacheLookup(effectiveCache, *currentRequest, effectiveOptions, &cacheLookup);
             if (!NT_SUCCESS(status)) {
+                WKNET_TRACE_CORRELATED(
+                    ::wknet::ComponentSession,
+                    ::wknet::TraceLevel::Error,
+                    &operationCorrelation,
+                    "http.cache.lookup.failed status=0x%08X",
+                    static_cast<ULONG>(status));
                 return status;
             }
             if (cacheLookup.OnlyIfCachedMiss) {
+                WKNET_TRACE_CORRELATED(
+                    ::wknet::ComponentSession,
+                    ::wknet::TraceLevel::Info,
+                    &operationCorrelation,
+                    "http.cache.only_if_cached_miss");
                 return STATUS_NOT_FOUND;
             }
             if (cacheLookup.Found && !cacheLookup.RequiresValidation) {
@@ -441,6 +489,15 @@ namespace session
                     status = CreateOwnedResponse(cachedParsed, nullptr, 0, response);
                 }
                 HttpCacheFreeSnapshot(&cacheLookup.Snapshot);
+                WKNET_TRACE_CORRELATED(
+                    ::wknet::ComponentSession,
+                    NT_SUCCESS(status) ? ::wknet::TraceLevel::Info : ::wknet::TraceLevel::Error,
+                    &operationCorrelation,
+                    NT_SUCCESS(status) ?
+                        "http.request.complete source=cache status_code=%u body_bytes=%Iu" :
+                        "http.request.failed source=cache status=0x%08X",
+                    NT_SUCCESS(status) ? cachedParsed.StatusCode : static_cast<ULONG>(status),
+                    NT_SUCCESS(status) ? cachedParsed.BodyLength : static_cast<SIZE_T>(0));
                 return status;
             }
             if (cacheLookup.Found && cacheLookup.RequiresValidation) {
@@ -605,6 +662,25 @@ namespace session
         if (redirectRequest != nullptr) {
             HttpRequestRelease(redirectRequest);
         }
+        if (NT_SUCCESS(status)) {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentSession,
+                ::wknet::TraceLevel::Info,
+                &operationCorrelation,
+                "http.request.complete status_code=%u body_bytes=%Iu redirects=%u",
+                parsed.StatusCode,
+                parsed.BodyLength,
+                redirectCount);
+        }
+        else {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentSession,
+                ::wknet::TraceLevel::Error,
+                &operationCorrelation,
+                "http.request.failed status=0x%08X redirects=%u",
+                static_cast<ULONG>(status),
+                redirectCount);
+        }
         return status;
     }
 
@@ -647,6 +723,9 @@ namespace session
             SessionEndOperation(session);
             return STATUS_INVALID_PARAMETER;
         }
+        if (effectiveOptions.TraceOperationId == 0) {
+            effectiveOptions.TraceOperationId = rtl::TraceAllocateCorrelationId();
+        }
 
         auto* context = AllocateAsyncHttpContext();
         if (context == nullptr) {
@@ -680,6 +759,7 @@ namespace session
         createOptions.CompletionCallback = effectiveOptions.CompletionCallback;
         createOptions.CompletionContext = effectiveOptions.CompletionContext;
         createOptions.StartSuspended = true;
+        createOptions.TraceOperationId = effectiveOptions.TraceOperationId;
 
         status = AsyncOperationCreate(createOptions, operation);
         if (!NT_SUCCESS(status)) {

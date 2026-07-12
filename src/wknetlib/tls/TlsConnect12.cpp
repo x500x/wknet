@@ -85,7 +85,7 @@ namespace tls
             TlsScratchClientHelloLength,
             &messageLength);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection encode ClientHello failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.client_hello.encode_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
@@ -110,21 +110,21 @@ namespace tls
             status = SendPlainRecord(transport, TlsContentType::Handshake, message, messageLength);
         }
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection send ClientHello failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.client_hello.send_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
         TlsHandshakeMessageView handshake = {};
         status = ReadHandshakeMessage(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection read ServerHello failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_hello.read_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
         TlsServerHelloView serverHello = {};
         status = TlsHandshake12::ParseServerHello(context_, handshake, serverHello);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection parse ServerHello failed: 0x%08X type=%u body=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_hello.parse_failed status=0x%08X type=%u body_bytes=%Iu",
                 static_cast<ULONG>(status),
                 static_cast<unsigned>(handshake.Type),
                 handshake.BodyLength);
@@ -132,19 +132,19 @@ namespace tls
         }
         status = TlsHandshake12::ValidateServerHelloOffer(serverHello, hello);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection ServerHello selected value was not offered: 0x%08X cipher=0x%04X\r\n",
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_hello.unoffered_selection status=0x%08X cipher=0x%04X",
                 static_cast<ULONG>(status),
                 static_cast<unsigned>(serverHello.CipherSuite));
             return status;
         }
         if (!serverHello.HasExtendedMasterSecret) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection TLS1.2 ServerHello missing extended_master_secret\r\n");
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_hello.missing_extended_master_secret");
             RecordHandshakeFailure(TlsHandshakeFailureCategory::LocalPolicy, STATUS_NOT_SUPPORTED);
             return STATUS_NOT_SUPPORTED;
         }
         if (!serverHello.HasSecureRenegotiation ||
             serverHello.SecureRenegotiationDataLength != 0) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection TLS1.2 ServerHello missing secure renegotiation indication\r\n");
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_hello.missing_secure_renegotiation");
             RecordHandshakeFailure(TlsHandshakeFailureCategory::LocalPolicy, STATUS_NOT_SUPPORTED);
             return STATUS_NOT_SUPPORTED;
         }
@@ -155,7 +155,7 @@ namespace tls
             return STATUS_NOT_SUPPORTED;
         }
         if (selectedCapability->BulkCipher == TlsBulkCipherKind::AesCbc && !serverHello.HasEncryptThenMac) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection TLS1.2 CBC ServerHello missing encrypt_then_mac\r\n");
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_hello.missing_encrypt_then_mac");
             RecordHandshakeFailure(TlsHandshakeFailureCategory::LocalPolicy, STATUS_NOT_SUPPORTED);
             return STATUS_NOT_SUPPORTED;
         }
@@ -163,12 +163,12 @@ namespace tls
         bool serverMaySendNewSessionTicket = false;
         status = ServerHelloHasEmptyExtension(serverHello, TlsExtensionSessionTicket, &serverMaySendNewSessionTicket);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection parse ServerHello extensions failed: 0x%08X len=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_hello.extensions_parse_failed status=0x%08X length=%Iu",
                 static_cast<ULONG>(status),
                 serverHello.ExtensionsLength);
             return status;
         }
-        WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Verbose, "TlsConnection ServerHello cipher=0x%04X sessionTicket=%u extensions=%Iu\r\n",
+        WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Verbose, "tls12.server_hello.parsed cipher=0x%04X session_ticket=%u extensions=%Iu",
             static_cast<unsigned>(serverHello.CipherSuite),
             serverMaySendNewSessionTicket ? 1u : 0u,
             serverHello.ExtensionsLength);
@@ -176,14 +176,17 @@ namespace tls
         // Parse ALPN from ServerHello
         status = ParseServerHelloAlpn(serverHello, negotiatedAlpn_, 16, &negotiatedAlpnLength_);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection parse ALPN failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.alpn.parse_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
         if (negotiatedAlpnLength_ > 0) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Info, "TlsConnection ALPN negotiated: %.*s\r\n",
-                static_cast<int>(negotiatedAlpnLength_), negotiatedAlpn_);
+            WKNET_TRACE(
+                ::wknet::ComponentTls,
+                ::wknet::TraceLevel::Info,
+                "tls.alpn.negotiated protocol_bytes=%Iu",
+                negotiatedAlpnLength_);
             if (!IsOfferedAlpn(options, negotiatedAlpn_, negotiatedAlpnLength_)) {
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection ALPN was not offered by client\r\n");
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.alpn.unoffered_selection");
                 RecordHandshakeFailure(TlsHandshakeFailureCategory::AlpnMismatch, STATUS_NOT_SUPPORTED);
                 return STATUS_NOT_SUPPORTED;
             }
@@ -191,7 +194,7 @@ namespace tls
 
         status = transcript_.Initialize(TlsHandshake12::PrfHashForCipherSuite(context_.CipherSuite()));
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection reinitialize transcript failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.transcript.reinitialize_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
@@ -201,7 +204,7 @@ namespace tls
         }
         RtlSecureZeroMemory(clientHello, TlsScratchFirstClientHelloLength);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection update transcript after ServerHello failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_hello.transcript_update_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
@@ -355,20 +358,20 @@ namespace tls
 
         status = ReadHandshakeMessage(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection read Certificate failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.certificate.read_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
         TlsCertificateListView certificates = {};
         status = TlsHandshake12::ParseCertificateList(context_, handshake, certificates);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection parse Certificate failed: 0x%08X type=%u body=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.certificate.parse_failed status=0x%08X type=%u body_bytes=%Iu",
                 static_cast<ULONG>(status),
                 static_cast<unsigned>(handshake.Type),
                 handshake.BodyLength);
             return status;
         }
-        WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Verbose, "TlsConnection Certificate count=%Iu bytes=%Iu\r\n",
+        WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Verbose, "tls12.certificate.parsed count=%Iu bytes=%Iu",
             certificates.CertificateCount,
             certificates.CertificatesLength);
 
@@ -376,7 +379,7 @@ namespace tls
         SIZE_T stapledOcspResponseLength = 0;
         status = ReadHandshakeMessage(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection read post-Certificate handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.post_certificate.read_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
@@ -384,7 +387,7 @@ namespace tls
             Tls12CertificateStatusView certificateStatus = {};
             status = TlsHandshake12::ParseCertificateStatus(handshake, certificateStatus);
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection parse CertificateStatus failed: 0x%08X body=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.certificate_status.parse_failed status=0x%08X body_bytes=%Iu",
                     static_cast<ULONG>(status),
                     handshake.BodyLength);
                 return status;
@@ -392,12 +395,12 @@ namespace tls
 
             stapledOcspResponse = certificateStatus.OcspResponse;
             stapledOcspResponseLength = certificateStatus.OcspResponseLength;
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Verbose, "TlsConnection CertificateStatus OCSP bytes=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Verbose, "tls12.certificate_status.parsed ocsp_bytes=%Iu",
                 stapledOcspResponseLength);
 
             status = ReadHandshakeMessage(transport, handshake, true);
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection read post-CertificateStatus handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.post_certificate_status.read_failed status=0x%08X", static_cast<ULONG>(status));
                 return status;
             }
         }
@@ -424,7 +427,7 @@ namespace tls
         chain.CertificateCount = certificates.CertificateCount;
         status = CertificateValidator::ValidateChain(chain, validation, validationResult.Get());
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection validate Certificate failed: 0x%08X count=%Iu bytes=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.certificate.validation_failed status=0x%08X count=%Iu bytes=%Iu",
                 static_cast<ULONG>(status),
                 chain.CertificateCount,
                 chain.CertificatesLength);
@@ -480,7 +483,7 @@ namespace tls
         else {
             status = CertificateValidator::ImportSubjectPublicKey(providerCache_, validationResult->Leaf, *serverPublicKey.Get());
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection import server public key failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_public_key.import_failed status=0x%08X", static_cast<ULONG>(status));
                 return status;
             }
         }
@@ -506,7 +509,7 @@ namespace tls
             }
             status = TlsHandshake12::ValidateServerKeyExchangeOffer(keyExchange, hello);
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection ServerKeyExchange selected value was not offered: 0x%08X group=%u signature=0x%04X\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_key_exchange.unoffered_selection status=0x%08X group=%u signature=0x%04X",
                     static_cast<ULONG>(status),
                     static_cast<unsigned>(keyExchange.NamedGroup),
                     static_cast<unsigned>(keyExchange.SignatureScheme));
@@ -515,7 +518,7 @@ namespace tls
 
             status = VerifyServerKeyExchange(keyExchange, *serverPublicKey.Get());
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection verify ServerKeyExchange failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_key_exchange.verify_failed status=0x%08X", static_cast<ULONG>(status));
                 return status;
             }
 
@@ -537,7 +540,7 @@ namespace tls
                     keyExchange.EcPointLength,
                     *peerKey.Get());
                 if (!NT_SUCCESS(status)) {
-                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection import ServerKeyExchange ECDH key failed: 0x%08X group=%u point=%Iu\r\n",
+                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_key_exchange.ecdh_import_failed status=0x%08X group=%u point_bytes=%Iu",
                         static_cast<ULONG>(status),
                         static_cast<unsigned>(keyExchange.NamedGroup),
                         keyExchange.EcPointLength);
@@ -547,7 +550,7 @@ namespace tls
 
             status = ReadHandshakeMessage(transport, handshake, true);
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection read ServerHelloDone failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_hello_done.read_failed status=0x%08X", static_cast<ULONG>(status));
                 return status;
             }
         }
@@ -613,7 +616,7 @@ namespace tls
 
         status = TlsHandshake12::MarkServerHelloDone(context_, handshake);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection parse ServerHelloDone failed: 0x%08X type=%u body=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_hello_done.parse_failed status=0x%08X type=%u body_bytes=%Iu",
                 static_cast<ULONG>(status),
                 static_cast<unsigned>(handshake.Type),
                 handshake.BodyLength);
@@ -639,7 +642,7 @@ namespace tls
             &messageLength);
         if (!NT_SUCCESS(status)) {
             RtlSecureZeroMemory(premasterSecret.Get(), premasterSecret.Count());
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection generate ClientKeyExchange failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.client_key_exchange.generate_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
@@ -649,7 +652,7 @@ namespace tls
         }
         if (!NT_SUCCESS(status)) {
             RtlSecureZeroMemory(premasterSecret.Get(), premasterSecret.Count());
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection send ClientKeyExchange failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.client_key_exchange.send_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
@@ -705,7 +708,7 @@ namespace tls
         RtlSecureZeroMemory(premasterSecret.Get(), premasterSecret.Count());
         if (!NT_SUCCESS(status)) {
             RtlSecureZeroMemory(transcriptHash.Get(), transcriptHash.Count());
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection derive TLS1.2 extended master secret failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.extended_master_secret.derive_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
@@ -725,20 +728,20 @@ namespace tls
         RtlSecureZeroMemory(&keyBlock, sizeof(keyBlock));
         if (!NT_SUCCESS(status)) {
             RtlSecureZeroMemory(transcriptHash.Get(), transcriptHash.Count());
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection derive TLS1.2 key block failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.key_block.derive_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
         static const UCHAR changeCipherSpec[] = { 1 };
         status = SendPlainRecord(transport, TlsContentType::ChangeCipherSpec, changeCipherSpec, sizeof(changeCipherSpec));
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection send ChangeCipherSpec failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.change_cipher_spec.send_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
         status = FinishTranscript(transcriptHash.Get(), transcriptHash.Count(), &transcriptHashLength);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection finish client transcript failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.client_finished.transcript_finalize_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
@@ -752,7 +755,7 @@ namespace tls
             &messageLength);
         RtlSecureZeroMemory(transcriptHash.Get(), transcriptHash.Count());
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection encode client Finished failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.client_finished.encode_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
         if (messageLength != TlsHandshakeHeaderLength + TlsVerifyDataLength) {
@@ -766,13 +769,13 @@ namespace tls
             status = SendProtectedRecord(transport, TlsContentType::Handshake, message, messageLength);
         }
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection send client Finished failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.client_finished.send_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
         status = ReadServerChangeCipherSpec(transport, serverMaySendNewSessionTicket);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection read server ChangeCipherSpec failed: 0x%08X allowTicket=%u\r\n",
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_change_cipher_spec.read_failed status=0x%08X allow_ticket=%u",
                 static_cast<ULONG>(status),
                 serverMaySendNewSessionTicket ? 1u : 0u);
             return status;
@@ -782,12 +785,12 @@ namespace tls
 
         status = ReadHandshakeMessage(transport, handshake, false);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection read server Finished failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_finished.read_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
         if (handshake.Type != TlsHandshakeType::Finished) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection unexpected server Finished type=%u body=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_finished.unexpected_message type=%u body_bytes=%Iu",
                 static_cast<unsigned>(handshake.Type),
                 handshake.BodyLength);
             return STATUS_INVALID_NETWORK_RESPONSE;
@@ -795,7 +798,7 @@ namespace tls
 
         status = FinishTranscript(transcriptHash.Get(), transcriptHash.Count(), &transcriptHashLength);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection finish server transcript failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_finished.transcript_finalize_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 
@@ -808,7 +811,7 @@ namespace tls
             handshake.BodyLength);
         RtlSecureZeroMemory(transcriptHash.Get(), transcriptHash.Count());
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection verify server Finished failed: 0x%08X body=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_finished.verify_failed status=0x%08X body_bytes=%Iu",
                 static_cast<ULONG>(status),
                 handshake.BodyLength);
             return status;
@@ -821,7 +824,7 @@ namespace tls
 
         status = AppendTranscript(handshakeBuffer_ + lastHandshakeOffset_, lastHandshakeLength_);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection append server Finished transcript failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.server_finished.transcript_append_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
 

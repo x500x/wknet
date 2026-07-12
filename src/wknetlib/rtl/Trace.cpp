@@ -490,7 +490,14 @@ namespace
     {
 #if defined(WKNET_USER_MODE_TEST)
         UNREFERENCED_PARAMETER(level);
-        (void)fputs(message, stdout);
+        const SIZE_T length = BoundedLength(message, rtl::TracePageBytes);
+        if (length >= 2 && message[length - 2] == '\r' && message[length - 1] == '\n') {
+            (void)fwrite(message, 1, length - 2, stdout);
+            (void)fputc('\n', stdout);
+        }
+        else {
+            (void)fputs(message, stdout);
+        }
 #else
         DbgPrintEx(DPFLTR_IHVNETWORK_ID, DbgPrintLevel(level), "%s", message);
 #endif

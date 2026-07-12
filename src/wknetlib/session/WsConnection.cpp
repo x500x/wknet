@@ -1063,8 +1063,17 @@ namespace session
         receiveDeflate_.Release();
         sendCompressedMessage_ = false;
         receiveCompressedMessage_ = false;
+        traceOperationId_ = options.TraceOperationId;
+        traceConnectionId_ = options.TraceConnectionId;
+        const TraceCorrelation correlation = { traceOperationId_, traceConnectionId_, 0 };
 
         if (connected_) {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentWs,
+                ::wknet::TraceLevel::Error,
+                &correlation,
+                "ws.connect.failed status=0x%08X reason=already_connected",
+                static_cast<ULONG>(STATUS_INVALID_DEVICE_STATE));
             return STATUS_INVALID_DEVICE_STATE;
         }
 
@@ -1142,7 +1151,12 @@ namespace session
             &remoteAddressCount,
             options.AddressFamily);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection resolve failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentWs,
+                ::wknet::TraceLevel::Error,
+                &correlation,
+                "ws.resolve.failed status=0x%08X",
+                static_cast<ULONG>(status));
             return status;
         }
 
@@ -1160,6 +1174,19 @@ namespace session
                 statusCode,
                 &tls12ConfirmationCandidate);
             if (NT_SUCCESS(status)) {
+                const TraceCorrelation completeCorrelation = {
+                    traceOperationId_,
+                    traceConnectionId_,
+                    h2StreamId_
+                };
+                WKNET_TRACE_CORRELATED(
+                    ::wknet::ComponentWs,
+                    ::wknet::TraceLevel::Info,
+                    &completeCorrelation,
+                    "ws.connect.complete address_index=%Iu http2=%u tls=%u",
+                    addressIndex,
+                    h2StreamId_ != 0 ? 1u : 0u,
+                    useTls_ ? 1u : 0u);
                 return STATUS_SUCCESS;
             }
 
@@ -1185,12 +1212,12 @@ namespace session
                     &ignoredConfirmationCandidate);
                 if (NT_SUCCESS(http11Status)) {
                     WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Verbose,
-                        "WsConnection HTTP/1.1 retry succeeded after h2 unsupported index=%Iu\r\n",
+                        "ws.connect.http11_retry_completed address_index=%Iu reason=h2_unsupported",
                         addressIndex);
                     return STATUS_SUCCESS;
                 }
                 WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error,
-                    "WsConnection HTTP/1.1 retry failed: 0x%08X original=0x%08X index=%Iu\r\n",
+                    "ws.connect.http11_retry_failed status=0x%08X original_status=0x%08X address_index=%Iu",
                     static_cast<ULONG>(http11Status),
                     static_cast<ULONG>(status),
                     addressIndex);
@@ -1216,18 +1243,18 @@ namespace session
                     &ignoredConfirmationCandidate);
                 if (NT_SUCCESS(confirmationStatus)) {
                     WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Info,
-                        "WsConnection TLS1.2 confirmed after version negotiation index=%Iu\r\n",
+                        "ws.connect.tls12_confirmation_completed address_index=%Iu",
                         addressIndex);
                     return STATUS_SUCCESS;
                 }
 
                 WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error,
-                    "WsConnection TLS1.2 confirmation failed: 0x%08X original=0x%08X index=%Iu\r\n",
+                    "ws.connect.tls12_confirmation_failed status=0x%08X original_status=0x%08X address_index=%Iu",
                     static_cast<ULONG>(confirmationStatus),
                     static_cast<ULONG>(status),
                     addressIndex);
             }
-            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Warning, "WsConnection address attempt failed: 0x%08X index=%Iu family=%u\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Warning, "ws.connect.address_attempt_failed status=0x%08X address_index=%Iu family=%u",
                 static_cast<ULONG>(lastStatus),
                 addressIndex,
                 static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
@@ -1247,6 +1274,7 @@ namespace session
         USHORT* statusCode,
         bool* tls12ConfirmationCandidate) noexcept
     {
+        const TraceCorrelation correlation = { traceOperationId_, traceConnectionId_, h2StreamId_ };
         if (tls12ConfirmationCandidate != nullptr) {
             *tls12ConfirmationCandidate = false;
         }
@@ -1260,11 +1288,14 @@ namespace session
             if (!NT_SUCCESS(createStatus)) {
                 return createStatus;
             }
+#if !defined(WKNET_USER_MODE_TEST)
+            net::WskSocketSetConnectionId(socket_, traceConnectionId_);
+#endif
         }
         NTSTATUS status = net::WskSocketConnect(
             socket_, wskClient, remoteAddress, nullptr, options.Cancellation);
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "ws.connect.socket_failed status=0x%08X", static_cast<ULONG>(status));
             return status;
         }
         transportClosed_ = false;
@@ -1275,6 +1306,7 @@ namespace session
             UNREFERENCED_PARAMETER(closeStatus);
             return status;
         }
+        transport::TransportSetConnectionId(rawTransport_, traceConnectionId_);
         transport::TransportSetCancellation(rawTransport_, options.Cancellation);
 
         useTls_ = options.UseTls;
@@ -1310,6 +1342,7 @@ namespace session
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
             }
+            tls::TlsConnectionSetConnectionId(tls_, traceConnectionId_);
 
             tls::TlsClientConnectionOptions tlsOptions = {};
             tlsOptions.ServerName = options.TlsServerName;
@@ -1354,7 +1387,7 @@ namespace session
                     IsTls12ConfirmationCandidate(options, tls::TlsConnectionLastHandshakeFailure(tls_))) {
                     *tls12ConfirmationCandidate = true;
                 }
-                WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "ws.connect.tls_failed status=0x%08X", static_cast<ULONG>(status));
                 const NTSTATUS closeStatus = CloseTransport();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -1521,9 +1554,12 @@ namespace session
             }
             if (negotiatedAlpnLength != 0 &&
                 !TextEqualsLiteral(negotiatedAlpn, negotiatedAlpnLength, WebSocketHttp11Alpn)) {
-                WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection unexpected ALPN: %.*s\r\n",
-                    static_cast<int>(negotiatedAlpnLength),
-                    negotiatedAlpn != nullptr ? negotiatedAlpn : "");
+                WKNET_TRACE_CORRELATED(
+                    ::wknet::ComponentWs,
+                    ::wknet::TraceLevel::Error,
+                    &correlation,
+                    "ws.alpn.unexpected protocol_bytes=%Iu",
+                    negotiatedAlpnLength);
                 const NTSTATUS closeStatus = CloseTransport();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return STATUS_NOT_SUPPORTED;
@@ -1543,7 +1579,7 @@ namespace session
             }
 
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection send handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "ws.handshake.send_failed status=0x%08X", static_cast<ULONG>(status));
                 const NTSTATUS closeStatus = Close(buffers);
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -1629,7 +1665,7 @@ namespace session
                 continue;
             }
 
-            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection handshake failed: 0x%08X status=%u\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "ws.handshake.validation_failed status=0x%08X http_status=%u",
                 static_cast<ULONG>(status),
                 response.StatusCode);
             const NTSTATUS closeStatus = Close(buffers);

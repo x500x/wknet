@@ -1600,6 +1600,23 @@ namespace crypto
         }
     }
 
+    NTSTATUS TraceAeadResult(
+        const char* operationName,
+        AeadAlgorithm algorithm,
+        SIZE_T inputLength,
+        NTSTATUS status) noexcept
+    {
+        WKNET_TRACE(
+            ::wknet::ComponentCrypto,
+            NT_SUCCESS(status) ? ::wknet::TraceLevel::Max : ::wknet::TraceLevel::Error,
+            "crypto.aead.result operation=%s algorithm=%u input_bytes=%Iu status=0x%08X",
+            operationName,
+            static_cast<ULONG>(algorithm),
+            inputLength,
+            static_cast<ULONG>(status));
+        return status;
+    }
+
     NTSTATUS Aead::Encrypt(
         const CngProviderCache* cache,
         const AeadKey& key,
@@ -1619,29 +1636,34 @@ namespace crypto
         switch (key.Algorithm) {
         case AeadAlgorithm::Aes128Gcm:
             if (key.KeyLength != 16) {
-                return STATUS_INVALID_PARAMETER;
+                return TraceAeadResult("encrypt", key.Algorithm, plaintextLength, STATUS_INVALID_PARAMETER);
             }
-            return EncryptAesGcm(cache, key, parameters, plaintext, plaintextLength, ciphertext, ciphertextLength, tag, tagLength, bytesWritten);
+            return TraceAeadResult("encrypt", key.Algorithm, plaintextLength,
+                EncryptAesGcm(cache, key, parameters, plaintext, plaintextLength, ciphertext, ciphertextLength, tag, tagLength, bytesWritten));
         case AeadAlgorithm::Aes256Gcm:
             if (key.KeyLength != 32) {
-                return STATUS_INVALID_PARAMETER;
+                return TraceAeadResult("encrypt", key.Algorithm, plaintextLength, STATUS_INVALID_PARAMETER);
             }
-            return EncryptAesGcm(cache, key, parameters, plaintext, plaintextLength, ciphertext, ciphertextLength, tag, tagLength, bytesWritten);
+            return TraceAeadResult("encrypt", key.Algorithm, plaintextLength,
+                EncryptAesGcm(cache, key, parameters, plaintext, plaintextLength, ciphertext, ciphertextLength, tag, tagLength, bytesWritten));
         case AeadAlgorithm::ChaCha20Poly1305:
             UNREFERENCED_PARAMETER(cache);
-            return ChaCha20Poly1305Encrypt(key, parameters, plaintext, plaintextLength, ciphertext, ciphertextLength, tag, tagLength, bytesWritten);
+            return TraceAeadResult("encrypt", key.Algorithm, plaintextLength,
+                ChaCha20Poly1305Encrypt(key, parameters, plaintext, plaintextLength, ciphertext, ciphertextLength, tag, tagLength, bytesWritten));
         case AeadAlgorithm::Aes128Ccm:
             if (tagLength != 16) {
-                return STATUS_INVALID_PARAMETER;
+                return TraceAeadResult("encrypt", key.Algorithm, plaintextLength, STATUS_INVALID_PARAMETER);
             }
-            return AesCcmEncrypt(key, parameters, plaintext, plaintextLength, ciphertext, ciphertextLength, tag, tagLength, bytesWritten);
+            return TraceAeadResult("encrypt", key.Algorithm, plaintextLength,
+                AesCcmEncrypt(key, parameters, plaintext, plaintextLength, ciphertext, ciphertextLength, tag, tagLength, bytesWritten));
         case AeadAlgorithm::Aes128Ccm8:
             if (tagLength != 8) {
-                return STATUS_INVALID_PARAMETER;
+                return TraceAeadResult("encrypt", key.Algorithm, plaintextLength, STATUS_INVALID_PARAMETER);
             }
-            return AesCcmEncrypt(key, parameters, plaintext, plaintextLength, ciphertext, ciphertextLength, tag, tagLength, bytesWritten);
+            return TraceAeadResult("encrypt", key.Algorithm, plaintextLength,
+                AesCcmEncrypt(key, parameters, plaintext, plaintextLength, ciphertext, ciphertextLength, tag, tagLength, bytesWritten));
         default:
-            return STATUS_NOT_SUPPORTED;
+            return TraceAeadResult("encrypt", key.Algorithm, plaintextLength, STATUS_NOT_SUPPORTED);
         }
     }
 
@@ -1662,29 +1684,34 @@ namespace crypto
         switch (key.Algorithm) {
         case AeadAlgorithm::Aes128Gcm:
             if (key.KeyLength != 16) {
-                return STATUS_INVALID_PARAMETER;
+                return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength, STATUS_INVALID_PARAMETER);
             }
-            return DecryptAesGcm(cache, key, parameters, ciphertext, ciphertextLength, plaintext, plaintextLength, bytesWritten);
+            return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength,
+                DecryptAesGcm(cache, key, parameters, ciphertext, ciphertextLength, plaintext, plaintextLength, bytesWritten));
         case AeadAlgorithm::Aes256Gcm:
             if (key.KeyLength != 32) {
-                return STATUS_INVALID_PARAMETER;
+                return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength, STATUS_INVALID_PARAMETER);
             }
-            return DecryptAesGcm(cache, key, parameters, ciphertext, ciphertextLength, plaintext, plaintextLength, bytesWritten);
+            return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength,
+                DecryptAesGcm(cache, key, parameters, ciphertext, ciphertextLength, plaintext, plaintextLength, bytesWritten));
         case AeadAlgorithm::ChaCha20Poly1305:
             UNREFERENCED_PARAMETER(cache);
-            return ChaCha20Poly1305Decrypt(key, parameters, ciphertext, ciphertextLength, plaintext, plaintextLength, bytesWritten);
+            return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength,
+                ChaCha20Poly1305Decrypt(key, parameters, ciphertext, ciphertextLength, plaintext, plaintextLength, bytesWritten));
         case AeadAlgorithm::Aes128Ccm:
             if (parameters.Tag.Length != 16) {
-                return STATUS_INVALID_PARAMETER;
+                return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength, STATUS_INVALID_PARAMETER);
             }
-            return AesCcmDecrypt(key, parameters, ciphertext, ciphertextLength, plaintext, plaintextLength, bytesWritten);
+            return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength,
+                AesCcmDecrypt(key, parameters, ciphertext, ciphertextLength, plaintext, plaintextLength, bytesWritten));
         case AeadAlgorithm::Aes128Ccm8:
             if (parameters.Tag.Length != 8) {
-                return STATUS_INVALID_PARAMETER;
+                return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength, STATUS_INVALID_PARAMETER);
             }
-            return AesCcmDecrypt(key, parameters, ciphertext, ciphertextLength, plaintext, plaintextLength, bytesWritten);
+            return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength,
+                AesCcmDecrypt(key, parameters, ciphertext, ciphertextLength, plaintext, plaintextLength, bytesWritten));
         default:
-            return STATUS_NOT_SUPPORTED;
+            return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength, STATUS_NOT_SUPPORTED);
         }
     }
 }

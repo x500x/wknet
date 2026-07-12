@@ -364,7 +364,7 @@ namespace net
                     }
 
                     const LONG abandonedCount = InterlockedIncrement(&g_wskAbandonedIrpCount);
-                    WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Warning, "WSK canceled IRP did not complete within %u ms; abandoned count=%ld\r\n",
+                    WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Warning, "net.wsk_irp.cancel_timeout timeout_ms=%u abandoned_count=%ld",
                         WskCancelCompletionTimeoutMilliseconds,
                         abandonedCount);
                     UNREFERENCED_PARAMETER(abandonedCount);

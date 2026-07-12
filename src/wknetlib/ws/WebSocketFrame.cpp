@@ -903,7 +903,7 @@ namespace ws
         SIZE_T destinationCapacity,
         SIZE_T* bytesWritten) noexcept
     {
-        return EncodeFrame(
+        const NTSTATUS status = EncodeFrame(
             opcode,
             fin,
             rsv1,
@@ -914,6 +914,18 @@ namespace ws
             destination,
             destinationCapacity,
             bytesWritten);
+        WKNET_TRACE(
+            ::wknet::ComponentWs,
+            NT_SUCCESS(status) ? ::wknet::TraceLevel::Max : ::wknet::TraceLevel::Error,
+            NT_SUCCESS(status) ? "ws.frame.encode opcode=%u fin=%u rsv1=%u payload_bytes=%Iu frame_bytes=%Iu" :
+                "ws.frame.encode.failed opcode=%u fin=%u rsv1=%u payload_bytes=%Iu status=0x%08X",
+            static_cast<ULONG>(opcode),
+            fin ? 1u : 0u,
+            rsv1 ? 1u : 0u,
+            payloadLength,
+            NT_SUCCESS(status) ? (bytesWritten != nullptr ? *bytesWritten : static_cast<SIZE_T>(0)) :
+                static_cast<SIZE_T>(static_cast<ULONG>(status)));
+        return status;
     }
 
     NTSTATUS WebSocketCodec::EncodeClientFrameForHttp2(
@@ -1015,6 +1027,15 @@ namespace ws
         header->Opcode = opcode;
         header->PayloadLength = payloadLength;
         header->HeaderLength = cursor;
+        WKNET_TRACE(
+            ::wknet::ComponentWs,
+            ::wknet::TraceLevel::Max,
+            "ws.frame.decode_header opcode=%u fin=%u rsv1=%u payload_bytes=%llu header_bytes=%Iu",
+            static_cast<ULONG>(header->Opcode),
+            header->Fin ? 1u : 0u,
+            header->Rsv1 ? 1u : 0u,
+            header->PayloadLength,
+            header->HeaderLength);
         return STATUS_SUCCESS;
     }
 

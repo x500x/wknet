@@ -52,6 +52,8 @@ namespace wknet::net {
         NTSTATUS Close() noexcept;
         bool IsConnected() const noexcept;
         PWSK_SOCKET NativeSocket() const noexcept;
+        void SetConnectionId(ULONGLONG connectionId) noexcept { connectionId_ = connectionId; }
+        ULONGLONG ConnectionId() const noexcept { return connectionId_; }
 
     private:
         enum class OwnershipState : UCHAR
@@ -73,6 +75,7 @@ namespace wknet::net {
         void ReleaseReusableIrps() noexcept;
 
         PWSK_SOCKET socket_ = nullptr;
+        ULONGLONG connectionId_ = 0;
         const WSK_PROVIDER_CONNECTION_DISPATCH* dispatch_ = nullptr;
         OwnershipState ownershipState_ = OwnershipState::Closed;
         volatile LONG closeIssued_ = 0;

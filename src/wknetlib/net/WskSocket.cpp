@@ -517,7 +517,7 @@ namespace net
             WskSyncIrpContext* context = nullptr;
             NTSTATUS status = WskSyncAllocateIrp(&context);
             if (!NT_SUCCESS(status)) {
-                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Verbose, "Unable to allocate detached WSK close IRP: 0x%08X\r\n",
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Verbose, "net.wsk_socket.detached_close_irp_unavailable status=0x%08X",
                     static_cast<ULONG>(status));
                 return;
             }
@@ -799,7 +799,7 @@ namespace net
             &completion);
 
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskSocketConnect failed: 0x%08X family=%u information=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "net.wsk_socket.connect_failed status=0x%08X family=%u information=%Iu",
                 static_cast<ULONG>(status),
                 static_cast<unsigned>(remoteAddress->sa_family),
                 information);
@@ -897,7 +897,7 @@ namespace net
             }
             const NTSTATUS closeStatus = CloseAfterCancelledOperation(completion.CompletionOwnedCleanup);
             if (!NT_SUCCESS(closeStatus)) {
-                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskSend cancellation close failed: 0x%08X\r\n",
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "net.wsk_socket.send_cancel_close_failed status=0x%08X",
                     static_cast<ULONG>(closeStatus));
             }
         }
@@ -1009,7 +1009,7 @@ namespace net
             }
             const NTSTATUS closeStatus = CloseAfterCancelledOperation(completion.CompletionOwnedCleanup);
             if (!NT_SUCCESS(closeStatus)) {
-                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskReceive cancellation close failed: 0x%08X\r\n",
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "net.wsk_socket.receive_cancel_close_failed status=0x%08X",
                     static_cast<ULONG>(closeStatus));
             }
         }
@@ -1029,7 +1029,7 @@ namespace net
         }
 
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskReceive failed: 0x%08X information=%Iu requested=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "net.wsk_socket.receive_failed status=0x%08X information=%Iu requested=%Iu",
                 static_cast<ULONG>(status),
                 information,
                 length);
@@ -1133,7 +1133,7 @@ namespace net
         if (status == STATUS_IO_TIMEOUT) {
             const NTSTATUS closeStatus = CloseAfterCancelledOperation(completion.CompletionOwnedCleanup);
             if (!NT_SUCCESS(closeStatus)) {
-                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskDisconnect timeout close failed: 0x%08X\r\n",
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "net.wsk_socket.disconnect_timeout_close_failed status=0x%08X",
                     static_cast<ULONG>(closeStatus));
             }
         }
@@ -1185,9 +1185,18 @@ namespace net
         const SOCKADDR* localAddress,
         const WskCancellationToken* cancellation) noexcept
     {
-        return socket != nullptr && client != nullptr
-            ? socket->Connect(*client, remoteAddress, localAddress, cancellation)
-            : STATUS_INVALID_PARAMETER;
+        if (socket == nullptr || client == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        const NTSTATUS status = socket->Connect(*client, remoteAddress, localAddress, cancellation);
+        const TraceCorrelation correlation = { 0, socket->ConnectionId(), 0 };
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentNet,
+            NT_SUCCESS(status) ? ::wknet::TraceLevel::Info : ::wknet::TraceLevel::Error,
+            &correlation,
+            NT_SUCCESS(status) ? "net.socket.connect.complete" : "net.socket.connect.failed status=0x%08X",
+            static_cast<ULONG>(status));
+        return status;
     }
 
     NTSTATUS WskSocketSend(
@@ -1198,9 +1207,30 @@ namespace net
         ULONG flags,
         const WskCancellationToken* cancellation) noexcept
     {
-        return socket != nullptr
-            ? socket->Send(data, length, bytesSent, flags, cancellation)
-            : STATUS_INVALID_PARAMETER;
+        if (socket == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        const NTSTATUS status = socket->Send(data, length, bytesSent, flags, cancellation);
+        const TraceCorrelation correlation = { 0, socket->ConnectionId(), 0 };
+        if (NT_SUCCESS(status)) {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Max,
+                &correlation,
+                "net.socket.send bytes=%Iu requested=%Iu",
+                bytesSent != nullptr ? *bytesSent : length,
+                length);
+        }
+        else {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Error,
+                &correlation,
+                "net.socket.send.failed status=0x%08X requested=%Iu",
+                static_cast<ULONG>(status),
+                length);
+        }
+        return status;
     }
 
     NTSTATUS WskSocketReceive(
@@ -1212,14 +1242,46 @@ namespace net
         ULONG timeoutMilliseconds,
         const WskCancellationToken* cancellation) noexcept
     {
-        return socket != nullptr
-            ? socket->Receive(data, length, bytesReceived, flags, timeoutMilliseconds, cancellation)
-            : STATUS_INVALID_PARAMETER;
+        if (socket == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        const NTSTATUS status = socket->Receive(data, length, bytesReceived, flags, timeoutMilliseconds, cancellation);
+        const TraceCorrelation correlation = { 0, socket->ConnectionId(), 0 };
+        if (NT_SUCCESS(status)) {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Max,
+                &correlation,
+                "net.socket.receive bytes=%Iu requested=%Iu",
+                bytesReceived != nullptr ? *bytesReceived : static_cast<SIZE_T>(0),
+                length);
+        }
+        else {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Error,
+                &correlation,
+                "net.socket.receive.failed status=0x%08X requested=%Iu",
+                static_cast<ULONG>(status),
+                length);
+        }
+        return status;
     }
 
     NTSTATUS WskSocketClose(WskSocket* socket) noexcept
     {
-        return socket != nullptr ? socket->Close() : STATUS_SUCCESS;
+        if (socket == nullptr) {
+            return STATUS_SUCCESS;
+        }
+        const TraceCorrelation correlation = { 0, socket->ConnectionId(), 0 };
+        const NTSTATUS status = socket->Close();
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentNet,
+            NT_SUCCESS(status) ? ::wknet::TraceLevel::Info : ::wknet::TraceLevel::Warning,
+            &correlation,
+            NT_SUCCESS(status) ? "net.socket.close.complete" : "net.socket.close.failed status=0x%08X",
+            static_cast<ULONG>(status));
+        return status;
     }
 
     void WskSocketDestroy(WskSocket* socket) noexcept
@@ -1234,6 +1296,18 @@ namespace net
     bool WskSocketIsConnected(const WskSocket* socket) noexcept
     {
         return socket != nullptr && socket->IsConnected();
+    }
+
+    void WskSocketSetConnectionId(WskSocket* socket, ULONGLONG connectionId) noexcept
+    {
+        if (socket != nullptr) {
+            socket->SetConnectionId(connectionId);
+        }
+    }
+
+    ULONGLONG WskSocketConnectionId(const WskSocket* socket) noexcept
+    {
+        return socket != nullptr ? socket->ConnectionId() : 0;
     }
 }
 }

@@ -140,6 +140,8 @@ namespace session
     {
         HandleHeader Header = { HandleKind::WebSocket, 0, nullptr };
         SessionHandle Session = nullptr;
+        ULONGLONG TraceOperationId = 0;
+        ULONGLONG TraceConnectionId = 0;
         Workspace* Workspace = nullptr;
         char* Url = nullptr;
         SIZE_T UrlLength = 0;

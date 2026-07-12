@@ -100,5 +100,7 @@ namespace net
     NTSTATUS WskSocketClose(_Inout_opt_ WskSocket* socket) noexcept;
     void WskSocketDestroy(_Inout_opt_ WskSocket* socket) noexcept;
     bool WskSocketIsConnected(_In_opt_ const WskSocket* socket) noexcept;
+    void WskSocketSetConnectionId(_Inout_opt_ WskSocket* socket, ULONGLONG connectionId) noexcept;
+    ULONGLONG WskSocketConnectionId(_In_opt_ const WskSocket* socket) noexcept;
 }
 }

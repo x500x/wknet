@@ -38,6 +38,7 @@ namespace session
         // operation object alive and must still be able to observe cancellation.
         volatile LONG Closed = 0;
         AsyncOperationKind Kind = AsyncOperationKind::HttpSend;
+        ULONGLONG TraceOperationId = 0;
         volatile LONG ReferenceCount = 1;
         volatile LONG Canceled = 0;
         volatile LONG Completed = 0;
@@ -67,6 +68,7 @@ namespace session
         AsyncCompletionCallback CompletionCallback = nullptr;
         void* CompletionContext = nullptr;
         bool StartSuspended = false;
+        ULONGLONG TraceOperationId = 0;
     };
 
     _Must_inspect_result_

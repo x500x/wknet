@@ -83,8 +83,15 @@ NTSTATUS TransportCreateWsk(net::WskSocket* socket, Transport** transport) noexc
     context->Socket = socket;
     created->Operations = &Operations;
     created->Context = context;
+    created->ConnectionId = net::WskSocketConnectionId(socket);
     created->OwnsOperations = false;
     *transport = created;
+    const TraceCorrelation correlation = { 0, created->ConnectionId, 0 };
+    WKNET_TRACE_CORRELATED(
+        ::wknet::ComponentTransport,
+        ::wknet::TraceLevel::Info,
+        &correlation,
+        "transport.wsk.created");
     return STATUS_SUCCESS;
 }
 }

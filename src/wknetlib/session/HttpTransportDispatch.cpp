@@ -579,9 +579,11 @@ namespace session
             const char* negotiatedAlpn = tls::TlsConnectionNegotiatedAlpn(tlsConnection);
             const SIZE_T negotiatedAlpnLength = tls::TlsConnectionNegotiatedAlpnLength(tlsConnection);
             if (!TextEqualsLiteral(negotiatedAlpn, negotiatedAlpnLength, "h2")) {
-                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "High-level HTTP/2 ALPN not negotiated: %.*s\r\n",
-                    static_cast<int>(negotiatedAlpnLength),
-                    negotiatedAlpn != nullptr ? negotiatedAlpn : "");
+                WKNET_TRACE(
+                    ::wknet::ComponentSession,
+                    ::wknet::TraceLevel::Error,
+                    "http2.alpn.unexpected protocol_bytes=%Iu",
+                    negotiatedAlpnLength);
                 return STATUS_NOT_SUPPORTED;
             }
 

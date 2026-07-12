@@ -63,7 +63,7 @@ namespace session
             status = websocket->Client->SendPong(payload, payloadLength, buffers);
         }
         if (!NT_SUCCESS(status)) {
-            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WebSocketSendControlSync Client->SendControl failed: 0x%08X\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "ws.control.send_failed status=0x%08X",
                 static_cast<ULONG>(status));
             DisconnectWebSocketOnTerminalStatus(*websocket, status);
         }

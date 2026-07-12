@@ -1,4 +1,5 @@
 #include "session/WsEngineInternal.hpp"
+#include "rtl/TraceInternal.h"
 
 namespace wknet
 {
@@ -56,12 +57,26 @@ namespace session
 
         newWebSocket->Header = { HandleKind::WebSocket, 0, nullptr };
         newWebSocket->Session = session;
+        newWebSocket->TraceOperationId = rtl::TraceAllocateCorrelationId();
+        newWebSocket->TraceConnectionId = rtl::TraceAllocateCorrelationId();
         newWebSocket->Url = urlCopy;
         newWebSocket->UrlLength = options.UrlLength;
         newWebSocket->MaxMessageBytes = options.MaxMessageBytes;
         newWebSocket->AutoReplyPing = options.AutoReplyPing;
         newWebSocket->PerMessageDeflate = options.PerMessageDeflate;
         newWebSocket->InFlight = 0;
+        const TraceCorrelation websocketCorrelation = {
+            newWebSocket->TraceOperationId,
+            newWebSocket->TraceConnectionId,
+            0
+        };
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentWs,
+            ::wknet::TraceLevel::Info,
+            &websocketCorrelation,
+            "ws.connect.start url_bytes=%Iu tls=%u",
+            options.UrlLength,
+            WebSocketModeRequiresWss(options) ? 1u : 0u);
 #if !defined(WKNET_USER_MODE_TEST)
         KeInitializeMutex(&newWebSocket->SendLock, 0);
         KeInitializeMutex(&newWebSocket->ReceiveLock, 0);
@@ -163,11 +178,25 @@ namespace session
 
         SIZE_T handshakeLength = 0;
         status = BuildWebSocketHandshakeRequest(*newWebSocket, *newWebSocket->Workspace, &handshakeLength);
-        WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Verbose, "DEBUG BuildWebSocketHandshakeRequest status=0x%08X scheme=%.*s port=%u\r\n",
-            static_cast<ULONG>(status),
-            static_cast<int>(newWebSocket->SchemeLength),
-            newWebSocket->Scheme,
-            newWebSocket->Port);
+        if (NT_SUCCESS(status)) {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentWs,
+                ::wknet::TraceLevel::Verbose,
+                &websocketCorrelation,
+                "ws.handshake.request_built scheme_bytes=%Iu port=%u",
+                newWebSocket->SchemeLength,
+                newWebSocket->Port);
+        }
+        else {
+            WKNET_TRACE_CORRELATED(
+                ::wknet::ComponentWs,
+                ::wknet::TraceLevel::Error,
+                &websocketCorrelation,
+                "ws.handshake.request_build.failed status=0x%08X scheme_bytes=%Iu port=%u",
+                static_cast<ULONG>(status),
+                newWebSocket->SchemeLength,
+                newWebSocket->Port);
+        }
         if (!NT_SUCCESS(status)) {
             ReleaseWebSocketStorage(*newWebSocket);
             FreeHandle(newWebSocket);
@@ -223,6 +252,13 @@ namespace session
             return status;
         }
         *websocket = newWebSocket;
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentWs,
+            ::wknet::TraceLevel::Info,
+            &websocketCorrelation,
+            "ws.connect.complete transport_mode=%u subprotocol_bytes=%Iu user_mode=1",
+            static_cast<ULONG>(options.TransportMode),
+            newWebSocket->SubprotocolLength);
         return STATUS_SUCCESS;
 #else
         newWebSocket->Client = AllocateNonPagedObject<session::WsConnection>();
@@ -322,6 +358,8 @@ namespace session
             connectOptions.ChallengeContext = &challengeBridge;
             connectOptions.MaxHandshakeRetries = options.MaxHandshakeRetries;
         }
+        connectOptions.TraceOperationId = newWebSocket->TraceOperationId;
+        connectOptions.TraceConnectionId = newWebSocket->TraceConnectionId;
 
         if (NT_SUCCESS(status)) {
             status = newWebSocket->Client->Connect(session->WskClient, connectOptions, buffers);
@@ -355,6 +393,13 @@ namespace session
             return status;
         }
         *websocket = newWebSocket;
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentWs,
+            ::wknet::TraceLevel::Info,
+            &websocketCorrelation,
+            "ws.connect.complete transport_mode=%u subprotocol_bytes=%Iu",
+            static_cast<ULONG>(options.TransportMode),
+            newWebSocket->SubprotocolLength);
         return STATUS_SUCCESS;
 #endif
     }

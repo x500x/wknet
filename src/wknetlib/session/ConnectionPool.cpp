@@ -1,4 +1,5 @@
 #include "session/ConnectionPoolPrivate.hpp"
+#include "rtl/TraceInternal.h"
 #include "transport/Transport.h"
 #include "http2/Http2Connection.h"
 #include "net/WskSocket.h"
@@ -450,12 +451,12 @@ namespace
     void StoreHttp2KeepAliveOpaqueData(_Inout_ PooledConnection& connection) noexcept
     {
         const ULONGLONG first =
-            (static_cast<ULONGLONG>(connection.Id) << 32) ^
-            static_cast<ULONGLONG>(connection.Http2KeepAliveSequence);
+            connection.Id ^
+            (static_cast<ULONGLONG>(connection.Http2KeepAliveSequence) << 32);
         const ULONGLONG second =
             0x4B48503250494E47ULL ^
             (static_cast<ULONGLONG>(connection.Http2KeepAliveSequence) << 1) ^
-            static_cast<ULONGLONG>(connection.Id);
+            connection.Id;
 
         for (ULONG index = 0; index < 4; ++index) {
             connection.Http2KeepAliveOpaqueData[index] =
@@ -570,7 +571,6 @@ namespace
 
         pool->Capacity = capacity;
         pool->MaxConnectionsPerHost = maxConnectionsPerHost;
-        pool->NextConnectionId = 1;
         pool->IdleTimeoutMilliseconds = idleTimeoutMilliseconds;
         for (ULONG index = 0; index < capacity; ++index) {
             InitializePooledConnectionSlot(pool->Entries[index]);
@@ -926,11 +926,8 @@ namespace
                     candidate.InUse = true;
                     candidate.Connected = true;
                     candidate.Key = key;
-                    candidate.Id = pool->NextConnectionId++;
+                    candidate.Id = rtl::TraceAllocateCorrelationId();
                     candidate.LastUsedTime = 0;
-                    if (candidate.Id == 0) {
-                        candidate.Id = pool->NextConnectionId++;
-                    }
                     ++pool->ActiveCount;
                     selected = &candidate;
                     break;
@@ -954,11 +951,8 @@ namespace
                     candidate.InUse = true;
                     candidate.Connected = true;
                     candidate.Key = key;
-                    candidate.Id = pool->NextConnectionId++;
+                    candidate.Id = rtl::TraceAllocateCorrelationId();
                     candidate.LastUsedTime = 0;
-                    if (candidate.Id == 0) {
-                        candidate.Id = pool->NextConnectionId++;
-                    }
                     if (!wasConnected) {
                         ++pool->ActiveCount;
                     }
@@ -1133,6 +1127,8 @@ namespace
         connection->Socket = socket;
         connection->RawTransport = transport;
         connection->Transport = transport;
+        net::WskSocketSetConnectionId(socket, connection->Id);
+        transport::TransportSetConnectionId(transport, connection->Id);
         connection->ProxyTunnelEstablished = false;
         return STATUS_SUCCESS;
     }
@@ -1154,6 +1150,8 @@ namespace
 
         connection->Tls = tlsConnection;
         connection->Transport = transport;
+        tls::TlsConnectionSetConnectionId(tlsConnection, connection->Id);
+        transport::TransportSetConnectionId(transport, connection->Id);
         return STATUS_SUCCESS;
     }
 #endif
@@ -1236,7 +1234,7 @@ namespace
         }
     }
 
-    ULONG PooledConnectionId(const PooledConnection* connection) noexcept
+    ULONGLONG PooledConnectionId(const PooledConnection* connection) noexcept
     {
         return connection != nullptr ? connection->Id : 0;
     }
@@ -1300,6 +1298,7 @@ namespace
         if (connection != nullptr) {
             connection->Transport = transport;
             connection->Http2 = http2Connection;
+            transport::TransportSetConnectionId(transport, connection->Id);
         }
     }
 

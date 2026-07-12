@@ -1,4 +1,5 @@
 #include "session/Async.h"
+#include "rtl/TraceInternal.h"
 
 #if defined(WKNET_USER_MODE_TEST)
 #include <stdlib.h>
@@ -487,6 +488,15 @@ namespace
 
         operation->Status = status;
         WriteState(operation, AsyncState::Completed);
+        const TraceCorrelation correlation = { operation->TraceOperationId, 0, 0 };
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentSession,
+            NT_SUCCESS(status) ? ::wknet::TraceLevel::Info : ::wknet::TraceLevel::Error,
+            &correlation,
+            NT_SUCCESS(status) ? "async.operation.complete kind=%u status=0x%08X" :
+                "async.operation.failed kind=%u status=0x%08X",
+            static_cast<ULONG>(operation->Kind),
+            static_cast<ULONG>(status));
 
 #if defined(WKNET_USER_MODE_TEST)
         operation->CompletionSignaled = true;
@@ -551,6 +561,8 @@ namespace
         newOperation->Magic = AsyncOperationMagic;
         newOperation->Closed = 0;
         newOperation->Kind = options.Kind;
+        newOperation->TraceOperationId = options.TraceOperationId != 0 ?
+            options.TraceOperationId : rtl::TraceAllocateCorrelationId();
         newOperation->ReferenceCount = 1;
         newOperation->Canceled = 0;
         newOperation->Completed = 0;
@@ -570,6 +582,14 @@ namespace
 #endif
 
         *operation = newOperation;
+        const TraceCorrelation correlation = { newOperation->TraceOperationId, 0, 0 };
+        WKNET_TRACE_CORRELATED(
+            ::wknet::ComponentSession,
+            ::wknet::TraceLevel::Info,
+            &correlation,
+            "async.operation.created kind=%u suspended=%u",
+            static_cast<ULONG>(newOperation->Kind),
+            options.StartSuspended ? 1u : 0u);
 
         if (!options.StartSuspended) {
             NTSTATUS status = AsyncOperationQueue(newOperation);

@@ -552,6 +552,11 @@ NTSTATUS ParseUrlIntoRequest(
     const char* url,
     SIZE_T urlLength) noexcept
 {
+    WKNET_TRACE(
+        ::wknet::ComponentRtl,
+        ::wknet::TraceLevel::Verbose,
+        "rtl.url.parse_request.start input_bytes=%Iu",
+        urlLength);
     if (url == nullptr || urlLength == 0) {
         return STATUS_INVALID_PARAMETER;
     }
@@ -707,6 +712,14 @@ NTSTATUS ParseUrlIntoRequest(
     }
 
     request.Port = port;
+    WKNET_TRACE(
+        ::wknet::ComponentRtl,
+        ::wknet::TraceLevel::Info,
+        "rtl.url.parse_request.complete scheme_bytes=%Iu host_bytes=%Iu path_bytes=%Iu port=%u",
+        request.SchemeLength,
+        request.HostLength,
+        request.PathLength,
+        static_cast<ULONG>(request.Port));
     return STATUS_SUCCESS;
 }
 

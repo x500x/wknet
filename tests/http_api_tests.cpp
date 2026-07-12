@@ -483,8 +483,8 @@ namespace
         SIZE_T CallCount = 0;
         SIZE_T ReusedCallCount = 0;
         SIZE_T NewConnectionCallCount = 0;
-        ULONG FirstConnectionId = 0;
-        ULONG RetryConnectionId = 0;
+        ULONGLONG FirstConnectionId = 0;
+        ULONGLONG RetryConnectionId = 0;
         NTSTATUS FailureStatus = STATUS_CONNECTION_RESET;
     };
 
@@ -493,16 +493,16 @@ namespace
         SIZE_T CallCount = 0;
         SIZE_T ReusedCallCount = 0;
         SIZE_T NewConnectionCallCount = 0;
-        ULONG FirstConnectionId = 0;
-        ULONG RetryConnectionId = 0;
+        ULONGLONG FirstConnectionId = 0;
+        ULONGLONG RetryConnectionId = 0;
     };
 
     struct FreshRetrySignalCapture
     {
         SIZE_T CallCount = 0;
         SIZE_T NewConnectionCallCount = 0;
-        ULONG FirstConnectionId = 0;
-        ULONG RetryConnectionId = 0;
+        ULONGLONG FirstConnectionId = 0;
+        ULONGLONG RetryConnectionId = 0;
         NTSTATUS FailureStatus = STATUS_RETRY;
     };
 
@@ -3424,7 +3424,7 @@ namespace
         Expect(status == STATUS_INSUFFICIENT_RESOURCES, "active same-host different TLS identity counts toward host quota");
         Expect(blocked == nullptr, "blocked TLS identity acquire returns no connection");
 
-        const ULONG firstId = wknet::session::PooledConnectionId(first);
+        const ULONGLONG firstId = wknet::session::PooledConnectionId(first);
         wknet::session::ConnectionPoolRelease(&pool, first, true);
 
         wknet::session::PooledConnection* second = nullptr;

@@ -7,7 +7,7 @@ namespace wknet::session {
     {
         bool InUse = false;
         bool Connected = false;
-        ULONG Id = 0;
+        ULONGLONG Id = 0;
         ULONGLONG LastUsedTime = 0;
         ULONG Http2StreamLeases = 0;
         ULONG Http2MaxStreamLeases = 0;
