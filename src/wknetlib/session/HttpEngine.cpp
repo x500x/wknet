@@ -1,5 +1,5 @@
 #include "session/HttpEngine.h"
-#include "client/ProxyTunnel.h"
+#include "transport/ProxyConnect.h"
 #include "transport/TlsTransport.h"
 #include "rtl/WorkspaceScratchAllocator.h"
 #include "transport/WskTransport.h"

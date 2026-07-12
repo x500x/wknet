@@ -284,7 +284,7 @@
         }
 
         http1::HttpHeader proxyAuthHeader = {};
-        client::ProxyConnectRequestOptions connectOptions = {};
+        transport::ProxyConnectRequestOptions connectOptions = {};
         connectOptions.Authority = {
             reinterpret_cast<char*>(workspace.DecodedBody.Data),
             authorityLength
@@ -300,7 +300,7 @@
         }
 
         SIZE_T connectRequestLength = 0;
-        status = client::BuildProxyConnectRequest(
+        status = transport::BuildProxyConnectRequest(
             connectOptions,
             reinterpret_cast<char*>(workspace.Response.Data),
             workspace.Response.Length,
@@ -353,7 +353,7 @@
         if (proxyResponse.StatusCode == 407) {
             return STATUS_ACCESS_DENIED;
         }
-        if (!client::IsSuccessfulProxyConnectResponse(proxyResponse)) {
+        if (!transport::IsSuccessfulProxyConnectResponse(proxyResponse)) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
 

@@ -1,8 +1,8 @@
-#include "client/ProxyTunnel.h"
+#include "transport/ProxyConnect.h"
 
 namespace wknet
 {
-namespace client
+namespace transport
 {
     NTSTATUS BuildProxyConnectRequest(
         const ProxyConnectRequestOptions& options,

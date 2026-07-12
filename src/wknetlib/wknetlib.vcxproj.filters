@@ -15,6 +15,9 @@
     <Filter Include="Source Files\core">
       <UniqueIdentifier>{A82F2D68-30B8-4A4F-B2CF-6AB8E4F3D153}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\transport">
+      <UniqueIdentifier>{5ED5144B-99DA-4E3F-93B2-1AB467B69242}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\crypto">
       <UniqueIdentifier>{1271C8D8-04BC-4EE0-9A2A-2C4D27E15DBD}</UniqueIdentifier>
     </Filter>
@@ -99,7 +102,10 @@
       <Filter>Source Files\client</Filter>
     </ClCompile>
     <ClCompile Include="transport\TlsTransport.cpp">
-      <Filter>Source Files\core</Filter>
+      <Filter>Source Files\transport</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\ProxyConnect.cpp">
+      <Filter>Source Files\transport</Filter>
     </ClCompile>
     <ClCompile Include="crypto\Aead.cpp">
       <Filter>Source Files\crypto</Filter>

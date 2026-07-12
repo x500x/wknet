@@ -33,7 +33,7 @@
     <ClCompile Include="client\HttpClient.cpp" />
     <ClCompile Include="client\Http2Client.cpp" />
     <ClCompile Include="client\HttpsClient.cpp" />
-    <ClCompile Include="client\ProxyTunnel.cpp" />
+    <ClCompile Include="transport\ProxyConnect.cpp" />
     <ClCompile Include="client\WebSocketClient.cpp" />
     <ClCompile Include="transport\TlsTransport.cpp" />
     <ClCompile Include="crypto\Aead.cpp" />

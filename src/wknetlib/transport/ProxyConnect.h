@@ -5,7 +5,7 @@
 
 namespace wknet
 {
-namespace client
+namespace transport
 {
     struct ProxyConnectRequestOptions final
     {

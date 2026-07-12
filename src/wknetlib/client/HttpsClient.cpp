@@ -1,5 +1,5 @@
 #include "client/HttpsClient.h"
-#include "client/ProxyTunnel.h"
+#include "transport/ProxyConnect.h"
 #include "rtl/Irql.h"
 #include "transport/TlsTransport.h"
 #include "rtl/WorkspaceScratchAllocator.h"
@@ -303,12 +303,12 @@ namespace client
 
         if (UsesProxyTunnel(options)) {
             SIZE_T connectRequestLength = 0;
-            ProxyConnectRequestOptions connectOptions = {};
+            transport::ProxyConnectRequestOptions connectOptions = {};
             connectOptions.Authority = { options.ProxyAuthority, options.ProxyAuthorityLength };
             connectOptions.UserAgent = options.Request.UserAgent;
             connectOptions.Headers = options.ProxyHeaders;
             connectOptions.HeaderCount = options.ProxyHeaderCount;
-            status = BuildProxyConnectRequest(
+            status = transport::BuildProxyConnectRequest(
                 connectOptions,
                 buffers.RequestBuffer,
                 buffers.RequestBufferLength,
@@ -343,7 +343,7 @@ namespace client
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
             }
-            if (!IsSuccessfulProxyConnectResponse(proxyResponse)) {
+            if (!transport::IsSuccessfulProxyConnectResponse(proxyResponse)) {
                 FreeNonPagedObject(rawTransport);
                 FreeNonPagedObject(tlsConnection);
                 const NTSTATUS closeStatus = socket->Close();
