@@ -519,6 +519,10 @@ _Use_decl_annotations_
 extern "C" NTSTATUS
 DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
 {
+    // Test driver: full graded trace (library default is Off).
+    wknet::TraceSetLevel(wknet::TraceLevel::Max);
+    wknet::TraceSetComponents(wknet::ComponentAll);
+
     const NTSTATUS logStatus = wknet::InitializeTestLogFile(registryPath);
     WKNET_DBG_PRINT("DriverEntry 开始\r\n");
     if (NT_SUCCESS(logStatus)) {

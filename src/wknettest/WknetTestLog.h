@@ -58,5 +58,8 @@ namespace testlog
 #undef WKNET_DBG_PRINT
 #define WKNET_DBG_PRINT(...) wknet::testlog::Print(__VA_ARGS__)
 
+// Prefer TraceSink for graded output; keep DBG_PRINT alias for sample verbosity.
+// Test drivers also force TraceLevel::Max in DriverEntry.
+
 #undef KHTTP_SAMPLE_LOG
 #define KHTTP_SAMPLE_LOG(...) WKNET_DBG_PRINT(__VA_ARGS__)

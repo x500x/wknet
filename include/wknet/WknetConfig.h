@@ -29,11 +29,8 @@ namespace wknet
     constexpr SIZE_T KhTlsMaxPostHandshakeMessagesPerRecord = 8;
 }
 
-#ifdef DBG
-#define WKNET_DBG_PRINT(...) DbgPrintEx(0, 0, WKNET_DRIVER_NAME " : " __VA_ARGS__)
-#else
-#define WKNET_DBG_PRINT(...)
-#endif
+// Graded trace lives in <wknet/Trace.h>. Default level is Off.
+#include <wknet/Trace.h>
 
 _Ret_maybenull_
 void* __cdecl operator new(size_t size);

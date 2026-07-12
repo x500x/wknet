@@ -3,6 +3,8 @@
 
 #if defined(WKNET_USER_MODE_TEST)
 #include <time.h>
+// Quiet cert-validator spam in user-mode protocol tests.
+#undef WKNET_DBG_PRINT
 #define WKNET_DBG_PRINT(...)
 #else
 #include <wknet/WknetConfig.h>

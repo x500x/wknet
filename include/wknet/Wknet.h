@@ -1,6 +1,7 @@
 #pragma once
 
 #include <wknet/WknetConfig.h>
+#include <wknet/Trace.h>
 
 #include <wknet/http/AsyncOp.h>
 #include <wknet/http/Body.h>
