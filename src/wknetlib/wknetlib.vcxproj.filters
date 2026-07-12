@@ -562,6 +562,9 @@
     <ClInclude Include="rtl\Text.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="rtl\TraceInternal.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\AsyncOp.h">
       <Filter>Header Files\http</Filter>
     </ClInclude>

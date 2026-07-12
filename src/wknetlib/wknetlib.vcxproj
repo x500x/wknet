@@ -220,6 +220,7 @@
     <ClInclude Include="codec\Pack200JarWriter.h" />
     <ClInclude Include="codec\XmlWriter.h" />
     <ClInclude Include="rtl\Text.h" />
+    <ClInclude Include="rtl\TraceInternal.h" />
     <ClInclude Include="..\..\include\wknet\WknetConfig.h" />
     <ClInclude Include="..\..\include\wknet\WknetLimits.h" />
     <ClInclude Include="..\..\include\wknet\http\AsyncOp.h" />
