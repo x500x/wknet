@@ -517,7 +517,7 @@ namespace net
             WskSyncIrpContext* context = nullptr;
             NTSTATUS status = WskSyncAllocateIrp(&context);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("Unable to allocate detached WSK close IRP: 0x%08X\r\n",
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Verbose, "Unable to allocate detached WSK close IRP: 0x%08X\r\n",
                     static_cast<ULONG>(status));
                 return;
             }
@@ -799,7 +799,7 @@ namespace net
             &completion);
 
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WskSocketConnect failed: 0x%08X family=%u information=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskSocketConnect failed: 0x%08X family=%u information=%Iu\r\n",
                 static_cast<ULONG>(status),
                 static_cast<unsigned>(remoteAddress->sa_family),
                 information);
@@ -897,7 +897,7 @@ namespace net
             }
             const NTSTATUS closeStatus = CloseAfterCancelledOperation(completion.CompletionOwnedCleanup);
             if (!NT_SUCCESS(closeStatus)) {
-                WKNET_DBG_PRINT("WskSend cancellation close failed: 0x%08X\r\n",
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskSend cancellation close failed: 0x%08X\r\n",
                     static_cast<ULONG>(closeStatus));
             }
         }
@@ -1009,7 +1009,7 @@ namespace net
             }
             const NTSTATUS closeStatus = CloseAfterCancelledOperation(completion.CompletionOwnedCleanup);
             if (!NT_SUCCESS(closeStatus)) {
-                WKNET_DBG_PRINT("WskReceive cancellation close failed: 0x%08X\r\n",
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskReceive cancellation close failed: 0x%08X\r\n",
                     static_cast<ULONG>(closeStatus));
             }
         }
@@ -1029,7 +1029,7 @@ namespace net
         }
 
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WskReceive failed: 0x%08X information=%Iu requested=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskReceive failed: 0x%08X information=%Iu requested=%Iu\r\n",
                 static_cast<ULONG>(status),
                 information,
                 length);
@@ -1133,7 +1133,7 @@ namespace net
         if (status == STATUS_IO_TIMEOUT) {
             const NTSTATUS closeStatus = CloseAfterCancelledOperation(completion.CompletionOwnedCleanup);
             if (!NT_SUCCESS(closeStatus)) {
-                WKNET_DBG_PRINT("WskDisconnect timeout close failed: 0x%08X\r\n",
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskDisconnect timeout close failed: 0x%08X\r\n",
                     static_cast<ULONG>(closeStatus));
             }
         }

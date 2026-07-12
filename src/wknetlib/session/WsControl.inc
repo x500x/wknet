@@ -57,7 +57,7 @@
             status = websocket->Client->SendPong(payload, payloadLength, buffers);
         }
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WebSocketSendControlSync Client->SendControl failed: 0x%08X\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WebSocketSendControlSync Client->SendControl failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
             DisconnectWebSocketOnTerminalStatus(*websocket, status);
         }

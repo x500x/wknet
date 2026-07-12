@@ -79,7 +79,7 @@ namespace client
             buffers.RequestBufferLength,
             &requestLength);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("HttpClient build request failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpClient build request failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -90,7 +90,7 @@ namespace client
 
         status = wskClient.Resolve(options.ServerName, options.ServiceName, remoteAddress.Get());
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("HttpClient resolve failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpClient resolve failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -101,7 +101,7 @@ namespace client
 
         status = socket->Connect(wskClient, reinterpret_cast<const SOCKADDR*>(remoteAddress.Get()));
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("HttpClient connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpClient connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -111,7 +111,7 @@ namespace client
             status = STATUS_CONNECTION_DISCONNECTED;
         }
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("HttpClient send failed: 0x%08X sent=%Iu expected=%Iu\r\n",
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpClient send failed: 0x%08X sent=%Iu expected=%Iu\r\n",
                 static_cast<ULONG>(status),
                 sent,
                 requestLength);
@@ -120,7 +120,7 @@ namespace client
         if (NT_SUCCESS(status)) {
             status = ReadHttpResponse(*socket.Get(), options.ResponseBodyForbidden, buffers, response);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("HttpClient read response failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpClient read response failed: 0x%08X\r\n", static_cast<ULONG>(status));
             }
         }
 
@@ -169,7 +169,7 @@ namespace client
             }
 
             if (status != STATUS_MORE_PROCESSING_REQUIRED) {
-                WKNET_DBG_PRINT("HttpClient parse response failed: 0x%08X bytes=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpClient parse response failed: 0x%08X bytes=%Iu\r\n",
                     static_cast<ULONG>(status),
                     responseLength);
                 return status;
@@ -186,7 +186,7 @@ namespace client
                 &received);
             if (!NT_SUCCESS(status)) {
                 if (status != STATUS_CONNECTION_DISCONNECTED) {
-                    WKNET_DBG_PRINT("HttpClient receive failed: 0x%08X bytes=%Iu\r\n",
+                    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpClient receive failed: 0x%08X bytes=%Iu\r\n",
                         static_cast<ULONG>(status),
                         responseLength);
                     return status;

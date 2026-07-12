@@ -173,7 +173,7 @@
             Tls12ServerKeyExchangeDiagnostic diagnostic = {};
             CaptureServerKeyExchangeDiagnostic(keyExchangeKind, handshake, &diagnostic);
 
-            WKNET_DBG_PRINT(
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error,
                 "TlsConnection parse ServerKeyExchange failed: 0x%08X cipher=0x%04X kx=%u type=%u body=%Iu curve=%u group=%u point=%u sig=0x%04X sigLen=%u offset=%Iu\r\n",
                 static_cast<ULONG>(status),
                 static_cast<unsigned>(cipherSuite),
@@ -678,7 +678,7 @@
         NTSTATUS LogTls13Failure(_In_z_ const char* stage, NTSTATUS status) noexcept
         {
 #if defined(DBG) && !defined(WKNET_USER_MODE_TEST)
-            WKNET_DBG_PRINT("TlsConnection TLS1.3 %s failed: 0x%08X\r\n", stage, static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection TLS1.3 %s failed: 0x%08X\r\n", stage, static_cast<ULONG>(status));
 #else
             UNREFERENCED_PARAMETER(stage);
 #endif

@@ -1062,7 +1062,7 @@
         if (ticket.TicketLength > Tls13MaxTicketIdentityLength ||
             ticket.NonceLength > Tls13MaxTicketNonceLength) {
 #if defined(DBG) && !defined(WKNET_USER_MODE_TEST)
-            WKNET_DBG_PRINT(
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning,
                 "TlsConnection TLS1.3 skip uncacheable NewSessionTicket ticket=%Iu nonce=%Iu\r\n",
                 ticket.TicketLength,
                 ticket.NonceLength);

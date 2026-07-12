@@ -418,7 +418,7 @@ namespace wknet
                 g_certificateBundlePath,
                 sizeof(g_certificateBundlePath));
             if (NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("证书信任包路径: %s\r\n", g_certificateBundlePath);
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "证书信任包路径: %s\r\n", g_certificateBundlePath);
                 return STATUS_SUCCESS;
             }
             if (status != STATUS_OBJECT_NAME_NOT_FOUND && status != STATUS_OBJECT_PATH_NOT_FOUND) {
@@ -435,7 +435,7 @@ namespace wknet
                 g_certificateBundlePath,
                 sizeof(g_certificateBundlePath));
             if (NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("证书信任包路径: %s (默认驱动目录同名文件)\r\n", g_certificateBundlePath);
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "证书信任包路径: %s (默认驱动目录同名文件)\r\n", g_certificateBundlePath);
             }
             return status;
         }
@@ -472,11 +472,11 @@ namespace wknet
             certificateBundlePath,
             &khttpResults);
         if (!NT_SUCCESS(khttpStatus)) {
-            WKNET_DBG_PRINT("wknettest 全量示例完成，但存在失败项: 0x%08X\r\n", static_cast<ULONG>(khttpStatus));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "wknettest 全量示例完成，但存在失败项: 0x%08X\r\n", static_cast<ULONG>(khttpStatus));
             finalStatus = khttpStatus;
         }
         else {
-            WKNET_DBG_PRINT("wknettest 全量示例全部完成\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "wknettest 全量示例全部完成\r\n");
         }
 
         return finalStatus;
@@ -500,17 +500,17 @@ namespace wknet
         UNREFERENCED_PARAMETER(driverObject);
 
         if (g_wskClient != nullptr) {
-            WKNET_DBG_PRINT("驱动卸载开始\r\n");
-            WKNET_DBG_PRINT("驱动卸载: 开始等待异步 HTTP worker 结束\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "驱动卸载开始\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "驱动卸载: 开始等待异步 HTTP worker 结束\r\n");
             ::wknet::http::Destroy();
-            WKNET_DBG_PRINT("驱动卸载: 异步 HTTP worker 已结束\r\n");
-            WKNET_DBG_PRINT("驱动卸载: 开始关闭 active HTTP/WebSocket handle\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "驱动卸载: 异步 HTTP worker 已结束\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "驱动卸载: 开始关闭 active HTTP/WebSocket handle\r\n");
             session::EngineCloseActiveHandles();
-            WKNET_DBG_PRINT("驱动卸载: active HTTP/WebSocket handle 已关闭\r\n");
-            WKNET_DBG_PRINT("驱动卸载: 开始释放 WSK client\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "驱动卸载: active HTTP/WebSocket handle 已关闭\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "驱动卸载: 开始释放 WSK client\r\n");
             ReleaseWskClient();
-            WKNET_DBG_PRINT("驱动卸载: WSK client 已释放\r\n");
-            WKNET_DBG_PRINT("驱动卸载完成\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "驱动卸载: WSK client 已释放\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "驱动卸载完成\r\n");
         }
         testlog::Shutdown();
     }
@@ -525,24 +525,24 @@ DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
     wknet::TraceSetComponents(wknet::ComponentAll);
 
     const NTSTATUS logStatus = wknet::InitializeTestLogFile(registryPath);
-    WKNET_DBG_PRINT("DriverEntry 开始\r\n");
+    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "DriverEntry 开始\r\n");
     if (NT_SUCCESS(logStatus)) {
-        WKNET_DBG_PRINT("测试日志路径: %s\r\n", wknet::g_testLogPath);
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "测试日志路径: %s\r\n", wknet::g_testLogPath);
     }
     else {
-        WKNET_DBG_PRINT("测试日志文件初始化失败: 0x%08X\r\n", static_cast<ULONG>(logStatus));
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "测试日志文件初始化失败: 0x%08X\r\n", static_cast<ULONG>(logStatus));
     }
     driverObject->DriverUnload = wknet::DriverUnload;
 
     NTSTATUS status = wknet::InitializeCertificateBundlePath(registryPath);
     if (!NT_SUCCESS(status)) {
-        WKNET_DBG_PRINT("证书信任包路径初始化失败: 0x%08X\r\n", static_cast<ULONG>(status));
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "证书信任包路径初始化失败: 0x%08X\r\n", static_cast<ULONG>(status));
         wknet::g_certificateBundlePath[0] = '\0';
     }
 
     wknet::g_wskClient = new wknet::net::WskClient();
     if (wknet::g_wskClient == nullptr) {
-        WKNET_DBG_PRINT("WskClient 分配失败\r\n");
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "WskClient 分配失败\r\n");
         wknet::testlog::Shutdown();
         return STATUS_INSUFFICIENT_RESOURCES;
     }
@@ -550,22 +550,22 @@ DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
     status = wknet::g_wskClient->Initialize();
     if (!NT_SUCCESS(status)) {
         if (!wknet::IsLoadTimeWskProviderUnavailable(status)) {
-            WKNET_DBG_PRINT("WSK 初始化失败: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "WSK 初始化失败: 0x%08X\r\n", static_cast<ULONG>(status));
             wknet::ReleaseWskClient();
             wknet::testlog::Shutdown();
             return status;
         }
 
-        WKNET_DBG_PRINT(
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info,
             "WSK 初始化暂不可用，DriverEntry 继续完成: 0x%08X\r\n",
             static_cast<ULONG>(status));
         wknet::ReleaseWskClient();
-        WKNET_DBG_PRINT("DriverEntry 完成: 0x%08X\r\n", static_cast<ULONG>(STATUS_SUCCESS));
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "DriverEntry 完成: 0x%08X\r\n", static_cast<ULONG>(STATUS_SUCCESS));
         wknet::testlog::Shutdown();
         return STATUS_SUCCESS;
     }
 
-    WKNET_DBG_PRINT("WSK 已初始化，开始运行 wknettest 全量场景示例\r\n");
+    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "WSK 已初始化，开始运行 wknettest 全量场景示例\r\n");
 
     wknet::LoadHttpSamplesThreadContext sampleThreadContext = {
         STATUS_UNSUCCESSFUL,
@@ -584,7 +584,7 @@ DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
         wknet::LoadHttpSamplesThread,
         &sampleThreadContext);
     if (!NT_SUCCESS(status)) {
-        WKNET_DBG_PRINT("创建加载期示例线程失败: 0x%08X\r\n", static_cast<ULONG>(status));
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "创建加载期示例线程失败: 0x%08X\r\n", static_cast<ULONG>(status));
         wknet::ReleaseWskClient();
         wknet::testlog::Shutdown();
         return status;
@@ -593,7 +593,7 @@ DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
     status = ZwWaitForSingleObject(sampleThreadHandle, FALSE, nullptr);
     ZwClose(sampleThreadHandle);
     if (!NT_SUCCESS(status)) {
-        WKNET_DBG_PRINT("等待加载期示例线程失败: 0x%08X\r\n", static_cast<ULONG>(status));
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "等待加载期示例线程失败: 0x%08X\r\n", static_cast<ULONG>(status));
         wknet::ReleaseWskClient();
         wknet::testlog::Shutdown();
         return status;
@@ -601,13 +601,13 @@ DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
 
     const NTSTATUS sampleStatus = sampleThreadContext.Status;
     if (!NT_SUCCESS(sampleStatus)) {
-        WKNET_DBG_PRINT(
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
             "加载期示例存在失败项，DriverEntry 继续完成: 0x%08X\r\n",
             static_cast<ULONG>(sampleStatus));
     }
 
     status = STATUS_SUCCESS;
-    WKNET_DBG_PRINT("DriverEntry 完成: 0x%08X\r\n", static_cast<ULONG>(status));
+    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "DriverEntry 完成: 0x%08X\r\n", static_cast<ULONG>(status));
 
     return status;
 }

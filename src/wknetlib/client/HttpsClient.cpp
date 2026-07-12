@@ -221,11 +221,11 @@ namespace client
             response,
             nullptr);
         if (NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("HttpsClient TLS1.2 confirmed after version negotiation\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "HttpsClient TLS1.2 confirmed after version negotiation\r\n");
             return STATUS_SUCCESS;
         }
 
-        WKNET_DBG_PRINT(
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
             "HttpsClient TLS1.2 confirmation failed: 0x%08X original=0x%08X\r\n",
             static_cast<ULONG>(status),
             static_cast<ULONG>(originalStatus));
@@ -269,7 +269,7 @@ namespace client
             buffers.RequestBufferLength,
             &requestLength);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("HttpsClient build request failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient build request failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -282,7 +282,7 @@ namespace client
             UsesProxyTunnel(options) ? options.ProxyAddress : options.RemoteAddress;
         status = socket->Connect(wskClient, connectAddress);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("HttpsClient connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -431,7 +431,7 @@ namespace client
                 IsTls12ConfirmationCandidate(options, tlsConnection->LastHandshakeFailure())) {
                 *tls12ConfirmationCandidate = true;
             }
-            WKNET_DBG_PRINT("HttpsClient TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             FreeNonPagedObject(rawTransport);
             FreeNonPagedObject(tlsConnection);
             const NTSTATUS closeStatus = socket->Close();
@@ -455,7 +455,7 @@ namespace client
         if (options.PreferHttp2 && AlpnIsH2(alpn, alpnLen)) {
             if (buffers.HeaderNameValueBuffer == nullptr ||
                 buffers.HeaderNameValueBufferLength == 0) {
-                WKNET_DBG_PRINT("HttpsClient H2 missing header name/value buffer\r\n");
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient H2 missing header name/value buffer\r\n");
                 FreeNonPagedObject(tlsTransport);
                 FreeNonPagedObject(rawTransport);
                 FreeNonPagedObject(tlsConnection);
@@ -476,7 +476,7 @@ namespace client
 
             status = h2conn->Initialize(*tlsTransport);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("HttpsClient H2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient H2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 FreeNonPagedObject(h2conn);
                 FreeNonPagedObject(tlsTransport);
                 FreeNonPagedObject(rawTransport);
@@ -582,7 +582,7 @@ namespace client
                     decodeBuffers,
                     decoded);
                 if (!NT_SUCCESS(status)) {
-                    WKNET_DBG_PRINT("HttpsClient H2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient H2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 }
             }
 
@@ -597,7 +597,7 @@ namespace client
                 response.BytesConsumed = respBodyLen;
                 response.BodyKind = http1::HttpBodyKind::ContentLength;
             } else {
-                WKNET_DBG_PRINT("HttpsClient H2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient H2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
             }
 
             ReleaseHttp2HeaderScratch(*h2Scratch.Get());
@@ -610,7 +610,7 @@ namespace client
                 status = STATUS_CONNECTION_DISCONNECTED;
             }
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("HttpsClient TLS send failed: 0x%08X sent=%Iu expected=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient TLS send failed: 0x%08X sent=%Iu expected=%Iu\r\n",
                     static_cast<ULONG>(status),
                     sent,
                     requestLength);
@@ -619,7 +619,7 @@ namespace client
             if (NT_SUCCESS(status)) {
                 status = ReadHttpResponse(*tlsTransport, options.ResponseBodyForbidden, buffers, response);
                 if (!NT_SUCCESS(status)) {
-                    WKNET_DBG_PRINT("HttpsClient read response failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient read response failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 }
             }
         }
@@ -672,7 +672,7 @@ namespace client
             }
 
             if (status != STATUS_MORE_PROCESSING_REQUIRED) {
-                WKNET_DBG_PRINT("HttpsClient parse response failed: 0x%08X bytes=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient parse response failed: 0x%08X bytes=%Iu\r\n",
                     static_cast<ULONG>(status),
                     responseLength);
                 return status;
@@ -689,7 +689,7 @@ namespace client
                 &received);
             if (!NT_SUCCESS(status)) {
                 if (!IsOrderlyConnectionCloseStatus(status)) {
-                    WKNET_DBG_PRINT("HttpsClient receive failed: 0x%08X bytes=%Iu\r\n",
+                    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "HttpsClient receive failed: 0x%08X bytes=%Iu\r\n",
                         static_cast<ULONG>(status),
                         responseLength);
                     return status;

@@ -246,7 +246,7 @@
 
             status = h2Connection->Initialize(*pooledConnection.Transport, maxHeaderBlockBytes);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("High-level HTTP/2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level HTTP/2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 FreeNonPagedObject(h2Connection);
                 return status;
             }
@@ -291,7 +291,7 @@
             &streamId);
 
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("High-level HTTP/2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level HTTP/2 request failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -312,13 +312,13 @@
         if (!NT_SUCCESS(status)) {
             pooledConnection.Http2->ReleaseStream(streamId);
             if (status == STATUS_BUFFER_TOO_SMALL && workspace.MaxResponseBytes != 0) {
-                WKNET_DBG_PRINT(
+                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Verbose,
                     "High-level HTTP/2 response reached MaxResponseBytes limit: status=0x%08X MaxResponseBytes=%Iu\r\n",
                     static_cast<ULONG>(status),
                     workspace.MaxResponseBytes);
             }
             else {
-                WKNET_DBG_PRINT("High-level HTTP/2 response failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level HTTP/2 response failed: 0x%08X\r\n", static_cast<ULONG>(status));
             }
             return status;
         }
@@ -351,7 +351,7 @@
             sendOptions.ContentCodingMaterials,
             &decoded);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("High-level HTTP/2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level HTTP/2 content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -887,7 +887,7 @@
 
         status = h2Connection->InitializeAfterUpgrade(*activeTransport, maxHeaderBlockBytes);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("High-level h2c Upgrade init failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level h2c Upgrade init failed: 0x%08X\r\n", static_cast<ULONG>(status));
             FreeNonPagedObject(h2Connection);
             return status;
         }
@@ -912,7 +912,7 @@
             reinterpret_cast<char*>(workspace.Http2HeaderScratch.Data),
             workspace.Http2HeaderScratch.Length);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("High-level h2c Upgrade stream 1 failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level h2c Upgrade stream 1 failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -944,7 +944,7 @@
             sendOptions.ContentCodingMaterials,
             &decoded);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("High-level h2c Upgrade content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level h2c Upgrade content decode failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 

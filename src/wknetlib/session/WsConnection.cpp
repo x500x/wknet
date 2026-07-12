@@ -1142,7 +1142,7 @@ namespace session
             &remoteAddressCount,
             options.AddressFamily);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WsConnection resolve failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection resolve failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -1184,12 +1184,12 @@ namespace session
                     statusCode,
                     &ignoredConfirmationCandidate);
                 if (NT_SUCCESS(http11Status)) {
-                    WKNET_DBG_PRINT(
+                    WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Verbose,
                         "WsConnection HTTP/1.1 retry succeeded after h2 unsupported index=%Iu\r\n",
                         addressIndex);
                     return STATUS_SUCCESS;
                 }
-                WKNET_DBG_PRINT(
+                WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error,
                     "WsConnection HTTP/1.1 retry failed: 0x%08X original=0x%08X index=%Iu\r\n",
                     static_cast<ULONG>(http11Status),
                     static_cast<ULONG>(status),
@@ -1215,19 +1215,19 @@ namespace session
                     statusCode,
                     &ignoredConfirmationCandidate);
                 if (NT_SUCCESS(confirmationStatus)) {
-                    WKNET_DBG_PRINT(
+                    WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Info,
                         "WsConnection TLS1.2 confirmed after version negotiation index=%Iu\r\n",
                         addressIndex);
                     return STATUS_SUCCESS;
                 }
 
-                WKNET_DBG_PRINT(
+                WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error,
                     "WsConnection TLS1.2 confirmation failed: 0x%08X original=0x%08X index=%Iu\r\n",
                     static_cast<ULONG>(confirmationStatus),
                     static_cast<ULONG>(status),
                     addressIndex);
             }
-            WKNET_DBG_PRINT("WsConnection address attempt failed: 0x%08X index=%Iu family=%u\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Warning, "WsConnection address attempt failed: 0x%08X index=%Iu family=%u\r\n",
                 static_cast<ULONG>(lastStatus),
                 addressIndex,
                 static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
@@ -1257,7 +1257,7 @@ namespace session
 
         NTSTATUS status = socket_.Connect(wskClient, remoteAddress, nullptr, options.Cancellation);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WsConnection connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
         transportClosed_ = false;
@@ -1347,7 +1347,7 @@ namespace session
                     IsTls12ConfirmationCandidate(options, tls_->LastHandshakeFailure())) {
                     *tls12ConfirmationCandidate = true;
                 }
-                WKNET_DBG_PRINT("WsConnection TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 const NTSTATUS closeStatus = CloseTransport();
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -1510,7 +1510,7 @@ namespace session
             }
             if (negotiatedAlpnLength != 0 &&
                 !TextEqualsLiteral(negotiatedAlpn, negotiatedAlpnLength, WebSocketHttp11Alpn)) {
-                WKNET_DBG_PRINT("WsConnection unexpected ALPN: %.*s\r\n",
+                WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection unexpected ALPN: %.*s\r\n",
                     static_cast<int>(negotiatedAlpnLength),
                     negotiatedAlpn != nullptr ? negotiatedAlpn : "");
                 const NTSTATUS closeStatus = CloseTransport();
@@ -1532,7 +1532,7 @@ namespace session
             }
 
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("WsConnection send handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection send handshake failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 const NTSTATUS closeStatus = Close(buffers);
                 UNREFERENCED_PARAMETER(closeStatus);
                 return status;
@@ -1618,7 +1618,7 @@ namespace session
                 continue;
             }
 
-            WKNET_DBG_PRINT("WsConnection handshake failed: 0x%08X status=%u\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection handshake failed: 0x%08X status=%u\r\n",
                 static_cast<ULONG>(status),
                 response.StatusCode);
             const NTSTATUS closeStatus = Close(buffers);

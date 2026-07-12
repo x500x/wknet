@@ -80,7 +80,7 @@
         }
         status = websocket->Client->SendText(text, textLength, buffers, finalFragment);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WebSocketSendTextSync Client->SendText failed: 0x%08X\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WebSocketSendTextSync Client->SendText failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
         }
         if (NT_SUCCESS(status)) {
@@ -182,7 +182,7 @@
         }
         status = websocket->Client->SendBinary(data, dataLength, buffers, finalFragment);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WebSocketSendBinarySync Client->SendBinary failed: 0x%08X\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WebSocketSendBinarySync Client->SendBinary failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
         }
         if (NT_SUCCESS(status)) {
@@ -285,7 +285,7 @@
         }
         status = websocket->Client->SendContinuation(data, dataLength, buffers, finalFragment);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WebSocketSendContinuationSync Client->SendContinuation failed: 0x%08X\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WebSocketSendContinuationSync Client->SendContinuation failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
         }
         if (NT_SUCCESS(status)) {

@@ -616,7 +616,7 @@ namespace net
             return STATUS_SUCCESS;
         }
 
-        WKNET_DBG_PRINT("等待 WSK IRP context 完成: outstanding=%ld\r\n", static_cast<long>(count));
+        WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "等待 WSK IRP context 完成: outstanding=%ld\r\n", static_cast<long>(count));
 
         LARGE_INTEGER timeout = {};
         LARGE_INTEGER* timeoutPointer = nullptr;
@@ -632,12 +632,12 @@ namespace net
             FALSE,
             timeoutPointer);
         if (NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WSK IRP context 已完成\r\n");
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Info, "WSK IRP context 已完成\r\n");
         }
         else {
             const LONG remaining = InterlockedCompareExchange(&g_wskOutstandingContextCount, 0, 0);
             UNREFERENCED_PARAMETER(remaining);
-            WKNET_DBG_PRINT("等待 WSK IRP context 失败: 0x%08X outstanding=%ld\r\n",
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "等待 WSK IRP context 失败: 0x%08X outstanding=%ld\r\n",
                 static_cast<ULONG>(status),
                 static_cast<long>(remaining));
         }
@@ -653,7 +653,7 @@ namespace net
         g_wskLastOpenedSocket = socket;
         const LONG count = InterlockedIncrement(&g_wskOpenSocketCount);
         UNREFERENCED_PARAMETER(count);
-        WKNET_DBG_PRINT("WSK socket opened: socket=%p open=%ld\r\n", socket, static_cast<long>(count));
+        WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Info, "WSK socket opened: socket=%p open=%ld\r\n", socket, static_cast<long>(count));
     }
 
     void WskSyncTrackSocketCloseStarted(_In_opt_ PWSK_SOCKET socket) noexcept
@@ -665,7 +665,7 @@ namespace net
         g_wskLastCloseStartedSocket = socket;
         const LONG pending = InterlockedIncrement(&g_wskClosePendingSocketCount);
         UNREFERENCED_PARAMETER(pending);
-        WKNET_DBG_PRINT("WSK socket close started: socket=%p pending=%ld\r\n", socket, static_cast<long>(pending));
+        WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Info, "WSK socket close started: socket=%p pending=%ld\r\n", socket, static_cast<long>(pending));
     }
 
     void WskSyncTrackSocketClosed(_In_opt_ PWSK_SOCKET socket, NTSTATUS closeStatus) noexcept
@@ -684,7 +684,7 @@ namespace net
         }
         UNREFERENCED_PARAMETER(open);
 
-        WKNET_DBG_PRINT(
+        WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Verbose,
             "WSK socket close completed: socket=%p status=0x%08X open=%ld pending=%ld\r\n",
             socket,
             static_cast<ULONG>(closeStatus),
@@ -700,7 +700,7 @@ namespace net
         UNREFERENCED_PARAMETER(open);
         UNREFERENCED_PARAMETER(pending);
         UNREFERENCED_PARAMETER(contexts);
-        WKNET_DBG_PRINT(
+        WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Verbose,
             "WSK shutdown state: openSockets=%ld closePending=%ld irpContexts=%ld lastOpen=%p lastCloseStart=%p lastClosed=%p lastCloseStatus=0x%08X\r\n",
             static_cast<long>(open),
             static_cast<long>(pending),
@@ -789,25 +789,25 @@ namespace net
         if (providerCaptured_ || registered_) {
             const NTSTATUS drainStatus = WskSyncWaitForOutstandingContexts(WskOperationTimeoutMilliseconds);
             if (!NT_SUCCESS(drainStatus)) {
-                WKNET_DBG_PRINT("WSK IRP context 收敛失败: 0x%08X\r\n", static_cast<ULONG>(drainStatus));
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WSK IRP context 收敛失败: 0x%08X\r\n", static_cast<ULONG>(drainStatus));
             }
             WskSyncLogOutstandingSockets();
         }
 
         if (providerCaptured_) {
-            WKNET_DBG_PRINT("开始释放 WSK provider NPI\r\n");
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Info, "开始释放 WSK provider NPI\r\n");
             WskReleaseProviderNPI(&registration_);
             providerCaptured_ = false;
             RtlZeroMemory(&providerNpi_, sizeof(providerNpi_));
-            WKNET_DBG_PRINT("WSK provider NPI 已释放\r\n");
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Info, "WSK provider NPI 已释放\r\n");
         }
 
         if (registered_) {
-            WKNET_DBG_PRINT("开始注销 WSK client\r\n");
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Info, "开始注销 WSK client\r\n");
             WskDeregister(&registration_);
             registered_ = false;
             RtlZeroMemory(&registration_, sizeof(registration_));
-            WKNET_DBG_PRINT("WSK client 已注销\r\n");
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Info, "WSK client 已注销\r\n");
         }
 
         ClearResolveCache();
@@ -1012,7 +1012,7 @@ namespace net
 
         if (!NT_SUCCESS(status)) {
             if (addressFamily == WskAddressFamily::Any && IsNoAddressResolveStatus(status)) {
-                WKNET_DBG_PRINT("WskGetAddressInfo AF_UNSPEC no match, querying explicit address families\r\n");
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Warning, "WskGetAddressInfo AF_UNSPEC no match, querying explicit address families\r\n");
                 WskSyncReleaseContext(context);
                 return ResolveAllExplicitAddressFamilies(
                     *this,
@@ -1022,14 +1022,14 @@ namespace net
                     addressCapacity,
                     addressCount);
             }
-            WKNET_DBG_PRINT("WskGetAddressInfo failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskGetAddressInfo failed: 0x%08X\r\n", static_cast<ULONG>(status));
             WskSyncReleaseContext(context);
             return status;
         }
 
         if (request->Result == nullptr) {
             if (addressFamily == WskAddressFamily::Any) {
-                WKNET_DBG_PRINT("WskGetAddressInfo AF_UNSPEC returned no results, querying explicit address families\r\n");
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Warning, "WskGetAddressInfo AF_UNSPEC returned no results, querying explicit address families\r\n");
                 WskSyncReleaseContext(context);
                 return ResolveAllExplicitAddressFamilies(
                     *this,
@@ -1039,7 +1039,7 @@ namespace net
                     addressCapacity,
                     addressCount);
             }
-            WKNET_DBG_PRINT("WskGetAddressInfo returned no results\r\n");
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskGetAddressInfo returned no results\r\n");
             WskSyncReleaseContext(context);
             return STATUS_NO_MATCH;
         }
@@ -1059,7 +1059,7 @@ namespace net
         request->Result = nullptr;
         if (!NT_SUCCESS(status)) {
             if (addressFamily == WskAddressFamily::Any && IsNoAddressResolveStatus(status)) {
-                WKNET_DBG_PRINT("WskGetAddressInfo AF_UNSPEC returned no usable address, querying explicit address families\r\n");
+                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Warning, "WskGetAddressInfo AF_UNSPEC returned no usable address, querying explicit address families\r\n");
                 WskSyncReleaseContext(context);
                 return ResolveAllExplicitAddressFamilies(
                     *this,
@@ -1069,7 +1069,7 @@ namespace net
                     addressCapacity,
                     addressCount);
             }
-            WKNET_DBG_PRINT("WskGetAddressInfo returned no AF_INET/AF_INET6 address: 0x%08X\r\n",
+            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "WskGetAddressInfo returned no AF_INET/AF_INET6 address: 0x%08X\r\n",
                 static_cast<ULONG>(status));
         }
         else {

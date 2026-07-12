@@ -189,7 +189,7 @@ namespace samples
         {
             const char* safeLabel = label != nullptr ? label : "";
             if (data == nullptr || dataLength == 0) {
-                WKNET_DBG_PRINT("%s<empty>\r\n", safeLabel);
+                KHTTP_SAMPLE_LOG("%s<empty>\r\n", safeLabel);
                 return;
             }
 
@@ -198,11 +198,11 @@ namespace samples
             if (!truncated && dataLength <= TextLogChunkBytes) {
                 char escaped[TextLogChunkBytes * 4] = {};
                 const SIZE_T escapedLength = EscapeLogTextChunk(data, dataLength, escaped, sizeof(escaped));
-                WKNET_DBG_PRINT("%s%.*s\r\n", safeLabel, PrintLength(escapedLength), escaped);
+                KHTTP_SAMPLE_LOG("%s%.*s\r\n", safeLabel, PrintLength(escapedLength), escaped);
                 return;
             }
 
-            WKNET_DBG_PRINT(
+            KHTTP_SAMPLE_LOG(
                 "%s长度=%Iu 日志分块输出=%Iu%s\r\n",
                 safeLabel,
                 dataLength,
@@ -212,7 +212,7 @@ namespace samples
                 const SIZE_T chunkLength = MinSize(loggedBytes - offset, TextLogChunkBytes);
                 char escaped[TextLogChunkBytes * 4] = {};
                 const SIZE_T escapedLength = EscapeLogTextChunk(data + offset, chunkLength, escaped, sizeof(escaped));
-                WKNET_DBG_PRINT(
+                KHTTP_SAMPLE_LOG(
                     "%s偏移=%Iu 长度=%Iu 内容=%.*s\r\n",
                     safeLabel,
                     offset,
@@ -221,7 +221,7 @@ namespace samples
                     escaped);
             }
             if (truncated) {
-                WKNET_DBG_PRINT(
+                KHTTP_SAMPLE_LOG(
                     "%s日志展示截断 已输出=%Iu 总长度=%Iu\r\n",
                     safeLabel,
                     loggedBytes,
@@ -242,7 +242,7 @@ namespace samples
             const char* name = header.Name.Data != nullptr ? header.Name.Data : "";
             const char* value = header.Value.Data != nullptr ? header.Value.Data : "";
             if (header.Value.Data == nullptr || header.Value.Length == 0) {
-                WKNET_DBG_PRINT(
+                KHTTP_SAMPLE_LOG(
                     "[header] %.*s: <empty>\r\n",
                     PrintLength(header.Name.Length),
                     name);
@@ -252,7 +252,7 @@ namespace samples
             const SIZE_T loggedBytes = ClampLoggedBytes(header.Value.Length);
             const bool truncated = loggedBytes < header.Value.Length;
             if (!truncated && header.Value.Length <= TextLogChunkBytes) {
-                WKNET_DBG_PRINT(
+                KHTTP_SAMPLE_LOG(
                     "[header] %.*s: %.*s\r\n",
                     PrintLength(header.Name.Length),
                     name,
@@ -261,7 +261,7 @@ namespace samples
                 return;
             }
 
-            WKNET_DBG_PRINT(
+            KHTTP_SAMPLE_LOG(
                 "[header] %.*s: 值长度=%Iu 日志分块输出=%Iu%s\r\n",
                 PrintLength(header.Name.Length),
                 name,
@@ -270,7 +270,7 @@ namespace samples
                 truncated ? " <truncated>" : "");
             for (SIZE_T offset = 0; offset < loggedBytes; offset += TextLogChunkBytes) {
                 const SIZE_T chunkLength = MinSize(loggedBytes - offset, TextLogChunkBytes);
-                WKNET_DBG_PRINT(
+                KHTTP_SAMPLE_LOG(
                     "[header] %.*s 值偏移=%Iu 长度=%Iu 内容=%.*s\r\n",
                     PrintLength(header.Name.Length),
                     name,
@@ -280,7 +280,7 @@ namespace samples
                     value + offset);
             }
             if (truncated) {
-                WKNET_DBG_PRINT(
+                KHTTP_SAMPLE_LOG(
                     "[header] %.*s 日志展示截断 已输出=%Iu 总长度=%Iu\r\n",
                     PrintLength(header.Name.Length),
                     name,
@@ -292,11 +292,11 @@ namespace samples
         void LogBody(const char* body, SIZE_T bodyLength) noexcept
         {
             if (body == nullptr || bodyLength == 0) {
-                WKNET_DBG_PRINT("[body] length=0 raw follows\r\n");
+                KHTTP_SAMPLE_LOG("[body] length=0 raw follows\r\n");
                 return;
             }
 
-            WKNET_DBG_PRINT("[body] length=%Iu raw follows\r\n", bodyLength);
+            KHTTP_SAMPLE_LOG("[body] length=%Iu raw follows\r\n", bodyLength);
             SIZE_T offset = 0;
             while (offset < bodyLength) {
                 constexpr SIZE_T MaxPrintLength = 0x7fffffff;
@@ -311,7 +311,7 @@ namespace samples
             UNREFERENCED_PARAMETER(methodName);
             UNREFERENCED_PARAMETER(response);
 
-            WKNET_DBG_PRINT("[%s] status=%u version=%u.%u bodyKind=%u bodyLength=%Iu consumed=%Iu\r\n",
+            KHTTP_SAMPLE_LOG("[%s] status=%u version=%u.%u bodyKind=%u bodyLength=%Iu consumed=%Iu\r\n",
                 methodName,
                 response.StatusCode,
                 response.MajorVersion,
@@ -341,7 +341,7 @@ namespace samples
             UNREFERENCED_PARAMETER(path);
             UNREFERENCED_PARAMETER(acceptEncoding);
 
-            WKNET_DBG_PRINT("[%s] request path=%.*s accept-encoding=%.*s\r\n",
+            KHTTP_SAMPLE_LOG("[%s] request path=%.*s accept-encoding=%.*s\r\n",
                 sampleName,
                 static_cast<int>(path.Length),
                 path.Data != nullptr ? path.Data : "",
@@ -406,7 +406,7 @@ namespace samples
                 LogResponse(methodName, response);
             }
             else {
-                WKNET_DBG_PRINT("[%s] request failed: 0x%08X\r\n", methodName, static_cast<ULONG>(result.Status));
+                KHTTP_SAMPLE_LOG("[%s] request failed: 0x%08X\r\n", methodName, static_cast<ULONG>(result.Status));
             }
 
             return result.Status;
@@ -507,7 +507,7 @@ namespace samples
                 &remoteAddressCount,
                 addressFamily);
             if (!NT_SUCCESS(result.Status)) {
-                WKNET_DBG_PRINT("[%s] HTTPS resolve failed: 0x%08X\r\n",
+                KHTTP_SAMPLE_LOG("[%s] HTTPS resolve failed: 0x%08X\r\n",
                     methodName,
                     static_cast<ULONG>(result.Status));
                 return result.Status;
@@ -552,7 +552,7 @@ namespace samples
                 request.ExtraHeaderCount,
                 http1::MakeText("Accept-Encoding"));
 
-            WKNET_DBG_PRINT("[%s] HTTPS verify=%s\r\n", methodName, verifyCertificate ? "on" : "off");
+            KHTTP_SAMPLE_LOG("[%s] HTTPS verify=%s\r\n", methodName, verifyCertificate ? "on" : "off");
             LogRequestStart(methodName, request.Path, acceptEncoding);
 
             NTSTATUS lastStatus = STATUS_NOT_FOUND;
@@ -570,7 +570,7 @@ namespace samples
                 }
 
                 lastStatus = result.Status;
-                WKNET_DBG_PRINT("[%s] HTTPS address attempt failed: 0x%08X index=%Iu family=%u\r\n",
+                KHTTP_SAMPLE_LOG("[%s] HTTPS address attempt failed: 0x%08X index=%Iu family=%u\r\n",
                     methodName,
                     static_cast<ULONG>(result.Status),
                     addressIndex,
@@ -578,7 +578,7 @@ namespace samples
             }
 
             result.Status = lastStatus;
-            WKNET_DBG_PRINT("[%s] HTTPS request failed: 0x%08X\r\n", methodName, static_cast<ULONG>(result.Status));
+            KHTTP_SAMPLE_LOG("[%s] HTTPS request failed: 0x%08X\r\n", methodName, static_cast<ULONG>(result.Status));
             return result.Status;
         }
 
@@ -595,7 +595,7 @@ namespace samples
             NTSTATUS next) noexcept
         {
             if (!NT_SUCCESS(next) && IsPublicEndpointDiagnosticStatus(next)) {
-                WKNET_DBG_PRINT("[%s] 公网端点环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                KHTTP_SAMPLE_LOG("[%s] 公网端点环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                     sampleName,
                     static_cast<ULONG>(next));
                 return current;
@@ -613,7 +613,7 @@ namespace samples
             if (!NT_SUCCESS(next) &&
                 result.StatusCode == 0 &&
                 IsPublicEndpointDiagnosticStatus(next)) {
-                WKNET_DBG_PRINT("[%s] 公网端点连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                KHTTP_SAMPLE_LOG("[%s] 公网端点连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                     sampleName,
                     static_cast<ULONG>(next));
                 return current;
@@ -766,7 +766,7 @@ namespace samples
         options.UseTls = true;
         options.VerifyCertificate = verifyCertificate;
 
-        WKNET_DBG_PRINT(
+        KHTTP_SAMPLE_LOG(
             "[%s] TLS策略=ModernDefault SHA1签名=关闭\r\n",
             sampleName);
 
@@ -784,7 +784,7 @@ namespace samples
             const char message[] = "kernel-http websocket echo";
             session::WsEchoResult echo = {};
 
-            WKNET_DBG_PRINT("[%s] send bytes=%Iu data=%.*s\r\n",
+            KHTTP_SAMPLE_LOG("[%s] send bytes=%Iu data=%.*s\r\n",
                 sampleName,
                 sizeof(message) - 1,
                 static_cast<int>(sizeof(message) - 1),
@@ -795,7 +795,7 @@ namespace samples
                 result->HeaderCount = 1;
                 result->BodyLength = echo.BytesReceived;
 
-                WKNET_DBG_PRINT("[%s] recv opcode=%u bytes=%Iu data=%.*s\r\n",
+                KHTTP_SAMPLE_LOG("[%s] recv opcode=%u bytes=%Iu data=%.*s\r\n",
                     sampleName,
                     static_cast<unsigned>(echo.Opcode),
                     echo.BytesReceived,
@@ -814,14 +814,14 @@ namespace samples
         UNREFERENCED_PARAMETER(closeStatus);
         result->Status = status;
         if (NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("[%s] status=%u echoed=%Iu verify=%s\r\n",
+            KHTTP_SAMPLE_LOG("[%s] status=%u echoed=%Iu verify=%s\r\n",
                 sampleName,
                 result->StatusCode,
                 result->BodyLength,
                 verifyCertificate ? "on" : "off");
         }
         else {
-            WKNET_DBG_PRINT("[%s] failed: 0x%08X status=%u echoed=%Iu verify=%s\r\n",
+            KHTTP_SAMPLE_LOG("[%s] failed: 0x%08X status=%u echoed=%Iu verify=%s\r\n",
                 sampleName,
                 static_cast<ULONG>(status),
                 result->StatusCode,

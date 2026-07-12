@@ -157,7 +157,7 @@
 
         SIZE_T handshakeLength = 0;
         status = BuildWebSocketHandshakeRequest(*newWebSocket, *newWebSocket->Workspace, &handshakeLength);
-        WKNET_DBG_PRINT("DEBUG BuildWebSocketHandshakeRequest status=0x%08X scheme=%.*s port=%u\r\n",
+        WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Verbose, "DEBUG BuildWebSocketHandshakeRequest status=0x%08X scheme=%.*s port=%u\r\n",
             static_cast<ULONG>(status),
             static_cast<int>(newWebSocket->SchemeLength),
             newWebSocket->Scheme,

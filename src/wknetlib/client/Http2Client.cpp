@@ -602,7 +602,7 @@ namespace client
 
         status = socket->Connect(wskClient, options.RemoteAddress);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("Http2Client connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "Http2Client connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
 
@@ -664,7 +664,7 @@ namespace client
 
             status = tlsConnection->Connect(*rawTransport, tlsOptions);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("Http2Client TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "Http2Client TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 FreeNonPagedObject(tlsConnection);
                 FreeNonPagedObject(rawTransport);
                 FreeNonPagedObject(h2conn);
@@ -682,7 +682,7 @@ namespace client
             }
 
             if (alpn == nullptr || !AlpnEquals(alpn, alpnLen, "h2", 2)) {
-                WKNET_DBG_PRINT("Http2Client ALPN not h2: %.*s\r\n",
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "Http2Client ALPN not h2: %.*s\r\n",
                     static_cast<int>(alpnLen), alpn != nullptr ? alpn : "(null)");
                 FreeNonPagedObject(tlsConnection);
                 FreeNonPagedObject(rawTransport);
@@ -727,7 +727,7 @@ namespace client
             h2conn->InitializeAfterUpgrade(*activeTransport) :
             h2conn->Initialize(*activeTransport);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("Http2Client H2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "Http2Client H2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
             FreeNonPagedObject(tlsTransport);
             FreeNonPagedObject(tlsConnection);
             FreeNonPagedObject(rawTransport);
@@ -829,7 +829,7 @@ namespace client
             response.Body = buffers.BodyBuffer;
             response.BodyLength = respBodyLen;
         } else {
-            WKNET_DBG_PRINT("Http2Client SendRequest failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "Http2Client SendRequest failed: 0x%08X\r\n", static_cast<ULONG>(status));
         }
 
         h2conn->Shutdown(*activeTransport);

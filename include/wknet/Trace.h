@@ -58,9 +58,3 @@ namespace wknet
             ::wknet::TraceWrite(static_cast<ULONG>(component), (level), __VA_ARGS__); \
         } \
     } while (0)
-
-// Transitional alias for existing call sites (Verbose + all components).
-// Prefer WKNET_TRACE with an explicit component/level for new code.
-#undef WKNET_DBG_PRINT
-#define WKNET_DBG_PRINT(...) \
-    WKNET_TRACE(::wknet::ComponentAll, ::wknet::TraceLevel::Verbose, __VA_ARGS__)

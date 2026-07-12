@@ -386,7 +386,7 @@
             TlsMutablePlaintextRecord record = {};
             NTSTATUS status = ReadRecord(transport, record, receiveTimeoutMilliseconds, &receiveDeadline);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("TlsConnection read record failed before HTTP: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection read record failed before HTTP: 0x%08X\r\n", static_cast<ULONG>(status));
                 return status;
             }
 
@@ -409,7 +409,7 @@
                 }
                 status = ConsumeTls12PostHandshakeRecord(transport, record.Fragment, record.FragmentLength);
                 if (!NT_SUCCESS(status)) {
-                    WKNET_DBG_PRINT("TlsConnection consume TLS1.2 post-handshake message during HTTP read failed: 0x%08X length=%Iu\r\n",
+                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection consume TLS1.2 post-handshake message during HTTP read failed: 0x%08X length=%Iu\r\n",
                         static_cast<ULONG>(status),
                         record.FragmentLength);
                     return status;
@@ -421,13 +421,13 @@
                 TlsAlert alert = {};
                 status = TlsRecordLayer::DecodeAlert(record.Fragment, record.FragmentLength, alert);
                 if (!NT_SUCCESS(status)) {
-                    WKNET_DBG_PRINT("TlsConnection decode alert during HTTP read failed: 0x%08X length=%Iu\r\n",
+                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection decode alert during HTTP read failed: 0x%08X length=%Iu\r\n",
                         static_cast<ULONG>(status),
                         record.FragmentLength);
                     return status;
                 }
 
-                WKNET_DBG_PRINT("TlsConnection receive alert during HTTP read level=%u description=%u\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning, "TlsConnection receive alert during HTTP read level=%u description=%u\r\n",
                     static_cast<unsigned>(alert.Level),
                     static_cast<unsigned>(alert.Description));
                 return alert.CloseNotify ? STATUS_CONNECTION_DISCONNECTED : STATUS_INVALID_NETWORK_RESPONSE;
@@ -436,14 +436,14 @@
             if (!tls13RecordProtection_ &&
                 context_.Protocol() == TlsProtocol::Tls12 &&
                 (handshakeLength_ != 0 || handshakeConsumed_ != 0)) {
-                WKNET_DBG_PRINT("TlsConnection incomplete TLS1.2 handshake before application data length=%Iu consumed=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection incomplete TLS1.2 handshake before application data length=%Iu consumed=%Iu\r\n",
                     handshakeLength_,
                     handshakeConsumed_);
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
             if (record.ContentType != TlsContentType::ApplicationData) {
-                WKNET_DBG_PRINT("TlsConnection unexpected record during HTTP read type=%u length=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection unexpected record during HTTP read type=%u length=%Iu\r\n",
                     static_cast<unsigned>(record.ContentType),
                     record.FragmentLength);
                 return STATUS_INVALID_NETWORK_RESPONSE;

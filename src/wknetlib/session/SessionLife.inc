@@ -166,11 +166,11 @@
 
             const NTSTATUS status = WebSocketCloseSyncImpl(websocket);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("卸载扫尾关闭 WebSocket 失败: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Warning, "卸载扫尾关闭 WebSocket 失败: 0x%08X\r\n", static_cast<ULONG>(status));
                 break;
             }
             if (FirstActiveWebSocketHandle() == websocket) {
-                WKNET_DBG_PRINT("卸载扫尾关闭 WebSocket 未推进\r\n");
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Warning, "卸载扫尾关闭 WebSocket 未推进\r\n");
                 break;
             }
         }
@@ -183,7 +183,7 @@
 
             SessionClose(session);
             if (FirstActiveSessionHandle() == session) {
-                WKNET_DBG_PRINT("卸载扫尾关闭 session 未推进\r\n");
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Warning, "卸载扫尾关闭 session 未推进\r\n");
                 break;
             }
         }

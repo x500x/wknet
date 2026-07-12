@@ -573,7 +573,7 @@
             const char* negotiatedAlpn = tlsConnection->NegotiatedAlpn();
             const SIZE_T negotiatedAlpnLength = tlsConnection->NegotiatedAlpnLength();
             if (!TextEqualsLiteral(negotiatedAlpn, negotiatedAlpnLength, "h2")) {
-                WKNET_DBG_PRINT("High-level HTTP/2 ALPN not negotiated: %.*s\r\n",
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "High-level HTTP/2 ALPN not negotiated: %.*s\r\n",
                     static_cast<int>(negotiatedAlpnLength),
                     negotiatedAlpn != nullptr ? negotiatedAlpn : "");
                 return STATUS_NOT_SUPPORTED;

@@ -450,7 +450,7 @@
                 }
 
                 lastStatus = status;
-                WKNET_DBG_PRINT("HttpEngine socket connect attempt failed: 0x%08X index=%Iu family=%u\r\n",
+                WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Warning, "HttpEngine socket connect attempt failed: 0x%08X index=%Iu family=%u\r\n",
                     static_cast<ULONG>(status),
                     addressIndex,
                     static_cast<unsigned>(remoteAddresses[addressIndex].ss_family));
@@ -630,7 +630,7 @@
 
         status = EnsureSocketConnected(session, request, connection, cancellationOperation);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT(
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
                 "HttpEngine TLS1.2 confirmation reconnect failed: 0x%08X original=0x%08X\r\n",
                 static_cast<ULONG>(status),
                 static_cast<ULONG>(originalStatus));
@@ -648,7 +648,7 @@
             trailerCapacity,
             cancellationOperation);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT(
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
                 "HttpEngine TLS1.2 confirmation proxy CONNECT failed: 0x%08X original=0x%08X\r\n",
                 static_cast<ULONG>(status),
                 static_cast<ULONG>(originalStatus));
@@ -664,11 +664,11 @@
             cancellationOperation,
             nullptr);
         if (NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("HttpEngine TLS1.2 confirmed after version negotiation\r\n");
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "HttpEngine TLS1.2 confirmed after version negotiation\r\n");
             return STATUS_SUCCESS;
         }
 
-        WKNET_DBG_PRINT(
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
             "HttpEngine TLS1.2 confirmation failed: 0x%08X original=0x%08X\r\n",
             static_cast<ULONG>(status),
             static_cast<ULONG>(originalStatus));

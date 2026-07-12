@@ -1,6 +1,7 @@
 #include "WknetTestLog.h"
 
 #if !defined(WKNET_USER_MODE_TEST)
+#include <wknet/Trace.h>
 #include <ntstrsafe.h>
 #include <stdarg.h>
 
@@ -75,6 +76,25 @@ namespace
             offset += bytesToWrite;
         }
     }
+
+    void TraceFileSink(
+        _In_opt_ void* context,
+        TraceLevel level,
+        ULONG component,
+        _In_z_ const char* message) noexcept
+    {
+        UNREFERENCED_PARAMETER(context);
+        UNREFERENCED_PARAMETER(level);
+        UNREFERENCED_PARAMETER(component);
+
+        if (message == nullptr) {
+            return;
+        }
+
+        const SIZE_T messageLength = TextLengthBounded(message, FormatBufferBytes);
+        DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_INFO_LEVEL, "%s", message);
+        WriteFileBytes(message, messageLength);
+    }
 }
 
 _Must_inspect_result_
@@ -125,11 +145,14 @@ NTSTATUS Initialize(_In_z_ const char* path) noexcept
     }
 
     g_logFileHandle = fileHandle;
+    TraceSetSink(TraceFileSink, nullptr);
     return STATUS_SUCCESS;
 }
 
 void Shutdown() noexcept
 {
+    TraceSetSink(nullptr, nullptr);
+
     if (g_logFileHandle == nullptr) {
         return;
     }

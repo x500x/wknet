@@ -3,9 +3,6 @@
 
 #if defined(WKNET_USER_MODE_TEST)
 #include <time.h>
-// Quiet cert-validator spam in user-mode protocol tests.
-#undef WKNET_DBG_PRINT
-#define WKNET_DBG_PRINT(...)
 #else
 #include <wknet/WknetConfig.h>
 #endif
@@ -5001,7 +4998,7 @@ namespace tls
                 if (!NT_SUCCESS(status)) {
                     if (nextOffset > offset &&
                         IsSkippableAuthorityCertificateStatus(status)) {
-                        WKNET_DBG_PRINT(
+                        WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning,
                             "CertificateValidator: Authority certificate skipped: index=%Iu offset=%Iu status=0x%08X\r\n",
                             certificateIndex,
                             certificateOffset,
@@ -5018,7 +5015,7 @@ namespace tls
                 status = CertificateValidator::ParseCertificate(scratch, derLength, *anchor);
                 if (!NT_SUCCESS(status)) {
                     if (IsSkippableAuthorityCertificateStatus(status)) {
-                        WKNET_DBG_PRINT(
+                        WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning,
                             "CertificateValidator: Authority certificate skipped: index=%Iu offset=%Iu status=0x%08X\r\n",
                             certificateIndex,
                             certificateOffset,
@@ -5131,11 +5128,11 @@ namespace tls
 
                 status = HashSubjectPublicKey(providerCache, certificates[index], certSpkiSha256.Get());
                 if (!NT_SUCCESS(status)) {
-                    WKNET_DBG_PRINT("CertificateValidator: Cert %Iu SPKI hash failed: 0x%08X\r\n", index, static_cast<ULONG>(status));
+                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Cert %Iu SPKI hash failed: 0x%08X\r\n", index, static_cast<ULONG>(status));
                     break;
                 }
 
-                WKNET_DBG_PRINT("CertificateValidator: Cert %Iu SPKI SHA256: %02X%02X%02X%02X...\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Max, "CertificateValidator: Cert %Iu SPKI SHA256: %02X%02X%02X%02X...\r\n",
                     index, certSpkiSha256[0], certSpkiSha256[1], certSpkiSha256[2], certSpkiSha256[3]);
 
                 bool trusted = false;
@@ -5158,7 +5155,7 @@ namespace tls
                 }
 
                 if (trusted) {
-                    WKNET_DBG_PRINT("CertificateValidator: Found trusted anchor at index %Iu\r\n", index);
+                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Info, "CertificateValidator: Found trusted anchor at index %Iu\r\n", index);
                     *trustedAnchorIndex = index;
                     break;
                 }
@@ -5421,13 +5418,13 @@ namespace tls
 
         status = HashSubjectPublicKey(options.ProviderCache, parsed[0], spkiSha256.Get());
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("CertificateValidator: Leaf SPKI hash failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Leaf SPKI hash failed: 0x%08X\r\n", static_cast<ULONG>(status));
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return status;
         }
 
-        WKNET_DBG_PRINT("CertificateValidator: Leaf SPKI SHA256: %02X%02X%02X%02X...\r\n",
+        WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Max, "CertificateValidator: Leaf SPKI SHA256: %02X%02X%02X%02X...\r\n",
             spkiSha256[0], spkiSha256[1], spkiSha256[2], spkiSha256[3]);
 
         if (!options.VerifyCertificate) {
@@ -5439,7 +5436,7 @@ namespace tls
 
         status = ValidateNameConstraints(parsed, pathCount);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("CertificateValidator: Name Constraints validation failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Name Constraints validation failed: 0x%08X\r\n", static_cast<ULONG>(status));
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return status;
@@ -5447,7 +5444,7 @@ namespace tls
 
         status = ValidateCertificatePolicyTree(parsed, pathCount);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("CertificateValidator: Certificate policy validation failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Certificate policy validation failed: 0x%08X\r\n", static_cast<ULONG>(status));
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return status;
@@ -5456,7 +5453,7 @@ namespace tls
         long long now = 0;
         status = CurrentPackedTime(&now);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("CertificateValidator: CurrentPackedTime failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: CurrentPackedTime failed: 0x%08X\r\n", static_cast<ULONG>(status));
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return status;
@@ -5464,7 +5461,7 @@ namespace tls
 
         for (SIZE_T index = 0; index < pathCount; ++index) {
             if (now < parsed[index].NotBefore || now > parsed[index].NotAfter) {
-                WKNET_DBG_PRINT("CertificateValidator: Certificate %Iu time validation failed\r\n", index);
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Certificate %Iu time validation failed\r\n", index);
                 RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
                 ReleaseCertificateValidationScratch(scratch);
                 return STATUS_TRUST_FAILURE;
@@ -5473,7 +5470,7 @@ namespace tls
 
         if (options.RequireServerAuthEku &&
             (!parsed[0].HasExtendedKeyUsage || !parsed[0].AllowsServerAuth)) {
-            WKNET_DBG_PRINT("CertificateValidator: ServerAuth EKU validation failed\r\n");
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: ServerAuth EKU validation failed\r\n");
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return STATUS_TRUST_FAILURE;
@@ -5482,7 +5479,7 @@ namespace tls
         if ((parsed[0].HasBasicConstraints && parsed[0].IsCa) ||
             !parsed[0].HasKeyUsage ||
             !parsed[0].AllowsDigitalSignature) {
-            WKNET_DBG_PRINT("CertificateValidator: Leaf certificate usage validation failed\r\n");
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Leaf certificate usage validation failed\r\n");
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return STATUS_TRUST_FAILURE;
@@ -5490,7 +5487,7 @@ namespace tls
 
         status = ValidateHostName(parsed[0], validationHost, validationHostLength);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("CertificateValidator: HostName validation failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: HostName validation failed: 0x%08X\r\n", static_cast<ULONG>(status));
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return status;
@@ -5499,21 +5496,21 @@ namespace tls
         for (SIZE_T index = 0; index + 1 < pathCount; ++index) {
             if (parsed[index].IssuerLength != parsed[index + 1].SubjectLength ||
                 !MemoryEquals(parsed[index].Issuer, parsed[index + 1].Subject, parsed[index].IssuerLength)) {
-                WKNET_DBG_PRINT("CertificateValidator: Chain issuer/subject mismatch at %Iu\r\n", index);
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Chain issuer/subject mismatch at %Iu\r\n", index);
                 RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
                 ReleaseCertificateValidationScratch(scratch);
                 return STATUS_TRUST_FAILURE;
             }
 
             if (!parsed[index + 1].HasBasicConstraints || !parsed[index + 1].IsCa) {
-                WKNET_DBG_PRINT("CertificateValidator: Certificate %Iu is not a CA\r\n", index + 1);
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Certificate %Iu is not a CA\r\n", index + 1);
                 RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
                 ReleaseCertificateValidationScratch(scratch);
                 return STATUS_TRUST_FAILURE;
             }
 
             if (!parsed[index + 1].HasKeyUsage || !parsed[index + 1].AllowsKeyCertSign) {
-                WKNET_DBG_PRINT("CertificateValidator: Certificate %Iu lacks keyCertSign\r\n", index + 1);
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Certificate %Iu lacks keyCertSign\r\n", index + 1);
                 RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
                 ReleaseCertificateValidationScratch(scratch);
                 return STATUS_TRUST_FAILURE;
@@ -5525,7 +5522,7 @@ namespace tls
                 index + 1);
             if (parsed[index + 1].HasPathLenConstraint &&
                 subordinateCaCount > parsed[index + 1].PathLenConstraint) {
-                WKNET_DBG_PRINT("CertificateValidator: pathLenConstraint failed at %Iu\r\n", index + 1);
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: pathLenConstraint failed at %Iu\r\n", index + 1);
                 RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
                 ReleaseCertificateValidationScratch(scratch);
                 return STATUS_TRUST_FAILURE;
@@ -5533,7 +5530,7 @@ namespace tls
 
             status = VerifyCertificateSignature(options.ProviderCache, parsed[index], parsed[index + 1]);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("CertificateValidator: Signature verification failed at %Iu: 0x%08X\r\n", index, static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Signature verification failed at %Iu: 0x%08X\r\n", index, static_cast<ULONG>(status));
                 RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
                 ReleaseCertificateValidationScratch(scratch);
                 return status;
@@ -5542,7 +5539,7 @@ namespace tls
 
         if (options.Store != nullptr &&
             !options.Store->MatchesPin(validationHost, validationHostLength, spkiSha256.Get(), spkiSha256.Count())) {
-            WKNET_DBG_PRINT("CertificateValidator: Pin validation failed\r\n");
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Pin validation failed\r\n");
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return STATUS_TRUST_FAILURE;
@@ -5559,14 +5556,14 @@ namespace tls
             scratch.AuthorityLength,
             &trustedAnchorIndex);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("CertificateValidator: Trust anchor search failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Trust anchor search failed: 0x%08X\r\n", static_cast<ULONG>(status));
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return status;
         }
 
         if (trustedAnchorIndex == pathCount) {
-            WKNET_DBG_PRINT("CertificateValidator: No trusted anchor found in chain\r\n");
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: No trusted anchor found in chain\r\n");
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return STATUS_TRUST_FAILURE;
@@ -5578,7 +5575,7 @@ namespace tls
              MemoryEquals(parsed[0].Issuer, parsed[0].Subject, parsed[0].IssuerLength)) {
             status = VerifyCertificateSignature(options.ProviderCache, parsed[0], parsed[0]);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("CertificateValidator: Self-signed signature verification failed: 0x%08X\r\n", static_cast<ULONG>(status));
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Self-signed signature verification failed: 0x%08X\r\n", static_cast<ULONG>(status));
                 RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
                 ReleaseCertificateValidationScratch(scratch);
                 return status;
@@ -5587,7 +5584,7 @@ namespace tls
 
         status = ValidateCertificateRevocation(parsed, pathCount, options, trustedAnchorIndex, scratch.Anchor, now);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("CertificateValidator: Revocation validation failed: 0x%08X\r\n", static_cast<ULONG>(status));
+            WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "CertificateValidator: Revocation validation failed: 0x%08X\r\n", static_cast<ULONG>(status));
             RtlSecureZeroMemory(spkiSha256.Get(), spkiSha256.Count());
             ReleaseCertificateValidationScratch(scratch);
             return status;

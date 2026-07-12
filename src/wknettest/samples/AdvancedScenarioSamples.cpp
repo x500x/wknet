@@ -71,7 +71,7 @@ namespace samples
             NTSTATUS status) noexcept
         {
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT(
+                KHTTP_SAMPLE_LOG(
                     "[高级场景] 示例=%s 失败 NTSTATUS=0x%08X\r\n",
                     sampleName,
                     static_cast<ULONG>(status));
@@ -87,7 +87,7 @@ namespace samples
             NTSTATUS status) noexcept
         {
             if (!NT_SUCCESS(status) && IsPublicEndpointDiagnosticStatus(status)) {
-                WKNET_DBG_PRINT(
+                KHTTP_SAMPLE_LOG(
                     "[高级场景] 示例=%s 公网连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                     sampleName,
                     static_cast<ULONG>(status));
@@ -229,7 +229,7 @@ namespace samples
 
             const bool expected = status == STATUS_BUFFER_TOO_SMALL;
             CaptureStatus(result, expected ? STATUS_SUCCESS : status, 0, 64);
-            WKNET_DBG_PRINT(
+            KHTTP_SAMPLE_LOG(
                 "[高级场景] 预期限制样本=HTTP ResponseLimit %s 实际=0x%08X 预期=0x%08X MaxResponseBytes=%Iu（非零值主动限制响应体聚合）\r\n",
                 expected ? "命中预期，按通过处理" : "未命中预期，按失败处理",
                 static_cast<ULONG>(status),
@@ -428,7 +428,7 @@ namespace samples
                 allowPublicEndpointDiagnostic &&
                 IsPublicEndpointDiagnosticStatus(status);
             CaptureStatus(result, expected ? STATUS_SUCCESS : status, static_cast<ULONG>(status), 0);
-            WKNET_DBG_PRINT(
+            KHTTP_SAMPLE_LOG(
                 "[高级场景] 负面样本=%s %s 实际=0x%08X 预期=0x%08X\r\n",
                 sampleName,
                 expected ? "命中预期，按通过处理" :
@@ -449,7 +449,7 @@ namespace samples
             config.Url = WebSocketUrl;
             config.UrlLength = LiteralLength(WebSocketUrl);
             config.Tls = tlsConfig;
-            WKNET_DBG_PRINT("[高级场景] WebSocket Close TLS策略=ModernDefault SHA1签名=关闭\r\n");
+            KHTTP_SAMPLE_LOG("[高级场景] WebSocket Close TLS策略=ModernDefault SHA1签名=关闭\r\n");
 
             wknet::websocket::WebSocket* websocket = nullptr;
             NTSTATUS status = wknet::websocket::ConnectEx(session, &config, &websocket);
@@ -471,7 +471,7 @@ namespace samples
             config.Url = WebSocketUrl;
             config.UrlLength = LiteralLength(WebSocketUrl);
             config.Tls = tlsConfig;
-            WKNET_DBG_PRINT("[高级场景] WebSocket FragmentSend TLS策略=ModernDefault SHA1签名=关闭\r\n");
+            KHTTP_SAMPLE_LOG("[高级场景] WebSocket FragmentSend TLS策略=ModernDefault SHA1签名=关闭\r\n");
 
             wknet::websocket::WebSocket* websocket = nullptr;
             NTSTATUS status = wknet::websocket::ConnectEx(session, &config, &websocket);

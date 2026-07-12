@@ -128,7 +128,7 @@
             effectiveOptions.DeliverFragments,
             &finalFragment);
         if (!NT_SUCCESS(status)) {
-            WKNET_DBG_PRINT("WebSocketReceiveSync Client->ReceiveMessage failed: 0x%08X\r\n",
+            WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WebSocketReceiveSync Client->ReceiveMessage failed: 0x%08X\r\n",
                 static_cast<ULONG>(status));
             if (status == STATUS_BUFFER_TOO_SMALL || IsWebSocketTransportTerminalStatus(status)) {
                 const NTSTATUS closeStatus = CloseWebSocketTransport(*websocket);

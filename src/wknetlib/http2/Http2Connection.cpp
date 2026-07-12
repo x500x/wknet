@@ -58,7 +58,7 @@ namespace http2
             LONG connectionWindow,
             LONG streamWindow) noexcept
         {
-            WKNET_DBG_PRINT(
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error,
                 "Http2Connection request body flow-control failed: status=0x%08X bodyOffset=%Iu bodyLength=%Iu connWindow=%ld streamWindow=%ld\r\n",
                 static_cast<ULONG>(status),
                 bodyOffset,
@@ -853,7 +853,7 @@ namespace http2
     {
         NTSTATUS status = STATUS_SUCCESS;
 
-        WKNET_DBG_PRINT("Http2Connection dispatch frame type=%u flags=0x%02X stream=%u length=%u\r\n",
+        WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Verbose, "Http2Connection dispatch frame type=%u flags=0x%02X stream=%u length=%u\r\n",
             static_cast<unsigned>(fh.Type),
             static_cast<unsigned>(fh.Flags),
             fh.StreamId,
@@ -1042,7 +1042,7 @@ namespace http2
         if (sendOffset != 0) {
             status = SendRaw(transport, sendBuf, sendOffset);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("Http2Connection send HEADERS failed: 0x%08X stream=%u bytes=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "Http2Connection send HEADERS failed: 0x%08X stream=%u bytes=%Iu\r\n",
                     static_cast<ULONG>(status),
                     streamId,
                     sendOffset);
@@ -2389,7 +2389,7 @@ namespace http2
                     &nvUsed,
                     localSettings_.MaxHeaderListSize);
                 if (!NT_SUCCESS(status)) {
-                    WKNET_DBG_PRINT("Http2Connection HPACK decode failed: 0x%08X block=%Iu stream=%u\r\n",
+                    WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "Http2Connection HPACK decode failed: 0x%08X block=%Iu stream=%u\r\n",
                         static_cast<ULONG>(status),
                         state.ResponseHeaderBlockLen,
                         stream.StreamId());
@@ -2592,7 +2592,7 @@ namespace http2
             ULONG errorCode = 0;
             status = Http2FrameCodec::DecodeRstStreamPayload(fp, fpLen, &errorCode);
             if (!NT_SUCCESS(status)) return status;
-            WKNET_DBG_PRINT("Http2Connection RST_STREAM stream=%u error=0x%08X\r\n",
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Warning, "Http2Connection RST_STREAM stream=%u error=0x%08X\r\n",
                 fh.StreamId,
                 errorCode);
             stream.Reset();
@@ -2707,7 +2707,7 @@ namespace http2
 
             status = ReadFrame(transport, &fh, fp, framePayloadCapacity_, &fpLen);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("Http2Connection ReadFrame failed: 0x%08X stream=%u headers=%u body=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "Http2Connection ReadFrame failed: 0x%08X stream=%u headers=%u body=%Iu\r\n",
                     static_cast<ULONG>(status),
                     stream.StreamId(),
                     frameState.ResponseHeadersReceived ? 1u : 0u,
@@ -2715,7 +2715,7 @@ namespace http2
                 return HandleReadFrameFailure(transport, status);
             }
 
-            WKNET_DBG_PRINT("Http2Connection frame type=%u flags=0x%02X stream=%u length=%u target=%u\r\n",
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Verbose, "Http2Connection frame type=%u flags=0x%02X stream=%u length=%u target=%u\r\n",
                 static_cast<unsigned>(fh.Type),
                 static_cast<unsigned>(fh.Flags),
                 fh.StreamId,
@@ -3320,7 +3320,7 @@ namespace http2
             ULONG errorCode = 0;
             NTSTATUS status = Http2FrameCodec::DecodeGoAwayPayload(payload, payloadLen, &lastStreamId, &errorCode);
             if (!NT_SUCCESS(status)) return status;
-            WKNET_DBG_PRINT("Http2Connection GOAWAY error=0x%08X lastStream=%u\r\n",
+            WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Warning, "Http2Connection GOAWAY error=0x%08X lastStream=%u\r\n",
                 errorCode,
                 lastStreamId);
             goAwayReceived_ = true;

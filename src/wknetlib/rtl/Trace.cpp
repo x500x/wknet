@@ -33,6 +33,23 @@ namespace
         }
     }
 
+    const char* ComponentName(ULONG component) noexcept
+    {
+        switch (component) {
+        case ComponentRtl: return "RTL";
+        case ComponentNet: return "NET";
+        case ComponentTls: return "TLS";
+        case ComponentHttp1: return "HTTP1";
+        case ComponentHttp2: return "HTTP2";
+        case ComponentWs: return "WS";
+        case ComponentSession: return "SESSION";
+        case ComponentCodec: return "CODEC";
+        case ComponentCrypto: return "CRYPTO";
+        case ComponentNone: return "NONE";
+        default: return "MULTI";
+        }
+    }
+
     void DefaultEmit(_In_z_ const char* message) noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
@@ -117,7 +134,7 @@ void TraceWrite(
     }
     buffer[0] = '\0';
 
-    // Prefix: "wknet : [LVL] "
+    // Prefix: "wknet : [COMPONENT][LVL] "
     SIZE_T used = 0;
 #if defined(WKNET_USER_MODE_TEST)
     {
@@ -125,8 +142,9 @@ void TraceWrite(
             buffer,
             TraceFormatBufferBytes,
             _TRUNCATE,
-            "%s : [%s] ",
+            "%s : [%s][%s] ",
             WKNET_DRIVER_NAME,
+            ComponentName(component),
             LevelName(level));
         if (prefix > 0) {
             used = static_cast<SIZE_T>(prefix);
@@ -137,8 +155,9 @@ void TraceWrite(
         const NTSTATUS prefixStatus = RtlStringCbPrintfA(
             buffer,
             TraceFormatBufferBytes,
-            "%s : [%s] ",
+            "%s : [%s][%s] ",
             WKNET_DRIVER_NAME,
+            ComponentName(component),
             LevelName(level));
         if (NT_SUCCESS(prefixStatus)) {
             SIZE_T length = 0;

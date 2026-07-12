@@ -98,7 +98,7 @@ namespace samples
                 transportMode == client::Http2TransportMode::TlsAlpn ? NgHttp2HttpsServiceName : NgHttp2HttpServiceName,
                 &remoteAddress);
             if (!NT_SUCCESS(result.Status)) {
-                WKNET_DBG_PRINT("[%s] HTTP/2 resolve failed: 0x%08X\r\n",
+                KHTTP_SAMPLE_LOG("[%s] HTTP/2 resolve failed: 0x%08X\r\n",
                     sampleName,
                     static_cast<ULONG>(result.Status));
                 return result.Status;
@@ -155,7 +155,7 @@ namespace samples
                 return result.Status;
             }
 
-            WKNET_DBG_PRINT("[%s] HTTP/2 request mode=%u path=%.*s\r\n",
+            KHTTP_SAMPLE_LOG("[%s] HTTP/2 request mode=%u path=%.*s\r\n",
                 sampleName,
                 static_cast<unsigned>(transportMode),
                 static_cast<int>(path.Length),
@@ -173,7 +173,7 @@ namespace samples
                     result.NegotiatedAlpn[response.NegotiatedAlpnLength] = '\0';
                 }
 
-                WKNET_DBG_PRINT("[%s] HTTP/2 status=%u alpn=%.*s headers=%Iu body=%Iu\r\n",
+                KHTTP_SAMPLE_LOG("[%s] HTTP/2 status=%u alpn=%.*s headers=%Iu body=%Iu\r\n",
                     sampleName,
                     result.StatusCode,
                     static_cast<int>(response.NegotiatedAlpnLength),
@@ -182,7 +182,7 @@ namespace samples
                     result.BodyLength);
             }
             else {
-                WKNET_DBG_PRINT("[%s] HTTP/2 request failed: 0x%08X\r\n",
+                KHTTP_SAMPLE_LOG("[%s] HTTP/2 request failed: 0x%08X\r\n",
                     sampleName,
                     static_cast<ULONG>(result.Status));
             }
@@ -203,7 +203,7 @@ namespace samples
             NTSTATUS next) noexcept
         {
             if (!NT_SUCCESS(next) && IsPublicEndpointDiagnosticStatus(next)) {
-                WKNET_DBG_PRINT("[%s] 公网端点环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                KHTTP_SAMPLE_LOG("[%s] 公网端点环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                     sampleName,
                     static_cast<ULONG>(next));
                 return current;

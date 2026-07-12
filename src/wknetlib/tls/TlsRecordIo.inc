@@ -283,13 +283,13 @@
                 handshakeReceiveTimeoutMilliseconds_,
                 &handshakeReceiveDeadline_);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("TlsConnection ReadServerChangeCipherSpec ReadRecord failed: 0x%08X\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection ReadServerChangeCipherSpec ReadRecord failed: 0x%08X\r\n",
                     static_cast<ULONG>(status));
                 return status;
             }
 
             if (record.ContentType == TlsContentType::Alert) {
-                WKNET_DBG_PRINT("TlsConnection ReadServerChangeCipherSpec alert length=%Iu\r\n", record.FragmentLength);
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning, "TlsConnection ReadServerChangeCipherSpec alert length=%Iu\r\n", record.FragmentLength);
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
@@ -299,7 +299,7 @@
                     record.FragmentLength != 1 ||
                     record.Fragment == nullptr ||
                     record.Fragment[0] != 1) {
-                    WKNET_DBG_PRINT("TlsConnection invalid server ChangeCipherSpec len=%Iu hs=%Iu consumed=%Iu\r\n",
+                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection invalid server ChangeCipherSpec len=%Iu hs=%Iu consumed=%Iu\r\n",
                         record.FragmentLength,
                         handshakeLength_,
                         handshakeConsumed_);
@@ -310,21 +310,21 @@
             }
 
             if (record.ContentType != TlsContentType::Handshake) {
-                WKNET_DBG_PRINT("TlsConnection expected ChangeCipherSpec got type=%u length=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection expected ChangeCipherSpec got type=%u length=%Iu\r\n",
                     static_cast<unsigned>(record.ContentType),
                     record.FragmentLength);
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
             if (!allowNewSessionTicket) {
-                WKNET_DBG_PRINT("TlsConnection got unnegotiated handshake before ChangeCipherSpec length=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning, "TlsConnection got unnegotiated handshake before ChangeCipherSpec length=%Iu\r\n",
                     record.FragmentLength);
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
             status = ConsumeOptionalPlainHandshakeRecord(record.Fragment, record.FragmentLength);
             if (!NT_SUCCESS(status)) {
-                WKNET_DBG_PRINT("TlsConnection consume NewSessionTicket failed: 0x%08X length=%Iu\r\n",
+                WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "TlsConnection consume NewSessionTicket failed: 0x%08X length=%Iu\r\n",
                     static_cast<ULONG>(status),
                     record.FragmentLength);
                 return status;

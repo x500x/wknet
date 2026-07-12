@@ -214,8 +214,3 @@ using LONGLONG = int64_t;
 #define UNREFERENCED_PARAMETER(P) (void)(P)
 #endif
 
-#ifndef WKNET_DBG_PRINT
-#define WKNET_DBG_PRINT(...)
-#endif
-
-
