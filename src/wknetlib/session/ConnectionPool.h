@@ -165,6 +165,35 @@ namespace session
         _Inout_opt_ PooledConnection* connection,
         bool reusable) noexcept;
 
+#if !defined(WKNET_USER_MODE_TEST)
+    _Must_inspect_result_
+    NTSTATUS PooledConnectionAdoptSocket(
+        _Inout_ PooledConnection* connection,
+        _In_ net::WskSocket* socket,
+        _In_ core::WskTransport* transport) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS PooledConnectionAdoptTls(
+        _Inout_ PooledConnection* connection,
+        _In_ tls::TlsConnection* tlsConnection,
+        _In_ core::ITransport* transport) noexcept;
+
+    void PooledConnectionReleaseTls(_Inout_ PooledConnection* connection) noexcept;
+
+    void PooledConnectionCloseTransportResources(_Inout_ PooledConnection* connection) noexcept;
+#endif
+
+    _Must_inspect_result_
+    NTSTATUS PooledConnectionAdoptHttp2(
+        _Inout_ PooledConnection* connection,
+        _In_ http2::Http2Connection* http2Connection) noexcept;
+
+    void PooledConnectionReleaseHttp2(_Inout_ PooledConnection* connection) noexcept;
+
+    void PooledConnectionSetProxyTunnelEstablished(
+        _Inout_ PooledConnection* connection,
+        bool established) noexcept;
+
     _Must_inspect_result_
     bool ConnectionPoolHasHttp2StreamLease(
         _In_opt_ const PooledConnection* connection) noexcept;

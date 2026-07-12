@@ -150,52 +150,6 @@
 #if !defined(WKNET_USER_MODE_TEST)
     static bool IsHttpAsyncCancellationRequested(_In_opt_ void* context) noexcept;
 
-    void ReleaseHttp2Layer(_Inout_ PooledConnection& connection) noexcept
-    {
-        if (connection.Http2 == nullptr) {
-            return;
-        }
-
-        if (connection.Transport != nullptr) {
-            const NTSTATUS shutdownStatus = connection.Http2->Shutdown(*connection.Transport);
-            UNREFERENCED_PARAMETER(shutdownStatus);
-        }
-        FreeNonPagedObject(connection.Http2);
-        connection.Http2 = nullptr;
-    }
-
-    void ReleaseTlsLayer(_Inout_ PooledConnection& connection) noexcept
-    {
-        ReleaseHttp2Layer(connection);
-        if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
-            FreeNonPagedObject(connection.Transport);
-            connection.Transport = connection.RawTransport;
-        }
-        if (connection.Tls != nullptr) {
-            FreeNonPagedObject(connection.Tls);
-            connection.Tls = nullptr;
-        }
-    }
-
-    void ClosePooledTransportResources(_Inout_ PooledConnection& connection) noexcept
-    {
-        ReleaseTlsLayer(connection);
-
-        if (connection.RawTransport != nullptr) {
-            FreeNonPagedObject(connection.RawTransport);
-            connection.RawTransport = nullptr;
-            connection.Transport = nullptr;
-        }
-        if (connection.Socket != nullptr) {
-            const NTSTATUS closeStatus = connection.Socket->Close();
-            UNREFERENCED_PARAMETER(closeStatus);
-            FreeNonPagedObject(connection.Socket);
-            connection.Socket = nullptr;
-        }
-
-        connection.LastUsedTime = 0;
-        connection.ProxyTunnelEstablished = false;
-    }
 #endif
 
     _Must_inspect_result_
@@ -230,19 +184,22 @@
             return status;
         }
 
-        connection.Socket = socket;
-        connection.RawTransport = AllocateNonPagedObject<core::WskTransport>(*connection.Socket);
-        if (connection.RawTransport == nullptr) {
-            const NTSTATUS closeStatus = connection.Socket->Close();
+        auto* rawTransport = AllocateNonPagedObject<core::WskTransport>(*socket);
+        if (rawTransport == nullptr) {
+            const NTSTATUS closeStatus = socket->Close();
             UNREFERENCED_PARAMETER(closeStatus);
-            FreeNonPagedObject(connection.Socket);
-            connection.Socket = nullptr;
+            FreeNonPagedObject(socket);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        connection.Transport = connection.RawTransport;
-        connection.ProxyTunnelEstablished = false;
-        return STATUS_SUCCESS;
+        status = PooledConnectionAdoptSocket(&connection, socket, rawTransport);
+        if (!NT_SUCCESS(status)) {
+            FreeNonPagedObject(rawTransport);
+            const NTSTATUS closeStatus = socket->Close();
+            UNREFERENCED_PARAMETER(closeStatus);
+            FreeNonPagedObject(socket);
+        }
+        return status;
     }
 
     _Must_inspect_result_
@@ -358,7 +315,7 @@
         }
 
         workspace.ResponseLength = 0;
-        connection.ProxyTunnelEstablished = true;
+        PooledConnectionSetProxyTunnelEstablished(&connection, true);
         return STATUS_SUCCESS;
     }
 
@@ -377,26 +334,7 @@
             return STATUS_SUCCESS;
         }
 
-        if (connection.Transport != nullptr && connection.Transport != connection.RawTransport) {
-            ReleaseHttp2Layer(connection);
-            FreeNonPagedObject(connection.Transport);
-            connection.Transport = nullptr;
-        }
-        if (connection.Tls != nullptr) {
-            ReleaseHttp2Layer(connection);
-            FreeNonPagedObject(connection.Tls);
-            connection.Tls = nullptr;
-        }
-        if (connection.RawTransport != nullptr) {
-            ReleaseHttp2Layer(connection);
-            FreeNonPagedObject(connection.RawTransport);
-            connection.RawTransport = nullptr;
-        }
-        if (connection.Socket != nullptr) {
-            FreeNonPagedObject(connection.Socket);
-            connection.Socket = nullptr;
-        }
-        connection.ProxyTunnelEstablished = false;
+        PooledConnectionCloseTransportResources(&connection);
 
         if (session->Options.Proxy.Enabled) {
             return ConnectSocketToAddress(
@@ -568,9 +506,12 @@
 
         FreeNonPagedObject(certificateScratch);
         FreeNonPagedObject(handshakeScratch);
-        connection.Tls = tlsConnection;
-        connection.Transport = tlsTransport;
-        return STATUS_SUCCESS;
+        status = PooledConnectionAdoptTls(&connection, tlsConnection, tlsTransport);
+        if (!NT_SUCCESS(status)) {
+            FreeNonPagedObject(tlsTransport);
+            FreeNonPagedObject(tlsConnection);
+        }
+        return status;
     }
 
     _Must_inspect_result_
@@ -596,7 +537,7 @@
             return STATUS_SUCCESS;
         }
 
-        ReleaseTlsLayer(connection);
+        PooledConnectionReleaseTls(&connection);
 
         tls::TlsHandshakeFailure failure = {};
         NTSTATUS status = EstablishProxyTunnel(
@@ -626,7 +567,7 @@
         }
 
         const NTSTATUS originalStatus = status;
-        ClosePooledTransportResources(connection);
+        PooledConnectionCloseTransportResources(&connection);
 
         status = EnsureSocketConnected(session, request, connection, cancellationOperation);
         if (!NT_SUCCESS(status)) {
@@ -672,7 +613,7 @@
             "HttpEngine TLS1.2 confirmation failed: 0x%08X original=0x%08X\r\n",
             static_cast<ULONG>(status),
             static_cast<ULONG>(originalStatus));
-        ClosePooledTransportResources(connection);
+        PooledConnectionCloseTransportResources(&connection);
         return originalStatus;
     }
 #endif

@@ -1132,6 +1132,131 @@ namespace
         CloseDetachedConnectionResources(&detached);
     }
 
+#if !defined(WKNET_USER_MODE_TEST)
+    NTSTATUS PooledConnectionAdoptSocket(
+        PooledConnection* connection,
+        net::WskSocket* socket,
+        core::WskTransport* transport) noexcept
+    {
+        if (connection == nullptr || socket == nullptr || transport == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (connection->Socket != nullptr ||
+            connection->RawTransport != nullptr ||
+            connection->Transport != nullptr ||
+            connection->Tls != nullptr ||
+            connection->Http2 != nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        connection->Socket = socket;
+        connection->RawTransport = transport;
+        connection->Transport = transport;
+        connection->ProxyTunnelEstablished = false;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS PooledConnectionAdoptTls(
+        PooledConnection* connection,
+        tls::TlsConnection* tlsConnection,
+        core::ITransport* transport) noexcept
+    {
+        if (connection == nullptr || tlsConnection == nullptr || transport == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (connection->RawTransport == nullptr ||
+            connection->Transport != connection->RawTransport ||
+            connection->Tls != nullptr ||
+            connection->Http2 != nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        connection->Tls = tlsConnection;
+        connection->Transport = transport;
+        return STATUS_SUCCESS;
+    }
+#endif
+
+    NTSTATUS PooledConnectionAdoptHttp2(
+        PooledConnection* connection,
+        http2::Http2Connection* http2Connection) noexcept
+    {
+        if (connection == nullptr || http2Connection == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (connection->Transport == nullptr || connection->Http2 != nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        connection->Http2 = http2Connection;
+        return STATUS_SUCCESS;
+    }
+
+    void PooledConnectionReleaseHttp2(PooledConnection* connection) noexcept
+    {
+        if (connection == nullptr || connection->Http2 == nullptr) {
+            return;
+        }
+
+        if (connection->Transport != nullptr) {
+            const NTSTATUS shutdownStatus = connection->Http2->Shutdown(*connection->Transport);
+            UNREFERENCED_PARAMETER(shutdownStatus);
+        }
+        FreeNonPagedObject(connection->Http2);
+        connection->Http2 = nullptr;
+    }
+
+#if !defined(WKNET_USER_MODE_TEST)
+    void PooledConnectionReleaseTls(PooledConnection* connection) noexcept
+    {
+        if (connection == nullptr) {
+            return;
+        }
+
+        PooledConnectionReleaseHttp2(connection);
+        if (connection->Transport != nullptr && connection->Transport != connection->RawTransport) {
+            FreeNonPagedObject(connection->Transport);
+            connection->Transport = connection->RawTransport;
+        }
+        if (connection->Tls != nullptr) {
+            FreeNonPagedObject(connection->Tls);
+            connection->Tls = nullptr;
+        }
+    }
+
+    void PooledConnectionCloseTransportResources(PooledConnection* connection) noexcept
+    {
+        if (connection == nullptr) {
+            return;
+        }
+
+        PooledConnectionReleaseTls(connection);
+        if (connection->RawTransport != nullptr) {
+            FreeNonPagedObject(connection->RawTransport);
+            connection->RawTransport = nullptr;
+            connection->Transport = nullptr;
+        }
+        if (connection->Socket != nullptr) {
+            const NTSTATUS closeStatus = connection->Socket->Close();
+            UNREFERENCED_PARAMETER(closeStatus);
+            FreeNonPagedObject(connection->Socket);
+            connection->Socket = nullptr;
+        }
+
+        connection->LastUsedTime = 0;
+        connection->ProxyTunnelEstablished = false;
+    }
+#endif
+
+    void PooledConnectionSetProxyTunnelEstablished(
+        PooledConnection* connection,
+        bool established) noexcept
+    {
+        if (connection != nullptr) {
+            connection->ProxyTunnelEstablished = established;
+        }
+    }
+
     bool ConnectionPoolHasHttp2StreamLease(const PooledConnection* connection) noexcept
     {
         return connection != nullptr && connection->Http2StreamLeases != 0;

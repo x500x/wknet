@@ -250,7 +250,11 @@
                 FreeNonPagedObject(h2Connection);
                 return status;
             }
-            pooledConnection.Http2 = h2Connection;
+            status = PooledConnectionAdoptHttp2(&pooledConnection, h2Connection);
+            if (!NT_SUCCESS(status)) {
+                FreeNonPagedObject(h2Connection);
+                return status;
+            }
         }
 
         SIZE_T responseHeaderCount = 0;
@@ -891,7 +895,11 @@
             FreeNonPagedObject(h2Connection);
             return status;
         }
-        pooledConnection.Http2 = h2Connection;
+        status = PooledConnectionAdoptHttp2(&pooledConnection, h2Connection);
+        if (!NT_SUCCESS(status)) {
+            FreeNonPagedObject(h2Connection);
+            return status;
+        }
 
         SIZE_T responseHeaderCount = 0;
         SIZE_T responseBodyLength = 0;
