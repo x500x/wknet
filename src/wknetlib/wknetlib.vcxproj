@@ -56,9 +56,6 @@
     <ClCompile Include="session\ConnectionPool.cpp" />
     <ClCompile Include="session\Http2RequestBuilder.cpp" />
     <ClCompile Include="session\Workspace.cpp" />
-    <ClCompile Include="client\HttpClient.cpp" />
-    <ClCompile Include="client\Http2Client.cpp" />
-    <ClCompile Include="client\HttpsClient.cpp" />
     <ClCompile Include="transport\ProxyConnect.cpp" />
     <ClCompile Include="session\WsConnection.cpp" />
     <ClCompile Include="transport\TlsTransport.cpp" />
@@ -199,9 +196,6 @@
     <ClInclude Include="..\..\include\wknet\session\Async.h" />
     <ClInclude Include="..\..\include\wknet\session\ConnectionPool.h" />
     <ClInclude Include="..\..\include\wknet\session\Workspace.h" />
-    <ClInclude Include="..\..\include\wknet\client\HttpClient.h" />
-    <ClInclude Include="..\..\include\wknet\client\Http2Client.h" />
-    <ClInclude Include="..\..\include\wknet\client\HttpsClient.h" />
     <ClInclude Include="session\WsConnection.h" />
     <ClInclude Include="..\..\include\wknet\transport\IScratchAllocator.h" />
     <ClInclude Include="..\..\include\wknet\transport\ITransport.h" />

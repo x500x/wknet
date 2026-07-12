@@ -9,9 +9,6 @@
       <UniqueIdentifier>{93995380-89BD-4B04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
     </Filter>
-    <Filter Include="Source Files\client">
-      <UniqueIdentifier>{9D513525-581D-46E5-BCDB-B06F9F0FC8AA}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source Files\core">
       <UniqueIdentifier>{A82F2D68-30B8-4A4F-B2CF-6AB8E4F3D153}</UniqueIdentifier>
     </Filter>
@@ -47,9 +44,6 @@
     </Filter>
     <Filter Include="Source Files\third_party\brotli">
       <UniqueIdentifier>{A961B65D-115E-44B3-9E77-3B8D9751446C}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\client">
-      <UniqueIdentifier>{45F02825-5476-4470-A5E4-F08068A6F8FE}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\core">
       <UniqueIdentifier>{1CCEF3A8-5E95-4D78-A8E5-5F055A3A9A37}</UniqueIdentifier>
@@ -100,15 +94,6 @@
     </ClCompile>
     <ClCompile Include="session\Http2RequestBuilder.cpp">
       <Filter>Source Files\session</Filter>
-    </ClCompile>
-    <ClCompile Include="client\HttpClient.cpp">
-      <Filter>Source Files\client</Filter>
-    </ClCompile>
-    <ClCompile Include="client\Http2Client.cpp">
-      <Filter>Source Files\client</Filter>
-    </ClCompile>
-    <ClCompile Include="client\HttpsClient.cpp">
-      <Filter>Source Files\client</Filter>
     </ClCompile>
     <ClCompile Include="session\WsConnection.cpp">
       <Filter>Source Files\engine</Filter>
@@ -456,15 +441,6 @@
     </ClInclude>
     <ClInclude Include="session\Http2RequestBuilder.h">
       <Filter>Header Files\session</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\client\HttpClient.h">
-      <Filter>Header Files\client</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\client\Http2Client.h">
-      <Filter>Header Files\client</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\client\HttpsClient.h">
-      <Filter>Header Files\client</Filter>
     </ClInclude>
     <ClInclude Include="session\WsConnection.h">
       <Filter>Header Files\engine</Filter>

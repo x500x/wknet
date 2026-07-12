@@ -2,8 +2,6 @@
 
 #include "samples/AdvancedScenarioSamples.h"
 #include "samples/HighLevelApiSamples.h"
-#include "samples/Http2VerbSamples.h"
-#include "samples/HttpVerbSamples.h"
 
 namespace wknet::http {
     struct Session;
@@ -16,8 +14,6 @@ namespace samples
     struct wknettestSampleResults final
     {
         HighLevelApiSampleResults HighLevel = {};
-        HttpVerbSampleResults Http = {};
-        Http2VerbSampleResults Http2 = {};
         AdvancedScenarioSampleResults Advanced = {};
     };
 

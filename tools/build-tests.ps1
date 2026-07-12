@@ -37,23 +37,19 @@ $exePath = Join-Path $binDir "$Test.exe"
 # for WSK/TLS classes, so keep the default source set conservative.
 $excludedLibSources = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 @(
-    'Http2Client.cpp', 'HttpClient.cpp', 'HttpsClient.cpp',
     'WknetConfig.cpp', 'WsConnection.cpp', 'WskSocket.cpp'
 ) | ForEach-Object { [void]$excludedLibSources.Add($_) }
 
 switch ($Test) {
     'http2_client_tests' {
-        [void]$excludedLibSources.Remove('Http2Client.cpp')
-        [void]$excludedLibSources.Remove('HttpsClient.cpp')
         @(
             'TlsConnection.cpp', 'TlsConnect12.cpp', 'TlsConnect13.cpp',
-            'TlsPostHandshake.cpp', 'TlsRecordIo.cpp'
+            'TlsPostHandshake.cpp', 'TlsRecordIo.cpp', 'TlsTransport.cpp'
         ) | ForEach-Object { [void]$excludedLibSources.Add($_) }
     }
     'khttp_tests' {
         [void]$excludedLibSources.Remove('WskClient.cpp')
         [void]$excludedLibSources.Remove('WskSocket.cpp')
-        [void]$excludedLibSources.Remove('Http2Client.cpp')
     }
     'high_level_api_tests' {
         [void]$excludedLibSources.Remove('WskClient.cpp')
@@ -68,10 +64,7 @@ $libSources = Get-ChildItem -Path (Join-Path $repoRoot 'src\wknetlib') -Recurse 
     Where-Object { -not $excludedLibSources.Contains($_.Name) } |
     ForEach-Object { $_.FullName }
 
-# Only the high-level integration test pulls in sample translation units, and only the
-# three samples that compile under the user-mode harness. The HTTP/1.1-, HTTP/2-verb and
-# khttp samples call kernel-only internal services (HttpsClient/Http2Client/WsConnection)
-# that have no user-mode implementation, so they are excluded.
+# Only the high-level integration test pulls in the public-API sample translation units.
 $sampleSources = @()
 if ($Test -eq 'high_level_api_tests') {
     $sampleSources = @(

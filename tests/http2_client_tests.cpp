@@ -2,21 +2,15 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include "client/HttpsClient.h"
 #include "session/Http2RequestBuilder.h"
 #include "session/Workspace.h"
 #include "http2/Http2Connection.h"
-#include "net/WskSocket.h"
-#include "tls/TlsConnection.h"
 #include "ws/WebSocketFrame.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-using wknet::client::HttpsClient;
-using wknet::client::HttpsRequestOptions;
-using wknet::client::HttpsResponseBuffers;
 using wknet::session::BuildHttp2RequestHeaders;
 using wknet::session::Http2ContentLengthBufferLength;
 using wknet::session::Http2MaxHeaderNameLength;
@@ -55,259 +49,6 @@ namespace Http2FrameFlags = wknet::http2::Http2FrameFlags;
 
 namespace
 {
-    struct CapturedAlpnProtocol final
-    {
-        char Name[16] = {};
-        SIZE_T Length = 0;
-    };
-
-    struct HttpsClientStubState final
-    {
-        bool Enabled = false;
-        const char* Response = nullptr;
-        SIZE_T ResponseLength = 0;
-        SIZE_T ResponseOffset = 0;
-        const char* ProxyResponse = nullptr;
-        SIZE_T ProxyResponseLength = 0;
-        SIZE_T ProxyResponseOffset = 0;
-        ULONG ConnectCalls = 0;
-        ULONG RawSendCalls = 0;
-        ULONG RawReceiveCalls = 0;
-        ULONG TlsConnectCalls = 0;
-        ULONG TlsSendCalls = 0;
-        ULONG TlsReceiveCalls = 0;
-        SIZE_T CapturedAlpnCount = 0;
-        CapturedAlpnProtocol CapturedAlpn[4] = {};
-        char RawSent[1024] = {};
-        SIZE_T RawSentLength = 0;
-    };
-
-    HttpsClientStubState g_httpsClientStub = {};
-
-    void ResetHttpsClientStub(const char* response)
-    {
-        g_httpsClientStub = {};
-        g_httpsClientStub.Enabled = true;
-        g_httpsClientStub.Response = response;
-        g_httpsClientStub.ResponseLength = response != nullptr ? strlen(response) : 0;
-    }
-
-    void ResetHttpsClientProxyStub(const char* proxyResponse, const char* tlsResponse)
-    {
-        ResetHttpsClientStub(tlsResponse);
-        g_httpsClientStub.ProxyResponse = proxyResponse;
-        g_httpsClientStub.ProxyResponseLength = proxyResponse != nullptr ? strlen(proxyResponse) : 0;
-    }
-
-    void DisableHttpsClientStub()
-    {
-        g_httpsClientStub = {};
-    }
-}
-
-namespace wknet
-{
-namespace net
-{
-    WskSocket::~WskSocket() noexcept = default;
-
-    NTSTATUS WskSocket::Connect(WskClient&, const SOCKADDR*, const SOCKADDR*, const WskCancellationToken*) noexcept
-    {
-        if (g_httpsClientStub.Enabled) {
-            ++g_httpsClientStub.ConnectCalls;
-            return STATUS_SUCCESS;
-        }
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    NTSTATUS WskSocket::Send(WskBuffer&, SIZE_T, SIZE_T*, ULONG, const WskCancellationToken*) noexcept
-    {
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    NTSTATUS WskSocket::Send(const void* data, SIZE_T length, SIZE_T* bytesSent, ULONG, const WskCancellationToken*) noexcept
-    {
-        if (bytesSent != nullptr) {
-            *bytesSent = 0;
-        }
-        if (g_httpsClientStub.Enabled) {
-            ++g_httpsClientStub.RawSendCalls;
-            if (data == nullptr && length != 0) {
-                return STATUS_INVALID_PARAMETER;
-            }
-            if (length > sizeof(g_httpsClientStub.RawSent) - g_httpsClientStub.RawSentLength) {
-                return STATUS_BUFFER_TOO_SMALL;
-            }
-            if (length != 0) {
-                memcpy(
-                    g_httpsClientStub.RawSent + g_httpsClientStub.RawSentLength,
-                    data,
-                    length);
-                g_httpsClientStub.RawSentLength += length;
-            }
-            if (bytesSent != nullptr) {
-                *bytesSent = length;
-            }
-            return STATUS_SUCCESS;
-        }
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    NTSTATUS WskSocket::Receive(WskBuffer&, SIZE_T, SIZE_T*, ULONG, ULONG, const WskCancellationToken*) noexcept
-    {
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    NTSTATUS WskSocket::Receive(void* data, SIZE_T length, SIZE_T* bytesReceived, ULONG, ULONG, const WskCancellationToken*) noexcept
-    {
-        if (bytesReceived != nullptr) {
-            *bytesReceived = 0;
-        }
-        if (g_httpsClientStub.Enabled) {
-            ++g_httpsClientStub.RawReceiveCalls;
-            if (data == nullptr || length == 0) {
-                return STATUS_INVALID_PARAMETER;
-            }
-            if (g_httpsClientStub.ProxyResponse == nullptr ||
-                g_httpsClientStub.ProxyResponseOffset >= g_httpsClientStub.ProxyResponseLength) {
-                return STATUS_CONNECTION_DISCONNECTED;
-            }
-
-            const SIZE_T remaining =
-                g_httpsClientStub.ProxyResponseLength - g_httpsClientStub.ProxyResponseOffset;
-            const SIZE_T copyLength = remaining < length ? remaining : length;
-            memcpy(
-                data,
-                g_httpsClientStub.ProxyResponse + g_httpsClientStub.ProxyResponseOffset,
-                copyLength);
-            g_httpsClientStub.ProxyResponseOffset += copyLength;
-            if (bytesReceived != nullptr) {
-                *bytesReceived = copyLength;
-            }
-            return STATUS_SUCCESS;
-        }
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    NTSTATUS WskSocket::Disconnect(ULONG) noexcept
-    {
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    NTSTATUS WskSocket::Close() noexcept
-    {
-        return STATUS_SUCCESS;
-    }
-
-    bool WskSocket::IsConnected() const noexcept
-    {
-        if (g_httpsClientStub.Enabled) {
-            return true;
-        }
-        return false;
-    }
-
-    PWSK_SOCKET WskSocket::NativeSocket() const noexcept
-    {
-        return nullptr;
-    }
-}
-
-namespace tls
-{
-    TlsConnection::~TlsConnection() noexcept = default;
-
-    NTSTATUS TlsConnection::Connect(core::ITransport&, const TlsClientConnectionOptions& options) noexcept
-    {
-        if (g_httpsClientStub.Enabled) {
-            ++g_httpsClientStub.TlsConnectCalls;
-            g_httpsClientStub.CapturedAlpnCount = options.AlpnProtocolCount;
-            constexpr SIZE_T CapturedAlpnCapacity =
-                sizeof(g_httpsClientStub.CapturedAlpn) / sizeof(g_httpsClientStub.CapturedAlpn[0]);
-            const SIZE_T captureCount =
-                options.AlpnProtocolCount < CapturedAlpnCapacity ?
-                options.AlpnProtocolCount :
-                CapturedAlpnCapacity;
-            for (SIZE_T index = 0; index < captureCount; ++index) {
-                const wknet::tls::TlsAlpnProtocol& protocol = options.AlpnProtocols[index];
-                const SIZE_T copyLength =
-                    protocol.NameLength < sizeof(g_httpsClientStub.CapturedAlpn[index].Name) - 1 ?
-                    protocol.NameLength :
-                    sizeof(g_httpsClientStub.CapturedAlpn[index].Name) - 1;
-                if (protocol.Name != nullptr && copyLength != 0) {
-                    memcpy(g_httpsClientStub.CapturedAlpn[index].Name, protocol.Name, copyLength);
-                }
-                g_httpsClientStub.CapturedAlpn[index].Name[copyLength] = '\0';
-                g_httpsClientStub.CapturedAlpn[index].Length = protocol.NameLength;
-            }
-            return STATUS_SUCCESS;
-        }
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    NTSTATUS TlsConnection::Send(core::ITransport&, const void*, SIZE_T length, SIZE_T* bytesSent) noexcept
-    {
-        if (g_httpsClientStub.Enabled) {
-            ++g_httpsClientStub.TlsSendCalls;
-            if (bytesSent != nullptr) {
-                *bytesSent = length;
-            }
-            return STATUS_SUCCESS;
-        }
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    NTSTATUS TlsConnection::Receive(core::ITransport&, void* data, SIZE_T length, SIZE_T* bytesReceived, ULONG) noexcept
-    {
-        if (bytesReceived != nullptr) {
-            *bytesReceived = 0;
-        }
-        if (g_httpsClientStub.Enabled) {
-            ++g_httpsClientStub.TlsReceiveCalls;
-            if (data == nullptr || length == 0) {
-                return STATUS_INVALID_PARAMETER;
-            }
-            if (g_httpsClientStub.Response == nullptr ||
-                g_httpsClientStub.ResponseOffset >= g_httpsClientStub.ResponseLength) {
-                return STATUS_CONNECTION_DISCONNECTED;
-            }
-
-            const SIZE_T remaining =
-                g_httpsClientStub.ResponseLength - g_httpsClientStub.ResponseOffset;
-            const SIZE_T copyLength = remaining < length ? remaining : length;
-            memcpy(
-                data,
-                g_httpsClientStub.Response + g_httpsClientStub.ResponseOffset,
-                copyLength);
-            g_httpsClientStub.ResponseOffset += copyLength;
-            if (bytesReceived != nullptr) {
-                *bytesReceived = copyLength;
-            }
-            return STATUS_SUCCESS;
-        }
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    const char* TlsConnection::NegotiatedAlpn() const noexcept
-    {
-        return nullptr;
-    }
-
-    SIZE_T TlsConnection::NegotiatedAlpnLength() const noexcept
-    {
-        return 0;
-    }
-
-    const TlsHandshakeFailure& TlsConnection::LastHandshakeFailure() const noexcept
-    {
-        static const TlsHandshakeFailure failure = {};
-        return failure;
-    }
-}
-}
-
-namespace
-{
     bool g_failed = false;
 
     void Expect(bool condition, const char* message)
@@ -324,26 +65,6 @@ namespace
         return text.Data != nullptr &&
             text.Length == len &&
             memcmp(text.Data, literal, len) == 0;
-    }
-
-    bool BufferContainsLiteral(const char* buffer, SIZE_T bufferLength, const char* literal)
-    {
-        if (buffer == nullptr || literal == nullptr) {
-            return false;
-        }
-
-        const SIZE_T literalLength = strlen(literal);
-        if (literalLength == 0 || literalLength > bufferLength) {
-            return false;
-        }
-
-        for (SIZE_T offset = 0; offset + literalLength <= bufferLength; ++offset) {
-            if (memcmp(buffer + offset, literal, literalLength) == 0) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     int CountHeaders(const HttpHeader* headers, size_t headerCount, const char* name)
@@ -365,63 +86,6 @@ namespace
             }
         }
         return nullptr;
-    }
-
-    NTSTATUS SendHttpsClientAlpnCapture(
-        const wknet::tls::TlsAlpnProtocol* alpnProtocols,
-        SIZE_T alpnProtocolCount,
-        bool preferHttp2,
-        USHORT* statusCode)
-    {
-        if (statusCode != nullptr) {
-            *statusCode = 0;
-        }
-
-        char requestBuffer[256] = {};
-        char responseBuffer[256] = {};
-        char decodedBody[64] = {};
-        char scratchBody[64] = {};
-        char headerNameValue[256] = {};
-        HttpHeader responseHeaders[8] = {};
-
-        HttpsResponseBuffers buffers = {};
-        buffers.RequestBuffer = requestBuffer;
-        buffers.RequestBufferLength = sizeof(requestBuffer);
-        buffers.ResponseBuffer = responseBuffer;
-        buffers.ResponseBufferLength = sizeof(responseBuffer);
-        buffers.DecodedBodyBuffer = decodedBody;
-        buffers.DecodedBodyBufferLength = sizeof(decodedBody);
-        buffers.ScratchBodyBuffer = scratchBody;
-        buffers.ScratchBodyBufferLength = sizeof(scratchBody);
-        buffers.HeaderNameValueBuffer = headerNameValue;
-        buffers.HeaderNameValueBufferLength = sizeof(headerNameValue);
-        buffers.Headers = responseHeaders;
-        buffers.HeaderCapacity = sizeof(responseHeaders) / sizeof(responseHeaders[0]);
-
-        SOCKADDR_STORAGE remoteAddress = {};
-        remoteAddress.ss_family = AF_INET;
-
-        HttpsRequestOptions options = {};
-        options.RemoteAddress = reinterpret_cast<const SOCKADDR*>(&remoteAddress);
-        options.ServerName = "example.test";
-        options.ServerNameLength = sizeof("example.test") - 1;
-        options.Request.Method = HttpMethod::Get;
-        options.Request.Path = MakeText("/");
-        options.Request.Host = MakeText("example.test");
-        options.Request.Connection = wknet::http1::HttpConnectionDirective::Close;
-        options.VerifyCertificate = false;
-        options.PreferHttp2 = preferHttp2;
-        options.AlpnProtocols = alpnProtocols;
-        options.AlpnProtocolCount = alpnProtocolCount;
-
-        HttpsClient client;
-        wknet::http1::HttpResponse response = {};
-        auto& wskClient = *reinterpret_cast<wknet::net::WskClient*>(0x1);
-        const NTSTATUS status = client.SendRequest(wskClient, options, buffers, response);
-        if (NT_SUCCESS(status) && statusCode != nullptr) {
-            *statusCode = response.StatusCode;
-        }
-        return status;
     }
 
     bool TextDataInBuffer(HttpText text, const char* buffer, SIZE_T bufferLength)
@@ -4033,7 +3697,21 @@ namespace
         char headerNameValue[192] = {};
         HttpHeader responseHeaders[4] = {};
 
-        HttpsResponseBuffers buffers = {};
+        struct ResponseBuffers final
+        {
+            char* RequestBuffer = nullptr;
+            SIZE_T RequestBufferLength = 0;
+            char* ResponseBuffer = nullptr;
+            SIZE_T ResponseBufferLength = 0;
+            char* DecodedBodyBuffer = nullptr;
+            SIZE_T DecodedBodyBufferLength = 0;
+            char* ScratchBodyBuffer = nullptr;
+            SIZE_T ScratchBodyBufferLength = 0;
+            char* HeaderNameValueBuffer = nullptr;
+            SIZE_T HeaderNameValueBufferLength = 0;
+            HttpHeader* Headers = nullptr;
+            SIZE_T HeaderCapacity = 0;
+        } buffers;
         buffers.RequestBuffer = requestBuffer;
         buffers.RequestBufferLength = sizeof(requestBuffer);
         buffers.ResponseBuffer = responseBody;
@@ -4095,118 +3773,6 @@ namespace
                 !TextDataInBuffer(contentType->Name, buffers.DecodedBodyBuffer, buffers.DecodedBodyBufferLength) &&
                 !TextDataInBuffer(contentType->Value, buffers.DecodedBodyBuffer, buffers.DecodedBodyBufferLength),
             "HTTPS/H2 header name/value do not live in decoded body buffer");
-    }
-
-    void TestHttpsClientExplicitHttp11Alpn()
-    {
-        static const char OkResponse[] =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Length: 0\r\n"
-            "Connection: close\r\n"
-            "\r\n";
-        const wknet::tls::TlsAlpnProtocol http11Alpn[] = {
-            { "http/1.1", sizeof("http/1.1") - 1 }
-        };
-
-        ResetHttpsClientStub(OkResponse);
-        USHORT statusCode = 0;
-        NTSTATUS status = SendHttpsClientAlpnCapture(
-            http11Alpn,
-            sizeof(http11Alpn) / sizeof(http11Alpn[0]),
-            false,
-            &statusCode);
-        Expect(NT_SUCCESS(status), "HTTPS client explicit HTTP/1.1 ALPN request succeeds");
-        Expect(statusCode == 200, "HTTPS client explicit HTTP/1.1 ALPN response status is decoded");
-        Expect(g_httpsClientStub.ConnectCalls == 1, "HTTPS client explicit HTTP/1.1 ALPN opens one socket");
-        Expect(g_httpsClientStub.TlsConnectCalls == 1, "HTTPS client explicit HTTP/1.1 ALPN starts TLS once");
-        Expect(g_httpsClientStub.CapturedAlpnCount == 1, "HTTPS client forwards one explicit ALPN protocol");
-        Expect(
-            g_httpsClientStub.CapturedAlpn[0].Length == sizeof("http/1.1") - 1 &&
-                strcmp(g_httpsClientStub.CapturedAlpn[0].Name, "http/1.1") == 0,
-            "HTTPS client forwards explicit HTTP/1.1 ALPN");
-        DisableHttpsClientStub();
-
-        ResetHttpsClientStub(OkResponse);
-        statusCode = 0;
-        status = SendHttpsClientAlpnCapture(nullptr, 0, false, &statusCode);
-        Expect(NT_SUCCESS(status), "HTTPS client keeps no-ALPN mode when PreferHttp2 is disabled");
-        Expect(statusCode == 200, "HTTPS client no-ALPN response status is decoded");
-        Expect(g_httpsClientStub.CapturedAlpnCount == 0, "HTTPS client no-ALPN mode remains unchanged");
-        DisableHttpsClientStub();
-    }
-
-    void TestHttpsClientProxyConnectTunnel()
-    {
-        ResetHttpsClientProxyStub(
-            "HTTP/1.1 200 Connection Established\r\n\r\n",
-            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
-
-        char requestBuffer[512] = {};
-        char responseBuffer[512] = {};
-        char decodedBody[64] = {};
-        char scratchBody[64] = {};
-        char headerNameValue[256] = {};
-        HttpHeader responseHeaders[8] = {};
-
-        HttpsResponseBuffers buffers = {};
-        buffers.RequestBuffer = requestBuffer;
-        buffers.RequestBufferLength = sizeof(requestBuffer);
-        buffers.ResponseBuffer = responseBuffer;
-        buffers.ResponseBufferLength = sizeof(responseBuffer);
-        buffers.DecodedBodyBuffer = decodedBody;
-        buffers.DecodedBodyBufferLength = sizeof(decodedBody);
-        buffers.ScratchBodyBuffer = scratchBody;
-        buffers.ScratchBodyBufferLength = sizeof(scratchBody);
-        buffers.HeaderNameValueBuffer = headerNameValue;
-        buffers.HeaderNameValueBufferLength = sizeof(headerNameValue);
-        buffers.Headers = responseHeaders;
-        buffers.HeaderCapacity = sizeof(responseHeaders) / sizeof(responseHeaders[0]);
-
-        SOCKADDR_STORAGE remoteAddress = {};
-        remoteAddress.ss_family = AF_INET;
-        SOCKADDR_STORAGE proxyAddress = {};
-        proxyAddress.ss_family = AF_INET;
-
-        HttpsRequestOptions options = {};
-        options.RemoteAddress = reinterpret_cast<const SOCKADDR*>(&remoteAddress);
-        options.ProxyAddress = reinterpret_cast<const SOCKADDR*>(&proxyAddress);
-        options.ProxyAuthority = "example.test:443";
-        options.ProxyAuthorityLength = strlen(options.ProxyAuthority);
-        options.ServerName = "example.test";
-        options.ServerNameLength = strlen(options.ServerName);
-        options.Request.Method = HttpMethod::Get;
-        options.Request.Path = MakeText("/");
-        options.Request.Host = MakeText("example.test");
-        options.Request.UserAgent = MakeText("wknet/0.1");
-        options.Request.Connection = wknet::http1::HttpConnectionDirective::Close;
-        options.VerifyCertificate = false;
-        options.PreferHttp2 = false;
-
-        HttpsClient client;
-        wknet::http1::HttpResponse response = {};
-        auto& wskClient = *reinterpret_cast<wknet::net::WskClient*>(0x1);
-        const NTSTATUS status = client.SendRequest(wskClient, options, buffers, response);
-
-        Expect(NT_SUCCESS(status), "HTTPS client proxy CONNECT request succeeds");
-        Expect(g_httpsClientStub.ConnectCalls == 1, "HTTPS proxy CONNECT opens one TCP connection");
-        Expect(g_httpsClientStub.RawSendCalls == 1, "HTTPS proxy CONNECT sends one plaintext CONNECT request");
-        Expect(g_httpsClientStub.RawReceiveCalls >= 1, "HTTPS proxy CONNECT reads proxy response");
-        Expect(g_httpsClientStub.TlsConnectCalls == 1, "HTTPS proxy CONNECT starts TLS after tunnel");
-        Expect(BufferContainsLiteral(
-            g_httpsClientStub.RawSent,
-            g_httpsClientStub.RawSentLength,
-            "CONNECT example.test:443 HTTP/1.1\r\n"),
-            "HTTPS proxy CONNECT request line targets authority");
-        Expect(BufferContainsLiteral(
-            g_httpsClientStub.RawSent,
-            g_httpsClientStub.RawSentLength,
-            "Host: example.test:443\r\n"),
-            "HTTPS proxy CONNECT includes Host authority");
-        Expect(response.StatusCode == 200, "HTTPS proxy CONNECT inner response status is decoded");
-        Expect(response.BodyLength == 2 && memcmp(response.Body, "ok", 2) == 0,
-            "HTTPS proxy CONNECT inner response body is decoded");
-
-        DisableHttpsClientStub();
     }
 
     void TestConnectionRejectsMalformedResponseHeaders()
@@ -4718,8 +4284,6 @@ int main()
     TestConnectionAcceptsResponseFieldValueOptionalWhitespace();
     TestConnectionHidesResponsePseudoHeaders();
     TestHttpsH2HeaderNameValueBufferSurvivesDecodedBodyWrite();
-    TestHttpsClientExplicitHttp11Alpn();
-    TestHttpsClientProxyConnectTunnel();
     TestConnectionRejectsMalformedResponseHeaders();
     TestConnectionValidatesResponseContentLength();
     TestConnectionRejectsDataForNoBodyResponses();

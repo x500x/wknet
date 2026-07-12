@@ -219,7 +219,7 @@ function Invoke-HostRegression {
         -Source 'tests\http2_client_tests.cpp' `
         -ProjectSources @(
             'src\wknetlib\http1\HttpTypes.cpp',
-            'src\wknetlib\client\Http2Client.cpp',
+            'src\wknetlib\session\Http2RequestBuilder.cpp',
             'src\wknetlib\transport\TlsTransport.cpp',
             'src\wknetlib\session\Workspace.cpp',
             'src\wknetlib\http2\Http2Connection.cpp',

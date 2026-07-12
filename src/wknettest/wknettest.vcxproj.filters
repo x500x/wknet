@@ -36,12 +36,6 @@
     <ClCompile Include="samples\HighLevelApiSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
-    <ClCompile Include="samples\Http2VerbSamples.cpp">
-      <Filter>Source Files\samples</Filter>
-    </ClCompile>
-    <ClCompile Include="samples\HttpVerbSamples.cpp">
-      <Filter>Source Files\samples</Filter>
-    </ClCompile>
     <ClCompile Include="samples\KhttpSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
@@ -63,12 +57,6 @@
       <Filter>Header Files\samples</Filter>
     </ClInclude>
     <ClInclude Include="samples\HighLevelApiSamples.h">
-      <Filter>Header Files\samples</Filter>
-    </ClInclude>
-    <ClInclude Include="samples\Http2VerbSamples.h">
-      <Filter>Header Files\samples</Filter>
-    </ClInclude>
-    <ClInclude Include="samples\HttpVerbSamples.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
     <ClInclude Include="samples\KhttpSamples.h">

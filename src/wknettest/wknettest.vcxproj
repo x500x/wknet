@@ -24,8 +24,6 @@
     <ClCompile Include="samples\AdvancedScenarioSamples.cpp" />
     <ClCompile Include="samples\ExternalTrustStore.cpp" />
     <ClCompile Include="samples\HighLevelApiSamples.cpp" />
-    <ClCompile Include="samples\Http2VerbSamples.cpp" />
-    <ClCompile Include="samples\HttpVerbSamples.cpp" />
     <ClCompile Include="samples\KhttpSamples.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -35,8 +33,6 @@
     <ClInclude Include="samples\AdvancedScenarioSamples.h" />
     <ClInclude Include="samples\ExternalTrustStore.h" />
     <ClInclude Include="samples\HighLevelApiSamples.h" />
-    <ClInclude Include="samples\Http2VerbSamples.h" />
-    <ClInclude Include="samples\HttpVerbSamples.h" />
     <ClInclude Include="samples\KhttpSamples.h" />
   </ItemGroup>
   <ItemGroup>
