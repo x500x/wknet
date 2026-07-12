@@ -230,7 +230,7 @@ function Resolve-ExecutablePath {
 function Resolve-TlsTool {
     $openssl = Resolve-ExecutablePath `
         -ConfiguredPath $OpenSslPath `
-        -EnvironmentNames @('KERNEL_HTTP_OPENSSL', 'OPENSSL') `
+        -EnvironmentNames @('WKNET_OPENSSL', 'OPENSSL') `
         -CommandNames @('openssl.exe', 'openssl')
     if (-not [string]::IsNullOrWhiteSpace($openssl)) {
         return [pscustomobject]@{
@@ -241,7 +241,7 @@ function Resolve-TlsTool {
 
     $boring = Resolve-ExecutablePath `
         -ConfiguredPath $BoringSslPath `
-        -EnvironmentNames @('KERNEL_HTTP_BORINGSSL', 'BORINGSSL') `
+        -EnvironmentNames @('WKNET_BORINGSSL', 'BORINGSSL') `
         -CommandNames @('bssl.exe', 'bssl')
     if (-not [string]::IsNullOrWhiteSpace($boring)) {
         return [pscustomobject]@{
@@ -470,16 +470,16 @@ function Invoke-OpenSslScenario {
     }
 }
 
-function Invoke-KernelHttpRenegotiationScenario {
+function Invoke-WknetRenegotiationScenario {
     param(
         [string]$OpenSsl,
         [pscustomobject]$RsaFixture,
         [switch]$ClientInitiated
     )
 
-    $scenarioName = 'tls12-kernelhttp-renegotiation'
+    $scenarioName = 'tls12-wknet-renegotiation'
     if ($ClientInitiated) {
-        $scenarioName = 'tls12-kernelhttp-client-renegotiation'
+        $scenarioName = 'tls12-wknet-client-renegotiation'
     }
     if ($null -eq $RsaFixture -or
         -not (Test-Path -LiteralPath $RsaFixture.Cert) -or
@@ -490,7 +490,7 @@ function Invoke-KernelHttpRenegotiationScenario {
 
     $client = Join-Path $script:BinDir 'tls_renegotiation_client.exe'
     if (-not (Test-Path -LiteralPath $client)) {
-        Add-Skip $scenarioName 'KernelHttp renegotiation client test binary was not built'
+        Add-Skip $scenarioName 'wknet renegotiation client test binary was not built'
         return
     }
 
@@ -570,7 +570,7 @@ function Invoke-KernelHttpRenegotiationScenario {
         }
         $combinedOutput = "$($clientResult.StdOut)`n$($clientResult.StdErr)`n$serverText"
         if ($clientResult.TimedOut) {
-            throw "KernelHttp renegotiation client timed out for $scenarioName"
+            throw "wknet renegotiation client timed out for $scenarioName"
         }
         if ($clientResult.ExitCode -ne 0) {
             if (Test-OpenSslRenegotiationUnsupported -Text $combinedOutput) {
@@ -581,7 +581,7 @@ function Invoke-KernelHttpRenegotiationScenario {
                 Add-Skip $scenarioName 'local OpenSSL runtime does not expose the renegotiation APIs used by this harness'
                 return
             }
-            throw "KernelHttp renegotiation client failed for $scenarioName with exit code $($clientResult.ExitCode). See $script:LogDir"
+            throw "wknet renegotiation client failed for $scenarioName with exit code $($clientResult.ExitCode). See $script:LogDir"
         }
 
         Add-Pass $scenarioName
@@ -731,11 +731,11 @@ function Invoke-OpenSslWireMatrix {
             -EcdsaFixture $ecdsaFixture
     }
 
-    Invoke-KernelHttpRenegotiationScenario `
+    Invoke-WknetRenegotiationScenario `
         -OpenSsl $OpenSsl `
         -RsaFixture $rsaFixture
 
-    Invoke-KernelHttpRenegotiationScenario `
+    Invoke-WknetRenegotiationScenario `
         -OpenSsl $OpenSsl `
         -RsaFixture $rsaFixture `
         -ClientInitiated
@@ -763,7 +763,7 @@ Compile-UserModeTest `
 Add-Pass 'tls_interop_matrix_tests'
 
 if ($null -eq $tool) {
-    Add-Skip 'local-openssl-boringssl-wire-matrix' 'no OpenSSL/BoringSSL executable found; set -OpenSslPath, -BoringSslPath, KERNEL_HTTP_OPENSSL, or KERNEL_HTTP_BORINGSSL'
+    Add-Skip 'local-openssl-boringssl-wire-matrix' 'no OpenSSL/BoringSSL executable found; set -OpenSslPath, -BoringSslPath, WKNET_OPENSSL, or WKNET_BORINGSSL'
 }
 elseif ($tool.Kind -ne 'OpenSSL') {
     Add-Skip 'local-boringssl-wire-matrix' "found $($tool.Kind) at $($tool.Path), but this harness requires OpenSSL-compatible s_server/s_client arguments"

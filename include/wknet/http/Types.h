@@ -1,31 +1,7 @@
 #pragma once
 
 #include <wknet/WknetConfig.h>
-
-#if defined(WKNET_USER_MODE_TEST)
-// User-mode harness: local sockaddr storage without pulling WSK stubs.
-// Shared with net/WskClient.h via this guard.
-#ifndef WKNET_SOCKADDR_STORAGE_DEFINED
-#define WKNET_SOCKADDR_STORAGE_DEFINED
-struct SOCKADDR_STORAGE
-{
-    USHORT ss_family = 0;
-    UCHAR __ss_pad[126] = {};
-};
-#endif
-#else
-// Kernel: SOCKADDR_STORAGE comes with WSK.
-#include <wsk.h>
-#endif
-
-namespace wknet
-{
-namespace tls
-{
-    class CertificateStore;
-    struct TlsClientCredential;
-}
-}
+#include <wknet/http/Certificate.h>
 
 namespace wknet::http {
     struct Session;
@@ -280,14 +256,14 @@ namespace wknet::http {
         TlsVersion MinVersion = TlsVersion::Tls12;
         TlsVersion MaxVersion = TlsVersion::Tls13;
         CertPolicy Certificate = CertPolicy::Verify;
-        const ::wknet::tls::CertificateStore* Store = nullptr;
+        const CertificateStore* Store = nullptr;
         const char* ServerName = nullptr;
         SIZE_T ServerNameLength = 0;
         const char* Alpn = nullptr;
         SIZE_T AlpnLength = 0;
         bool PreferHttp2 = true;
         TlsPolicy Policy = {};
-        const ::wknet::tls::TlsClientCredential* ClientCredential = nullptr;
+        const TlsClientCredential* ClientCredential = nullptr;
         ULONG HandshakeTimeoutMs = DefaultTlsHandshakeTimeoutMs;
         ULONG MaxTls12Renegotiations = DefaultMaxTls12Renegotiations;
     };
@@ -295,7 +271,10 @@ namespace wknet::http {
     struct ProxyConfig final
     {
         bool Enabled = false;
-        SOCKADDR_STORAGE Address = {};
+        const char* Host = nullptr;
+        SIZE_T HostLength = 0;
+        USHORT Port = 0;
+        AddressFamily Family = AddressFamily::Any;
         const char* Authority = nullptr;
         SIZE_T AuthorityLength = 0;
         const char* AuthHeader = nullptr;
@@ -372,6 +351,8 @@ namespace wknet::http {
 #endif
 
         ~SendOptions() noexcept = default;
+        SendOptions(const SendOptions&) noexcept = default;
+        SendOptions& operator=(const SendOptions&) noexcept = default;
 
     private:
         SendOptions() noexcept;
@@ -391,6 +372,8 @@ namespace wknet::http {
         void* CompletionContext;
 
         ~AsyncOptions() noexcept = default;
+        AsyncOptions(const AsyncOptions&) noexcept = default;
+        AsyncOptions& operator=(const AsyncOptions&) noexcept = default;
 
     private:
         AsyncOptions() noexcept;

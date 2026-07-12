@@ -241,7 +241,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::Connect(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const TlsClientConnectionOptions& options) noexcept
     {
         ClearHandshakeFailure();
@@ -326,7 +326,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::Send(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const void* data,
         SIZE_T length,
         SIZE_T* bytesSent) noexcept
@@ -370,7 +370,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::Receive(
-        core::ITransport& transport,
+        transport::Transport* transport,
         void* data,
         SIZE_T length,
         SIZE_T* bytesReceived,
@@ -581,6 +581,82 @@ namespace tls
     const TlsHandshakeFailure& TlsConnection::LastHandshakeFailure() const noexcept
     {
         return lastHandshakeFailure_;
+    }
+
+    NTSTATUS TlsConnectionCreate(TlsConnection** connection) noexcept
+    {
+        if (connection != nullptr) {
+            *connection = nullptr;
+        }
+        if (connection == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        auto* created = AllocateNonPagedObject<TlsConnection>();
+        if (created == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        *connection = created;
+        return STATUS_SUCCESS;
+    }
+
+    void TlsConnectionClose(TlsConnection* connection) noexcept
+    {
+        FreeNonPagedObject(connection);
+    }
+
+    NTSTATUS TlsConnectionConnect(
+        TlsConnection* connection,
+        transport::Transport* transport,
+        const TlsClientConnectionOptions* options) noexcept
+    {
+        return connection != nullptr && options != nullptr
+            ? connection->Connect(transport, *options)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS TlsConnectionSend(
+        TlsConnection* connection,
+        transport::Transport* transport,
+        const void* data,
+        SIZE_T length,
+        SIZE_T* bytesSent) noexcept
+    {
+        return connection != nullptr
+            ? connection->Send(transport, data, length, bytesSent)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS TlsConnectionReceive(
+        TlsConnection* connection,
+        transport::Transport* transport,
+        void* data,
+        SIZE_T length,
+        SIZE_T* bytesReceived,
+        ULONG timeoutMilliseconds) noexcept
+    {
+        return connection != nullptr
+            ? connection->Receive(transport, data, length, bytesReceived, timeoutMilliseconds)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    bool TlsConnectionIsEstablished(const TlsConnection* connection) noexcept
+    {
+        return connection != nullptr && connection->IsEstablished();
+    }
+
+    const char* TlsConnectionNegotiatedAlpn(const TlsConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->NegotiatedAlpn() : nullptr;
+    }
+
+    SIZE_T TlsConnectionNegotiatedAlpnLength(const TlsConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->NegotiatedAlpnLength() : 0;
+    }
+
+    TlsHandshakeFailure TlsConnectionLastHandshakeFailure(const TlsConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->LastHandshakeFailure() : TlsHandshakeFailure{};
     }
 }
 }

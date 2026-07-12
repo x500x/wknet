@@ -4,7 +4,7 @@
 
 #include "session/Http2RequestBuilder.h"
 #include "session/Workspace.h"
-#include "http2/Http2Connection.h"
+#include "http2/Http2ConnectionPrivate.hpp"
 #include "ws/WebSocketFrame.h"
 
 #include <stdint.h>

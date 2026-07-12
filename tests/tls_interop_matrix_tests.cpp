@@ -2,10 +2,10 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <wknet/tls/CertificateStore.h>
+#include "tls/CertificateStore.h"
 #include "tls/CertificateValidator.h"
 #include "tls/TlsCapabilities.h"
-#include "tls/TlsConnection.h"
+#include "tls/TlsConnectionPrivate.hpp"
 #include "tls/TlsPolicy.h"
 
 #include <stdio.h>

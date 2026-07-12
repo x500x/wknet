@@ -234,27 +234,32 @@ namespace session
             return status;
         }
 
-        if (pooledConnection.Transport == nullptr) {
+        transport::Transport* activeTransport = PooledConnectionTransport(&pooledConnection);
+        if (activeTransport == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        if (pooledConnection.Http2 == nullptr) {
-            auto* h2Connection = AllocateNonPagedObject<http2::Http2Connection>();
-            if (h2Connection == nullptr) {
-                return STATUS_INSUFFICIENT_RESOURCES;
+        http2::Http2Connection* activeHttp2 = PooledConnectionHttp2(&pooledConnection);
+        if (activeHttp2 == nullptr) {
+            http2::Http2Connection* h2Connection = nullptr;
+            status = http2::Http2ConnectionCreate(&h2Connection);
+            if (!NT_SUCCESS(status)) {
+                return status;
             }
 
-            status = h2Connection->Initialize(*pooledConnection.Transport, maxHeaderBlockBytes);
+            status = http2::Http2ConnectionInitialize(
+                h2Connection, activeTransport, maxHeaderBlockBytes);
             if (!NT_SUCCESS(status)) {
                 WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level HTTP/2 init failed: 0x%08X\r\n", static_cast<ULONG>(status));
-                FreeNonPagedObject(h2Connection);
+                http2::Http2ConnectionClose(h2Connection);
                 return status;
             }
             status = PooledConnectionAdoptHttp2(&pooledConnection, h2Connection);
             if (!NT_SUCCESS(status)) {
-                FreeNonPagedObject(h2Connection);
+                http2::Http2ConnectionClose(h2Connection);
                 return status;
             }
+            activeHttp2 = h2Connection;
         }
 
         SIZE_T responseHeaderCount = 0;
@@ -279,15 +284,16 @@ namespace session
             h2Options.BodySource != nullptr ||
             h2Options.TrailerCount != 0 ||
             (h2Options.Body != nullptr && h2Options.BodyLength != 0);
-        status = pooledConnection.Http2->BeginRequest(
-            *pooledConnection.Transport,
+        status = http2::Http2ConnectionBeginRequest(
+            activeHttp2,
+            activeTransport,
             h2Scratch.Headers,
             h2HeaderCount,
-            requestBody,
+            &requestBody,
             responseHeaders,
             headerCapacity,
             &responseHeaderCount,
-            responseBodySink,
+            &responseBodySink,
             &responseBodyLength,
             &statusCode,
             reinterpret_cast<char*>(workspace.Http2HeaderScratch.Data),
@@ -303,18 +309,16 @@ namespace session
             status = ConnectionPoolPromoteHttp2StreamLease(
                 connectionPool,
                 &pooledConnection,
-                pooledConnection.Http2->MaxConcurrentStreams());
+                http2::Http2ConnectionMaxConcurrentStreams(activeHttp2));
             if (!NT_SUCCESS(status)) {
-                pooledConnection.Http2->ReleaseStream(streamId);
+                http2::Http2ConnectionReleaseStream(activeHttp2, streamId);
                 return status;
             }
         }
 
-        status = pooledConnection.Http2->ReceiveResponse(
-            *pooledConnection.Transport,
-            streamId);
+        status = http2::Http2ConnectionReceiveResponse(activeHttp2, activeTransport, streamId);
         if (!NT_SUCCESS(status)) {
-            pooledConnection.Http2->ReleaseStream(streamId);
+            http2::Http2ConnectionReleaseStream(activeHttp2, streamId);
             if (status == STATUS_BUFFER_TOO_SMALL && workspace.MaxResponseBytes != 0) {
                 WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Verbose,
                     "High-level HTTP/2 response reached MaxResponseBytes limit: status=0x%08X MaxResponseBytes=%Iu\r\n",
@@ -373,13 +377,14 @@ namespace session
         return STATUS_SUCCESS;
     }
 
-    class H2cReplayTransport final : public core::ITransport
+    class H2cReplayTransport final
     {
     public:
         H2cReplayTransport() noexcept = default;
+        ~H2cReplayTransport() noexcept { transport::TransportClose(handle_); }
 
         NTSTATUS Initialize(
-            _Inout_ core::ITransport* inner,
+            _Inout_ transport::Transport* inner,
             _In_reads_bytes_opt_(replayLength) const UCHAR* replayBytes,
             SIZE_T replayLength) noexcept
         {
@@ -391,46 +396,63 @@ namespace session
             replayBytes_ = replayBytes;
             replayLength_ = replayLength;
             replayOffset_ = 0;
-            return STATUS_SUCCESS;
+            const transport::TransportCallbacks callbacks = {
+                SendCallback,
+                ReceiveCallback,
+                ReceiveWithTimeoutCallback,
+                nullptr
+            };
+            return transport::TransportCreateCallbacks(&callbacks, this, &handle_);
         }
 
-        NTSTATUS Send(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept override
-        {
-            if (inner_ == nullptr) {
-                return STATUS_INVALID_DEVICE_STATE;
-            }
-            return inner_->Send(data, length, bytesSent);
-        }
-
-        NTSTATUS Receive(void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept override
-        {
-            NTSTATUS status = ReceiveReplay(buffer, length, bytesReceived);
-            if (status != STATUS_MORE_PROCESSING_REQUIRED) {
-                return status;
-            }
-            if (inner_ == nullptr) {
-                return STATUS_INVALID_DEVICE_STATE;
-            }
-            return inner_->Receive(buffer, length, bytesReceived);
-        }
-
-        NTSTATUS ReceiveWithTimeout(
-            void* buffer,
-            SIZE_T length,
-            SIZE_T* bytesReceived,
-            ULONG timeoutMilliseconds) noexcept override
-        {
-            NTSTATUS status = ReceiveReplay(buffer, length, bytesReceived);
-            if (status != STATUS_MORE_PROCESSING_REQUIRED) {
-                return status;
-            }
-            if (inner_ == nullptr) {
-                return STATUS_INVALID_DEVICE_STATE;
-            }
-            return inner_->ReceiveWithTimeout(buffer, length, bytesReceived, timeoutMilliseconds);
-        }
+        transport::Transport* Handle() noexcept { return handle_; }
 
     private:
+        static NTSTATUS SendCallback(
+            void* context, const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept
+        {
+            auto* self = static_cast<H2cReplayTransport*>(context);
+            return self == nullptr || self->inner_ == nullptr
+                ? STATUS_INVALID_DEVICE_STATE
+                : transport::TransportSend(self->inner_, data, length, bytesSent);
+        }
+
+        static NTSTATUS ReceiveCallback(
+            void* context, void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept
+        {
+            auto* self = static_cast<H2cReplayTransport*>(context);
+            if (self == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            NTSTATUS status = self->ReceiveReplay(buffer, length, bytesReceived);
+            if (status != STATUS_MORE_PROCESSING_REQUIRED) {
+                return status;
+            }
+            if (self->inner_ == nullptr) {
+                return STATUS_INVALID_DEVICE_STATE;
+            }
+            return transport::TransportReceive(self->inner_, buffer, length, bytesReceived);
+        }
+
+        static NTSTATUS ReceiveWithTimeoutCallback(
+            void* context, void* buffer, SIZE_T length, SIZE_T* bytesReceived,
+            ULONG timeoutMilliseconds) noexcept
+        {
+            auto* self = static_cast<H2cReplayTransport*>(context);
+            if (self == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            NTSTATUS status = self->ReceiveReplay(buffer, length, bytesReceived);
+            if (status != STATUS_MORE_PROCESSING_REQUIRED) {
+                return status;
+            }
+            if (self->inner_ == nullptr) {
+                return STATUS_INVALID_DEVICE_STATE;
+            }
+            return transport::TransportReceiveWithTimeout(
+                self->inner_, buffer, length, bytesReceived, timeoutMilliseconds);
+        }
+
         NTSTATUS ReceiveReplay(void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept
         {
             if (bytesReceived != nullptr) {
@@ -453,10 +475,11 @@ namespace session
             return STATUS_SUCCESS;
         }
 
-        core::ITransport* inner_ = nullptr;
+        transport::Transport* inner_ = nullptr;
         const UCHAR* replayBytes_ = nullptr;
         SIZE_T replayLength_ = 0;
         SIZE_T replayOffset_ = 0;
+        transport::Transport* handle_ = nullptr;
     };
 
     SIZE_T H2cLiteralLength(_In_z_ const char* text) noexcept
@@ -721,7 +744,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS ReadH2cUpgradeResponse(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         _Inout_ HeapArray<UCHAR>& replayBytes,
         _Out_ SIZE_T* replayLength) noexcept
@@ -768,7 +791,7 @@ namespace session
             }
 
             SIZE_T received = 0;
-            NTSTATUS status = transport.Receive(
+            NTSTATUS status = transport::TransportReceive(transport,
                 workspace.Response.Data + workspace.ResponseLength,
                 workspace.Response.Length - workspace.ResponseLength,
                 &received);
@@ -805,7 +828,8 @@ namespace session
             request.TrailerCount != 0) {
             return STATUS_INVALID_PARAMETER;
         }
-        if (pooledConnection.Transport == nullptr || pooledConnection.Http2 != nullptr) {
+        transport::Transport* pooledTransport = PooledConnectionTransport(&pooledConnection);
+        if (pooledTransport == nullptr || PooledConnectionHttp2(&pooledConnection) != nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
@@ -843,7 +867,7 @@ namespace session
         }
 
         SIZE_T sent = 0;
-        status = pooledConnection.Transport->Send(
+        status = transport::TransportSend(pooledTransport,
             workspace.Request.Data,
             upgradeRequestLength,
             &sent);
@@ -857,7 +881,7 @@ namespace session
         HeapArray<UCHAR> replayBytes;
         SIZE_T replayLength = 0;
         status = ReadH2cUpgradeResponse(
-            *pooledConnection.Transport,
+            pooledTransport,
             workspace,
             replayBytes,
             &replayLength);
@@ -865,39 +889,40 @@ namespace session
             return status;
         }
 
-        auto* h2Connection = AllocateNonPagedObject<http2::Http2Connection>();
-        if (h2Connection == nullptr) {
-            return STATUS_INSUFFICIENT_RESOURCES;
+        http2::Http2Connection* h2Connection = nullptr;
+        status = http2::Http2ConnectionCreate(&h2Connection);
+        if (!NT_SUCCESS(status)) {
+            return status;
         }
 
         HeapObject<H2cReplayTransport> replayTransport;
         if (!replayTransport.IsValid()) {
-            FreeNonPagedObject(h2Connection);
+            http2::Http2ConnectionClose(h2Connection);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        core::ITransport* activeTransport = pooledConnection.Transport;
+        transport::Transport* activeTransport = pooledTransport;
         if (replayLength != 0) {
             status = replayTransport->Initialize(
-                pooledConnection.Transport,
+                pooledTransport,
                 replayBytes.Get(),
                 replayLength);
             if (!NT_SUCCESS(status)) {
-                FreeNonPagedObject(h2Connection);
+                http2::Http2ConnectionClose(h2Connection);
                 return status;
             }
-            activeTransport = replayTransport.Get();
+            activeTransport = replayTransport->Handle();
         }
 
-        status = h2Connection->InitializeAfterUpgrade(*activeTransport, maxHeaderBlockBytes);
+        status = http2::Http2ConnectionInitializeAfterUpgrade(h2Connection, activeTransport, maxHeaderBlockBytes);
         if (!NT_SUCCESS(status)) {
             WKNET_TRACE(::wknet::ComponentHttp2, ::wknet::TraceLevel::Error, "High-level h2c Upgrade init failed: 0x%08X\r\n", static_cast<ULONG>(status));
-            FreeNonPagedObject(h2Connection);
+            http2::Http2ConnectionClose(h2Connection);
             return status;
         }
         status = PooledConnectionAdoptHttp2(&pooledConnection, h2Connection);
         if (!NT_SUCCESS(status)) {
-            FreeNonPagedObject(h2Connection);
+            http2::Http2ConnectionClose(h2Connection);
             return status;
         }
 
@@ -908,13 +933,18 @@ namespace session
         responseBodySink.Append = AppendHttp2ResponseBodyToWorkspace;
         responseBodySink.Context = &workspace;
 
-        status = pooledConnection.Http2->ReceiveResponse(
-            *activeTransport,
+        http2::Http2Connection* activeHttp2 = PooledConnectionHttp2(&pooledConnection);
+        if (activeHttp2 == nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+        status = http2::Http2ConnectionReceiveResponseDetailed(
+            activeHttp2,
+            activeTransport,
             1,
             responseHeaders,
             headerCapacity,
             &responseHeaderCount,
-            responseBodySink,
+            &responseBodySink,
             &responseBodyLength,
             &statusCode,
             reinterpret_cast<char*>(workspace.Http2HeaderScratch.Data),

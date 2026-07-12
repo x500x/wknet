@@ -55,5 +55,5 @@ namespace testlog
 }
 #endif
 
-#undef KHTTP_SAMPLE_LOG
-#define KHTTP_SAMPLE_LOG(...) wknet::testlog::Print(__VA_ARGS__)
+#undef WKNET_SAMPLE_LOG
+#define WKNET_SAMPLE_LOG(...) wknet::testlog::Print(__VA_ARGS__)

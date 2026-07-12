@@ -479,7 +479,7 @@ namespace session
             return STATUS_INVALID_PARAMETER;
         }
 
-        const http1::HttpText prefix = http1::MakeText("----KernelHttpBoundary");
+        const http1::HttpText prefix = http1::MakeText("----WknetBoundary");
         if (prefix.Length + 8 >= MultipartBoundaryStorageLength) {
             return STATUS_BUFFER_TOO_SMALL;
         }

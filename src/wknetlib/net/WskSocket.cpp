@@ -1,4 +1,4 @@
-#include "net/WskSocket.h"
+#include "net/WskSocketPrivate.hpp"
 
 #if !defined(WKNET_USER_MODE_TEST)
 #include "WskSync.h"
@@ -1161,5 +1161,79 @@ namespace net
         return socket_;
     }
 #endif
+
+    NTSTATUS WskSocketCreate(WskSocket** socket) noexcept
+    {
+        if (socket != nullptr) {
+            *socket = nullptr;
+        }
+        if (socket == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        auto* created = AllocateNonPagedObject<WskSocket>();
+        if (created == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        *socket = created;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS WskSocketConnect(
+        WskSocket* socket,
+        WskClient* client,
+        const SOCKADDR* remoteAddress,
+        const SOCKADDR* localAddress,
+        const WskCancellationToken* cancellation) noexcept
+    {
+        return socket != nullptr && client != nullptr
+            ? socket->Connect(*client, remoteAddress, localAddress, cancellation)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS WskSocketSend(
+        WskSocket* socket,
+        const void* data,
+        SIZE_T length,
+        SIZE_T* bytesSent,
+        ULONG flags,
+        const WskCancellationToken* cancellation) noexcept
+    {
+        return socket != nullptr
+            ? socket->Send(data, length, bytesSent, flags, cancellation)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS WskSocketReceive(
+        WskSocket* socket,
+        void* data,
+        SIZE_T length,
+        SIZE_T* bytesReceived,
+        ULONG flags,
+        ULONG timeoutMilliseconds,
+        const WskCancellationToken* cancellation) noexcept
+    {
+        return socket != nullptr
+            ? socket->Receive(data, length, bytesReceived, flags, timeoutMilliseconds, cancellation)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS WskSocketClose(WskSocket* socket) noexcept
+    {
+        return socket != nullptr ? socket->Close() : STATUS_SUCCESS;
+    }
+
+    void WskSocketDestroy(WskSocket* socket) noexcept
+    {
+        if (socket != nullptr) {
+            const NTSTATUS status = socket->Close();
+            UNREFERENCED_PARAMETER(status);
+            FreeNonPagedObject(socket);
+        }
+    }
+
+    bool WskSocketIsConnected(const WskSocket* socket) noexcept
+    {
+        return socket != nullptr && socket->IsConnected();
+    }
 }
 }

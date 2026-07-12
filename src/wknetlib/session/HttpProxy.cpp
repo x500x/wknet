@@ -167,9 +167,10 @@ namespace session
             return STATUS_INVALID_PARAMETER;
         }
 
-        auto* socket = AllocateNonPagedObject<net::WskSocket>();
-        if (socket == nullptr) {
-            return STATUS_INSUFFICIENT_RESOURCES;
+        net::WskSocket* socket = nullptr;
+        NTSTATUS status = net::WskSocketCreate(&socket);
+        if (!NT_SUCCESS(status)) {
+            return status;
         }
 
         net::WskCancellationToken cancellation = {};
@@ -178,30 +179,28 @@ namespace session
             cancellation.Context = cancellationOperation;
         }
 
-        NTSTATUS status = socket->Connect(
-            *session->WskClient,
+        status = net::WskSocketConnect(
+            socket,
+            session->WskClient,
             remoteAddress,
             nullptr,
             cancellation.IsCancellationRequested != nullptr ? &cancellation : nullptr);
         if (!NT_SUCCESS(status)) {
-            FreeNonPagedObject(socket);
+            net::WskSocketDestroy(socket);
             return status;
         }
 
-        auto* rawTransport = AllocateNonPagedObject<core::WskTransport>(*socket);
-        if (rawTransport == nullptr) {
-            const NTSTATUS closeStatus = socket->Close();
-            UNREFERENCED_PARAMETER(closeStatus);
-            FreeNonPagedObject(socket);
+        transport::Transport* rawTransport = nullptr;
+        status = transport::TransportCreateWsk(socket, &rawTransport);
+        if (!NT_SUCCESS(status)) {
+            net::WskSocketDestroy(socket);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
         status = PooledConnectionAdoptSocket(&connection, socket, rawTransport);
         if (!NT_SUCCESS(status)) {
-            FreeNonPagedObject(rawTransport);
-            const NTSTATUS closeStatus = socket->Close();
-            UNREFERENCED_PARAMETER(closeStatus);
-            FreeNonPagedObject(socket);
+            transport::TransportClose(rawTransport);
+            net::WskSocketDestroy(socket);
         }
         return status;
     }
@@ -221,10 +220,11 @@ namespace session
         if (session == nullptr || !session->Options.Proxy.Enabled) {
             return STATUS_SUCCESS;
         }
-        if (connection.ProxyTunnelEstablished) {
+        if (PooledConnectionProxyTunnelEstablished(&connection)) {
             return STATUS_SUCCESS;
         }
-        if (connection.RawTransport == nullptr ||
+        transport::Transport* rawTransport = PooledConnectionRawTransport(&connection);
+        if (rawTransport == nullptr ||
             workspace.Response.Data == nullptr ||
             workspace.Response.Length == 0 ||
             workspace.DecodedBody.Data == nullptr ||
@@ -274,16 +274,16 @@ namespace session
         if (cancellationOperation != nullptr) {
             cancellation.IsCancellationRequested = IsHttpAsyncCancellationRequested;
             cancellation.Context = cancellationOperation;
-            connection.RawTransport->SetCancellation(&cancellation);
+            transport::TransportSetCancellation(rawTransport, &cancellation);
         }
 
         SIZE_T sent = 0;
-        status = connection.RawTransport->Send(
+        status = transport::TransportSend(rawTransport,
             workspace.Response.Data,
             connectRequestLength,
             &sent);
         if (cancellationOperation != nullptr) {
-            connection.RawTransport->SetCancellation(nullptr);
+            transport::TransportSetCancellation(rawTransport, nullptr);
         }
         if (NT_SUCCESS(status) && sent != connectRequestLength) {
             return STATUS_CONNECTION_DISCONNECTED;
@@ -296,7 +296,7 @@ namespace session
         SIZE_T proxyRawResponseLength = 0;
         workspace.ResponseLength = 0;
         status = ReadHttpResponseFromSocket(
-            *connection.RawTransport,
+            rawTransport,
             workspace,
             true,
             nullptr,
@@ -334,19 +334,12 @@ namespace session
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (connection.Socket != nullptr && connection.Socket->IsConnected()) {
+        net::WskSocket* socket = PooledConnectionSocket(&connection);
+        if (net::WskSocketIsConnected(socket)) {
             return STATUS_SUCCESS;
         }
 
         PooledConnectionCloseTransportResources(&connection);
-
-        if (session->Options.Proxy.Enabled) {
-            return ConnectSocketToAddress(
-                session,
-                reinterpret_cast<const SOCKADDR*>(&session->Options.Proxy.Address),
-                connection,
-                cancellationOperation);
-        }
 
         HeapArray<wchar_t> serverName(MaxHostLength + 1);
         HeapArray<wchar_t> serviceName(MaxServiceNameLength + 1);
@@ -354,9 +347,20 @@ namespace session
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        NTSTATUS status = CopyAsciiToWide(request.Host, request.HostLength, serverName.Get(), serverName.Count());
+        const char* connectHost = request.Host;
+        SIZE_T connectHostLength = request.HostLength;
+        USHORT connectPort = request.Port;
+        AddressFamily connectFamily = request.AddressFamily;
+        if (session->Options.Proxy.Enabled) {
+            connectHost = session->Options.Proxy.Host;
+            connectHostLength = session->Options.Proxy.HostLength;
+            connectPort = session->Options.Proxy.Port;
+            connectFamily = session->Options.Proxy.Family;
+        }
+
+        NTSTATUS status = CopyAsciiToWide(connectHost, connectHostLength, serverName.Get(), serverName.Count());
         if (NT_SUCCESS(status)) {
-            status = FormatServiceName(request.Port, serviceName.Get(), serviceName.Count());
+            status = FormatServiceName(connectPort, serviceName.Get(), serviceName.Count());
         }
 
         HeapArray<SOCKADDR_STORAGE> remoteAddresses(net::WskMaxResolvedAddresses);
@@ -366,13 +370,13 @@ namespace session
 
         SIZE_T remoteAddressCount = 0;
         if (NT_SUCCESS(status)) {
-            status = session->WskClient->ResolveAll(
+            status = net::WskClientResolveAll(session->WskClient,
                 serverName.Get(),
                 serviceName.Get(),
                 remoteAddresses.Get(),
                 net::WskMaxResolvedAddresses,
                 &remoteAddressCount,
-                ToWskAddressFamily(request.AddressFamily));
+                ToWskAddressFamily(connectFamily));
         }
 
         NTSTATUS lastStatus = status;
@@ -419,13 +423,16 @@ namespace session
         if (failure != nullptr) {
             *failure = {};
         }
-        if (session == nullptr || connection.Socket == nullptr || connection.RawTransport == nullptr) {
+        net::WskSocket* socket = PooledConnectionSocket(&connection);
+        transport::Transport* rawTransport = PooledConnectionRawTransport(&connection);
+        if (session == nullptr || socket == nullptr || rawTransport == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        auto* tlsConnection = AllocateNonPagedObject<tls::TlsConnection>();
-        if (tlsConnection == nullptr) {
-            return STATUS_INSUFFICIENT_RESOURCES;
+        tls::TlsConnection* tlsConnection = nullptr;
+        NTSTATUS createStatus = tls::TlsConnectionCreate(&tlsConnection);
+        if (!NT_SUCCESS(createStatus)) {
+            return createStatus;
         }
 
         tls::TlsAlpnProtocol explicitAlpn = {};
@@ -434,18 +441,18 @@ namespace session
             { "http/1.1", 8 }
         };
         tls::TlsClientConnectionOptions tlsOptions = {};
-        core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
-        core::WorkspaceScratchAllocator* certificateScratch = nullptr;
-        handshakeScratch = AllocateNonPagedObject<core::WorkspaceScratchAllocator>(
+        rtl::WorkspaceScratchAllocator* handshakeScratch = nullptr;
+        rtl::WorkspaceScratchAllocator* certificateScratch = nullptr;
+        handshakeScratch = AllocateNonPagedObject<rtl::WorkspaceScratchAllocator>(
             workspace,
-            core::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
-        certificateScratch = AllocateNonPagedObject<core::WorkspaceScratchAllocator>(
+            rtl::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
+        certificateScratch = AllocateNonPagedObject<rtl::WorkspaceScratchAllocator>(
             workspace,
-            core::WorkspaceScratchAllocator::BufferKind::Certificate);
+            rtl::WorkspaceScratchAllocator::BufferKind::Certificate);
         if (handshakeScratch == nullptr || certificateScratch == nullptr) {
             FreeNonPagedObject(certificateScratch);
             FreeNonPagedObject(handshakeScratch);
-            FreeNonPagedObject(tlsConnection);
+            tls::TlsConnectionClose(tlsConnection);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
@@ -482,27 +489,28 @@ namespace session
         if (cancellationOperation != nullptr) {
             cancellation.IsCancellationRequested = IsHttpAsyncCancellationRequested;
             cancellation.Context = cancellationOperation;
-            connection.RawTransport->SetCancellation(&cancellation);
+            transport::TransportSetCancellation(rawTransport, &cancellation);
         }
 
-        NTSTATUS status = tlsConnection->Connect(*connection.RawTransport, tlsOptions);
+        NTSTATUS status = tls::TlsConnectionConnect(tlsConnection, rawTransport, &tlsOptions);
         if (cancellationOperation != nullptr) {
-            connection.RawTransport->SetCancellation(nullptr);
+            transport::TransportSetCancellation(rawTransport, nullptr);
         }
 
         if (!NT_SUCCESS(status)) {
             if (failure != nullptr) {
-                *failure = tlsConnection->LastHandshakeFailure();
+                *failure = tls::TlsConnectionLastHandshakeFailure(tlsConnection);
             }
-            FreeNonPagedObject(tlsConnection);
+            tls::TlsConnectionClose(tlsConnection);
             FreeNonPagedObject(certificateScratch);
             FreeNonPagedObject(handshakeScratch);
             return status;
         }
 
-        auto* tlsTransport = AllocateNonPagedObject<core::TlsTransport>(*connection.RawTransport, *tlsConnection);
-        if (tlsTransport == nullptr) {
-            FreeNonPagedObject(tlsConnection);
+        transport::Transport* tlsTransport = nullptr;
+        status = transport::TransportCreateTls(rawTransport, tlsConnection, &tlsTransport);
+        if (!NT_SUCCESS(status)) {
+            tls::TlsConnectionClose(tlsConnection);
             FreeNonPagedObject(certificateScratch);
             FreeNonPagedObject(handshakeScratch);
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -512,8 +520,8 @@ namespace session
         FreeNonPagedObject(handshakeScratch);
         status = PooledConnectionAdoptTls(&connection, tlsConnection, tlsTransport);
         if (!NT_SUCCESS(status)) {
-            FreeNonPagedObject(tlsTransport);
-            FreeNonPagedObject(tlsConnection);
+            transport::TransportClose(tlsTransport);
+            tls::TlsConnectionClose(tlsConnection);
         }
         return status;
     }
@@ -530,14 +538,18 @@ namespace session
         SIZE_T trailerCapacity,
         _In_opt_ AsyncOperationHandle cancellationOperation) noexcept
     {
-        if (session == nullptr || connection.Socket == nullptr || connection.RawTransport == nullptr) {
+        net::WskSocket* socket = PooledConnectionSocket(&connection);
+        transport::Transport* rawTransport = PooledConnectionRawTransport(&connection);
+        if (session == nullptr || socket == nullptr || rawTransport == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        if (connection.Tls != nullptr &&
-            connection.Tls->IsEstablished() &&
-            connection.Transport != nullptr &&
-            connection.Transport != connection.RawTransport) {
+        tls::TlsConnection* tlsConnection = PooledConnectionTls(&connection);
+        transport::Transport* activeTransport = PooledConnectionTransport(&connection);
+        if (tlsConnection != nullptr &&
+            tls::TlsConnectionIsEstablished(tlsConnection) &&
+            activeTransport != nullptr &&
+            activeTransport != rawTransport) {
             return STATUS_SUCCESS;
         }
 

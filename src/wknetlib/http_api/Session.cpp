@@ -32,7 +32,10 @@ namespace
         if (config != nullptr) {
             tls = config->Tls;
             apiOptions.Proxy.Enabled = config->Proxy.Enabled;
-            apiOptions.Proxy.Address = config->Proxy.Address;
+            apiOptions.Proxy.Host = config->Proxy.Host;
+            apiOptions.Proxy.HostLength = config->Proxy.HostLength;
+            apiOptions.Proxy.Port = config->Proxy.Port;
+            apiOptions.Proxy.Family = detail::ToApiAddressFamily(config->Proxy.Family);
             apiOptions.Proxy.Authority = config->Proxy.Authority;
             apiOptions.Proxy.AuthorityLength = config->Proxy.AuthorityLength;
             apiOptions.Proxy.AuthHeader = config->Proxy.AuthHeader;
@@ -111,13 +114,13 @@ NTSTATUS SessionCreate(const SessionConfig* config, Session** session) noexcept
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    highSession->Wsk = ::wknet::AllocateNonPagedObject<::wknet::net::WskClient>();
-    if (highSession->Wsk == nullptr) {
+    NTSTATUS status = ::wknet::net::WskClientCreate(&highSession->Wsk);
+    if (!NT_SUCCESS(status)) {
         detail::FreeClosedSession(highSession);
-        return STATUS_INSUFFICIENT_RESOURCES;
+        return status;
     }
 
-    NTSTATUS status = highSession->Wsk->Initialize();
+    status = ::wknet::net::WskClientInitialize(highSession->Wsk);
     if (!NT_SUCCESS(status)) {
         detail::FreeClosedSession(highSession);
         return status;
@@ -158,8 +161,7 @@ void SessionClose(Session* session) noexcept
         session->Engine = nullptr;
     }
     if (session->Wsk != nullptr) {
-        session->Wsk->Shutdown();
-        ::wknet::FreeNonPagedObject(session->Wsk);
+        ::wknet::net::WskClientClose(session->Wsk);
         session->Wsk = nullptr;
     }
 

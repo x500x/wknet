@@ -9,10 +9,9 @@ namespace net
     class WskSocket;
 }
 
-namespace core
+namespace transport
 {
-    class ITransport;
-    class WskTransport;
+    struct Transport;
 }
 
 namespace tls
@@ -31,6 +30,7 @@ namespace session
     constexpr SIZE_T PoolMaxTlsServerNameLength = 255;
     constexpr SIZE_T PoolMaxAlpnLength = 16;
     constexpr SIZE_T PoolMaxProxyAuthorityLength = 255;
+    constexpr SIZE_T PoolMaxProxyHostLength = 255;
 
     struct ConnectionPoolKey final
     {
@@ -54,46 +54,15 @@ namespace session
         bool AutomaticAlpn = false;
         Http2CleartextMode Http2CleartextMode = Http2CleartextMode::Disabled;
         bool ProxyEnabled = false;
-        SOCKADDR_STORAGE ProxyAddress = {};
+        char ProxyHost[PoolMaxProxyHostLength + 1] = {};
+        SIZE_T ProxyHostLength = 0;
+        USHORT ProxyPort = 0;
+        ::wknet::session::AddressFamily ProxyFamily = ::wknet::session::AddressFamily::Any;
         char ProxyAuthority[PoolMaxProxyAuthorityLength + 1] = {};
         SIZE_T ProxyAuthorityLength = 0;
     };
 
-    struct PooledConnection final
-    {
-        bool InUse = false;
-        bool Connected = false;
-        ULONG Id = 0;
-        ULONGLONG LastUsedTime = 0;
-        ULONG Http2StreamLeases = 0;
-        ULONG Http2MaxStreamLeases = 0;
-        ULONG Http1PipelineLeases = 0;
-        ULONG Http1MaxPipelineLeases = 0;
-        ULONG Http1PipelineNextSequence = 1;
-        ULONG Http1PipelineNextReceiveSequence = 1;
-        NTSTATUS Http1PipelineFailureStatus = STATUS_SUCCESS;
-        UCHAR* Http1PipelineBufferedBytes = nullptr;
-        SIZE_T Http1PipelineBufferedLength = 0;
-        SIZE_T Http1PipelineBufferedCapacity = 0;
-        bool CloseWhenIdle = false;
-        bool ProxyTunnelEstablished = false;
-        bool Http2KeepAliveInProgress = false;
-        ULONGLONG Http2LastKeepAliveTime = 0;
-        ULONGLONG Http2KeepAliveSequence = 0;
-        UCHAR Http2KeepAliveOpaqueData[8] = {};
-        ConnectionPoolKey Key = {};
-#if !defined(WKNET_USER_MODE_TEST)
-        KMUTEX Http1PipelineSendLock = {};
-        KEVENT Http1PipelineReceiveEvent = {};
-#endif
-#if !defined(WKNET_USER_MODE_TEST)
-        net::WskSocket* Socket = nullptr;
-        core::WskTransport* RawTransport = nullptr;
-        tls::TlsConnection* Tls = nullptr;
-#endif
-        core::ITransport* Transport = nullptr;
-        http2::Http2Connection* Http2 = nullptr;
-    };
+    struct PooledConnection;
 
     struct ConnectionPool final
     {
@@ -170,13 +139,13 @@ namespace session
     NTSTATUS PooledConnectionAdoptSocket(
         _Inout_ PooledConnection* connection,
         _In_ net::WskSocket* socket,
-        _In_ core::WskTransport* transport) noexcept;
+        _In_ transport::Transport* transport) noexcept;
 
     _Must_inspect_result_
     NTSTATUS PooledConnectionAdoptTls(
         _Inout_ PooledConnection* connection,
         _In_ tls::TlsConnection* tlsConnection,
-        _In_ core::ITransport* transport) noexcept;
+        _In_ transport::Transport* transport) noexcept;
 
     void PooledConnectionReleaseTls(_Inout_ PooledConnection* connection) noexcept;
 
@@ -193,6 +162,34 @@ namespace session
     void PooledConnectionSetProxyTunnelEstablished(
         _Inout_ PooledConnection* connection,
         bool established) noexcept;
+
+    ULONG PooledConnectionId(_In_opt_ const PooledConnection* connection) noexcept;
+    bool PooledConnectionProxyTunnelEstablished(_In_opt_ const PooledConnection* connection) noexcept;
+    _Ret_maybenull_ transport::Transport* PooledConnectionTransport(
+        _In_opt_ PooledConnection* connection) noexcept;
+    _Ret_maybenull_ http2::Http2Connection* PooledConnectionHttp2(
+        _In_opt_ PooledConnection* connection) noexcept;
+#if !defined(WKNET_USER_MODE_TEST)
+    _Ret_maybenull_ net::WskSocket* PooledConnectionSocket(
+        _In_opt_ PooledConnection* connection) noexcept;
+    _Ret_maybenull_ transport::Transport* PooledConnectionRawTransport(
+        _In_opt_ PooledConnection* connection) noexcept;
+    _Ret_maybenull_ tls::TlsConnection* PooledConnectionTls(
+        _In_opt_ PooledConnection* connection) noexcept;
+#endif
+    _Must_inspect_result_
+    NTSTATUS PooledConnectionSetAlpn(
+        _Inout_ PooledConnection* connection,
+        _In_reads_bytes_(alpnLength) const char* alpn,
+        SIZE_T alpnLength) noexcept;
+#if defined(WKNET_USER_MODE_TEST)
+    void PooledConnectionAttachTestState(
+        _Inout_ PooledConnection* connection,
+        _In_opt_ transport::Transport* transport,
+        _In_opt_ http2::Http2Connection* http2Connection) noexcept;
+    ULONGLONG PooledConnectionHttp2LastKeepAliveTime(
+        _In_opt_ const PooledConnection* connection) noexcept;
+#endif
 
     _Must_inspect_result_
     bool ConnectionPoolHasHttp2StreamLease(

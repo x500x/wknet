@@ -2,8 +2,8 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include "transport/ITransport.h"
-#include "tls/TlsConnection.h"
+#include "transport/Transport.h"
+#include "tls/TlsConnectionPrivate.hpp"
 #include "tls/TlsPolicy.h"
 
 #include <limits.h>
@@ -150,21 +150,32 @@ namespace
         }
     }
 
-    class SocketTransport final : public wknet::core::ITransport
+    class SocketTransport final
     {
     public:
         explicit SocketTransport(const WinsockApi& api) noexcept :
             api_(&api)
         {
+            const wknet::transport::TransportCallbacks callbacks = {
+                SendCallback,
+                ReceiveCallback,
+                ReceiveWithTimeoutCallback,
+                nullptr
+            };
+            createStatus_ = wknet::transport::TransportCreateCallbacks(&callbacks, this, &handle_);
         }
 
-        ~SocketTransport() noexcept override
+        ~SocketTransport() noexcept
         {
             Close();
+            wknet::transport::TransportClose(handle_);
         }
 
         SocketTransport(const SocketTransport&) = delete;
         SocketTransport& operator=(const SocketTransport&) = delete;
+
+        wknet::transport::Transport* Handle() noexcept { return handle_; }
+        NTSTATUS CreateStatus() const noexcept { return createStatus_; }
 
         NTSTATUS Connect(USHORT port) noexcept
         {
@@ -193,7 +204,7 @@ namespace
             return STATUS_SUCCESS;
         }
 
-        NTSTATUS Send(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept override
+        NTSTATUS Send(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept
         {
             if (bytesSent != nullptr) {
                 *bytesSent = 0;
@@ -221,7 +232,7 @@ namespace
             return STATUS_SUCCESS;
         }
 
-        NTSTATUS Receive(void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept override
+        NTSTATUS Receive(void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept
         {
             return ReceiveWithTimeout(buffer, length, bytesReceived, 15000);
         }
@@ -230,7 +241,7 @@ namespace
             void* buffer,
             SIZE_T length,
             SIZE_T* bytesReceived,
-            ULONG timeoutMilliseconds) noexcept override
+            ULONG timeoutMilliseconds) noexcept
         {
             if (bytesReceived != nullptr) {
                 *bytesReceived = 0;
@@ -264,6 +275,30 @@ namespace
         }
 
     private:
+        static NTSTATUS SendCallback(
+            void* context, const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept
+        {
+            auto* self = static_cast<SocketTransport*>(context);
+            return self != nullptr ? self->Send(data, length, bytesSent) : STATUS_INVALID_PARAMETER;
+        }
+
+        static NTSTATUS ReceiveCallback(
+            void* context, void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept
+        {
+            auto* self = static_cast<SocketTransport*>(context);
+            return self != nullptr ? self->Receive(buffer, length, bytesReceived) : STATUS_INVALID_PARAMETER;
+        }
+
+        static NTSTATUS ReceiveWithTimeoutCallback(
+            void* context, void* buffer, SIZE_T length, SIZE_T* bytesReceived,
+            ULONG timeoutMilliseconds) noexcept
+        {
+            auto* self = static_cast<SocketTransport*>(context);
+            return self != nullptr
+                ? self->ReceiveWithTimeout(buffer, length, bytesReceived, timeoutMilliseconds)
+                : STATUS_INVALID_PARAMETER;
+        }
+
         void Close() noexcept
         {
             if (api_ != nullptr && socket_ != InvalidSocket) {
@@ -274,6 +309,8 @@ namespace
 
         const WinsockApi* api_ = nullptr;
         SOCKET socket_ = InvalidSocket;
+        wknet::transport::Transport* handle_ = nullptr;
+        NTSTATUS createStatus_ = STATUS_UNSUCCESSFUL;
     };
 
     bool ParsePort(const char* text, USHORT* port) noexcept
@@ -354,7 +391,7 @@ int main(int argc, char** argv)
             options.AlpnProtocolCount = sizeof(alpnProtocols) / sizeof(alpnProtocols[0]);
         }
 
-        status = connection.Connect(transport, options);
+        status = connection.Connect(transport.Handle(), options);
         if (!NT_SUCCESS(status)) {
             const wknet::tls::TlsHandshakeFailure& failure = connection.LastHandshakeFailure();
             printf(
@@ -371,7 +408,7 @@ int main(int argc, char** argv)
             TextEquals(initialAlpn, initialAlpnLength, "h2", sizeof("h2") - 1);
 
         if (clientInitiatedRenegotiation) {
-            status = connection.RenegotiateTls12(transport);
+            status = connection.RenegotiateTls12(transport.Handle());
             if (!NT_SUCCESS(status)) {
                 const wknet::tls::TlsHandshakeFailure& failure = connection.LastHandshakeFailure();
                 printf(
@@ -405,7 +442,7 @@ int main(int argc, char** argv)
             "Host: localhost\r\n"
             "\r\n";
         SIZE_T bytesSent = 0;
-        status = connection.Send(transport, request, sizeof(request) - 1, &bytesSent);
+        status = connection.Send(transport.Handle(), request, sizeof(request) - 1, &bytesSent);
         if (!NT_SUCCESS(status) || bytesSent != sizeof(request) - 1) {
             printf("TLS request send failed: 0x%08X sent=%Iu\n", static_cast<unsigned>(status), bytesSent);
             goto Cleanup;

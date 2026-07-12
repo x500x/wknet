@@ -24,7 +24,7 @@
     <ClCompile Include="samples\AdvancedScenarioSamples.cpp" />
     <ClCompile Include="samples\ExternalTrustStore.cpp" />
     <ClCompile Include="samples\HighLevelApiSamples.cpp" />
-    <ClCompile Include="samples\KhttpSamples.cpp" />
+    <ClCompile Include="samples\HttpApiSamples.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\include\wknet\Wknet.h" />
@@ -33,7 +33,7 @@
     <ClInclude Include="samples\AdvancedScenarioSamples.h" />
     <ClInclude Include="samples\ExternalTrustStore.h" />
     <ClInclude Include="samples\HighLevelApiSamples.h" />
-    <ClInclude Include="samples\KhttpSamples.h" />
+    <ClInclude Include="samples\HttpApiSamples.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="wknettest.inf" />
@@ -112,7 +112,7 @@
   <PropertyGroup>
     <TargetName>wknettest</TargetName>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <IntDir>$(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>
     <EmbedManifest>false</EmbedManifest>
     <GenerateManifest>false</GenerateManifest>
@@ -121,7 +121,7 @@
     <ClCompile>
       <WarningLevel>EnableAllWarnings</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
-      <DisableSpecificWarnings>4061;4100;4127;4255;4365;4464;4514;4603;4623;4625;4626;4627;4668;4711;4820;4986;4987;5026;5027;5032;5045;5220;5246;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4061;4100;4127;4255;4365;4464;4514;4603;4623;4625;4626;4627;4668;4710;4711;4820;4986;4987;5026;5027;5032;5045;5220;5246;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <BufferSecurityCheck>true</BufferSecurityCheck>

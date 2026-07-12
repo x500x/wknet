@@ -2,9 +2,9 @@
 
 #include "session/HttpEngine.h"
 #include "transport/ProxyConnect.h"
-#include "transport/TlsTransport.h"
+#include "transport/Transport.h"
 #include "rtl/WorkspaceScratchAllocator.h"
-#include "transport/WskTransport.h"
+#include "transport/Transport.h"
 #include "session/HttpCache.h"
 #include "session/Http2RequestBuilder.h"
 #include "session/EngineImpl.h"
@@ -1089,7 +1089,7 @@ namespace session
     {
     public:
         WskCancellationScope(
-            _In_opt_ core::WskTransport* transport,
+            _In_opt_ transport::Transport* transport,
             _In_opt_ AsyncOperationHandle operation) noexcept :
             transport_(transport)
         {
@@ -1099,13 +1099,13 @@ namespace session
 
             token_.IsCancellationRequested = IsHttpAsyncCancellationRequested;
             token_.Context = operation;
-            transport_->SetCancellation(&token_);
+            transport::TransportSetCancellation(transport_, &token_);
         }
 
         ~WskCancellationScope() noexcept
         {
             if (transport_ != nullptr) {
-                transport_->SetCancellation(nullptr);
+                transport::TransportSetCancellation(transport_, nullptr);
             }
         }
 
@@ -1113,7 +1113,7 @@ namespace session
         WskCancellationScope& operator=(const WskCancellationScope&) = delete;
 
     private:
-        core::WskTransport* transport_ = nullptr;
+        transport::Transport* transport_ = nullptr;
         net::WskCancellationToken token_ = {};
     };
 
@@ -1167,7 +1167,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestBuffer(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
         SIZE_T requestLength) noexcept;
 
@@ -1175,7 +1175,7 @@ namespace session
     NTSTATUS SendHttp1PipelineRequestBuffer(
         _Inout_ ConnectionPool* connectionPool,
         _Inout_ PooledConnection* pooledConnection,
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
         SIZE_T requestLength,
@@ -1192,13 +1192,13 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestBodySource(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _In_ const Request& request,
         _Inout_ Workspace& workspace) noexcept;
 
     _Must_inspect_result_
     NTSTATUS ReadHttpResponseFromSocket(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         bool responseBodyForbidden,
         _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
@@ -1212,7 +1212,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestBufferWithExpect(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
         SIZE_T requestLength,
@@ -1229,7 +1229,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestSourceWithExpect(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         _In_ const Request& request,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,

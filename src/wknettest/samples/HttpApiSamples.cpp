@@ -1,4 +1,4 @@
-#include "samples/KhttpSamples.h"
+#include "samples/HttpApiSamples.h"
 
 #include "WknetTestLog.h"
 
@@ -16,20 +16,10 @@ namespace
     }
 }
 
-NTSTATUS RunKhttpSamples(wknet::http::Session* session, KhttpSampleResults* results) noexcept
-{
-    if (session == nullptr || results == nullptr) {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    *results = {};
-    return RunHighLevelApiSamples(session, &results->HighLevel);
-}
-
-NTSTATUS RunwknettestSamples(
+NTSTATUS RunDriverSamples(
     net::WskClient* wskClient,
     const char* certificateBundlePath,
-    wknettestSampleResults* results) noexcept
+    DriverSampleResults* results) noexcept
 {
     if (wskClient == nullptr || results == nullptr) {
         return STATUS_INVALID_PARAMETER;

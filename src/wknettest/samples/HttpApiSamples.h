@@ -11,23 +11,16 @@ namespace wknet
 {
 namespace samples
 {
-    struct wknettestSampleResults final
+    struct DriverSampleResults final
     {
         HighLevelApiSampleResults HighLevel = {};
         AdvancedScenarioSampleResults Advanced = {};
     };
 
-    using KhttpSampleResults = wknettestSampleResults;
-
     _Must_inspect_result_
-    NTSTATUS RunKhttpSamples(
-        _In_ ::wknet::http::Session* session,
-        _Out_ KhttpSampleResults* results) noexcept;
-
-    _Must_inspect_result_
-    NTSTATUS RunwknettestSamples(
+    NTSTATUS RunDriverSamples(
         _In_ net::WskClient* wskClient,
         _In_opt_z_ const char* certificateBundlePath,
-        _Out_ wknettestSampleResults* results) noexcept;
+        _Out_ DriverSampleResults* results) noexcept;
 }
 }

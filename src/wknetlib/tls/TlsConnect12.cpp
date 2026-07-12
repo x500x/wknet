@@ -5,7 +5,7 @@ namespace wknet
 namespace tls
 {
     NTSTATUS TlsConnection::ConnectTls12(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const TlsClientConnectionOptions& options) noexcept
     {
         tls13RecordProtection_ = false;
@@ -861,7 +861,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::ConsumeTls12PostHandshakeRecord(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const UCHAR* fragment,
         SIZE_T fragmentLength) noexcept
     {
@@ -891,7 +891,7 @@ namespace tls
         return RenegotiateTls12(transport);
     }
 
-    NTSTATUS TlsConnection::RenegotiateTls12(core::ITransport& transport) noexcept
+    NTSTATUS TlsConnection::RenegotiateTls12(transport::Transport* transport) noexcept
     {
         if (tls12Renegotiating_ ||
             tls13RecordProtection_ ||

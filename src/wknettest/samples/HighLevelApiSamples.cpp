@@ -62,9 +62,9 @@ namespace
 #endif
 
     constexpr const char* JsonBody = "{\"hello\":\"world\"}";
-    constexpr const char* TextBody = "hello from high-level khttp";
+    constexpr const char* TextBody = "hello from high-level wknet";
     constexpr UCHAR RawBody[] = { 0x6B, 0x68, 0x74, 0x74, 0x70 };
-    constexpr const char* WsHelloMessage = "hello-from-khttp";
+    constexpr const char* WsHelloMessage = "hello-from-wknet";
     constexpr UCHAR WsBinaryMessage[] = { 0x01, 0x02, 0x03, 0x04 };
     constexpr SIZE_T TextLogChunkBytes = 256;
     constexpr SIZE_T MaxLoggedTextBytes = 8 * 1024;
@@ -150,14 +150,14 @@ namespace
         SIZE_T dataLength) noexcept
     {
         if (data == nullptr || dataLength == 0) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "%s 示例=%s 内容长度=0 原始响应体如下\r\n",
                 prefix,
                 sampleName);
             return;
         }
 
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "%s 示例=%s 内容长度=%Iu 原始响应体如下\r\n",
             prefix,
             sampleName,
@@ -183,7 +183,7 @@ namespace
         const char* safeSampleName = sampleName != nullptr ? sampleName : "";
         const char* safeHeaderName = headerName != nullptr ? headerName : "";
         if (headerValue == nullptr || headerValueLength == 0) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP响应] 示例=%s 响应头[%Iu] %.*s: <空>\r\n",
                 safeSampleName,
                 index,
@@ -195,7 +195,7 @@ namespace
         const SIZE_T loggedBytes = ClampLoggedBytes(headerValueLength);
         const bool truncated = loggedBytes < headerValueLength;
         if (!truncated && headerValueLength <= TextLogChunkBytes) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP响应] 示例=%s 响应头[%Iu] %.*s: %.*s\r\n",
                 safeSampleName,
                 index,
@@ -206,7 +206,7 @@ namespace
             return;
         }
 
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[HTTP响应] 示例=%s 响应头[%Iu] %.*s: 值长度=%Iu 日志分块输出=%Iu%s\r\n",
             safeSampleName,
             index,
@@ -217,7 +217,7 @@ namespace
             truncated ? " <truncated>" : "");
         for (SIZE_T offset = 0; offset < loggedBytes; offset += TextLogChunkBytes) {
             const SIZE_T chunkLength = MinSize(loggedBytes - offset, TextLogChunkBytes);
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP响应] 示例=%s 响应头[%Iu] 值偏移=%Iu 长度=%Iu 内容=%.*s\r\n",
                 safeSampleName,
                 index,
@@ -227,7 +227,7 @@ namespace
                 headerValue + offset);
         }
         if (truncated) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP响应] 示例=%s 响应头[%Iu] 日志展示截断 已输出=%Iu 总长度=%Iu\r\n",
                 safeSampleName,
                 index,
@@ -244,7 +244,7 @@ namespace
     {
         const char* safeHeaderName = headerName != nullptr ? headerName : "";
         if (headerValue == nullptr || headerValueLength == 0) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP回调] 收到响应头 %.*s: <空>\r\n",
                 PrintLength(headerNameLength),
                 safeHeaderName);
@@ -254,7 +254,7 @@ namespace
         const SIZE_T loggedBytes = ClampLoggedBytes(headerValueLength);
         const bool truncated = loggedBytes < headerValueLength;
         if (!truncated && headerValueLength <= TextLogChunkBytes) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP回调] 收到响应头 %.*s: %.*s\r\n",
                 PrintLength(headerNameLength),
                 safeHeaderName,
@@ -263,7 +263,7 @@ namespace
             return;
         }
 
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[HTTP回调] 收到响应头 %.*s: 值长度=%Iu 日志分块输出=%Iu%s\r\n",
             PrintLength(headerNameLength),
             safeHeaderName,
@@ -272,7 +272,7 @@ namespace
             truncated ? " <truncated>" : "");
         for (SIZE_T offset = 0; offset < loggedBytes; offset += TextLogChunkBytes) {
             const SIZE_T chunkLength = MinSize(loggedBytes - offset, TextLogChunkBytes);
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP回调] 响应头值偏移=%Iu 长度=%Iu 内容=%.*s\r\n",
                 offset,
                 chunkLength,
@@ -280,7 +280,7 @@ namespace
                 headerValue + offset);
         }
         if (truncated) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP回调] 响应头日志展示截断 已输出=%Iu 总长度=%Iu\r\n",
                 loggedBytes,
                 headerValueLength);
@@ -414,7 +414,7 @@ namespace
         }
 
         if (IsPublicEndpointDiagnosticStatus(status)) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP响应] 示例=%s 公网端点环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                 sampleName,
                 static_cast<ULONG>(status));
@@ -436,7 +436,7 @@ namespace
 
         if ((family == wknet::http::AddressFamily::Ipv4 || family == wknet::http::AddressFamily::Ipv6) &&
             IsPublicEndpointDiagnosticStatus(status)) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP响应] 示例=%s 公网 %s 环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                 sampleName,
                 AddressFamilyName(family),
@@ -457,7 +457,7 @@ namespace
         }
 
         if (IsPublicEndpointDiagnosticStatus(status)) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[WebSocket响应] 示例=%s 公网连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                 sampleName,
                 static_cast<ULONG>(status));
@@ -480,7 +480,7 @@ namespace
 
     void LogSessionConfig(const char* sampleName, const wknet::http::SessionConfig& config) noexcept
     {
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[会话示例] %s：响应池=%s 请求缓冲=%Iu 最大响应=%Iu 连接池容量=%lu 每主机最大连接=%lu 空闲超时=%lums TLS=%s-%s 证书策略=%s TLS握手超时=%lums TLS1.2最大重协商=%lu\r\n",
             sampleName,
             PoolTypeName(config.ResponsePool),
@@ -521,7 +521,7 @@ namespace
             alpn = "不自动";
             alpnLength = LiteralLength(alpn);
         }
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[HTTP请求] 示例=%s 入口=%s 方法=%s URL=%s 请求体=%s 长度=%Iu 证书策略=%s TLS ALPN=%.*s TLS1.2最大重协商=%lu 地址族=%s 连接策略=%s\r\n",
             sampleName,
             entryName,
@@ -544,7 +544,7 @@ namespace
     {
         const ULONG statusCode = wknet::http::ResponseStatusCode(response);
         const SIZE_T bodyLength = wknet::http::ResponseBodyLength(response);
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[HTTP响应] 示例=%s NTSTATUS=0x%08X 状态码=%lu 响应体长度=%Iu\r\n",
             sampleName,
             static_cast<ULONG>(status),
@@ -556,7 +556,7 @@ namespace
         }
 
         const SIZE_T headerCount = wknet::http::ResponseHeaderCount(response);
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[HTTP响应] 示例=%s 响应头数量=%Iu\r\n",
             sampleName,
             headerCount);
@@ -592,14 +592,14 @@ namespace
             &headerValue,
             &headerValueLength);
         if (NT_SUCCESS(headerStatus)) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP响应] 示例=%s 响应头 Content-Length=%.*s\r\n",
                 sampleName,
                 PrintLength(headerValueLength),
                 headerValue != nullptr ? headerValue : "");
         }
         else {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP响应] 示例=%s 未找到响应头 Content-Length，查询状态=0x%08X\r\n",
                 sampleName,
                 static_cast<ULONG>(headerStatus));
@@ -656,7 +656,7 @@ namespace
         ++stats->BodyChunks;
         stats->BodyBytes += dataLength;
         stats->BodyFinal = finalChunk;
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[HTTP回调] 收到响应体分块 长度=%Iu 是否最后一块=%s\r\n",
             dataLength,
             BoolName(finalChunk));
@@ -673,7 +673,7 @@ namespace
 
         ++stats->CompletionCount;
         stats->CompletionStatus = status;
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[异步回调] 操作完成 NTSTATUS=0x%08X\r\n",
             static_cast<ULONG>(status));
     }
@@ -693,7 +693,7 @@ namespace
         stats->WsMessageBytes = dataLength;
         stats->WsMessageType = type;
         stats->WsFinalFragment = finalFragment;
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[WebSocket回调] 收到%s消息 长度=%Iu 是否最后分片=%s\r\n",
             WsMsgTypeName(type),
             dataLength,
@@ -900,7 +900,7 @@ namespace
         }
         else {
             CaptureStatus(result, status, 0, 0);
-            KHTTP_SAMPLE_LOG("[HTTP请求] 示例=%s 构造请求体失败 NTSTATUS=0x%08X\r\n",
+            WKNET_SAMPLE_LOG("[HTTP请求] 示例=%s 构造请求体失败 NTSTATUS=0x%08X\r\n",
                 sampleName,
                 static_cast<ULONG>(status));
         }
@@ -983,7 +983,7 @@ namespace
 
     NTSTATUS CreateFileBody(wknet::http::Body** body) noexcept
     {
-        KHTTP_SAMPLE_LOG("[HTTP请求] 文件请求体示例路径=%s\r\n", FileBodyPath);
+        WKNET_SAMPLE_LOG("[HTTP请求] 文件请求体示例路径=%s\r\n", FileBodyPath);
         return wknet::http::BodyCreateFileEx(
             FileBodyPath,
             LiteralLength(FileBodyPath),
@@ -1165,7 +1165,7 @@ namespace
             CaptureStatus(result, status, 0, 0);
         }
 
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[HTTP回调] 示例=%s 响应头数量=%Iu 响应体分块=%Iu 回调累计字节=%Iu\r\n",
             useSendEx ? "HTTP SendEx" : "HTTP Send(带选项)",
             stats.HeaderCount,
@@ -1235,7 +1235,7 @@ namespace
                 LiteralLength("Content-Length"),
                 &headerValue,
                 &headerLength);
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP响应] ResponseGetHeader(Content-Length) 状态=0x%08X 值=%.*s\r\n",
                 static_cast<ULONG>(headerStatus),
                 PrintLength(headerLength),
@@ -1259,7 +1259,7 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[HTTP异步] 示例=%s 等待前：状态=0x%08X 已完成=%s 已取消=%s\r\n",
             sampleName,
             static_cast<ULONG>(wknet::http::AsyncGetStatus(op)),
@@ -1267,7 +1267,7 @@ namespace
             BoolName(wknet::http::AsyncIsCanceled(op)));
 
         NTSTATUS status = wknet::http::AsyncWait(op, AsyncWaitTimeoutMs);
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[HTTP异步] 示例=%s 等待后：状态=0x%08X 已完成=%s 已取消=%s\r\n",
             sampleName,
             static_cast<ULONG>(wknet::http::AsyncGetStatus(op)),
@@ -1447,12 +1447,12 @@ namespace
         }
 
         if (variant == AsyncSendVariant::AsyncSend) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP异步] 示例=%s 完成回调=未配置\r\n",
                 sampleName);
         }
         else {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[HTTP异步] 示例=%s 完成回调次数=%Iu 完成回调状态=0x%08X\r\n",
                 sampleName,
                 stats.CompletionCount,
@@ -1468,7 +1468,7 @@ namespace
 
     NTSTATUS RunAsyncCancelSample(wknet::http::Session* session, HighLevelApiSampleResult& result) noexcept
     {
-        KHTTP_SAMPLE_LOG("[HTTP异步] 示例=AsyncCancel 创建一个异步 GET 后立即请求取消并等待终态\r\n");
+        WKNET_SAMPLE_LOG("[HTTP异步] 示例=AsyncCancel 创建一个异步 GET 后立即请求取消并等待终态\r\n");
         wknet::http::AsyncOp* op = nullptr;
         NTSTATUS status = wknet::http::AsyncGetEx(
             session,
@@ -1495,7 +1495,7 @@ namespace
 
         const bool canceled = wknet::http::AsyncIsCanceled(op);
         const bool terminalObserved = wknet::http::AsyncIsCompleted(op);
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[HTTP异步] 示例=AsyncCancel 取消状态=0x%08X 等待状态=0x%08X 已取消=%s 当前状态=0x%08X\r\n",
             static_cast<ULONG>(cancelStatus),
             static_cast<ULONG>(waitStatus),
@@ -1526,7 +1526,7 @@ namespace
             status = CreateSampleHeaders(&headers);
         }
         if (NT_SUCCESS(status)) {
-            status = wknet::http::HeadersAdd(headers, "X-KernelHttp-Sample", "request-builder");
+            status = wknet::http::HeadersAdd(headers, "X-Wknet-Sample", "request-builder");
         }
         wknet::http::Body* body = nullptr;
         if (NT_SUCCESS(status)) {
@@ -1599,7 +1599,7 @@ namespace
         WsSendVariant sendVariant,
         SIZE_T sendLength) noexcept
     {
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[WebSocket请求] 示例=%s 入口=%s URL=%s 子协议=%.*s 发送=%s 发送长度=%Iu 地址族=%s 证书策略=%s 自动Ping响应=%s 最大消息=%Iu TLS策略=%s SHA1签名=%s TLS1.2最大重协商=%lu\r\n",
             sampleName,
             WsConnectVariantName(connectVariant),
@@ -1623,7 +1623,7 @@ namespace
         const wknet::websocket::Message* message,
         NTSTATUS closeStatus) noexcept
     {
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[WebSocket响应] 示例=%s NTSTATUS=0x%08X 消息类型=%s 消息长度=%Iu 是否最后分片=%s 关闭状态=0x%08X\r\n",
             sampleName,
             static_cast<ULONG>(status),
@@ -1734,7 +1734,7 @@ namespace
         const wknet::websocket::MsgType expectedType = ExpectedWebSocketEchoType(variant);
         ExpectedWebSocketEchoPayload(variant, &expectedLength);
 
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[WebSocket响应] 示例=%s Echo校验失败 期望类型=%s 实际类型=%s 期望长度=%Iu 实际长度=%Iu 最后分片=%s\r\n",
             sampleName,
             WsMsgTypeName(expectedType),
@@ -1774,7 +1774,7 @@ namespace
                 return STATUS_SUCCESS;
             }
 
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[WebSocket响应] 示例=%s 跳过非目标Echo帧 序号=%lu 类型=%s 长度=%Iu\r\n",
                 sampleName,
                 frameIndex,
@@ -1847,7 +1847,7 @@ namespace
                 logMessage.Data = logMessageData.Get();
             }
             else {
-                KHTTP_SAMPLE_LOG(
+                WKNET_SAMPLE_LOG(
                     "[WebSocket响应] 示例=%s 响应体日志复制失败 NTSTATUS=0x%08X\r\n",
                     sampleName,
                     static_cast<ULONG>(copyStatus));
@@ -1902,7 +1902,7 @@ namespace
 
         wknet::websocket::WebSocket* websocket = nullptr;
         if (NT_SUCCESS(status)) {
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[WebSocket异步] 示例=%s 等待前：状态=0x%08X 已完成=%s\r\n",
                 sampleName,
                 static_cast<ULONG>(wknet::http::AsyncGetStatus(op)),
@@ -1955,7 +1955,7 @@ namespace
         wknet::http::Session* session = nullptr;
         NTSTATUS status = wknet::http::SessionCreate(config, &session);
         CaptureStatus(result, status, NT_SUCCESS(status) ? 1 : 0, config != nullptr ? config->MaxResponseBytes : 0);
-        KHTTP_SAMPLE_LOG(
+        WKNET_SAMPLE_LOG(
             "[会话示例] %s：SessionCreate 状态=0x%08X 会话=%s\r\n",
             sampleName,
             static_cast<ULONG>(status),
@@ -1966,7 +1966,7 @@ namespace
         }
         else {
             wknet::http::SessionClose(session);
-            KHTTP_SAMPLE_LOG("[会话示例] %s：SessionClose 已调用\r\n", sampleName);
+            WKNET_SAMPLE_LOG("[会话示例] %s：SessionClose 已调用\r\n", sampleName);
         }
         return status;
     }
@@ -1996,7 +1996,7 @@ namespace
         }
 
         wknet::http::TlsConfig ngHttp2Tls = wknet::http::DefaultTlsConfig();
-        ngHttp2Tls.Store = &trustStore.Store;
+        ngHttp2Tls.Store = trustStore.Store;
 
         wknet::http::TlsConfig noVerifyTls = wknet::http::DefaultTlsConfig();
         noVerifyTls.Certificate = wknet::http::CertPolicy::NoVerify;
@@ -2010,7 +2010,7 @@ namespace
         ngHttp2Http2Tls.AlpnLength = LiteralLength(AlpnH2);
 
         wknet::http::TlsConfig webSocketTls = wknet::http::DefaultTlsConfig();
-        webSocketTls.Store = &trustStore.Store;
+        webSocketTls.Store = trustStore.Store;
 
         wknet::http::TlsConfig webSocketTls13Only = webSocketTls;
         webSocketTls13Only.MinVersion = wknet::http::TlsVersion::Tls13;
@@ -2201,7 +2201,7 @@ NTSTATUS RunHighLevelApiSamples(
     }
 
     wknet::http::SessionConfig defaultConfig = wknet::http::DefaultSessionConfig();
-    defaultConfig.Tls.Store = &trustStore.Store;
+    defaultConfig.Tls.Store = trustStore.Store;
 
     wknet::http::Session* session = nullptr;
     status = RunSessionCreateSample(
@@ -2220,7 +2220,7 @@ NTSTATUS RunHighLevelApiSamples(
             results);
         MergeSampleStatus(aggregate, status);
         wknet::http::SessionClose(session);
-        KHTTP_SAMPLE_LOG("[会话示例] 默认会话请求矩阵结束，SessionClose 已调用\r\n");
+        WKNET_SAMPLE_LOG("[会话示例] 默认会话请求矩阵结束，SessionClose 已调用\r\n");
     }
 
     wknet::http::SessionConfig customConfig = wknet::http::DefaultSessionConfig();
@@ -2229,7 +2229,7 @@ NTSTATUS RunHighLevelApiSamples(
     customConfig.MaxConnsPerHost = 1;
     customConfig.IdleTimeoutMs = 15000;
     customConfig.Tls.HandshakeTimeoutMs = 90000;
-    customConfig.Tls.Store = &trustStore.Store;
+    customConfig.Tls.Store = trustStore.Store;
     status = RunSessionCreateSample(
         wskClient,
         "自定义 SessionConfig",
@@ -2244,4 +2244,4 @@ NTSTATUS RunHighLevelApiSamples(
 }
 }
 
-#undef KHTTP_SAMPLE_LOG
+#undef WKNET_SAMPLE_LOG

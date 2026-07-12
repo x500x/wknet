@@ -324,7 +324,7 @@ namespace session
         }
 
         if (NT_SUCCESS(status)) {
-            status = newWebSocket->Client->Connect(*session->WskClient, connectOptions, buffers);
+            status = newWebSocket->Client->Connect(session->WskClient, connectOptions, buffers);
         }
 
         if (!NT_SUCCESS(status)) {

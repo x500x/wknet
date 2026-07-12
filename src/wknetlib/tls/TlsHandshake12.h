@@ -1,6 +1,6 @@
 #pragma once
 
-#include <wknet/tls/TlsTypes.h>
+#include "tls/TlsTypes.h"
 
 #include "tls/TlsContext.h"
 
@@ -45,7 +45,7 @@ namespace tls
         Ffdhe8192 = 260
     };
 
-    // TlsSignatureScheme is public: <wknet/tls/TlsTypes.h>
+    // TlsSignatureScheme is public: "tls/TlsTypes.h"
 
     struct TlsHandshakeMessageView final
     {

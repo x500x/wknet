@@ -22,7 +22,7 @@ wknet is a pure kernel-mode HTTP/HTTPS client library designed specifically for 
 ### ✨ Key Features
 
 - **🔒 Pure Kernel-Mode Implementation**: No dependency on WinHTTP, WinINet, SChannel, or other user-mode components
-- **🌐 WSK Network Transport**: Uses Windows Sockets Kernel (WSK) for network communication, with `ITransport` abstraction supporting WSK and TLS transport layers
+- **🌐 WSK Network Transport**: Uses Windows Sockets Kernel (WSK) with opaque `transport::Transport*` services for plaintext and TLS byte streams
 - **🔐 CNG/BCrypt Cryptography**: Uses kernel-mode CNG (Cryptography Next Generation) for cryptographic operations, supporting TLS 1.2/1.3 handshake
 - **📡 Explicit Capability Matrix**: Supports the client main paths for HTTP/1.1, HTTP/2 (with h2c plaintext upgrade), WebSocket, and TLS 1.2/1.3, with default capabilities separated from explicit compatibility capabilities
 - **🔄 Connection Pool Management**: Built-in connection pool with connection reuse, idle timeout, concurrency protection, and automatic management
@@ -127,8 +127,8 @@ For certificate host validation, IP literals match only iPAddress SAN entries an
 
 1. **Clone Repository**
    ```bash
-   git clone https://github.com/x500x/khttp.git
-   cd khttp
+   git clone https://github.com/x500x/wknet.git
+   cd wknet
    ```
 
 2. **Build with Visual Studio**
@@ -214,7 +214,7 @@ Common wknet entry namespaces:
 │  Fine-grained control, perf optimization, test hooks         │
 ├─────────────────────────────────────────────────────────────┤
 │                    Transport Adapters (wknet::transport)      │
-│  ITransport | WskTransport | TlsTransport | ProxyConnect     │
+│  opaque Transport services | WSK/TLS | ProxyConnect         │
 ├─────────────────────────────────────────────────────────────┤
 │                    Protocol Implementation Layer              │
 │  HTTP/1.1 | HTTP/2 (HPACK) | WebSocket | TLS 1.2/1.3        │
@@ -224,7 +224,7 @@ Common wknet entry namespaces:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-For the full API reference, see the **[project Wiki](https://github.com/x500x/khttp/wiki)** and the **[online docs site](https://x500x.github.io/khttp/)**.
+For the full API reference, see the **[project Wiki](https://github.com/x500x/wknet/wiki)** and the **[online docs site](https://x500x.github.io/wknet/)**.
 
 ### 🔥 High-Level API Example
 
@@ -357,7 +357,6 @@ wknet/
 │   ├── websocket/                    # wknet::websocket
 │   ├── crypto/                       # wknet::crypto
 │   ├── codec/                        # wknet::codec
-│   ├── tls/                          # Public certificate/TLS value types
 │   └── test/                         # Narrow WKNET_USER_MODE_TEST hooks
 ├── src/wknetlib/                     # Kernel static-library implementation
 │   ├── rtl/                          # Heap, tracing, text, URL
@@ -365,7 +364,7 @@ wknet/
 │   ├── crypto/                       # CNG and software cryptography
 │   ├── tls/                          # TLS 1.2/1.3 and certificate validation
 │   ├── codec/                        # Content-Encoding, EXI, Pack200
-│   ├── transport/                    # ITransport, WSK/TLS, proxy CONNECT
+│   ├── transport/                    # opaque Transport, WSK/TLS, proxy CONNECT
 │   ├── http1/ / http2/ / ws/        # Protocol layers
 │   ├── session/                      # Sessions, pool, HTTP/WS orchestration
 │   └── http_api/                     # Thin public-API bridge
@@ -386,16 +385,16 @@ wknet/
 
 Full documentation now lives in the **GitHub Wiki** and an **online docs site** (bilingual, grounded in the actual code):
 
-- 📚 **[Project Wiki](https://github.com/x500x/khttp/wiki)** — capability matrix, architecture, HTTP/1.1, HTTP/2 & HPACK, WebSocket, TLS & certificates, cryptography, product API, transport, connection pool, async, memory, NTSTATUS, cookbook, FAQ, roadmap, glossary, and more.
-- 🌐 **[Online docs site](https://x500x.github.io/khttp/)** — the same content as a MkDocs Material site with full-text search and dark mode.
+- 📚 **[Project Wiki](https://github.com/x500x/wknet/wiki)** — capability matrix, architecture, HTTP/1.1, HTTP/2 & HPACK, WebSocket, TLS & certificates, cryptography, product API, transport, connection pool, async, memory, NTSTATUS, cookbook, FAQ, roadmap, glossary, and more.
+- 🌐 **[Online docs site](https://x500x.github.io/wknet/)** — the same content as a MkDocs Material site with full-text search and dark mode.
 
 | Topic | Link |
 |-------|------|
-| Capability Matrix | [Capability Matrix](https://github.com/x500x/khttp/wiki/Capability-Matrix) |
-| Product API (http/websocket/crypto/codec) | [High-Level API](https://github.com/x500x/khttp/wiki/High-Level-API) |
-| Internal session layer (wknet::session) | [Low-Level API](https://github.com/x500x/khttp/wiki/Low-Level-API) |
-| TLS & Certificates | [TLS & Certificates](https://github.com/x500x/khttp/wiki/TLS-and-Certificates) |
-| NTSTATUS Reference | [NTSTATUS Reference](https://github.com/x500x/khttp/wiki/NTSTATUS-Reference) |
+| Capability Matrix | [Capability Matrix](https://github.com/x500x/wknet/wiki/Capability-Matrix) |
+| Product API (http/websocket/crypto/codec) | [High-Level API](https://github.com/x500x/wknet/wiki/High-Level-API) |
+| Internal session layer (wknet::session) | [Low-Level API](https://github.com/x500x/wknet/wiki/Low-Level-API) |
+| TLS & Certificates | [TLS & Certificates](https://github.com/x500x/wknet/wiki/TLS-and-Certificates) |
+| NTSTATUS Reference | [NTSTATUS Reference](https://github.com/x500x/wknet/wiki/NTSTATUS-Reference) |
 
 ---
 
@@ -467,7 +466,7 @@ pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_crypto_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_handshake_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_record_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\tls_interop_matrix_tests.exe'
-pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\khttp_tests.exe'
+pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\http_api_tests.exe'
 pwsh -NoLogo -NoProfile -Command '& .\tests\out\bin\high_level_api_tests.exe'
 
 # Local TLS interop matrix: uses 127.0.0.1 only; reports explicit SKIP when OpenSSL/BoringSSL is absent
@@ -491,7 +490,7 @@ msbuild wknet.sln /m /restore /p:Configuration=Debug /p:Platform=x64
 | `tls_interop_matrix_tests.cpp` | TLS capability/policy/interop matrix manifest |
 | `tests/integration/tls_matrix.ps1` | Local OpenSSL/BoringSSL loopback interop matrix |
 | `websocket_frame_tests.cpp` | WebSocket frame processing |
-| `khttp_tests.cpp` | Product HTTP API tests |
+| `http_api_tests.cpp` | Product HTTP API tests |
 | `high_level_api_tests.cpp` | High-level API integration tests |
 | `websocket_client_tests.cpp` | WebSocket client tests |
 
@@ -651,9 +650,9 @@ config.Tls.Certificate = wknet::http::CertPolicy::Verify;
 config.Tls.HandshakeTimeoutMs = 120000;
 
 // Custom certificate store
-tls::CertificateStore store = {};
-// Add trust anchors...
-config.Tls.Store = &store;
+wknet::http::CertificateStore* store = nullptr;
+NTSTATUS status = wknet::http::CertificateStoreCreate(nullptr, &store);
+config.Tls.Store = store;
 ```
 
 ### TLS 1.3 Security Enhancements
@@ -671,29 +670,32 @@ The project implements the following TLS 1.3 security hardening:
 
 ```cpp
 // Use certificate pinning for enhanced security
-tls::CertificateTrustAnchor anchor = {};
+wknet::http::CertificateTrustAnchor anchor = {};
 anchor.SubjectName = rootCertSubject;
 anchor.SubjectNameLength = rootCertSubjectLen;
 RtlCopyMemory(anchor.SubjectPublicKeySha256, rootSpkiHash, 32);
 anchor.MatchSubjectPublicKey = true;
 
-tls::CertificatePin pin = {};
+wknet::http::CertificatePin pin = {};
 pin.HostName = "example.com";
 pin.HostNameLength = 11;
 RtlCopyMemory(pin.LeafSubjectPublicKeySha256, leafSpkiHash, 32);
 
 // Create certificate store
-tls::CertificateStoreOptions storeOptions = {};
+wknet::http::CertificateStoreOptions storeOptions = {};
 storeOptions.TrustAnchors = &anchor;
 storeOptions.TrustAnchorCount = 1;
 storeOptions.Pins = &pin;
 storeOptions.PinCount = 1;
 
-tls::CertificateStore store;
-store.Initialize(storeOptions);
+wknet::http::CertificateStore* store = nullptr;
+NTSTATUS status = wknet::http::CertificateStoreCreate(&storeOptions, &store);
 
 // Apply to session
-config.Tls.Store = &store;
+config.Tls.Store = store;
+
+// Release the caller-owned store after SessionClose.
+wknet::http::CertificateStoreClose(store);
 ```
 
 ### ALPN Protocol Negotiation
@@ -704,7 +706,7 @@ config.Tls.Alpn = "h2";
 config.Tls.AlpnLength = 2;
 
 // Or support both HTTP/1.1 and HTTP/2
-// Set via TlsAlpnProtocol array in TlsConnection
+// session derives the internal offer list from PreferHttp2 and explicit Alpn
 ```
 
 ---

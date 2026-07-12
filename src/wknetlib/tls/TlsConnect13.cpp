@@ -5,7 +5,7 @@ namespace wknet
 namespace tls
 {
     NTSTATUS TlsConnection::ConnectTls13(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const TlsClientConnectionOptions& options) noexcept
     {
         tls13RecordProtection_ = false;
@@ -839,7 +839,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::ReadHandshakeMessage13(
-        core::ITransport& transport,
+        transport::Transport* transport,
         TlsHandshakeMessageView& message,
         bool updateTranscript) noexcept
     {

@@ -65,7 +65,7 @@ namespace
     _Ret_maybenull_
     Workspace* AllocateWorkspaceObject(
         PoolType poolType,
-        _In_opt_ core::LookasideList* lookaside) noexcept
+        _In_opt_ rtl::LookasideList* lookaside) noexcept
     {
         if (!IsSupportedWorkspacePoolType(poolType)) {
             return nullptr;
@@ -80,7 +80,7 @@ namespace
 
     void FreeWorkspaceObject(
         _In_opt_ Workspace* workspace,
-        _In_opt_ core::LookasideList* lookaside) noexcept
+        _In_opt_ rtl::LookasideList* lookaside) noexcept
     {
         if (workspace == nullptr) {
             return;
@@ -161,7 +161,7 @@ namespace
 
     NTSTATUS WorkspaceCreateFromLookaside(
         const WorkspaceOptions* options,
-        core::LookasideList* lookaside,
+        rtl::LookasideList* lookaside,
         Workspace** workspace) noexcept
     {
         if (workspace == nullptr) {
@@ -272,7 +272,7 @@ namespace
         workspace->ResponseLength = 0;
     }
 
-    void WorkspaceReleaseToLookaside(Workspace* workspace, core::LookasideList* lookaside) noexcept
+    void WorkspaceReleaseToLookaside(Workspace* workspace, rtl::LookasideList* lookaside) noexcept
     {
         if (workspace == nullptr) {
             return;

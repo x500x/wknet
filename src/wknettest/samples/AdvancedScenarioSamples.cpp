@@ -71,7 +71,7 @@ namespace samples
             NTSTATUS status) noexcept
         {
             if (!NT_SUCCESS(status)) {
-                KHTTP_SAMPLE_LOG(
+                WKNET_SAMPLE_LOG(
                     "[高级场景] 示例=%s 失败 NTSTATUS=0x%08X\r\n",
                     sampleName,
                     static_cast<ULONG>(status));
@@ -87,7 +87,7 @@ namespace samples
             NTSTATUS status) noexcept
         {
             if (!NT_SUCCESS(status) && IsPublicEndpointDiagnosticStatus(status)) {
-                KHTTP_SAMPLE_LOG(
+                WKNET_SAMPLE_LOG(
                     "[高级场景] 示例=%s 公网连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                     sampleName,
                     static_cast<ULONG>(status));
@@ -229,7 +229,7 @@ namespace samples
 
             const bool expected = status == STATUS_BUFFER_TOO_SMALL;
             CaptureStatus(result, expected ? STATUS_SUCCESS : status, 0, 64);
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[高级场景] 预期限制样本=HTTP ResponseLimit %s 实际=0x%08X 预期=0x%08X MaxResponseBytes=%Iu（非零值主动限制响应体聚合）\r\n",
                 expected ? "命中预期，按通过处理" : "未命中预期，按失败处理",
                 static_cast<ULONG>(status),
@@ -428,7 +428,7 @@ namespace samples
                 allowPublicEndpointDiagnostic &&
                 IsPublicEndpointDiagnosticStatus(status);
             CaptureStatus(result, expected ? STATUS_SUCCESS : status, static_cast<ULONG>(status), 0);
-            KHTTP_SAMPLE_LOG(
+            WKNET_SAMPLE_LOG(
                 "[高级场景] 负面样本=%s %s 实际=0x%08X 预期=0x%08X\r\n",
                 sampleName,
                 expected ? "命中预期，按通过处理" :
@@ -449,7 +449,7 @@ namespace samples
             config.Url = WebSocketUrl;
             config.UrlLength = LiteralLength(WebSocketUrl);
             config.Tls = tlsConfig;
-            KHTTP_SAMPLE_LOG("[高级场景] WebSocket Close TLS策略=ModernDefault SHA1签名=关闭\r\n");
+            WKNET_SAMPLE_LOG("[高级场景] WebSocket Close TLS策略=ModernDefault SHA1签名=关闭\r\n");
 
             wknet::websocket::WebSocket* websocket = nullptr;
             NTSTATUS status = wknet::websocket::ConnectEx(session, &config, &websocket);
@@ -471,7 +471,7 @@ namespace samples
             config.Url = WebSocketUrl;
             config.UrlLength = LiteralLength(WebSocketUrl);
             config.Tls = tlsConfig;
-            KHTTP_SAMPLE_LOG("[高级场景] WebSocket FragmentSend TLS策略=ModernDefault SHA1签名=关闭\r\n");
+            WKNET_SAMPLE_LOG("[高级场景] WebSocket FragmentSend TLS策略=ModernDefault SHA1签名=关闭\r\n");
 
             wknet::websocket::WebSocket* websocket = nullptr;
             NTSTATUS status = wknet::websocket::ConnectEx(session, &config, &websocket);
@@ -542,7 +542,7 @@ namespace samples
         config.MaxResponseBytes = 0;
         config.PoolCapacity = 8;
         config.MaxConnsPerHost = 3;
-        config.Tls.Store = &trustStore.Store;
+        config.Tls.Store = trustStore.Store;
 
         wknet::http::Session* session = nullptr;
         status = wknet::http::SessionCreate(&config, &session);
@@ -570,20 +570,14 @@ namespace samples
         status = RunAsyncWaitTimeoutSample(session, results->HttpAsyncWaitTimeout);
         MergePublicDiagnosticSampleStatus(aggregate, "HTTP AsyncWaitTimeout", status);
 
-        HeapObject<tls::CertificateStore> emptyTrustStore;
-        if (!emptyTrustStore.IsValid()) {
-            status = STATUS_INSUFFICIENT_RESOURCES;
+        http::CertificateStore* emptyTrustStore = nullptr;
+        status = http::CertificateStoreCreate(nullptr, &emptyTrustStore);
+        if (!NT_SUCCESS(status)) {
             CaptureStatus(results->HttpsTrustFailure, status, static_cast<ULONG>(status), 0);
         }
         else {
-            tls::CertificateStoreOptions emptyStoreOptions = {};
-            status = emptyTrustStore->Initialize(emptyStoreOptions);
-            if (!NT_SUCCESS(status)) {
-                CaptureStatus(results->HttpsTrustFailure, status, static_cast<ULONG>(status), 0);
-            }
-            else {
                 wknet::http::TlsConfig trustFailureTls = wknet::http::DefaultTlsConfig();
-                trustFailureTls.Store = emptyTrustStore.Get();
+                trustFailureTls.Store = emptyTrustStore;
                 status = RunExpectedTlsFailure(
                     session,
                     "HTTPS TrustFailure",
@@ -592,12 +586,12 @@ namespace samples
                     STATUS_TRUST_FAILURE,
                     results->HttpsTrustFailure,
                     true);
-            }
+            http::CertificateStoreClose(emptyTrustStore);
         }
         MergePublicDiagnosticSampleStatus(aggregate, "HTTPS TrustFailure", status);
 
         wknet::http::TlsConfig alpnMismatchTls = wknet::http::DefaultTlsConfig();
-        alpnMismatchTls.Store = &trustStore.Store;
+        alpnMismatchTls.Store = trustStore.Store;
         alpnMismatchTls.Alpn = "kernel-http-test";
         alpnMismatchTls.AlpnLength = LiteralLength(alpnMismatchTls.Alpn);
         status = RunExpectedTlsFailure(
@@ -610,7 +604,7 @@ namespace samples
         MergeSampleStatus(aggregate, "HTTPS ALPN Mismatch", status);
 
         wknet::http::TlsConfig webSocketTls = wknet::http::DefaultTlsConfig();
-        webSocketTls.Store = &trustStore.Store;
+        webSocketTls.Store = trustStore.Store;
         webSocketTls.MinVersion = wknet::http::TlsVersion::Tls12;
         webSocketTls.MaxVersion = wknet::http::TlsVersion::Tls13;
         status = RunWebSocketCloseSample(session, webSocketTls, results->WebSocketClose);

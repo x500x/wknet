@@ -1,4 +1,4 @@
-#include "net/WskClient.h"
+#include "net/WskClientPrivate.hpp"
 
 #if !defined(WKNET_USER_MODE_TEST)
 #include "WskSync.h"
@@ -1083,6 +1083,62 @@ namespace net
         WskSyncReleaseContext(context);
         return status;
 #endif
+    }
+
+    NTSTATUS WskClientCreate(WskClient** client) noexcept
+    {
+        if (client != nullptr) {
+            *client = nullptr;
+        }
+        if (client == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        auto* created = AllocateNonPagedObject<WskClient>();
+        if (created == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        *client = created;
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS WskClientInitialize(WskClient* client, ULONG waitTimeoutMilliseconds) noexcept
+    {
+        return client != nullptr ? client->Initialize(waitTimeoutMilliseconds) : STATUS_INVALID_PARAMETER;
+    }
+
+    void WskClientShutdown(WskClient* client) noexcept
+    {
+        if (client != nullptr) {
+            client->Shutdown();
+        }
+    }
+
+    void WskClientClose(WskClient* client) noexcept
+    {
+        if (client != nullptr) {
+            client->Shutdown();
+            FreeNonPagedObject(client);
+        }
+    }
+
+    bool WskClientIsInitialized(const WskClient* client) noexcept
+    {
+        return client != nullptr && client->IsInitialized();
+    }
+
+    NTSTATUS WskClientResolveAll(
+        WskClient* client,
+        const wchar_t* nodeName,
+        const wchar_t* serviceName,
+        SOCKADDR_STORAGE* remoteAddresses,
+        SIZE_T addressCapacity,
+        SIZE_T* addressCount,
+        WskAddressFamily addressFamily) noexcept
+    {
+        return client != nullptr
+            ? client->ResolveAll(
+                nodeName, serviceName, remoteAddresses, addressCapacity, addressCount, addressFamily)
+            : STATUS_INVALID_PARAMETER;
     }
 }
 }

@@ -1,4 +1,4 @@
-#include "http2/Http2Connection.h"
+#include "http2/Http2ConnectionPrivate.hpp"
 
 namespace wknet
 {
@@ -803,9 +803,9 @@ namespace http2
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS Http2Connection::Initialize(core::ITransport& transport, SIZE_T maxHeaderBlockBytes) noexcept
+    NTSTATUS Http2Connection::Initialize(transport::Transport* transport, SIZE_T maxHeaderBlockBytes) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return Initialize(adapter, maxHeaderBlockBytes);
     }
 
@@ -821,10 +821,10 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::InitializeAfterUpgrade(
-        core::ITransport& transport,
+        transport::Transport* transport,
         SIZE_T maxHeaderBlockBytes) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return InitializeAfterUpgrade(adapter, maxHeaderBlockBytes);
     }
 
@@ -1493,7 +1493,7 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::BeginRequest(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const http1::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
         const Http2RequestBody& requestBody,
@@ -1507,7 +1507,7 @@ namespace http2
         SIZE_T nameValueCapacity,
         ULONG* streamId) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return BeginRequest(
             adapter,
             requestHeaders,
@@ -1525,7 +1525,7 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::BeginRequest(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const http1::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
         const UCHAR* body,
@@ -1540,7 +1540,7 @@ namespace http2
         SIZE_T nameValueCapacity,
         ULONG* streamId) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return BeginRequest(
             adapter,
             requestHeaders,
@@ -1652,10 +1652,10 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::ReceiveResponse(
-        core::ITransport& transport,
+        transport::Transport* transport,
         ULONG streamId) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return ReceiveResponse(adapter, streamId);
     }
 
@@ -1692,10 +1692,10 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::ReceiveResponseHeaders(
-        core::ITransport& transport,
+        transport::Transport* transport,
         ULONG streamId) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return ReceiveResponseHeaders(adapter, streamId);
     }
 
@@ -1781,13 +1781,13 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::SendStreamData(
-        core::ITransport& transport,
+        transport::Transport* transport,
         ULONG streamId,
         const UCHAR* data,
         SIZE_T dataLength,
         bool endStream) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return SendStreamData(adapter, streamId, data, dataLength, endStream);
     }
 
@@ -1942,14 +1942,14 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::ReceiveStreamData(
-        core::ITransport& transport,
+        transport::Transport* transport,
         ULONG streamId,
         UCHAR* buffer,
         SIZE_T bufferCapacity,
         SIZE_T* bytesReceived,
         bool* endStream) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return ReceiveStreamData(
             adapter,
             streamId,
@@ -2189,7 +2189,7 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::ReceiveResponse(
-        core::ITransport& transport,
+        transport::Transport* transport,
         ULONG streamId,
         http1::HttpHeader* responseHeaders,
         SIZE_T responseHeaderCapacity,
@@ -2201,7 +2201,7 @@ namespace http2
         char* nameValueBuffer,
         SIZE_T nameValueCapacity) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return ReceiveResponse(
             adapter,
             streamId,
@@ -2217,7 +2217,7 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::ReceiveResponse(
-        core::ITransport& transport,
+        transport::Transport* transport,
         ULONG streamId,
         http1::HttpHeader* responseHeaders,
         SIZE_T responseHeaderCapacity,
@@ -2228,7 +2228,7 @@ namespace http2
         char* nameValueBuffer,
         SIZE_T nameValueCapacity) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return ReceiveResponse(
             adapter,
             streamId,
@@ -2779,7 +2779,7 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::SendRequest(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const http1::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
         const Http2RequestBody& requestBody,
@@ -2793,7 +2793,7 @@ namespace http2
         char* nameValueBuffer,
         SIZE_T nameValueCapacity) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return SendRequest(
             adapter,
             requestHeaders,
@@ -2811,7 +2811,7 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::SendRequest(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const http1::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
         const UCHAR* body,
@@ -2826,7 +2826,7 @@ namespace http2
         char* nameValueBuffer,
         SIZE_T nameValueCapacity) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return SendRequest(
             adapter,
             requestHeaders,
@@ -2845,7 +2845,7 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::SendRequest(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const http1::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
         const Http2RequestBody& requestBody,
@@ -2858,7 +2858,7 @@ namespace http2
         char* nameValueBuffer,
         SIZE_T nameValueCapacity) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return SendRequest(
             adapter,
             requestHeaders,
@@ -2875,7 +2875,7 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::SendRequest(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const http1::HttpHeader* requestHeaders,
         SIZE_T requestHeaderCount,
         const UCHAR* body,
@@ -2889,7 +2889,7 @@ namespace http2
         char* nameValueBuffer,
         SIZE_T nameValueCapacity) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return SendRequest(
             adapter,
             requestHeaders,
@@ -2936,10 +2936,10 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::SendPing(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const UCHAR* opaqueData) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return SendPing(adapter, opaqueData);
     }
 
@@ -2995,11 +2995,11 @@ namespace http2
     }
 
     NTSTATUS Http2Connection::SendPingAndWaitForAck(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const UCHAR* opaqueData,
         ULONG ackTimeoutMilliseconds) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return SendPingAndWaitForAck(adapter, opaqueData, ackTimeoutMilliseconds);
     }
 
@@ -3021,9 +3021,9 @@ namespace http2
         return SendRaw(transport, buf, written);
     }
 
-    NTSTATUS Http2Connection::Shutdown(core::ITransport& transport) noexcept
+    NTSTATUS Http2Connection::Shutdown(transport::Transport* transport) noexcept
     {
-        Http2ITransportAdapter adapter(transport);
+        Http2TransportAdapter adapter(transport);
         return Shutdown(adapter);
     }
 
@@ -3576,6 +3576,182 @@ namespace http2
             }
         }
         return 0;
+    }
+    NTSTATUS Http2ConnectionCreate(Http2Connection** connection) noexcept
+    {
+        if (connection != nullptr) {
+            *connection = nullptr;
+        }
+        if (connection == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        auto* created = AllocateNonPagedObject<Http2Connection>();
+        if (created == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        *connection = created;
+        return STATUS_SUCCESS;
+    }
+
+    void Http2ConnectionClose(Http2Connection* connection) noexcept
+    {
+        FreeNonPagedObject(connection);
+    }
+
+    NTSTATUS Http2ConnectionInitialize(
+        Http2Connection* connection, transport::Transport* transport, SIZE_T maxHeaderBlockBytes) noexcept
+    {
+        return connection != nullptr
+            ? connection->Initialize(transport, maxHeaderBlockBytes)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS Http2ConnectionInitializeAfterUpgrade(
+        Http2Connection* connection, transport::Transport* transport, SIZE_T maxHeaderBlockBytes) noexcept
+    {
+        return connection != nullptr
+            ? connection->InitializeAfterUpgrade(transport, maxHeaderBlockBytes)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS Http2ConnectionBeginRequest(
+        Http2Connection* connection,
+        transport::Transport* transport,
+        const http1::HttpHeader* requestHeaders,
+        SIZE_T requestHeaderCount,
+        const Http2RequestBody* requestBody,
+        http1::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        const Http2ResponseBodySink* responseBodySink,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity,
+        ULONG* streamId) noexcept
+    {
+        return connection != nullptr && requestBody != nullptr && responseBodySink != nullptr
+            ? connection->BeginRequest(
+                transport,
+                requestHeaders,
+                requestHeaderCount,
+                *requestBody,
+                responseHeaders,
+                responseHeaderCapacity,
+                responseHeaderCount,
+                *responseBodySink,
+                responseBodyLength,
+                statusCode,
+                nameValueBuffer,
+                nameValueCapacity,
+                streamId)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS Http2ConnectionReceiveResponse(
+        Http2Connection* connection, transport::Transport* transport, ULONG streamId) noexcept
+    {
+        return connection != nullptr
+            ? connection->ReceiveResponse(transport, streamId)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS Http2ConnectionReceiveResponseDetailed(
+        Http2Connection* connection,
+        transport::Transport* transport,
+        ULONG streamId,
+        http1::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCapacity,
+        SIZE_T* responseHeaderCount,
+        const Http2ResponseBodySink* responseBodySink,
+        SIZE_T* responseBodyLength,
+        USHORT* statusCode,
+        char* nameValueBuffer,
+        SIZE_T nameValueCapacity) noexcept
+    {
+        return connection != nullptr && responseBodySink != nullptr
+            ? connection->ReceiveResponse(
+                transport,
+                streamId,
+                responseHeaders,
+                responseHeaderCapacity,
+                responseHeaderCount,
+                *responseBodySink,
+                responseBodyLength,
+                statusCode,
+                nameValueBuffer,
+                nameValueCapacity)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS Http2ConnectionReceiveResponseHeaders(
+        Http2Connection* connection, transport::Transport* transport, ULONG streamId) noexcept
+    {
+        return connection != nullptr
+            ? connection->ReceiveResponseHeaders(transport, streamId)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS Http2ConnectionSendStreamData(
+        Http2Connection* connection,
+        transport::Transport* transport,
+        ULONG streamId,
+        const UCHAR* data,
+        SIZE_T dataLength,
+        bool endStream) noexcept
+    {
+        return connection != nullptr
+            ? connection->SendStreamData(transport, streamId, data, dataLength, endStream)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS Http2ConnectionReceiveStreamData(
+        Http2Connection* connection,
+        transport::Transport* transport,
+        ULONG streamId,
+        UCHAR* buffer,
+        SIZE_T bufferCapacity,
+        SIZE_T* bytesReceived,
+        bool* endStream) noexcept
+    {
+        return connection != nullptr
+            ? connection->ReceiveStreamData(
+                transport, streamId, buffer, bufferCapacity, bytesReceived, endStream)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS Http2ConnectionSendPingAndWaitForAck(
+        Http2Connection* connection,
+        transport::Transport* transport,
+        const UCHAR* opaqueData,
+        ULONG ackTimeoutMilliseconds) noexcept
+    {
+        return connection != nullptr
+            ? connection->SendPingAndWaitForAck(transport, opaqueData, ackTimeoutMilliseconds)
+            : STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS Http2ConnectionShutdown(
+        Http2Connection* connection, transport::Transport* transport) noexcept
+    {
+        return connection != nullptr ? connection->Shutdown(transport) : STATUS_SUCCESS;
+    }
+
+    bool Http2ConnectionIsReusable(const Http2Connection* connection) noexcept
+    {
+        return connection != nullptr && connection->IsReusable();
+    }
+
+    ULONG Http2ConnectionMaxConcurrentStreams(Http2Connection* connection) noexcept
+    {
+        return connection != nullptr ? connection->MaxConcurrentStreams() : 0;
+    }
+
+    void Http2ConnectionReleaseStream(Http2Connection* connection, ULONG streamId) noexcept
+    {
+        if (connection != nullptr) {
+            connection->ReleaseStream(streamId);
+        }
     }
 }
 }

@@ -24,30 +24,30 @@
 
 | 条目 | RFC 级别 | 状态 | 代码入口 | 测试入口 | 备注 |
 |------|----------|------|----------|----------|------|
-| 请求行与常用方法 GET/POST/PUT/DELETE/HEAD/OPTIONS/PATCH | MUST | 已实现/已验证 | `src/wknetlib/http1/HttpRequest.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | 常用方法默认可用。 |
-| TRACE 显式 opt-in | MAY/诊断 | 已实现/已验证 | `http1/HttpRequest.cpp`、`session/HttpSend.cpp`、`http_api/Http.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | 需 `SendFlagAllowTrace`；body、trailer、敏感头与带代理凭据路径拒绝。 |
-| Range / 条件请求 typed helper | MAY | 已实现/已验证 | `session/RequestApi.cpp`、`http_api/Request.cpp` | `tests/khttp_tests.cpp` | 只生成请求 header；不做分片合并、缓存合并或 RFC9111 cache。 |
-| CONNECT 请求构建 | MUST for proxy/tunnel clients | 已实现/已验证 | `http1/HttpRequest.cpp`、`transport/ProxyConnect.cpp`、`session/HttpProxy.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | HTTPS 代理隧道已接入。 |
+| 请求行与常用方法 GET/POST/PUT/DELETE/HEAD/OPTIONS/PATCH | MUST | 已实现/已验证 | `src/wknetlib/http1/HttpRequest.cpp` | `tests/http_parser_tests.cpp`、`tests/http_api_tests.cpp` | 常用方法默认可用。 |
+| TRACE 显式 opt-in | MAY/诊断 | 已实现/已验证 | `http1/HttpRequest.cpp`、`session/HttpSend.cpp`、`http_api/Http.cpp` | `tests/http_parser_tests.cpp`、`tests/http_api_tests.cpp` | 需 `SendFlagAllowTrace`；body、trailer、敏感头与带代理凭据路径拒绝。 |
+| Range / 条件请求 typed helper | MAY | 已实现/已验证 | `session/RequestApi.cpp`、`http_api/Request.cpp` | `tests/http_api_tests.cpp` | 只生成请求 header；不做分片合并、缓存合并或 RFC9111 cache。 |
+| CONNECT 请求构建 | MUST for proxy/tunnel clients | 已实现/已验证 | `http1/HttpRequest.cpp`、`transport/ProxyConnect.cpp`、`session/HttpProxy.cpp` | `tests/http_parser_tests.cpp`、`tests/http_api_tests.cpp` | HTTPS 代理隧道已接入。 |
 | Host 首发与 header 文本校验 | MUST | 已实现/已验证 | `http1/HttpRequest.cpp`、`session/HttpRoute.cpp` | `tests/http_parser_tests.cpp` | 拒绝 CRLF 注入和库受控头篡改。 |
 | 用户设置 `Transfer-Encoding`/`TE` | MAY | 安全拒绝 | `http1/HttpRequest.cpp`、`session/HttpEngineInternal.hpp` | `tests/http_parser_tests.cpp` | 调用方不能破坏 framing，库自己生成 chunked。 |
 | 请求 `Content-Length` body | MUST | 已实现/已验证 | `http1/HttpRequest.cpp`、`session/HttpH1Dispatch.cpp` | `tests/http_parser_tests.cpp` | 小 body 当前一次性写入。 |
-| 请求 chunked body 与 trailer | MUST when chunked | 已实现/已验证 | `http1/HttpRequest.cpp`、`session/RequestApi.cpp`、`session/HttpH1Dispatch.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | trailer 禁止字段已拒绝。 |
-| 真流式请求体上传 | SHOULD for large clients | 已实现/已验证 | `session/HttpH1Dispatch.cpp`、`session/HttpH2Dispatch.cpp`、`http_api/Body.cpp` | `tests/khttp_tests.cpp`、`tests/high_level_api_tests.cpp` | `BodyCreateStream` / `HttpRequestSetBodySource` 按块读取；已知长度走 `Content-Length`，未知长度走库生成 chunked。 |
-| `Expect: 100-continue` | SHOULD | 已实现/已验证 | `http1/HttpRequest.cpp`、`http1/HttpParser.cpp`、`session/HttpH1Dispatch.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | 显式 opt-in；默认关闭；覆盖 100 后发 body、final/417 不发 body、超时后发 body、断连错误。 |
+| 请求 chunked body 与 trailer | MUST when chunked | 已实现/已验证 | `http1/HttpRequest.cpp`、`session/RequestApi.cpp`、`session/HttpH1Dispatch.cpp` | `tests/http_parser_tests.cpp`、`tests/http_api_tests.cpp` | trailer 禁止字段已拒绝。 |
+| 真流式请求体上传 | SHOULD for large clients | 已实现/已验证 | `session/HttpH1Dispatch.cpp`、`session/HttpH2Dispatch.cpp`、`http_api/Body.cpp` | `tests/http_api_tests.cpp`、`tests/high_level_api_tests.cpp` | `BodyCreateStream` / `HttpRequestSetBodySource` 按块读取；已知长度走 `Content-Length`，未知长度走库生成 chunked。 |
+| `Expect: 100-continue` | SHOULD | 已实现/已验证 | `http1/HttpRequest.cpp`、`http1/HttpParser.cpp`、`session/HttpH1Dispatch.cpp` | `tests/http_parser_tests.cpp`、`tests/http_api_tests.cpp` | 显式 opt-in；默认关闭；覆盖 100 后发 body、final/417 不发 body、超时后发 body、断连错误。 |
 | 响应状态行与 HTTP/1.0/1.1 版本 | MUST | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 拒绝非 1.x 与非法状态码。 |
 | header section、单行、头数量上限 | MUST/安全边界 | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 64 KiB header section、8 KiB 单行、≤200 headers。 |
 | obs-fold | OBSOLETE | 安全拒绝 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 拒绝而非规范化。 |
 | `Content-Length`/`Transfer-Encoding` 冲突 | MUST reject | 已实现/已验证 | `HttpParser.cpp`、`HttpTransferCoding.cpp` | `tests/http_parser_tests.cpp` | 多 CL、TE+CL 冲突拒绝。 |
 | response body framing：CL/chunked/close-delimited/no-body | MUST | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 1xx/204/205/304/HEAD 无 body。 |
-| 响应 trailer 解析与查询 | MUST when chunked | 已实现/已验证 | `http1/HttpParser.cpp`、`session/EngineResponseStorage.cpp`、`http_api/Response.cpp` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | 禁止 trailer 字段拒绝。 |
-| Content-Encoding gzip/deflate/br/compress/zstd/dcz/aes128gcm/identity | MAY | 已实现/已验证 | `http1/HttpContentEncoding.cpp`、`codec/ContentCoding.cpp`、`third_party/zstd` | `tests/http_parser_tests.cpp`、`tests/khttp_tests.cpp` | dcz/aes128gcm 需要调用方提供解码材料；缺材料、认证失败或膨胀超限 fail-closed。 |
+| 响应 trailer 解析与查询 | MUST when chunked | 已实现/已验证 | `http1/HttpParser.cpp`、`session/EngineResponseStorage.cpp`、`http_api/Response.cpp` | `tests/http_parser_tests.cpp`、`tests/http_api_tests.cpp` | 禁止 trailer 字段拒绝。 |
+| Content-Encoding gzip/deflate/br/compress/zstd/dcz/aes128gcm/identity | MAY | 已实现/已验证 | `http1/HttpContentEncoding.cpp`、`codec/ContentCoding.cpp`、`third_party/zstd` | `tests/http_parser_tests.cpp`、`tests/http_api_tests.cpp` | dcz/aes128gcm 需要调用方提供解码材料；缺材料、认证失败或膨胀超限 fail-closed。 |
 | Content-Encoding exi | MAY | 已实现/已验证 | `HttpContentEncoding.cpp`、`HttpExiDecoder.cpp`、`HttpExiOptions.cpp`、`HttpExiValueDecoder.cpp` | `tests/exi_decoder_tests.cpp`、`tests/http_parser_tests.cpp` | W3C EXI 1.0 Second Edition 无外部 Schema 流：四种 alignment、Options、保真项、内建 XML Schema 类型、`xsi:type`、`xsi:nil`；输出 Infoset 等价 XML。外部 Schema/strict grammar 返回 `STATUS_NOT_SUPPORTED`；EXIficient 语料带 SHA-256/provenance。 |
 | Content-Encoding pack200-gzip | MAY | 已实现/已验证 | `HttpContentEncoding.cpp`、`HttpPack200Decoder.cpp`、`HttpPack200AttributeLayout.cpp`、`HttpPack200ClassWriter.cpp` | `tests/pack200_decoder_tests.cpp`、`tests/http_parser_tests.cpp` | Java 5–8 格式 `150.7`/`160.1`/`170.1`/`171.0`：裸/gzip、多 segment、class/file/bytecode、自定义 attribute layout（四 context、replication/union/callable）、overflow index、常量池与 BCI relocation；输出语义等价 JAR。真实语料由 `SHA256SUMS` 与 provenance 审计。 |
 | Transfer-Encoding gzip/deflate/compress/chunked | MAY | 已实现/已验证 | `HttpTransferCoding.cpp` | `tests/http_parser_tests.cpp` | `br` 作为 TE 安全拒绝。 |
-| Redirect 安全规则 | MAY | 已实现/已验证 | `session/HttpRedirect.cpp`、`session/HttpSend.cpp` | `tests/khttp_tests.cpp` | HTTPS 降级拒绝、跨源清理敏感头。 |
-| Stale 连接安全重试 | MAY | 已实现/已验证 | `session/HttpSend.cpp`、`session/HttpTransportDispatch.cpp` | `tests/khttp_tests.cpp` | 仅安全方法，ForceNew 一次。 |
-| 明文 HTTP over proxy | SHOULD for client completeness | 已实现/已验证 | `session/HttpProxy.cpp`、`session/HttpRoute.cpp`、`session/ConnectionPool.cpp` | `tests/khttp_tests.cpp` | 使用 absolute-form target，Host 保持 origin，`Proxy-Authorization` 仅来自显式 proxy config；HTTPS CONNECT 保持现状。 |
-| HTTP 管线化 | MAY | 默认关闭/已验证 | `session/ConnectionPool.cpp`、`session/HttpH1Dispatch.cpp`、`http_api/Session.cpp` | `tests/khttp_tests.cpp` | session `EnableHttp11Pipeline=true` 显式开启；FIFO 响应绑定；默认仅 `GET`/`HEAD`/`OPTIONS`，深度和方法 mask 可配置；带 body、`Expect:100-continue`、redirect 重放/重排不进入 pipeline。 |
+| Redirect 安全规则 | MAY | 已实现/已验证 | `session/HttpRedirect.cpp`、`session/HttpSend.cpp` | `tests/http_api_tests.cpp` | HTTPS 降级拒绝、跨源清理敏感头。 |
+| Stale 连接安全重试 | MAY | 已实现/已验证 | `session/HttpSend.cpp`、`session/HttpTransportDispatch.cpp` | `tests/http_api_tests.cpp` | 仅安全方法，ForceNew 一次。 |
+| 明文 HTTP over proxy | SHOULD for client completeness | 已实现/已验证 | `session/HttpProxy.cpp`、`session/HttpRoute.cpp`、`session/ConnectionPool.cpp` | `tests/http_api_tests.cpp` | 使用 absolute-form target，Host 保持 origin，`Proxy-Authorization` 仅来自显式 proxy config；HTTPS CONNECT 保持现状。 |
+| HTTP 管线化 | MAY | 默认关闭/已验证 | `session/ConnectionPool.cpp`、`session/HttpH1Dispatch.cpp`、`http_api/Session.cpp` | `tests/http_api_tests.cpp` | session `EnableHttp11Pipeline=true` 显式开启；FIFO 响应绑定；默认仅 `GET`/`HEAD`/`OPTIONS`，深度和方法 mask 可配置；带 body、`Expect:100-continue`、redirect 重放/重排不进入 pipeline。 |
 | HTTP 服务端/入站 request parser | N/A | 明确非目标 | N/A | N/A | 项目定位为客户端协议栈。 |
 
 ## HTTP/2 与 HPACK 账本
@@ -60,43 +60,43 @@
 | HPACK 整数/Huffman/动态表/header-list 上限 | MUST | 已实现/已验证 | `Hpack.cpp`、`HpackHuffman.cpp` | `tests/hpack_tests.cpp` | 敏感头 never-indexed。 |
 | 响应伪头与连接专属头校验 | MUST | 已实现/已验证 | `Http2Connection.cpp` | `tests/http2_client_tests.cpp` | `te` 仅允许 `trailers`。 |
 | DATA 流控与 WINDOW_UPDATE | MUST | 已实现/已验证 | `Http2Stream.cpp`、`Http2Connection.cpp` | `tests/http2_client_tests.cpp` | 连接级与 stream 级均覆盖。 |
-| 多活动 stream 分发 | SHOULD | 已实现/已验证 | `Http2Connection.cpp`、`ConnectionPool.cpp` | `tests/http2_client_tests.cpp`、`tests/khttp_tests.cpp` | 高层连接池已用 stream lease。 |
+| 多活动 stream 分发 | SHOULD | 已实现/已验证 | `Http2Connection.cpp`、`ConnectionPool.cpp` | `tests/http2_client_tests.cpp`、`tests/http_api_tests.cpp` | 高层连接池已用 stream lease。 |
 | HTTP/2 响应 trailers | MUST | 已实现/已验证 | `Http2Connection.cpp` | `tests/http2_client_tests.cpp` | trailer 伪头拒绝。 |
-| HTTP/2 请求 trailers | SHOULD | 已实现/已验证 | `http2/Http2Connection.cpp`、`session/HttpH2Dispatch.cpp` | `tests/http2_client_tests.cpp`、`tests/khttp_tests.cpp` | body 结束后发送 final HEADERS + END_STREAM；不使用 chunked，拒绝 trailer 伪头。 |
+| HTTP/2 请求 trailers | SHOULD | 已实现/已验证 | `http2/Http2Connection.cpp`、`session/HttpH2Dispatch.cpp` | `tests/http2_client_tests.cpp`、`tests/http_api_tests.cpp` | body 结束后发送 final HEADERS + END_STREAM；不使用 chunked，拒绝 trailer 伪头。 |
 | HTTP/2 流式请求 DATA | SHOULD | 已实现/已验证 | `Http2Connection.cpp` | `tests/http2_client_tests.cpp` | body source 驱动，按连接/stream 窗口和 peer `MAX_FRAME_SIZE` 切块。 |
 | RFC 8441 extended CONNECT | MAY | 已实现/已验证 | `http2/Http2Connection.cpp`、`session/WsConnect.cpp`、`session/WsHandshake.cpp` | `tests/http2_client_tests.cpp`、`tests/websocket_client_tests.cpp` | `wss` 自动协商，可用 `Http11Only` 强制 HTTP/1.1。 |
-| h2 TLS ALPN 高层路径 | SHOULD | 已实现/已验证 | `session/HttpTransportDispatch.cpp`、`tls/TlsConnection.cpp` | `tests/khttp_tests.cpp` | 自动 offer `h2,http/1.1`。 |
-| h2c prior knowledge / Upgrade | MAY | 已实现/已验证 | `session/HttpH2Dispatch.cpp`、`session/HttpTransportDispatch.cpp` | `tests/http2_client_tests.cpp`、`tests/khttp_tests.cpp` | Upgrade 禁请求体并重放 101 后残留字节。 |
-| h2c 高层显式入口 | MAY | 默认关闭/已验证 | `session/HttpH2Dispatch.cpp`、`session/HttpRoute.cpp` | `tests/khttp_tests.cpp`、`tests/http2_client_tests.cpp` | `SendOptions.Http2CleartextMode` 显式开启；pool key 区分 HTTP/1.1、prior knowledge 与 Upgrade。 |
-| GOAWAY/RST_STREAM 高层重试语义 | SHOULD | 已实现/已验证 | `http2/Http2Connection.cpp`、`session/HttpSend.cpp` | `tests/http2_client_tests.cpp`、`tests/khttp_tests.cpp` | `NO_ERROR`/未处理 stream 返回 `STATUS_RETRY`；高层只对安全方法 fresh retry 一次，非幂等请求不自动重放。 |
+| h2 TLS ALPN 高层路径 | SHOULD | 已实现/已验证 | `session/HttpTransportDispatch.cpp`、`tls/TlsConnection.cpp` | `tests/http_api_tests.cpp` | 自动 offer `h2,http/1.1`。 |
+| h2c prior knowledge / Upgrade | MAY | 已实现/已验证 | `session/HttpH2Dispatch.cpp`、`session/HttpTransportDispatch.cpp` | `tests/http2_client_tests.cpp`、`tests/http_api_tests.cpp` | Upgrade 禁请求体并重放 101 后残留字节。 |
+| h2c 高层显式入口 | MAY | 默认关闭/已验证 | `session/HttpH2Dispatch.cpp`、`session/HttpRoute.cpp` | `tests/http_api_tests.cpp`、`tests/http2_client_tests.cpp` | `SendOptions.Http2CleartextMode` 显式开启；pool key 区分 HTTP/1.1、prior knowledge 与 Upgrade。 |
+| GOAWAY/RST_STREAM 高层重试语义 | SHOULD | 已实现/已验证 | `http2/Http2Connection.cpp`、`session/HttpSend.cpp` | `tests/http2_client_tests.cpp`、`tests/http_api_tests.cpp` | `NO_ERROR`/未处理 stream 返回 `STATUS_RETRY`；高层只对安全方法 fresh retry 一次，非幂等请求不自动重放。 |
 | PRIORITY 发送 | MAY | 已实现/已验证 | `http2/Http2Frame.cpp`、`http2/Http2Connection.cpp`、`session/Http2RequestBuilder.cpp` | `tests/http2_frame_tests.cpp`、`tests/http2_client_tests.cpp` | 显式 per-request priority；支持 HEADERS priority 字段与独立 PRIORITY frame 编解码，收到 peer PRIORITY 只校验/记录语义，不改变安全边界。 |
 | server push | MAY/deprecated | 安全拒绝 | `Http2Connection.cpp` | `tests/http2_client_tests.cpp` | 客户端 `ENABLE_PUSH=0`，`PUSH_PROMISE` 协议错误。 |
-| 后台自动 PING 保活 | MAY | 默认关闭/已验证 | `ConnectionPool.cpp`、`Http2Connection.cpp` | `tests/khttp_tests.cpp`、`tests/http2_client_tests.cpp` | session `Http2KeepAlive.Enabled=true` 显式开启；只扫描 idle 可复用池化 H2 连接，ACK 超时关闭该 idle 连接；低层保留显式 `SendPing`。 |
+| 后台自动 PING 保活 | MAY | 默认关闭/已验证 | `ConnectionPool.cpp`、`Http2Connection.cpp` | `tests/http_api_tests.cpp`、`tests/http2_client_tests.cpp` | session `Http2KeepAlive.Enabled=true` 显式开启；只扫描 idle 可复用池化 H2 连接，ACK 超时关闭该 idle 连接；低层保留显式 `SendPing`。 |
 
 ## TLS 1.2/1.3 账本
 
 | 条目 | RFC 级别 | 状态 | 代码入口 | 测试入口 | 备注 |
 |------|----------|------|----------|----------|------|
-| TLS 1.3 优先、失败分类后显式 TLS 1.2 重连 | SHOULD | 已实现/已验证 | `tls/TlsConnection.cpp`、`session/HttpProxy.cpp` | `tests/tls_handshake_tests.cpp`、`tests/khttp_tests.cpp` | 无握手内自动降级。 |
+| TLS 1.3 优先、失败分类后显式 TLS 1.2 重连 | SHOULD | 已实现/已验证 | `tls/TlsConnection.cpp`、`session/HttpProxy.cpp` | `tests/tls_handshake_tests.cpp`、`tests/http_api_tests.cpp` | 无握手内自动降级。 |
 | 降级哨兵检测 | MUST | 已实现/已验证 | `TlsHandshake13.cpp`、`TlsConnection.cpp` | `tests/tls_handshake_tests.cpp` | 攻击硬失败。 |
 | TLS 1.2 EMS 与安全重协商指示 | SHOULD/MUST by policy | 已实现/已验证 | `TlsConnection.cpp`、`TlsHandshake12.cpp` | `tests/tls_handshake_tests.cpp` | 缺失按本库策略拒绝。 |
 | TLS 1.2 CBC Encrypt-then-MAC | SHOULD | 默认关闭/安全拒绝 | `TlsPolicy.cpp`、`TlsRecord.cpp` | `tests/tls_record_tests.cpp` | CBC 需兼容档开启且必须 EtM。 |
 | TLS 1.3 HRR、binder 重算、NST、KeyUpdate 被动回应 | MUST/SHOULD | 已实现/已验证 | `TlsConnection.cpp`、`TlsHandshake13.cpp` | `tests/tls_record_tests.cpp`、`tests/tls_interop_matrix_tests.cpp` | 默认不主动 rekey；服务端请求 KeyUpdate 时被动回应并 rekey。 |
 | TLS 1.3 early data | MAY | 默认关闭 | `TlsConnection.cpp` | `tests/tls_handshake_tests.cpp` | 需 replay-safe 且 ticket 允许。 |
 | 会话恢复绑定 policy/SNI/ALPN/cipher/version | SHOULD | 已实现/已验证 | `TlsConnection.cpp` | `tests/tls_handshake_tests.cpp` | 1.2/1.3 各最多 4 条。 |
-| ALPN h2/http1 | SHOULD | 已实现/已验证 | `TlsHandshake13.cpp`、`TlsConnection.cpp` | `tests/tls_handshake_tests.cpp`、`tests/khttp_tests.cpp` | 高层仅接受支持的 ALPN。 |
+| ALPN h2/http1 | SHOULD | 已实现/已验证 | `TlsHandshake13.cpp`、`TlsConnection.cpp` | `tests/tls_handshake_tests.cpp`、`tests/http_api_tests.cpp` | 高层仅接受支持的 ALPN。 |
 | AES-GCM/AES-CBC EtM/ChaCha20-Poly1305 record | MUST for offered suites | 已实现/已验证 | `TlsRecord.cpp`、`crypto/Aead.cpp` | `tests/tls_record_tests.cpp`、`tests/tls_crypto_tests.cpp` | 序列号溢出保护。 |
 | X25519/X448/FFDHE/NIST ECDH | MUST for offered groups | 已实现/已验证 | `crypto/KeyExchange.cpp`、`CngProvider.cpp` | `tests/tls_crypto_tests.cpp` | NIST 曲线走 CNG，部分软件实现。 |
 | RSA-PSS/ECDSA/Ed25519/Ed448 验签 | MUST for offered sigalgs | 已实现/已验证 | `crypto/CngProvider.cpp`、`Ed25519.cpp`、`Ed448.cpp` | `tests/tls_crypto_tests.cpp` | legacy SHA-1 默认关闭。 |
 | post-handshake client auth | MAY | 默认关闭/已验证 | `TlsPolicy.cpp`、`TlsConnection.cpp` | `tests/tls_record_tests.cpp`、`tests/tls_interop_matrix_tests.cpp` | 开启后走 mTLS 回调，不持有私钥；默认策略关闭。 |
-| TLS 1.2 renegotiation | MAY | 默认关闭/已验证 | `TlsConnection.cpp`、`TlsHandshake12.cpp` | `tests/tls_record_tests.cpp`、`tests/khttp_tests.cpp`、`tests/integration/tls_matrix.ps1` | 需 `CompatibilityExplicit` + `EnableTls12Renegotiation`，次数由 `MaxTls12Renegotiations` 限制；支持服务器 `HelloRequest` 与低层客户端主动全量重协商；不支持 abbreviated/session resumption；ALPN 按本次重协商结果更新，非空结果必须来自本次 offer。 |
+| TLS 1.2 renegotiation | MAY | 默认关闭/已验证 | `TlsConnection.cpp`、`TlsHandshake12.cpp` | `tests/tls_record_tests.cpp`、`tests/http_api_tests.cpp`、`tests/integration/tls_matrix.ps1` | 需 `CompatibilityExplicit` + `EnableTls12Renegotiation`，次数由 `MaxTls12Renegotiations` 限制；支持服务器 `HelloRequest` 与低层客户端主动全量重协商；不支持 abbreviated/session resumption；ALPN 按本次重协商结果更新，非空结果必须来自本次 offer。 |
 | SChannel 主路径 | N/A | 明确非目标 | N/A | N/A | 不符合内核自实现方向。 |
 
 ## X.509 证书校验账本
 
 | 条目 | RFC/PKIX 级别 | 状态 | 代码入口 | 测试入口 | 备注 |
 |------|---------------|------|----------|----------|------|
-| 链深上限、DER/PEM 输入界限 | MUST/安全边界 | 已实现/已验证 | `CertificateValidator.cpp`、`CertificateStore.cpp` | `tests/tls_handshake_tests.cpp` | 链 ≤8。 |
+| 链深上限、DER/PEM 输入界限 | MUST/安全边界 | 已实现/已验证 | `tls/CertificateValidator.cpp`、`http_api/Certificate.cpp` | `tests/tls_record_tests.cpp`、`tests/http_api_tests.cpp` | 链 ≤8；完整坏 PEM 成员可隔离并记录序号/偏移/NTSTATUS，缺失 END 与资源/密码学错误失败；单 DER 严格失败。 |
 | subject/issuer DN 链接与签名验证 | MUST | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_record_tests.cpp` | 多候选与交叉签名路径有 fixture 覆盖。 |
 | AKI/SKI 辅助路径选择 | SHOULD | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_record_tests.cpp` | 路径候选按 AKI/SKI、issuer/subject 与签名可验证性选择。 |
 | basic constraints/pathLen/KU/EKU | MUST | 已实现/已验证 | `CertificateValidator.cpp` | `tests/tls_handshake_tests.cpp` | serverAuth 可选策略。 |
@@ -128,10 +128,18 @@
 
 | 条目 | RFC/实践级别 | 状态 | 代码入口 | 测试入口 | 备注 |
 |------|--------------|------|----------|----------|------|
-| HTTPS over HTTP proxy CONNECT | SHOULD | 已实现/已验证 | `transport/ProxyConnect.cpp`、`session/HttpProxy.cpp` | `tests/khttp_tests.cpp` | 支持 `Proxy-Authorization` opaque 值。 |
-| 明文 HTTP over proxy absolute-form | SHOULD | 已实现/已验证 | `session/HttpProxy.cpp`、`session/ConnectionPool.cpp` | `tests/khttp_tests.cpp` | 不建立 CONNECT 隧道；pool key 保留 proxy endpoint 与 origin 身份。 |
+| HTTPS over HTTP proxy CONNECT | SHOULD | 已实现/已验证 | `transport/ProxyConnect.cpp`、`session/HttpProxy.cpp` | `tests/http_api_tests.cpp` | 支持 `Proxy-Authorization` opaque 值。 |
+| 明文 HTTP over proxy absolute-form | SHOULD | 已实现/已验证 | `session/HttpProxy.cpp`、`session/ConnectionPool.cpp` | `tests/http_api_tests.cpp` | 不建立 CONNECT 隧道；pool key 保留 proxy endpoint 与 origin 身份。 |
 | 代理鉴权协议解析 | MAY | 明确非目标 | N/A | N/A | 仅透传调用方提供的 opaque 头值。 |
 | SOCKS proxy | MAY | 明确非目标 | N/A | N/A | 当前范围只覆盖 HTTP proxy。 |
+
+## 内部模块边界账本
+
+| 条目 | 状态 | 代码入口 | 验证入口 | 备注 |
+|------|------|----------|----------|------|
+| WSK / transport / TLS / HTTP2 / pooled connection opaque 布局 | 已实现/已验证 | `*Private.hpp`、对应 Create/Close/Send/Receive 服务 | `tools/check-architecture.ps1`、相关用户态测试 | 布局只归所属模块；跨模块不得包含私有状态头。 |
+| 单一传输服务 | 已实现/已验证 | `transport/Transport.h`、`Transport.cpp`、`TransportWsk.cpp` | `http_api_tests`、`http2_client_tests`、`tls_record_tests`、`websocket_client_tests` | 不存在平行传输接口或兼容层。 |
+| 公共证书句柄 | 已实现/已验证 | `include/wknet/http/Certificate.h`、`http_api/Certificate.cpp` | `tests/http_api_tests.cpp` | 公共头不泄漏 `wknet::tls` 布局。 |
 
 ## 验证基线
 
@@ -148,7 +156,7 @@ pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_crypto_tests -Ru
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_handshake_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_record_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_interop_matrix_tests -Run
-pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test khttp_tests -Run
+pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_api_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test high_level_api_tests -Run
 ```
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <wknet/tls/CertificateStore.h>
+#include <wknet/http/Certificate.h>
 
 namespace wknet
 {
@@ -16,10 +16,7 @@ namespace samples
 
     struct ExternalTrustStore final
     {
-        tls::CertificateAuthorityBundle AuthorityBundle = {};
-        tls::CertificateStore Store = {};
-        UCHAR* BundleData = nullptr;
-        SIZE_T BundleDataLength = 0;
+        http::CertificateStore* Store = nullptr;
     };
 
     _Must_inspect_result_

@@ -5,7 +5,7 @@ namespace wknet
 namespace tls
 {
     NTSTATUS TlsConnection::SendPlainRecord(
-        core::ITransport& transport,
+        transport::Transport* transport,
         TlsContentType contentType,
         const UCHAR* fragment,
         SIZE_T fragmentLength) noexcept
@@ -14,7 +14,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::SendPlainRecordWithVersion(
-        core::ITransport& transport,
+        transport::Transport* transport,
         TlsProtocolVersion version,
         TlsContentType contentType,
         const UCHAR* fragment,
@@ -39,7 +39,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::SendProtectedRecord(
-        core::ITransport& transport,
+        transport::Transport* transport,
         TlsContentType contentType,
         const UCHAR* fragment,
         SIZE_T fragmentLength) noexcept
@@ -69,7 +69,7 @@ namespace tls
         return status;
     }
 
-    NTSTATUS TlsConnection::SendPendingTls13KeyUpdate(core::ITransport& transport) noexcept
+    NTSTATUS TlsConnection::SendPendingTls13KeyUpdate(transport::Transport* transport) noexcept
     {
         if (ExchangeTlsFlag(&tls13PeerRequestedKeyUpdate_, 0) == 0) {
             return STATUS_SUCCESS;
@@ -95,7 +95,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::SendProtectedRecord13(
-        core::ITransport& transport,
+        transport::Transport* transport,
         TlsContentType contentType,
         const UCHAR* fragment,
         SIZE_T fragmentLength) noexcept
@@ -131,7 +131,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::ReadRecord(
-        core::ITransport& transport,
+        transport::Transport* transport,
         TlsMutablePlaintextRecord& record,
         ULONG receiveTimeoutMilliseconds,
         const TlsReceiveDeadline* receiveDeadline) noexcept
@@ -272,7 +272,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::ReadServerChangeCipherSpec(
-        core::ITransport& transport,
+        transport::Transport* transport,
         bool allowNewSessionTicket) noexcept
     {
         ULONG recordsRead = 0;
@@ -337,7 +337,7 @@ namespace tls
         }
     }
 
-    NTSTATUS TlsConnection::ReadOptionalCompatibilityChangeCipherSpec(core::ITransport& transport) noexcept
+    NTSTATUS TlsConnection::ReadOptionalCompatibilityChangeCipherSpec(transport::Transport* transport) noexcept
     {
         TlsRecordView view = {};
         NTSTATUS status = TlsRecordLayer::Parse(inputBuffer_, inputLength_, view);
@@ -470,7 +470,7 @@ namespace tls
     }
 
     NTSTATUS TlsConnection::ReadHandshakeMessage(
-        core::ITransport& transport,
+        transport::Transport* transport,
         TlsHandshakeMessageView& message,
         bool updateTranscript) noexcept
     {

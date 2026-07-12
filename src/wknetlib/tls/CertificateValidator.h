@@ -1,7 +1,7 @@
 #pragma once
 
 #include "rtl/IScratchAllocator.h"
-#include <wknet/tls/CertificateStore.h>
+#include "tls/CertificateStore.h"
 #include "tls/TlsHandshake12.h"
 
 namespace wknet
@@ -144,7 +144,7 @@ namespace tls
         const char* HostName = nullptr;
         SIZE_T HostNameLength = 0;
         const CertificateStore* Store = nullptr;
-        core::IScratchAllocator* ScratchAllocator = nullptr;
+        rtl::IScratchAllocator* ScratchAllocator = nullptr;
         const crypto::CngProviderCache* ProviderCache = nullptr;
         bool VerifyCertificate = true;
         bool RequireServerAuthEku = true;
@@ -171,6 +171,21 @@ namespace tls
             _In_reads_bytes_(derLength) const UCHAR* der,
             SIZE_T derLength,
             _Out_ ParsedCertificate& certificate) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS ValidateAuthorityBundle(
+            _In_reads_bytes_(dataLength) const UCHAR* data,
+            SIZE_T dataLength) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS ValidateAuthorityPemBundle(
+            _In_reads_bytes_(dataLength) const UCHAR* data,
+            SIZE_T dataLength) noexcept;
+
+        _Must_inspect_result_
+        static NTSTATUS ValidateAuthorityDer(
+            _In_reads_bytes_(dataLength) const UCHAR* data,
+            SIZE_T dataLength) noexcept;
 
         _Must_inspect_result_
         static NTSTATUS ValidateChain(

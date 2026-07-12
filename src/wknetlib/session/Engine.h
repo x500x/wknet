@@ -6,6 +6,7 @@
 #include <wknet/WknetLimits.h>
 #include "net/WskClient.h"
 #include "tls/TlsPolicy.h"
+#include "tls/TlsTypes.h"
 #include "ws/WebSocketDeflate.h"
 
 namespace wknet
@@ -13,7 +14,6 @@ namespace wknet
 namespace tls
 {
     class CertificateStore;
-    struct TlsClientCredential;
 }
 }
 
@@ -240,7 +240,10 @@ namespace session
     struct ProxyOptions final
     {
         bool Enabled = false;
-        SOCKADDR_STORAGE Address = {};
+        const char* Host = nullptr;
+        SIZE_T HostLength = 0;
+        USHORT Port = 0;
+        AddressFamily Family = AddressFamily::Any;
         const char* Authority = nullptr;
         SIZE_T AuthorityLength = 0;
         const char* AuthHeader = nullptr;
@@ -767,7 +770,10 @@ namespace session
         const tls::TlsClientCredential* ClientCredential = nullptr;
         ULONG MaxTls12Renegotiations = DefaultMaxTls12Renegotiations;
         bool ProxyEnabled = false;
-        SOCKADDR_STORAGE ProxyAddress = {};
+        const char* ProxyHost = nullptr;
+        SIZE_T ProxyHostLength = 0;
+        USHORT ProxyPort = 0;
+        ::wknet::session::AddressFamily ProxyFamily = ::wknet::session::AddressFamily::Any;
         const char* ProxyAuthority = nullptr;
         SIZE_T ProxyAuthorityLength = 0;
         const char* ProxyAuthHeader = nullptr;

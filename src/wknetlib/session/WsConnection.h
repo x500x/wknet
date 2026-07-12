@@ -4,17 +4,15 @@
 #include "http2/Http2Connection.h"
 #include "net/WskClient.h"
 #include "net/WskSocket.h"
-#include <wknet/tls/CertificateStore.h>
+#include "tls/CertificateStore.h"
 #include "tls/TlsConnection.h"
 #include "ws/WebSocketFrame.h"
 
 namespace wknet
 {
-namespace core
+namespace transport
 {
-    class ITransport;
-    class TlsTransport;
-    class WskTransport;
+    struct Transport;
 }
 
 namespace session
@@ -127,7 +125,7 @@ namespace session
 
         _Must_inspect_result_
         NTSTATUS Connect(
-            _Inout_ net::WskClient& wskClient,
+            _Inout_ net::WskClient* wskClient,
             _In_ const WsConnectionOptions& options,
             _In_ const WsIoBuffers& buffers,
             _Out_opt_ USHORT* statusCode = nullptr) noexcept;
@@ -275,7 +273,7 @@ namespace session
 
         _Must_inspect_result_
         NTSTATUS ConnectAddress(
-            _Inout_ net::WskClient& wskClient,
+            _Inout_ net::WskClient* wskClient,
             _In_ const SOCKADDR* remoteAddress,
             _In_ const WsConnectionOptions& options,
             _In_ const WsIoBuffers& buffers,
@@ -295,9 +293,9 @@ namespace session
             _In_ const WsIoBuffers& buffers,
             _Out_ http1::HttpResponse& response) noexcept;
 
-        net::WskSocket socket_ = {};
-        core::WskTransport* rawTransport_ = nullptr;
-        core::TlsTransport* h2Transport_ = nullptr;
+        net::WskSocket* socket_ = nullptr;
+        transport::Transport* rawTransport_ = nullptr;
+        transport::Transport* h2Transport_ = nullptr;
         tls::TlsConnection* tls_ = nullptr;
         http2::Http2Connection* h2Connection_ = nullptr;
         ULONG h2StreamId_ = 0;

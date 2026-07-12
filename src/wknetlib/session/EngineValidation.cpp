@@ -210,14 +210,23 @@ namespace session
     bool IsValidProxyOptions(const ProxyOptions& options) noexcept
     {
         if (!options.Enabled) {
-            return options.Address.ss_family == 0 &&
+            return options.Host == nullptr &&
+                options.HostLength == 0 &&
+                options.Port == 0 &&
+                options.Family == AddressFamily::Any &&
                 options.Authority == nullptr &&
                 options.AuthorityLength == 0 &&
                 options.AuthHeader == nullptr &&
                 options.AuthHeaderLength == 0;
         }
 
-        if (options.Address.ss_family != AF_INET && options.Address.ss_family != AF_INET6) {
+        if (options.Host == nullptr ||
+            options.HostLength == 0 ||
+            options.HostLength > MaxHostLength ||
+            options.Port == 0 ||
+            (options.Family != AddressFamily::Any &&
+                options.Family != AddressFamily::Ipv4 &&
+                options.Family != AddressFamily::Ipv6)) {
             return false;
         }
 

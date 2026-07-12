@@ -43,7 +43,7 @@
   - 让 `OnMessage` 可选择按 wire fragment 交付，并保留默认聚合行为。
 - 修改：`src/wknetlib/tls/CertificateValidator.cpp`、`include/wknet/tls/CertificateValidator.h`
   - 补证书路径候选选择、AKI/SKI、交叉签名、name constraints/policy 的账本测试。
-- 修改：`tests/http_parser_tests.cpp`、`tests/http2_client_tests.cpp`、`tests/websocket_client_tests.cpp`、`tests/tls_handshake_tests.cpp`、`tests/tls_record_tests.cpp`、`tests/khttp_tests.cpp`、`tests/high_level_api_tests.cpp`
+- 修改：`tests/http_parser_tests.cpp`、`tests/http2_client_tests.cpp`、`tests/websocket_client_tests.cpp`、`tests/tls_handshake_tests.cpp`、`tests/tls_record_tests.cpp`、`tests/http_api_tests.cpp`、`tests/high_level_api_tests.cpp`
   - 所有协议缺口先写失败测试，再实现。
 - 修改：`docsite/capability-matrix.md`、`docsite/capability-matrix.en.md`、`docsite/roadmap.md`、`docsite/roadmap.en.md`、各协议页与 README
   - 文档显示作为单独 docsite 提交处理。
@@ -92,7 +92,7 @@
   pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_handshake_tests -Run
   pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_record_tests -Run
   pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_interop_matrix_tests -Run
-  pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test khttp_tests -Run
+  pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_api_tests -Run
   pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test high_level_api_tests -Run
   ```
 
@@ -116,7 +116,7 @@
 - Modify: `src/wknetlib/http1/HttpRequest.cpp`
 - Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Test: `tests/http_parser_tests.cpp`
-- Test: `tests/khttp_tests.cpp`
+- Test: `tests/http_api_tests.cpp`
 
 - [x] **Step 1: 写失败测试**
 
@@ -145,7 +145,7 @@
 - Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Modify: `src/wknetlib/http1/HttpParser.cpp`
 - Test: `tests/http_parser_tests.cpp`
-- Test: `tests/khttp_tests.cpp`
+- Test: `tests/http_api_tests.cpp`
 
 - [x] **Step 1: 增加显式选项**
 
@@ -161,7 +161,7 @@
 
 - [x] **Step 4: 验证**
 
-  Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test khttp_tests -Run`
+  Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_api_tests -Run`
 
   Expected: `Expect: 100-continue` 的每个分支都有断言。
 
@@ -171,7 +171,7 @@
 - Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Modify: `src/wknetlib/client/ProxyTunnel.cpp`
 - Modify: `include/wknet/engine/ConnectionPool.h`
-- Test: `tests/khttp_tests.cpp`
+- Test: `tests/http_api_tests.cpp`
 - Test: `tests/high_level_api_tests.cpp`
 
 - [x] **Step 1: 写失败测试**
@@ -188,7 +188,7 @@
 
 - [x] **Step 4: 验证**
 
-  Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test khttp_tests -Run`
+  Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_api_tests -Run`
 
   Expected: 代理明文请求通过；HTTPS CONNECT 既有测试不回归。
 
@@ -200,7 +200,7 @@
 - Modify: `src/wknetlib/http_api/Body.cpp`
 - Modify: `src/wknetlib/http_api/Http.cpp`
 - Modify: `src/wknetlib/session/HttpEngine.cpp`
-- Test: `tests/khttp_tests.cpp`
+- Test: `tests/http_api_tests.cpp`
 - Test: `tests/high_level_api_tests.cpp`
 
 - [x] **Step 1: 设计 body source ABI**
@@ -233,7 +233,7 @@
 - Modify: `src/wknetlib/client/Http2Client.cpp`
 - Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Test: `tests/http2_client_tests.cpp`
-- Test: `tests/khttp_tests.cpp`
+- Test: `tests/http_api_tests.cpp`
 
 - [x] **Step 1: 写失败测试**
 
@@ -261,7 +261,7 @@
 - Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Modify: `src/wknetlib/client/Http2Client.cpp`
 - Test: `tests/http2_client_tests.cpp`
-- Test: `tests/khttp_tests.cpp`
+- Test: `tests/http_api_tests.cpp`
 
 - [x] **Step 1: 增加显式配置**
 
@@ -288,7 +288,7 @@
 - Modify: `src/wknetlib/session/HttpEngine.cpp`
 - Modify: `src/wknetlib/session/ConnectionPool.cpp`
 - Test: `tests/http2_client_tests.cpp`
-- Test: `tests/khttp_tests.cpp`
+- Test: `tests/http_api_tests.cpp`
 
 - [x] **Step 1: 写失败测试**
 
@@ -304,7 +304,7 @@
 
 - [x] **Step 4: 验证**
 
-  Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test khttp_tests -Run`
+  Run: `pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_api_tests -Run`
 
   Expected: H2 retry 行为与 HTTP/1.1 stale retry 规则一致但不误重试非安全方法。
 

@@ -5,7 +5,7 @@ namespace wknet
 namespace tls
 {
     NTSTATUS TlsConnection::ConsumeTls13PostHandshakeRecord(
-        core::ITransport& transport,
+        transport::Transport* transport,
         const UCHAR* fragment,
         SIZE_T fragmentLength) noexcept
     {

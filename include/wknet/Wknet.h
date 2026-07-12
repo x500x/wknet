@@ -6,6 +6,7 @@
 #include <wknet/http/AsyncOp.h>
 #include <wknet/http/Body.h>
 #include <wknet/http/Cache.h>
+#include <wknet/http/Certificate.h>
 #include <wknet/http/Headers.h>
 #include <wknet/http/Http.h>
 #include <wknet/http/HttpAsync.h>
@@ -18,6 +19,3 @@
 #include <wknet/websocket/WebSocket.h>
 #include <wknet/crypto/Aead.h>
 #include <wknet/codec/Codec.h>
-
-// Certificate store remains reachable for external CA loading; implementation is tls-internal.
-#include <wknet/tls/CertificateStore.h>

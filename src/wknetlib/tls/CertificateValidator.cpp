@@ -99,7 +99,7 @@ namespace tls
             UCHAR* Data = nullptr;
             SIZE_T Length = 0;
             bool Owned = false;
-            core::IScratchAllocator* Allocator = nullptr;
+            rtl::IScratchAllocator* Allocator = nullptr;
             ParsedCertificate* Parsed = nullptr;
             ParsedCertificate* Anchor = nullptr;
             UCHAR* Authority = nullptr;
@@ -5163,6 +5163,133 @@ namespace tls
 
             return status;
         }
+    }
+
+    NTSTATUS CertificateValidator::ValidateAuthorityDer(
+        const UCHAR* data,
+        SIZE_T dataLength) noexcept
+    {
+        if (data == nullptr || dataLength == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        auto* certificate = AllocateNonPagedObject<ParsedCertificate>();
+        if (certificate == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        const NTSTATUS status = ParseCertificate(data, dataLength, *certificate);
+        RtlSecureZeroMemory(certificate, sizeof(*certificate));
+        FreeNonPagedObject(certificate);
+        return status;
+    }
+
+    NTSTATUS CertificateValidator::ValidateAuthorityPemBundle(
+        const UCHAR* data,
+        SIZE_T dataLength) noexcept
+    {
+        if (data == nullptr || dataLength == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        SIZE_T firstPem = 0;
+        if (!FindPattern(
+            data,
+            dataLength,
+            PemCertificateBegin,
+            sizeof(PemCertificateBegin) - 1,
+            0,
+            &firstPem)) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        auto* scratch = AllocateNonPagedArray<UCHAR>(CertificateMaxAuthorityDerLength);
+        auto* certificate = AllocateNonPagedObject<ParsedCertificate>();
+        if (scratch == nullptr || certificate == nullptr) {
+            FreeNonPagedArray(scratch);
+            FreeNonPagedObject(certificate);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        NTSTATUS result = STATUS_SUCCESS;
+        SIZE_T offset = firstPem;
+        SIZE_T certificateIndex = 0;
+        while (offset < dataLength) {
+            SIZE_T derLength = 0;
+            SIZE_T certificateOffset = offset;
+            SIZE_T nextOffset = offset;
+            NTSTATUS status = DecodePemCertificate(
+                data,
+                dataLength,
+                offset,
+                scratch,
+                CertificateMaxAuthorityDerLength,
+                &derLength,
+                &certificateOffset,
+                &nextOffset);
+            if (status == STATUS_NOT_FOUND) {
+                break;
+            }
+            if (!NT_SUCCESS(status)) {
+                if (nextOffset > offset && IsSkippableAuthorityCertificateStatus(status)) {
+                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning,
+                        "CertificateValidator: Authority certificate skipped: index=%Iu offset=%Iu status=0x%08X\r\n",
+                        certificateIndex,
+                        certificateOffset,
+                        static_cast<ULONG>(status));
+                    offset = nextOffset;
+                    ++certificateIndex;
+                    continue;
+                }
+                result = status;
+                break;
+            }
+
+            *certificate = {};
+            status = ParseCertificate(scratch, derLength, *certificate);
+            if (!NT_SUCCESS(status)) {
+                if (IsSkippableAuthorityCertificateStatus(status)) {
+                    WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Warning,
+                        "CertificateValidator: Authority certificate skipped: index=%Iu offset=%Iu status=0x%08X\r\n",
+                        certificateIndex,
+                        certificateOffset,
+                        static_cast<ULONG>(status));
+                }
+                else {
+                    result = status;
+                    break;
+                }
+            }
+
+            offset = nextOffset;
+            ++certificateIndex;
+        }
+
+        RtlSecureZeroMemory(scratch, CertificateMaxAuthorityDerLength);
+        RtlSecureZeroMemory(certificate, sizeof(*certificate));
+        FreeNonPagedArray(scratch);
+        FreeNonPagedObject(certificate);
+        return result;
+    }
+
+    NTSTATUS CertificateValidator::ValidateAuthorityBundle(
+        const UCHAR* data,
+        SIZE_T dataLength) noexcept
+    {
+        if (data == nullptr || dataLength == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        SIZE_T firstPem = 0;
+        return FindPattern(
+            data,
+            dataLength,
+            PemCertificateBegin,
+            sizeof(PemCertificateBegin) - 1,
+            0,
+            &firstPem)
+            ? ValidateAuthorityPemBundle(data, dataLength)
+            : ValidateAuthorityDer(data, dataLength);
     }
 
     NTSTATUS CertificateValidator::ParseCertificate(

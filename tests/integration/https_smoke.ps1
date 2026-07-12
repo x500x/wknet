@@ -220,7 +220,8 @@ function Invoke-HostRegression {
         -ProjectSources @(
             'src\wknetlib\http1\HttpTypes.cpp',
             'src\wknetlib\session\Http2RequestBuilder.cpp',
-            'src\wknetlib\transport\TlsTransport.cpp',
+            'src\wknetlib\transport\Transport.cpp',
+            'src\wknetlib\transport\TransportWsk.cpp',
             'src\wknetlib\session\Workspace.cpp',
             'src\wknetlib\http2\Http2Connection.cpp',
             'src\wknetlib\http2\Http2Frame.cpp',
@@ -241,10 +242,10 @@ function Invoke-HostRegression {
         )
 
     Compile-UserModeTest `
-        -Name 'khttp_tests' `
-        -Source 'tests\khttp_tests.cpp' `
+        -Name 'http_api_tests' `
+        -Source 'tests\http_api_tests.cpp' `
         -ProjectSources @(
-            'src\wknetlib\http_api\Khttp.cpp',
+            'src\wknetlib\http_api\Test.cpp',
             'src\wknetlib\http_api\AsyncOp.cpp',
             'src\wknetlib\http_api\Http.cpp',
             'src\wknetlib\http_api\HttpAsync.cpp',
@@ -293,7 +294,7 @@ function Invoke-HostRegression {
         -Name 'high_level_api_tests' `
         -Source 'tests\high_level_api_tests.cpp' `
         -ProjectSources @(
-            'src\wknetlib\http_api\Khttp.cpp',
+            'src\wknetlib\http_api\Test.cpp',
             'src\wknetlib\http_api\AsyncOp.cpp',
             'src\wknetlib\http_api\Http.cpp',
             'src\wknetlib\http_api\HttpAsync.cpp',
@@ -390,13 +391,13 @@ function Invoke-HostRegression {
 
         $extraDefines = @()
         if ($VmSmoke) {
-            $extraDefines += 'KERNEL_HTTP_REMOTE_HTTPS_ADDRESS_FAMILY_ONLY'
+            $extraDefines += 'WKNET_REMOTE_HTTPS_ADDRESS_FAMILY_ONLY'
         }
         if ($TestDriverScenarios) {
-            $extraDefines += 'KERNEL_HTTP_TEST_DRIVER_SCENARIOS'
+            $extraDefines += 'WKNET_TEST_DRIVER_SCENARIOS'
         }
         if ($extraDefines.Count -ne 0) {
-            $driverBuildArguments += "/p:KernelHttpExtraDefines=$($extraDefines -join ';')"
+            $driverBuildArguments += "/p:WknetExtraDefines=$($extraDefines -join ';')"
         }
 
         Invoke-Checked `

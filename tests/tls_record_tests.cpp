@@ -3,12 +3,12 @@
 #endif
 
 #include "tls/TlsContext.h"
-#include <wknet/tls/CertificateStore.h>
+#include "tls/CertificateStore.h"
 #include "tls/CertificateValidator.h"
 #include "tls/TlsCapabilities.h"
 #include "tls/TlsHandshake12.h"
 #include "tls/TlsHandshake13.h"
-#include "tls/TlsConnection.h"
+#include "tls/TlsConnectionPrivate.hpp"
 #include "tls/TlsPolicy.h"
 #include "tls/TlsRecord.h"
 
@@ -732,16 +732,31 @@ namespace
         Expect(status == STATUS_INVALID_NETWORK_RESPONSE, "invalid alert level is rejected");
     }
 
-    class ScriptedTlsTransport final : public wknet::core::ITransport
+    class ScriptedTlsTransport final
     {
     public:
         ScriptedTlsTransport(const UCHAR* receiveBytes, SIZE_T receiveLength) noexcept :
             receiveBytes_(receiveBytes),
             receiveLength_(receiveLength)
         {
+            const wknet::transport::TransportCallbacks callbacks = {
+                SendCallback,
+                ReceiveCallback,
+                ReceiveWithTimeoutCallback,
+                nullptr
+            };
+            createStatus_ = wknet::transport::TransportCreateCallbacks(&callbacks, this, &handle_);
         }
 
-        NTSTATUS Send(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept override
+        ~ScriptedTlsTransport() noexcept
+        {
+            wknet::transport::TransportClose(handle_);
+        }
+
+        wknet::transport::Transport* Handle() noexcept { return handle_; }
+        NTSTATUS CreateStatus() const noexcept { return createStatus_; }
+
+        NTSTATUS Send(const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept
         {
             if (data == nullptr && length != 0) {
                 return STATUS_INVALID_PARAMETER;
@@ -758,7 +773,7 @@ namespace
             return STATUS_SUCCESS;
         }
 
-        NTSTATUS Receive(void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept override
+        NTSTATUS Receive(void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept
         {
             return ReceiveWithTimeout(buffer, length, bytesReceived, 0);
         }
@@ -767,7 +782,7 @@ namespace
             void* buffer,
             SIZE_T length,
             SIZE_T* bytesReceived,
-            ULONG timeoutMilliseconds) noexcept override
+            ULONG timeoutMilliseconds) noexcept
         {
             UNREFERENCED_PARAMETER(timeoutMilliseconds);
             if ((buffer == nullptr && length != 0) || bytesReceived == nullptr) {
@@ -805,12 +820,39 @@ namespace
         }
 
     private:
+        static NTSTATUS SendCallback(
+            void* context, const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept
+        {
+            auto* self = static_cast<ScriptedTlsTransport*>(context);
+            return self != nullptr ? self->Send(data, length, bytesSent) : STATUS_INVALID_PARAMETER;
+        }
+
+        static NTSTATUS ReceiveCallback(
+            void* context, void* buffer, SIZE_T length, SIZE_T* bytesReceived) noexcept
+        {
+            auto* self = static_cast<ScriptedTlsTransport*>(context);
+            return self != nullptr ? self->Receive(buffer, length, bytesReceived) : STATUS_INVALID_PARAMETER;
+        }
+
+        static NTSTATUS ReceiveWithTimeoutCallback(
+            void* context, void* buffer, SIZE_T length, SIZE_T* bytesReceived,
+            ULONG timeoutMilliseconds) noexcept
+        {
+            auto* self = static_cast<ScriptedTlsTransport*>(context);
+            return self != nullptr
+                ? self->ReceiveWithTimeout(buffer, length, bytesReceived, timeoutMilliseconds)
+                : STATUS_INVALID_PARAMETER;
+        }
+
+    private:
         const UCHAR* receiveBytes_ = nullptr;
         SIZE_T receiveLength_ = 0;
         SIZE_T receiveOffset_ = 0;
         SIZE_T sendCalls_ = 0;
         UCHAR sentRecords_[2][4096] = {};
         SIZE_T sentRecordLengths_[2] = {};
+        wknet::transport::Transport* handle_ = nullptr;
+        NTSTATUS createStatus_ = STATUS_UNSUCCESSFUL;
     };
 
     void TestTlsHandshakeFailureRecordsLocalPolicy()
@@ -820,7 +862,7 @@ namespace
         TlsClientConnectionOptions options = {};
         options.HandshakeReceiveTimeoutMilliseconds = 1000;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         Expect(status == STATUS_INVALID_PARAMETER, "TLS connect rejects invalid local policy options");
         const auto& failure = connection.LastHandshakeFailure();
         Expect(
@@ -849,7 +891,7 @@ namespace
         options.ServerNameLength = strlen(options.ServerName);
         options.VerifyCertificate = false;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(
             status,
             STATUS_INVALID_NETWORK_RESPONSE,
@@ -883,7 +925,7 @@ namespace
         options.ServerNameLength = strlen(options.ServerName);
         options.VerifyCertificate = false;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(
             status,
             STATUS_INVALID_NETWORK_RESPONSE,
@@ -919,7 +961,7 @@ namespace
         options.MinimumProtocol = TlsProtocol::Tls13;
         options.MaximumProtocol = TlsProtocol::Tls13;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(
             status,
             STATUS_INVALID_NETWORK_RESPONSE,
@@ -949,7 +991,7 @@ namespace
         options.ServerNameLength = strlen(options.ServerName);
         options.VerifyCertificate = false;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(
             status,
             STATUS_INVALID_NETWORK_RESPONSE,
@@ -983,7 +1025,7 @@ namespace
         options.MinimumProtocol = TlsProtocol::Tls13;
         options.MaximumProtocol = TlsProtocol::Tls13;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(
             status,
             STATUS_INVALID_NETWORK_RESPONSE,
@@ -1003,7 +1045,7 @@ namespace
         options.ServerNameLength = strlen(options.ServerName);
         options.VerifyCertificate = false;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(
             status,
             STATUS_CONNECTION_DISCONNECTED,
@@ -1028,7 +1070,7 @@ namespace
         options.MinimumProtocol = TlsProtocol::Tls13;
         options.MaximumProtocol = TlsProtocol::Tls13;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(
             status,
             STATUS_CONNECTION_DISCONNECTED,
@@ -2427,7 +2469,7 @@ namespace
         ScriptedTlsTransport transport(nullptr, 0);
         TlsConnection connection;
 
-        const NTSTATUS status = connection.RenegotiateTls12(transport);
+        const NTSTATUS status = connection.RenegotiateTls12(transport.Handle());
 
         ExpectStatus(
             status,
@@ -2450,7 +2492,7 @@ namespace
         options.Policy.EnableTls12RsaKeyExchange = true;
         options.Policy.EnableTls12Cbc = true;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.2 compatibility ClientHello test stops after peer disconnect");
         Expect(transport.SendCalls() == 1, "TLS 1.2 compatibility ClientHello sends one record");
 
@@ -3036,7 +3078,7 @@ namespace
         options.AlpnProtocols = alpnProtocols;
         options.AlpnProtocolCount = alpnProtocolCount;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         if (failureCategory != nullptr) {
             *failureCategory = connection.LastHandshakeFailure().Category;
         }
@@ -3060,7 +3102,7 @@ namespace
         options.ServerNameLength = strlen(options.ServerName);
         options.VerifyCertificate = false;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(
             status,
             STATUS_NOT_SUPPORTED,
@@ -3088,7 +3130,7 @@ namespace
         options.ServerNameLength = strlen(options.ServerName);
         options.VerifyCertificate = false;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(
             status,
             STATUS_INVALID_NETWORK_RESPONSE,
@@ -4013,7 +4055,7 @@ namespace
         options.AlpnProtocolCount = 1;
         options.SessionCache = &cache;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 ticket test stops after ClientHello when peer disconnects");
         Expect(transport.SendCalls() == 1, "TLS 1.3 ticket test sends one ClientHello");
 
@@ -4064,7 +4106,7 @@ namespace
         options.AlpnProtocols = h2;
         options.AlpnProtocolCount = 1;
         options.SessionCache = &cache;
-        NTSTATUS status = expiredConnection.Connect(expiredTransport, options);
+        NTSTATUS status = expiredConnection.Connect(expiredTransport.Handle(), options);
         ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 expired ticket test stops after ClientHello");
         Expect(!SentClientHelloHasExtension(expiredTransport, 0, 41), "TLS 1.3 expired ticket is not offered");
 
@@ -4073,7 +4115,7 @@ namespace
         cache.Tickets[0].ServerNameLength = 13;
         ScriptedTlsTransport sniTransport(nullptr, 0);
         TlsConnection sniConnection;
-        status = sniConnection.Connect(sniTransport, options);
+        status = sniConnection.Connect(sniTransport.Handle(), options);
         ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 SNI mismatch ticket test stops after ClientHello");
         Expect(!SentClientHelloHasExtension(sniTransport, 0, 41), "TLS 1.3 SNI-mismatched ticket is not offered");
 
@@ -4082,7 +4124,7 @@ namespace
         options.AlpnProtocolCount = 1;
         ScriptedTlsTransport alpnTransport(nullptr, 0);
         TlsConnection alpnConnection;
-        status = alpnConnection.Connect(alpnTransport, options);
+        status = alpnConnection.Connect(alpnTransport.Handle(), options);
         ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 ALPN mismatch ticket test stops after ClientHello");
         Expect(!SentClientHelloHasExtension(alpnTransport, 0, 41), "TLS 1.3 ALPN-mismatched ticket is not offered");
 
@@ -4092,7 +4134,7 @@ namespace
         options.AlpnProtocolCount = 1;
         ScriptedTlsTransport cipherTransport(nullptr, 0);
         TlsConnection cipherConnection;
-        status = cipherConnection.Connect(cipherTransport, options);
+        status = cipherConnection.Connect(cipherTransport.Handle(), options);
         ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 cipher mismatch ticket test stops after ClientHello");
         Expect(!SentClientHelloHasExtension(cipherTransport, 0, 41), "TLS 1.3 non-TLS1.3-cipher ticket is not offered");
     }
@@ -4126,7 +4168,7 @@ namespace
         options.AlpnProtocolCount = 1;
         options.SessionCache = &cache;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.3 HRR test stops after second ClientHello when peer disconnects");
         Expect(transport.SendCalls() == 2, "TLS 1.3 HRR sends a second ClientHello");
 
@@ -4199,7 +4241,7 @@ namespace
         options.EarlyDataBytesSent = &earlyDataBytesSent;
         options.EarlyDataAccepted = &earlyDataAccepted;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(status, STATUS_NOT_SUPPORTED, "TLS 1.3 rejects 0-RTT without replay-safe opt-in");
         Expect(transport.SendCalls() == 0, "TLS 1.3 non replay-safe 0-RTT sends no data");
         Expect(earlyDataBytesSent == 0, "TLS 1.3 non replay-safe 0-RTT reports zero bytes sent");
@@ -4228,7 +4270,7 @@ namespace
         options.AlpnProtocolCount = 1;
         options.Tls12SessionCache = &cache;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(status, STATUS_CONNECTION_DISCONNECTED, "TLS 1.2 session cache test stops after ClientHello");
         Expect(transport.SendCalls() == 1, "TLS 1.2 session cache test sends one ClientHello");
 
@@ -4579,7 +4621,7 @@ namespace
         options.MinimumProtocol = TlsProtocol::Tls12;
         options.MaximumProtocol = TlsProtocol::Tls12;
 
-        const NTSTATUS status = connection.Connect(transport, options);
+        const NTSTATUS status = connection.Connect(transport.Handle(), options);
         ExpectStatus(status, STATUS_NOT_SUPPORTED, "TLS 1.2 connection rejects ServerHello without EMS");
         Expect(
             connection.LastHandshakeFailure().Category == TlsHandshakeFailureCategory::LocalPolicy,

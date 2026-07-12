@@ -233,32 +233,24 @@ namespace samples
             return status;
         }
 
-        trustStore.AuthorityBundle.Data = data;
-        trustStore.AuthorityBundle.DataLength = dataLength;
-
-        tls::CertificateStoreOptions storeOptions = {};
-        storeOptions.AuthorityBundles = &trustStore.AuthorityBundle;
-        storeOptions.AuthorityBundleCount = 1;
-
-        status = trustStore.Store.Initialize(storeOptions);
+        status = http::CertificateStoreCreate(nullptr, &trustStore.Store);
+        if (NT_SUCCESS(status)) {
+            status = http::CertificateStoreLoadPemBundle(trustStore.Store, data, dataLength);
+        }
+        RtlSecureZeroMemory(data, dataLength);
+        FreeBundleBytes(data);
         if (!NT_SUCCESS(status)) {
-            FreeBundleBytes(data);
-            trustStore = {};
+            http::CertificateStoreClose(trustStore.Store);
+            trustStore.Store = nullptr;
             return status;
         }
-
-        trustStore.BundleData = data;
-        trustStore.BundleDataLength = dataLength;
         return STATUS_SUCCESS;
     }
 
     void ResetExternalTrustStore(ExternalTrustStore& trustStore) noexcept
     {
-        if (trustStore.BundleData != nullptr && trustStore.BundleDataLength != 0) {
-            RtlSecureZeroMemory(trustStore.BundleData, trustStore.BundleDataLength);
-        }
-        FreeBundleBytes(trustStore.BundleData);
-        trustStore = {};
+        http::CertificateStoreClose(trustStore.Store);
+        trustStore.Store = nullptr;
     }
 }
 }

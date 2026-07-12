@@ -32,7 +32,7 @@
 
 > 进度（截至 2026-06-19）：
 >
-> - 第一小步已完成：新增集中硬上限头 `include/wknet/WknetLimits.h`，并通过 `khttp_tests` 覆盖常量关系。
+> - 第一小步已完成：新增集中硬上限头 `include/wknet/WknetLimits.h`，并通过 `http_api_tests` 覆盖常量关系。
 > - 第二小步已完成并校正：响应聚合改为 requests-like 语义，`MaxResponseBytes=0` 表示不设调用方上限；非零值才限制 buffered response 大小，旧 64 MiB 不再作为库级低位硬顶。
 > - 第三小步已完成：engine 可配置响应头数量收敛到 `WKNET_HARD_MAX_HEADERS`，显式超限会话创建 fail-closed。
 > - 第四小步已完成：engine 与低层 HTTP/2 header block 上限收敛到 `WKNET_HARD_MAX_HEADER_SECTION`。
@@ -71,7 +71,7 @@
 
 ### 测试
 
-`tests/khttp_tests.cpp` / `tests/http2_client_tests.cpp`：非零调用方容量被严格执行；旧 64 MiB 以上响应上限不再被拒绝；构造超大 header / 帧流验证 fail-closed；lookaside 压力下分配-归还计数平衡（无泄漏）；帧/控制信号账本越限触发 GOAWAY / 关闭。
+`tests/http_api_tests.cpp` / `tests/http2_client_tests.cpp`：非零调用方容量被严格执行；旧 64 MiB 以上响应上限不再被拒绝；构造超大 header / 帧流验证 fail-closed；lookaside 压力下分配-归还计数平衡（无泄漏）；帧/控制信号账本越限触发 GOAWAY / 关闭。
 
 ### 风险 / 工作量
 
@@ -81,7 +81,7 @@
 
 ## P1 — 高层 Session 代理（CONNECT 隧道）配置
 
-> 进度（截至 2026-06-19）：P1 已按路线 A 完成：高层 `SessionConfig` / `SessionOptions` 已接入显式代理配置，引擎在 HTTPS 传输装配中对代理建 TCP、通过共享 `client::ProxyTunnel` 建立 HTTP/1.1 CONNECT 隧道，再对目标主机执行 TLS；连接池按代理身份分桶，明文 HTTP over proxy 仍作为二期能力显式拒绝。已通过 `khttp_tests`、`http2_client_tests` 与 Debug x64 构建（0 警告）。
+> 进度（截至 2026-06-19）：P1 已按路线 A 完成：高层 `SessionConfig` / `SessionOptions` 已接入显式代理配置，引擎在 HTTPS 传输装配中对代理建 TCP、通过共享 `client::ProxyTunnel` 建立 HTTP/1.1 CONNECT 隧道，再对目标主机执行 TLS；连接池按代理身份分桶，明文 HTTP over proxy 仍作为二期能力显式拒绝。已通过 `http_api_tests`、`http2_client_tests` 与 Debug x64 构建（0 警告）。
 
 ### 现状
 
@@ -113,7 +113,7 @@
 
 ### 测试
 
-- `tests/khttp_tests.cpp`：覆盖 `SessionConfig.Proxy` 透传到传输层、无效代理配置拒绝、明文 HTTP proxy 显式拒绝、连接池按代理身份分桶，并验证 `Proxy-Authorization` 不进入目标请求。
+- `tests/http_api_tests.cpp`：覆盖 `SessionConfig.Proxy` 透传到传输层、无效代理配置拒绝、明文 HTTP proxy 显式拒绝、连接池按代理身份分桶，并验证 `Proxy-Authorization` 不进入目标请求。
 - `tests/http2_client_tests.cpp`：继续覆盖低层 `HttpsClient` / `client::ProxyTunnel` 既有 CONNECT 行为，防止共享 helper 回归。
 
 ### 风险 / 工作量
@@ -124,7 +124,7 @@
 
 ## P2 — 高层 HTTP/2 并发多流接入连接池（需独立详设）
 
-> 进度（截至 2026-06-19）：P2 已完成：连接池新增 HTTP/2 stream 租约计数与延迟关闭语义，已激活的 H2 连接可在未释放时按本地 / peer 并发上限再次分配给同源请求；高层 `SendHttp2ViaTransport` 改为 `BeginRequest` + 池租约提升 + 单 reader `ReceiveResponse` 两阶段路径；`Http2Connection` 接入 PASSIVE_LEVEL 状态锁 / reader 锁，并将活动 stream 上限收敛到 `min(peer MAX_CONCURRENT_STREAMS, WKNET_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL, active table capacity)`。已通过 `http2_client_tests`、`khttp_tests`、`high_level_api_tests` 与 Debug x64 构建（0 警告）。
+> 进度（截至 2026-06-19）：P2 已完成：连接池新增 HTTP/2 stream 租约计数与延迟关闭语义，已激活的 H2 连接可在未释放时按本地 / peer 并发上限再次分配给同源请求；高层 `SendHttp2ViaTransport` 改为 `BeginRequest` + 池租约提升 + 单 reader `ReceiveResponse` 两阶段路径；`Http2Connection` 接入 PASSIVE_LEVEL 状态锁 / reader 锁，并将活动 stream 上限收敛到 `min(peer MAX_CONCURRENT_STREAMS, WKNET_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL, active table capacity)`。已通过 `http2_client_tests`、`http_api_tests`、`high_level_api_tests` 与 Debug x64 构建（0 警告）。
 
 ### 现状
 
@@ -162,7 +162,7 @@
 
 ## P3 — 高层 kws 自动 / opt-in WebSocket over HTTP/2（RFC 8441，依赖 P2）
 
-> 进度（截至 2026-06-19）：P3 已按显式 opt-in 路线完成：`wknet::websocket::ConnectConfig` / engine / 低层 `WebSocketClient` 已接入 `AllowWebSocketOverHttp2`，默认仍保持 HTTP/1.1 Upgrade；`wss` opt-in 时 TLS ALPN offer `{h2, http/1.1}`，协商到 h2 后通过 RFC 8441 extended CONNECT 建立 tunnel，peer 未启用 `ENABLE_CONNECT_PROTOCOL` 继续 fail-closed；`ws://` opt-in 明确拒绝，不引入 h2c 隐式路径。WebSocket 帧层新增 H2 专用无掩码客户端编码，H2 DATA 隧道复用现有 send/receive/close/Ping/Pong/分片状态机。已通过 `websocket_frame_tests`、`websocket_client_tests`、`http2_client_tests`、`khttp_tests` 与 Debug x64 构建（0 警告）。
+> 进度（截至 2026-06-19）：P3 已按显式 opt-in 路线完成：`wknet::websocket::ConnectConfig` / engine / 低层 `WebSocketClient` 已接入 `AllowWebSocketOverHttp2`，默认仍保持 HTTP/1.1 Upgrade；`wss` opt-in 时 TLS ALPN offer `{h2, http/1.1}`，协商到 h2 后通过 RFC 8441 extended CONNECT 建立 tunnel，peer 未启用 `ENABLE_CONNECT_PROTOCOL` 继续 fail-closed；`ws://` opt-in 明确拒绝，不引入 h2c 隐式路径。WebSocket 帧层新增 H2 专用无掩码客户端编码，H2 DATA 隧道复用现有 send/receive/close/Ping/Pong/分片状态机。已通过 `websocket_frame_tests`、`websocket_client_tests`、`http2_client_tests`、`http_api_tests` 与 Debug x64 构建（0 警告）。
 
 ### 现状
 
@@ -200,7 +200,7 @@
 
 ## P4 — 维持非目标 / 小型增量（建议保持现状或低优先）
 
-> 进度（截至 2026-06-19）：P4 已完成：低层 `Http2Connection` 新增显式 `SendPing`，用于调用方主动发 HTTP/2 PING 保活 / 探测；HTTP/2 server push、WS 握手 redirect / 401 跟随、在线 OCSP/CRL 抓取、HTTP/3·QUIC、服务端 / 入站 parser 继续明确保持非目标。已通过 `http2_client_tests`、`http2_frame_tests`、`websocket_frame_tests`、`websocket_client_tests`、`khttp_tests` 与 Debug x64 构建（0 警告）。
+> 进度（截至 2026-06-19）：P4 已完成：低层 `Http2Connection` 新增显式 `SendPing`，用于调用方主动发 HTTP/2 PING 保活 / 探测；HTTP/2 server push、WS 握手 redirect / 401 跟随、在线 OCSP/CRL 抓取、HTTP/3·QUIC、服务端 / 入站 parser 继续明确保持非目标。已通过 `http2_client_tests`、`http2_frame_tests`、`websocket_frame_tests`、`websocket_client_tests`、`http_api_tests` 与 Debug x64 构建（0 警告）。
 > 后续状态更新：HTTP/1.1 pipeline、WebSocket `permessage-deflate`、HTTP/2 后台 PING 保活和 per-request priority 已从“保持拒绝/低层显式原语”迁移为显式 opt-in 能力；默认仍关闭，安全拒绝边界保持不变。
 
 | 项目 | 建议 |

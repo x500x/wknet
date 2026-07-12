@@ -1,6 +1,5 @@
-#include "session/ConnectionPool.h"
-#include "transport/TlsTransport.h"
-#include "transport/WskTransport.h"
+#include "session/ConnectionPoolPrivate.hpp"
+#include "transport/Transport.h"
 #include "http2/Http2Connection.h"
 #include "net/WskSocket.h"
 #include "tls/TlsConnection.h"
@@ -26,10 +25,10 @@ namespace
     {
 #if !defined(WKNET_USER_MODE_TEST)
         net::WskSocket* Socket = nullptr;
-        core::WskTransport* RawTransport = nullptr;
+        transport::Transport* RawTransport = nullptr;
         tls::TlsConnection* Tls = nullptr;
 #endif
-        core::ITransport* Transport = nullptr;
+        transport::Transport* Transport = nullptr;
         http2::Http2Connection* Http2 = nullptr;
     };
 
@@ -195,28 +194,6 @@ namespace
         return RtlCompareMemory(left, right, leftLength) == leftLength;
     }
 
-    SIZE_T SockaddrStorageCompareLength(const SOCKADDR_STORAGE& address) noexcept
-    {
-        switch (address.ss_family) {
-        case AF_INET:
-            return sizeof(SOCKADDR_IN);
-        case AF_INET6:
-            return sizeof(SOCKADDR_IN6);
-        default:
-            return sizeof(address.ss_family);
-        }
-    }
-
-    bool SockaddrStorageEquals(const SOCKADDR_STORAGE& left, const SOCKADDR_STORAGE& right) noexcept
-    {
-        if (left.ss_family != right.ss_family) {
-            return false;
-        }
-
-        const SIZE_T compareLength = SockaddrStorageCompareLength(left);
-        return RtlCompareMemory(&left, &right, compareLength) == compareLength;
-    }
-
     bool ProxyIdentityEquals(
         const ConnectionPoolKey& left,
         const ConnectionPoolKey& right) noexcept
@@ -229,7 +206,13 @@ namespace
             return true;
         }
 
-        return SockaddrStorageEquals(left.ProxyAddress, right.ProxyAddress) &&
+        return left.ProxyPort == right.ProxyPort &&
+            left.ProxyFamily == right.ProxyFamily &&
+            TextEquals(
+                left.ProxyHost,
+                left.ProxyHostLength,
+                right.ProxyHost,
+                right.ProxyHostLength) &&
             TextEquals(
                 left.ProxyAuthority,
                 left.ProxyAuthorityLength,
@@ -406,29 +389,27 @@ namespace
 #if !defined(WKNET_USER_MODE_TEST)
         if (detached->Http2 != nullptr) {
             if (detached->Transport != nullptr) {
-                const NTSTATUS shutdownStatus = detached->Http2->Shutdown(*detached->Transport);
+                const NTSTATUS shutdownStatus = http2::Http2ConnectionShutdown(detached->Http2, detached->Transport);
                 UNREFERENCED_PARAMETER(shutdownStatus);
             }
-            FreeNonPagedObject(detached->Http2);
+            http2::Http2ConnectionClose(detached->Http2);
             detached->Http2 = nullptr;
         }
         if (detached->Transport != nullptr &&
             detached->Transport != detached->RawTransport) {
-            FreeNonPagedObject(detached->Transport);
+            transport::TransportClose(detached->Transport);
             detached->Transport = nullptr;
         }
         if (detached->Tls != nullptr) {
-            FreeNonPagedObject(detached->Tls);
+            tls::TlsConnectionClose(detached->Tls);
             detached->Tls = nullptr;
         }
         if (detached->RawTransport != nullptr) {
-            FreeNonPagedObject(detached->RawTransport);
+            transport::TransportClose(detached->RawTransport);
             detached->RawTransport = nullptr;
         }
         if (detached->Socket != nullptr) {
-            const NTSTATUS closeStatus = detached->Socket->Close();
-            UNREFERENCED_PARAMETER(closeStatus);
-            FreeNonPagedObject(detached->Socket);
+            net::WskSocketDestroy(detached->Socket);
             detached->Socket = nullptr;
         }
 #endif
@@ -498,7 +479,7 @@ namespace
             connection.Http1PipelineLeases != 0 ||
             connection.Transport == nullptr ||
             connection.Http2 == nullptr ||
-            !connection.Http2->IsReusable() ||
+            !http2::Http2ConnectionIsReusable(connection.Http2) ||
             connection.LastUsedTime == 0 ||
             now < connection.LastUsedTime) {
             return false;
@@ -706,7 +687,7 @@ namespace
         }
 
         PooledConnection* selected = nullptr;
-        core::ITransport* transport = nullptr;
+        transport::Transport* transport = nullptr;
         http2::Http2Connection* http2Connection = nullptr;
         const UCHAR* opaqueData = nullptr;
         const ULONGLONG now = QueryPoolTime();
@@ -737,15 +718,15 @@ namespace
             return STATUS_SUCCESS;
         }
 
-        NTSTATUS status = http2Connection->SendPingAndWaitForAck(
-            *transport,
+        NTSTATUS status = http2::Http2ConnectionSendPingAndWaitForAck(http2Connection,
+            transport,
             opaqueData,
             pool->Http2KeepAlive.AckTimeoutMilliseconds);
 
         DetachedConnectionResources detached = {};
         LockPool(pool);
         selected->Http2KeepAliveInProgress = false;
-        if (NT_SUCCESS(status) && selected->Http2 != nullptr && selected->Http2->IsReusable()) {
+        if (NT_SUCCESS(status) && selected->Http2 != nullptr && http2::Http2ConnectionIsReusable(selected->Http2)) {
             selected->Http2LastKeepAliveTime = QueryPoolTime();
             selected->LastUsedTime = selected->Http2LastKeepAliveTime;
             selected->InUse = false;
@@ -1136,7 +1117,7 @@ namespace
     NTSTATUS PooledConnectionAdoptSocket(
         PooledConnection* connection,
         net::WskSocket* socket,
-        core::WskTransport* transport) noexcept
+        transport::Transport* transport) noexcept
     {
         if (connection == nullptr || socket == nullptr || transport == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -1159,7 +1140,7 @@ namespace
     NTSTATUS PooledConnectionAdoptTls(
         PooledConnection* connection,
         tls::TlsConnection* tlsConnection,
-        core::ITransport* transport) noexcept
+        transport::Transport* transport) noexcept
     {
         if (connection == nullptr || tlsConnection == nullptr || transport == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -1199,10 +1180,10 @@ namespace
         }
 
         if (connection->Transport != nullptr) {
-            const NTSTATUS shutdownStatus = connection->Http2->Shutdown(*connection->Transport);
+            const NTSTATUS shutdownStatus = http2::Http2ConnectionShutdown(connection->Http2, connection->Transport);
             UNREFERENCED_PARAMETER(shutdownStatus);
         }
-        FreeNonPagedObject(connection->Http2);
+        http2::Http2ConnectionClose(connection->Http2);
         connection->Http2 = nullptr;
     }
 
@@ -1215,11 +1196,11 @@ namespace
 
         PooledConnectionReleaseHttp2(connection);
         if (connection->Transport != nullptr && connection->Transport != connection->RawTransport) {
-            FreeNonPagedObject(connection->Transport);
+            transport::TransportClose(connection->Transport);
             connection->Transport = connection->RawTransport;
         }
         if (connection->Tls != nullptr) {
-            FreeNonPagedObject(connection->Tls);
+            tls::TlsConnectionClose(connection->Tls);
             connection->Tls = nullptr;
         }
     }
@@ -1232,14 +1213,12 @@ namespace
 
         PooledConnectionReleaseTls(connection);
         if (connection->RawTransport != nullptr) {
-            FreeNonPagedObject(connection->RawTransport);
+            transport::TransportClose(connection->RawTransport);
             connection->RawTransport = nullptr;
             connection->Transport = nullptr;
         }
         if (connection->Socket != nullptr) {
-            const NTSTATUS closeStatus = connection->Socket->Close();
-            UNREFERENCED_PARAMETER(closeStatus);
-            FreeNonPagedObject(connection->Socket);
+            net::WskSocketDestroy(connection->Socket);
             connection->Socket = nullptr;
         }
 
@@ -1257,6 +1236,79 @@ namespace
         }
     }
 
+    ULONG PooledConnectionId(const PooledConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->Id : 0;
+    }
+
+    bool PooledConnectionProxyTunnelEstablished(const PooledConnection* connection) noexcept
+    {
+        return connection != nullptr && connection->ProxyTunnelEstablished;
+    }
+
+    transport::Transport* PooledConnectionTransport(PooledConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->Transport : nullptr;
+    }
+
+    http2::Http2Connection* PooledConnectionHttp2(PooledConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->Http2 : nullptr;
+    }
+
+#if !defined(WKNET_USER_MODE_TEST)
+    net::WskSocket* PooledConnectionSocket(PooledConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->Socket : nullptr;
+    }
+
+    transport::Transport* PooledConnectionRawTransport(PooledConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->RawTransport : nullptr;
+    }
+
+    tls::TlsConnection* PooledConnectionTls(PooledConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->Tls : nullptr;
+    }
+#endif
+
+    NTSTATUS PooledConnectionSetAlpn(
+        PooledConnection* connection,
+        const char* alpn,
+        SIZE_T alpnLength) noexcept
+    {
+        if (connection == nullptr ||
+            (alpnLength != 0 && alpn == nullptr) ||
+            alpnLength > PoolMaxAlpnLength) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        RtlZeroMemory(connection->Key.Alpn, sizeof(connection->Key.Alpn));
+        if (alpnLength != 0) {
+            RtlCopyMemory(connection->Key.Alpn, alpn, alpnLength);
+        }
+        connection->Key.AlpnLength = alpnLength;
+        return STATUS_SUCCESS;
+    }
+
+#if defined(WKNET_USER_MODE_TEST)
+    void PooledConnectionAttachTestState(
+        PooledConnection* connection,
+        transport::Transport* transport,
+        http2::Http2Connection* http2Connection) noexcept
+    {
+        if (connection != nullptr) {
+            connection->Transport = transport;
+            connection->Http2 = http2Connection;
+        }
+    }
+
+    ULONGLONG PooledConnectionHttp2LastKeepAliveTime(
+        const PooledConnection* connection) noexcept
+    {
+        return connection != nullptr ? connection->Http2LastKeepAliveTime : 0;
+    }
+#endif
     bool ConnectionPoolHasHttp2StreamLease(const PooledConnection* connection) noexcept
     {
         return connection != nullptr && connection->Http2StreamLeases != 0;

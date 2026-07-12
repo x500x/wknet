@@ -4,7 +4,7 @@
 
 namespace wknet
 {
-namespace core
+namespace rtl
 {
     inline NTSTATUS CheckPassiveLevel() noexcept
     {

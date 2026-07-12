@@ -55,7 +55,7 @@ foreach ($path in @(
     Assert-File $path
 }
 
-$classes = Join-Path ([System.IO.Path]::GetTempPath()) 'win-khttp-exi-generator-classes'
+$classes = Join-Path ([System.IO.Path]::GetTempPath()) 'wknet-exi-generator-classes'
 New-Item -ItemType Directory -Force -Path $classes | Out-Null
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 $classpath = "$ExificientCoreJar;$ExificientGrammarsJar;$Slf4jApiJar;$XercesJar;$XmlApisJar"

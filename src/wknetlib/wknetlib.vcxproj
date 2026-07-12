@@ -58,7 +58,8 @@
     <ClCompile Include="session\Workspace.cpp" />
     <ClCompile Include="transport\ProxyConnect.cpp" />
     <ClCompile Include="session\WsConnection.cpp" />
-    <ClCompile Include="transport\TlsTransport.cpp" />
+    <ClCompile Include="transport\Transport.cpp" />
+    <ClCompile Include="transport\TransportWsk.cpp" />
     <ClCompile Include="crypto\Aead.cpp" />
     <ClCompile Include="crypto\CngProvider.cpp" />
     <ClCompile Include="crypto\CngProviderCache.cpp" />
@@ -68,10 +69,11 @@
     <ClCompile Include="http_api\AsyncOp.cpp" />
     <ClCompile Include="http_api\Body.cpp" />
     <ClCompile Include="http_api\Cache.cpp" />
+    <ClCompile Include="http_api\Certificate.cpp" />
     <ClCompile Include="http_api\Headers.cpp" />
     <ClCompile Include="http_api\Http.cpp" />
     <ClCompile Include="http_api\HttpAsync.cpp" />
-    <ClCompile Include="http_api\Khttp.cpp" />
+    <ClCompile Include="http_api\Test.cpp" />
     <ClCompile Include="http_api\Lifecycle.cpp" />
     <ClCompile Include="http_api\Options.cpp" />
     <ClCompile Include="http_api\Request.cpp" />
@@ -179,31 +181,18 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\include\wknet\Wknet.h" />
-    <ClInclude Include="..\..\include\wknet\session\Engine.h" />
     <ClInclude Include="session\EnginePrivate.hpp" />
-    <ClInclude Include="..\..\include\wknet\session\EngineImpl.h" />
-    <ClInclude Include="..\..\include\wknet\session\EngineInternal.h" />
-    <ClInclude Include="..\..\include\wknet\session\EngineUtils.h" />
-    <ClInclude Include="..\..\include\wknet\session\HandleAlloc.h" />
-    <ClInclude Include="..\..\include\wknet\session\HandleTypes.h" />
-    <ClInclude Include="..\..\include\wknet\session\HttpEngine.h" />
+    <ClInclude Include="session\ConnectionPoolPrivate.hpp" />
+    <ClInclude Include="transport\Transport.h" />
+    <ClInclude Include="transport\TransportPrivate.hpp" />
+    <ClInclude Include="net\WskClientPrivate.hpp" />
+    <ClInclude Include="net\WskSocketPrivate.hpp" />
+    <ClInclude Include="http2\Http2ConnectionPrivate.hpp" />
+    <ClInclude Include="tls\TlsConnectionPrivate.hpp" />
     <ClInclude Include="session\HttpEngineInternal.hpp" />
     <ClInclude Include="session\Http2RequestBuilder.h" />
-    <ClInclude Include="..\..\include\wknet\session\HttpCache.h" />
-    <ClInclude Include="..\..\include\wknet\session\UrlParser.h" />
-    <ClInclude Include="..\..\include\wknet\session\WsEngine.h" />
     <ClInclude Include="session\WsEngineInternal.hpp" />
-    <ClInclude Include="..\..\include\wknet\session\Async.h" />
-    <ClInclude Include="..\..\include\wknet\session\ConnectionPool.h" />
-    <ClInclude Include="..\..\include\wknet\session\Workspace.h" />
     <ClInclude Include="session\WsConnection.h" />
-    <ClInclude Include="..\..\include\wknet\transport\IScratchAllocator.h" />
-    <ClInclude Include="..\..\include\wknet\transport\ITransport.h" />
-    <ClInclude Include="..\..\include\wknet\transport\Irql.h" />
-    <ClInclude Include="..\..\include\wknet\transport\Lookaside.h" />
-    <ClInclude Include="..\..\include\wknet\transport\TlsTransport.h" />
-    <ClInclude Include="..\..\include\wknet\transport\WorkspaceScratchAllocator.h" />
-    <ClInclude Include="..\..\include\wknet\transport\WskTransport.h" />
     <ClInclude Include="..\..\include\wknet\crypto\Aead.h" />
     <ClInclude Include="..\..\include\wknet\crypto\CngProvider.h" />
     <ClInclude Include="..\..\include\wknet\crypto\CngProviderCache.h" />
@@ -212,13 +201,6 @@
     <ClInclude Include="..\..\include\wknet\crypto\KeyExchange.h" />
     <ClInclude Include="codec\ContentCoding.h" />
     <ClInclude Include="codec\CodecInternal.h" />
-    <ClInclude Include="..\..\include\wknet\http1\HttpCachePolicy.h" />
-    <ClInclude Include="..\..\include\wknet\http1\HttpContentEncoding.h" />
-    <ClInclude Include="..\..\include\wknet\http1\HttpParser.h" />
-    <ClInclude Include="..\..\include\wknet\http1\HttpRequest.h" />
-    <ClInclude Include="..\..\include\wknet\http1\HttpResponse.h" />
-    <ClInclude Include="..\..\include\wknet\http1\HttpTransferCoding.h" />
-    <ClInclude Include="..\..\include\wknet\http1\HttpTypes.h" />
     <ClInclude Include="codec\ExiDecoder.h" />
     <ClInclude Include="codec\DeflateDecoder.h" />
     <ClInclude Include="codec\ExiEventReader.h" />
@@ -238,21 +220,13 @@
     <ClInclude Include="codec\Pack200JarWriter.h" />
     <ClInclude Include="codec\XmlWriter.h" />
     <ClInclude Include="rtl\Text.h" />
-    <ClInclude Include="..\..\include\wknet\http2\Hpack.h" />
-    <ClInclude Include="..\..\include\wknet\http2\HpackHuffman.h" />
-    <ClInclude Include="..\..\include\wknet\http2\HpackStaticTable.h" />
-    <ClInclude Include="..\..\include\wknet\http2\Http2Connection.h" />
-    <ClInclude Include="..\..\include\wknet\http2\Http2Frame.h" />
-    <ClInclude Include="..\..\include\wknet\http2\Http2Stream.h" />
     <ClInclude Include="..\..\include\wknet\WknetConfig.h" />
     <ClInclude Include="..\..\include\wknet\WknetLimits.h" />
-    <ClInclude Include="..\..\include\wknet\net\WskBuffer.h" />
-    <ClInclude Include="..\..\include\wknet\net\WskClient.h" />
-    <ClInclude Include="..\..\include\wknet\net\WskSocket.h" />
     <ClInclude Include="..\..\include\wknet\http\AsyncOp.h" />
     <ClInclude Include="..\..\include\wknet\http\Body.h" />
     <ClInclude Include="..\..\include\wknet\http\Cache.h" />
-    <ClInclude Include="..\..\include\wknet\http\Detail.h" />
+    <ClInclude Include="..\..\include\wknet\http\Certificate.h" />
+    <ClInclude Include="..\..\include\wknet\crypto\TlsCredential.h" />
     <ClInclude Include="..\..\include\wknet\http\Headers.h" />
     <ClInclude Include="..\..\include\wknet\http\Http.h" />
     <ClInclude Include="..\..\include\wknet\http\HttpAsync.h" />
@@ -260,21 +234,9 @@
     <ClInclude Include="..\..\include\wknet\http\Request.h" />
     <ClInclude Include="..\..\include\wknet\http\Response.h" />
     <ClInclude Include="..\..\include\wknet\http\Session.h" />
-    <ClInclude Include="..\..\include\wknet\http\Test.h" />
     <ClInclude Include="..\..\include\wknet\http\Types.h" />
-    <ClInclude Include="..\..\include\wknet\ws\WebSocket.h" />
-    <ClInclude Include="..\..\include\wknet\tls\TlsContext.h" />
-    <ClInclude Include="..\..\include\wknet\tls\CertificateStore.h" />
-    <ClInclude Include="..\..\include\wknet\tls\CertificateValidator.h" />
-    <ClInclude Include="..\..\include\wknet\tls\TlsCapabilities.h" />
-    <ClInclude Include="..\..\include\wknet\tls\TlsConnection.h" />
+    <ClInclude Include="tls\CertificateStore.h" />
     <ClInclude Include="tls\TlsConnectionInternal.hpp" />
-    <ClInclude Include="..\..\include\wknet\tls\TlsHandshake12.h" />
-    <ClInclude Include="..\..\include\wknet\tls\TlsHandshake13.h" />
-    <ClInclude Include="..\..\include\wknet\tls\TlsPolicy.h" />
-    <ClInclude Include="..\..\include\wknet\tls\TlsRecord.h" />
-    <ClInclude Include="..\..\include\wknet\ws\WebSocketDeflate.h" />
-    <ClInclude Include="..\..\include\wknet\ws\WebSocketFrame.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{2F05C2F0-8C5F-4B05-B0D9-F72F40E1D5D6}</ProjectGuid>
@@ -329,13 +291,13 @@
   <PropertyGroup>
     <TargetName>wknetlib</TargetName>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <IntDir>$(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <WarningLevel>EnableAllWarnings</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
-      <DisableSpecificWarnings>4061;4100;4127;4255;4365;4464;4514;4603;4623;4625;4626;4627;4668;4711;4820;4986;4987;5026;5027;5032;5045;5220;5246;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4061;4100;4127;4255;4365;4464;4514;4603;4623;4625;4626;4627;4668;4710;4711;4820;4986;4987;5026;5027;5032;5045;5220;5246;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <BufferSecurityCheck>true</BufferSecurityCheck>

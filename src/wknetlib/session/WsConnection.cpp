@@ -1,8 +1,8 @@
 #include "session/WsConnection.h"
 #include "rtl/Irql.h"
-#include "transport/TlsTransport.h"
+#include "transport/Transport.h"
 #include "rtl/WorkspaceScratchAllocator.h"
-#include "transport/WskTransport.h"
+#include "transport/Transport.h"
 #include "http1/HttpTypes.h"
 #include "http1/HttpRequest.h"
 
@@ -1041,12 +1041,12 @@ namespace session
     }
 
     NTSTATUS WsConnection::Connect(
-        net::WskClient& wskClient,
+        net::WskClient* wskClient,
         const WsConnectionOptions& options,
         const WsIoBuffers& buffers,
         USHORT* statusCode) noexcept
     {
-        NTSTATUS status = core::CheckPassiveLevel();
+        NTSTATUS status = rtl::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             if (statusCode != nullptr) {
                 *statusCode = 0;
@@ -1134,7 +1134,7 @@ namespace session
         }
 
         SIZE_T remoteAddressCount = 0;
-        status = wskClient.ResolveAll(
+        status = net::WskClientResolveAll(wskClient,
             options.ServerName,
             options.ServiceName,
             remoteAddresses.Get(),
@@ -1237,7 +1237,7 @@ namespace session
     }
 
     NTSTATUS WsConnection::ConnectAddress(
-        net::WskClient& wskClient,
+        net::WskClient* wskClient,
         const SOCKADDR* remoteAddress,
         const WsConnectionOptions& options,
         const WsIoBuffers& buffers,
@@ -1255,20 +1255,27 @@ namespace session
             return STATUS_INVALID_PARAMETER;
         }
 
-        NTSTATUS status = socket_.Connect(wskClient, remoteAddress, nullptr, options.Cancellation);
+        if (socket_ == nullptr) {
+            NTSTATUS createStatus = net::WskSocketCreate(&socket_);
+            if (!NT_SUCCESS(createStatus)) {
+                return createStatus;
+            }
+        }
+        NTSTATUS status = net::WskSocketConnect(
+            socket_, wskClient, remoteAddress, nullptr, options.Cancellation);
         if (!NT_SUCCESS(status)) {
             WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
             return status;
         }
         transportClosed_ = false;
 
-        rawTransport_ = AllocateNonPagedObject<core::WskTransport>(socket_);
-        if (rawTransport_ == nullptr) {
+        status = transport::TransportCreateWsk(socket_, &rawTransport_);
+        if (!NT_SUCCESS(status)) {
             const NTSTATUS closeStatus = CloseTransport();
             UNREFERENCED_PARAMETER(closeStatus);
-            return STATUS_INSUFFICIENT_RESOURCES;
+            return status;
         }
-        rawTransport_->SetCancellation(options.Cancellation);
+        transport::TransportSetCancellation(rawTransport_, options.Cancellation);
 
         useTls_ = options.UseTls;
         bufferedFrameLength_ = 0;
@@ -1277,15 +1284,15 @@ namespace session
         ResetSendFragment();
         ResetReceiveFragment();
         if (useTls_) {
-            core::WorkspaceScratchAllocator* handshakeScratch = nullptr;
-            core::WorkspaceScratchAllocator* certificateScratch = nullptr;
+            rtl::WorkspaceScratchAllocator* handshakeScratch = nullptr;
+            rtl::WorkspaceScratchAllocator* certificateScratch = nullptr;
             if (options.Workspace != nullptr) {
-                handshakeScratch = AllocateNonPagedObject<core::WorkspaceScratchAllocator>(
+                handshakeScratch = AllocateNonPagedObject<rtl::WorkspaceScratchAllocator>(
                     *options.Workspace,
-                    core::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
-                certificateScratch = AllocateNonPagedObject<core::WorkspaceScratchAllocator>(
+                    rtl::WorkspaceScratchAllocator::BufferKind::TlsHandshake);
+                certificateScratch = AllocateNonPagedObject<rtl::WorkspaceScratchAllocator>(
                     *options.Workspace,
-                    core::WorkspaceScratchAllocator::BufferKind::Certificate);
+                    rtl::WorkspaceScratchAllocator::BufferKind::Certificate);
                 if (handshakeScratch == nullptr || certificateScratch == nullptr) {
                     FreeNonPagedObject(certificateScratch);
                     FreeNonPagedObject(handshakeScratch);
@@ -1295,13 +1302,13 @@ namespace session
                 }
             }
 
-            tls_ = AllocateNonPagedObject<tls::TlsConnection>();
-            if (tls_ == nullptr) {
+            status = tls::TlsConnectionCreate(&tls_);
+            if (!NT_SUCCESS(status)) {
                 FreeNonPagedObject(certificateScratch);
                 FreeNonPagedObject(handshakeScratch);
                 const NTSTATUS closeStatus = CloseTransport();
                 UNREFERENCED_PARAMETER(closeStatus);
-                return STATUS_INSUFFICIENT_RESOURCES;
+                return status;
             }
 
             tls::TlsClientConnectionOptions tlsOptions = {};
@@ -1338,13 +1345,13 @@ namespace session
             tlsOptions.AlpnProtocols = alpnProtocols.Get();
             tlsOptions.AlpnProtocolCount = alpnProtocolCount;
 
-            status = tls_->Connect(*rawTransport_, tlsOptions);
+            status = tls::TlsConnectionConnect(tls_, rawTransport_, &tlsOptions);
             FreeNonPagedObject(certificateScratch);
             FreeNonPagedObject(handshakeScratch);
 
             if (!NT_SUCCESS(status)) {
                 if (tls12ConfirmationCandidate != nullptr &&
-                    IsTls12ConfirmationCandidate(options, tls_->LastHandshakeFailure())) {
+                    IsTls12ConfirmationCandidate(options, tls::TlsConnectionLastHandshakeFailure(tls_))) {
                     *tls12ConfirmationCandidate = true;
                 }
                 WKNET_TRACE(::wknet::ComponentWs, ::wknet::TraceLevel::Error, "WsConnection TLS connect failed: 0x%08X\r\n", static_cast<ULONG>(status));
@@ -1353,19 +1360,21 @@ namespace session
                 return status;
             }
 
-            const char* negotiatedAlpn = tls_->NegotiatedAlpn();
-            const SIZE_T negotiatedAlpnLength = tls_->NegotiatedAlpnLength();
+            const char* negotiatedAlpn = tls::TlsConnectionNegotiatedAlpn(tls_);
+            const SIZE_T negotiatedAlpnLength = tls::TlsConnectionNegotiatedAlpnLength(tls_);
             if (WebSocketModeAllowsHttp2(options) &&
                 TextEqualsLiteral(negotiatedAlpn, negotiatedAlpnLength, WebSocketHttp2Alpn)) {
-                h2Transport_ = AllocateNonPagedObject<core::TlsTransport>(*rawTransport_, *tls_);
-                h2Connection_ = AllocateNonPagedObject<http2::Http2Connection>();
-                if (h2Transport_ == nullptr || h2Connection_ == nullptr) {
+                status = transport::TransportCreateTls(rawTransport_, tls_, &h2Transport_);
+                if (NT_SUCCESS(status)) {
+                    status = http2::Http2ConnectionCreate(&h2Connection_);
+                }
+                if (!NT_SUCCESS(status)) {
                     const NTSTATUS closeStatus = CloseTransport();
                     UNREFERENCED_PARAMETER(closeStatus);
-                    return STATUS_INSUFFICIENT_RESOURCES;
+                    return status;
                 }
 
-                status = h2Connection_->Initialize(*h2Transport_);
+                status = http2::Http2ConnectionInitialize(h2Connection_, h2Transport_);
                 if (!NT_SUCCESS(status)) {
                     const NTSTATUS closeStatus = CloseTransport();
                     UNREFERENCED_PARAMETER(closeStatus);
@@ -1450,23 +1459,25 @@ namespace session
                 USHORT h2StatusCode = 0;
                 http2::Http2ResponseBodySink sink = {};
                 sink.Append = IgnoreHttp2WebSocketResponseBody;
-                status = h2Connection_->BeginRequest(
-                    *h2Transport_,
+                http2::Http2RequestBody requestBody = {};
+                status = http2::Http2ConnectionBeginRequest(
+                    h2Connection_,
+                    h2Transport_,
                     requestHeaders.Get(),
                     requestHeaderCount,
-                    nullptr,
-                    0,
+                    &requestBody,
                     buffers.Headers,
                     buffers.HeaderCapacity,
                     &responseHeaderCount,
-                    sink,
+                    &sink,
                     &responseBodyLength,
                     &h2StatusCode,
                     buffers.ResponseBuffer,
                     buffers.ResponseBufferLength,
                     &h2StreamId_);
                 if (NT_SUCCESS(status)) {
-                    status = h2Connection_->ReceiveResponseHeaders(*h2Transport_, h2StreamId_);
+                    status = http2::Http2ConnectionReceiveResponseHeaders(
+                        h2Connection_, h2Transport_, h2StreamId_);
                 }
                 if (statusCode != nullptr) {
                     *statusCode = h2StatusCode;
@@ -1500,7 +1511,7 @@ namespace session
                 }
 
                 connected_ = true;
-                rawTransport_->SetCancellation(nullptr);
+                transport::TransportSetCancellation(rawTransport_, nullptr);
                 return STATUS_SUCCESS;
             }
             if (WebSocketModeRequiresHttp2(options)) {
@@ -1627,7 +1638,7 @@ namespace session
         }
 
         connected_ = true;
-        rawTransport_->SetCancellation(nullptr);
+        transport::TransportSetCancellation(rawTransport_, nullptr);
         return STATUS_SUCCESS;
     }
 
@@ -1637,7 +1648,7 @@ namespace session
         const WsIoBuffers& buffers,
         bool finalFragment) noexcept
     {
-        NTSTATUS status = core::CheckPassiveLevel();
+        NTSTATUS status = rtl::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1656,7 +1667,7 @@ namespace session
         const WsIoBuffers& buffers,
         bool finalFragment) noexcept
     {
-        NTSTATUS status = core::CheckPassiveLevel();
+        NTSTATUS status = rtl::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1675,7 +1686,7 @@ namespace session
         const WsIoBuffers& buffers,
         bool finalFragment) noexcept
     {
-        NTSTATUS status = core::CheckPassiveLevel();
+        NTSTATUS status = rtl::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1693,7 +1704,7 @@ namespace session
         SIZE_T payloadLength,
         const WsIoBuffers& buffers) noexcept
     {
-        NTSTATUS status = core::CheckPassiveLevel();
+        NTSTATUS status = rtl::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1706,7 +1717,7 @@ namespace session
         SIZE_T payloadLength,
         const WsIoBuffers& buffers) noexcept
     {
-        NTSTATUS status = core::CheckPassiveLevel();
+        NTSTATUS status = rtl::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -1858,7 +1869,7 @@ namespace session
         bool deliverFragments,
         bool* finalFragment) noexcept
     {
-        NTSTATUS status = core::CheckPassiveLevel();
+        NTSTATUS status = rtl::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             if (opcode != nullptr) {
                 *opcode = ws::WebSocketOpcode::Continuation;
@@ -2514,7 +2525,7 @@ namespace session
 
     NTSTATUS WsConnection::Close(const WsIoBuffers& buffers) noexcept
     {
-        NTSTATUS status = core::CheckPassiveLevel();
+        NTSTATUS status = rtl::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -2563,7 +2574,7 @@ namespace session
         SIZE_T reasonLength,
         const WsIoBuffers& buffers) noexcept
     {
-        NTSTATUS status = core::CheckPassiveLevel();
+        NTSTATUS status = rtl::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -2612,7 +2623,7 @@ namespace session
     {
         result = {};
 
-        NTSTATUS status = core::CheckPassiveLevel();
+        NTSTATUS status = rtl::CheckPassiveLevel();
         if (!NT_SUCCESS(status)) {
             return status;
         }
@@ -2675,21 +2686,22 @@ namespace session
     NTSTATUS WsConnection::CloseTransport() noexcept
     {
         if (h2Connection_ != nullptr && h2Transport_ != nullptr) {
-            const NTSTATUS shutdownStatus = h2Connection_->Shutdown(*h2Transport_);
+            const NTSTATUS shutdownStatus = http2::Http2ConnectionShutdown(
+                h2Connection_, h2Transport_);
             UNREFERENCED_PARAMETER(shutdownStatus);
         }
-        FreeNonPagedObject(h2Connection_);
+        http2::Http2ConnectionClose(h2Connection_);
         h2Connection_ = nullptr;
-        FreeNonPagedObject(h2Transport_);
+        transport::TransportClose(h2Transport_);
         h2Transport_ = nullptr;
         h2StreamId_ = 0;
 
         if (tls_ != nullptr) {
-            FreeNonPagedObject(tls_);
+            tls::TlsConnectionClose(tls_);
             tls_ = nullptr;
         }
 
-        FreeNonPagedObject(rawTransport_);
+        transport::TransportClose(rawTransport_);
         rawTransport_ = nullptr;
         useTls_ = false;
 
@@ -2698,7 +2710,9 @@ namespace session
         }
 
         transportClosed_ = true;
-        const NTSTATUS closeStatus = socket_.Close();
+        const NTSTATUS closeStatus = net::WskSocketClose(socket_);
+        net::WskSocketDestroy(socket_);
+        socket_ = nullptr;
         return IsConnectionTerminalStatus(closeStatus) ? STATUS_SUCCESS : closeStatus;
     }
 
@@ -2958,8 +2972,8 @@ namespace session
             if (bytesSent != nullptr) {
                 *bytesSent = 0;
             }
-            const NTSTATUS status = h2Connection_->SendStreamData(
-                *h2Transport_,
+            const NTSTATUS status = http2::Http2ConnectionSendStreamData(h2Connection_,
+                h2Transport_,
                 h2StreamId_,
                 static_cast<const UCHAR*>(data),
                 length,
@@ -2974,10 +2988,10 @@ namespace session
             if (tls_ == nullptr || rawTransport_ == nullptr) {
                 return STATUS_INVALID_DEVICE_STATE;
             }
-            return tls_->Send(*rawTransport_, data, length, bytesSent);
+            return tls::TlsConnectionSend(tls_, rawTransport_, data, length, bytesSent);
         }
 
-        return socket_.Send(data, length, bytesSent);
+        return net::WskSocketSend(socket_, data, length, bytesSent);
     }
 
     NTSTATUS WsConnection::ReceiveRaw(
@@ -2990,8 +3004,8 @@ namespace session
 
         if (h2Connection_ != nullptr && h2Transport_ != nullptr && h2StreamId_ != 0) {
             bool endStream = false;
-            const NTSTATUS status = h2Connection_->ReceiveStreamData(
-                *h2Transport_,
+            const NTSTATUS status = http2::Http2ConnectionReceiveStreamData(h2Connection_,
+                h2Transport_,
                 h2StreamId_,
                 static_cast<UCHAR*>(data),
                 length,
@@ -3008,10 +3022,10 @@ namespace session
             if (tls_ == nullptr || rawTransport_ == nullptr) {
                 return STATUS_INVALID_DEVICE_STATE;
             }
-            return tls_->Receive(*rawTransport_, data, length, bytesReceived, timeoutMilliseconds);
+            return tls::TlsConnectionReceive(tls_, rawTransport_, data, length, bytesReceived, timeoutMilliseconds);
         }
 
-        return socket_.Receive(data, length, bytesReceived, 0, timeoutMilliseconds);
+        return net::WskSocketReceive(socket_, data, length, bytesReceived, 0, timeoutMilliseconds);
     }
 
     NTSTATUS WsConnection::ReadHandshakeResponse(

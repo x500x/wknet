@@ -276,7 +276,17 @@ namespace session
 
         if (proxy.Enabled) {
             key->ProxyEnabled = true;
-            key->ProxyAddress = proxy.Address;
+            status = CopyExactText(
+                proxy.Host,
+                proxy.HostLength,
+                key->ProxyHost,
+                sizeof(key->ProxyHost),
+                &key->ProxyHostLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            key->ProxyPort = proxy.Port;
+            key->ProxyFamily = proxy.Family;
             status = CopyExactText(
                 proxy.Authority,
                 proxy.AuthorityLength,

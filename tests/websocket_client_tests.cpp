@@ -616,7 +616,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -652,7 +652,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -708,7 +708,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -770,7 +770,7 @@ namespace
             banner,
             sizeof(banner) - 1);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -823,7 +823,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -862,7 +862,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -915,7 +915,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -976,7 +976,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1021,7 +1021,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1070,7 +1070,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1108,7 +1108,7 @@ namespace
         server.FailConnectAttempts = 1;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1145,7 +1145,7 @@ namespace
         server.EchoAfterPing = true;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1216,7 +1216,7 @@ namespace
             second,
             sizeof(second) - 1);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1285,7 +1285,7 @@ namespace
             third,
             sizeof(third));
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1335,7 +1335,7 @@ namespace
             payloadBytes,
             sizeof(payloadBytes) - 1);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1390,7 +1390,7 @@ namespace
             second,
             sizeof(second) - 1);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1429,7 +1429,7 @@ namespace
         server.SelectedSubprotocolLength = strlen(server.SelectedSubprotocol);
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1475,7 +1475,7 @@ namespace
         server.SelectedSubprotocolLength = strlen(server.SelectedSubprotocol);
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1511,7 +1511,7 @@ namespace
         server.SelectedSubprotocolLength = strlen(server.SelectedSubprotocol);
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1542,7 +1542,7 @@ namespace
         server.ResponseExtensionsLength = strlen(server.ResponseExtensions);
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1571,7 +1571,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1610,7 +1610,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1667,7 +1667,7 @@ namespace
         server.ResponseExtensionsLength = strlen(server.ResponseExtensions);
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1706,7 +1706,7 @@ namespace
         server.ResponseExtensionsLength = strlen(server.ResponseExtensions);
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1787,7 +1787,7 @@ namespace
             true,
             true);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1839,7 +1839,7 @@ namespace
             banner,
             sizeof(banner) - 1);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1889,7 +1889,7 @@ namespace
             largeMessage,
             sizeof(largeMessage));
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1937,7 +1937,7 @@ namespace
             oversizedTextHeader,
             sizeof(oversizedTextHeader));
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -1996,7 +1996,7 @@ namespace
             oversizedContinuationHeader,
             sizeof(oversizedContinuationHeader));
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2055,7 +2055,7 @@ namespace
             text,
             sizeof(text) - 1);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2119,7 +2119,7 @@ namespace
             text,
             sizeof(text) - 1);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2185,7 +2185,7 @@ namespace
             text,
             sizeof(text) - 1);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2229,7 +2229,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2286,7 +2286,7 @@ namespace
             largeMessage[index] = static_cast<char>('a' + (index % 26));
         }
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2335,7 +2335,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2384,7 +2384,7 @@ namespace
             frame,
             frameLength);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2438,7 +2438,7 @@ namespace
             maskedServerFrame,
             sizeof(maskedServerFrame));
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2517,7 +2517,7 @@ namespace
             closePayload,
             sizeof(closePayload));
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2579,7 +2579,7 @@ namespace
             invalidText,
             sizeof(invalidText));
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2635,7 +2635,7 @@ namespace
             sizeof(second),
             true);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2696,7 +2696,7 @@ namespace
             sizeof(second),
             true);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2766,7 +2766,7 @@ namespace
             0,
             true);
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2841,7 +2841,7 @@ namespace
                 payloads[index],
                 payloadLengths[index]);
 
-            wknet::net::WskClient wskClient;
+            wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
             WsConnection client;
             char request[1024] = {};
             char response[1024] = {};
@@ -2884,7 +2884,7 @@ namespace
         server.ReceiveStatus = STATUS_IO_TIMEOUT;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2928,7 +2928,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -2973,7 +2973,7 @@ namespace
         server.CloseStatus = STATUS_CONNECTION_RESET;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3006,7 +3006,7 @@ namespace
         server.CloseStatus = STATUS_INVALID_DEVICE_STATE;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3044,7 +3044,7 @@ namespace
         server.HandshakeReason = reason;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3129,7 +3129,7 @@ namespace
         server.UpgradeWhenHeaderValue = "Basic dGVzdA==";
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3200,7 +3200,7 @@ namespace
         server.UpgradeWhenPath = "/next";
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3240,7 +3240,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3279,7 +3279,7 @@ namespace
         FakeWebSocketServer server;
         g_server = &server;
 
-        wknet::net::WskClient wskClient;
+        wknet::net::WskClient* wskClient = reinterpret_cast<wknet::net::WskClient*>(1);
         WsConnection client;
         char request[1024] = {};
         char response[1024] = {};
@@ -3323,48 +3323,26 @@ namespace wknet
 {
 namespace net
 {
-    WskClient::WskClient() noexcept = default;
-    WskClient::~WskClient() noexcept = default;
-
-    NTSTATUS WskClient::Initialize(ULONG) noexcept
+    NTSTATUS WskClientCreate(WskClient** client) noexcept
     {
-        return STATUS_SUCCESS;
-    }
-
-    void WskClient::Shutdown() noexcept
-    {
-    }
-
-    bool WskClient::IsInitialized() const noexcept
-    {
-        return true;
-    }
-
-    PWSK_CLIENT WskClient::ProviderClient() const noexcept
-    {
-        return nullptr;
-    }
-
-    const WSK_PROVIDER_DISPATCH* WskClient::ProviderDispatch() const noexcept
-    {
-        return nullptr;
-    }
-
-    NTSTATUS WskClient::Resolve(
-        const wchar_t*,
-        const wchar_t*,
-        SOCKADDR_STORAGE* remoteAddress,
-        WskAddressFamily) noexcept
-    {
-        if (remoteAddress == nullptr) {
+        if (client == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
-
-        remoteAddress->ss_family = 2;
+        *client = reinterpret_cast<WskClient*>(1);
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS WskClient::ResolveAll(
+    NTSTATUS WskClientInitialize(WskClient* client, ULONG) noexcept
+    {
+        return client != nullptr ? STATUS_SUCCESS : STATUS_INVALID_PARAMETER;
+    }
+
+    void WskClientShutdown(WskClient*) noexcept {}
+    void WskClientClose(WskClient*) noexcept {}
+    bool WskClientIsInitialized(const WskClient* client) noexcept { return client != nullptr; }
+
+    NTSTATUS WskClientResolveAll(
+        WskClient*,
         const wchar_t*,
         const wchar_t*,
         SOCKADDR_STORAGE* remoteAddresses,
@@ -3387,24 +3365,27 @@ namespace net
         return STATUS_SUCCESS;
     }
 
-    WskSocket::~WskSocket() noexcept = default;
+    NTSTATUS WskSocketCreate(WskSocket** socket) noexcept
+    {
+        if (socket == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        *socket = reinterpret_cast<WskSocket*>(2);
+        return STATUS_SUCCESS;
+    }
 
-    NTSTATUS WskSocket::Connect(WskClient&, const SOCKADDR*, const SOCKADDR*, const WskCancellationToken*) noexcept
+    NTSTATUS WskSocketConnect(
+        WskSocket*, WskClient*, const SOCKADDR*, const SOCKADDR*, const WskCancellationToken*) noexcept
     {
         if (g_server == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        socket_ = reinterpret_cast<PWSK_SOCKET>(g_server);
         return g_server->Connect();
     }
 
-    NTSTATUS WskSocket::Send(WskBuffer&, SIZE_T, SIZE_T*, ULONG, const WskCancellationToken*) noexcept
-    {
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    NTSTATUS WskSocket::Send(
+    NTSTATUS WskSocketSend(
+        WskSocket*,
         const void* data,
         SIZE_T length,
         SIZE_T* bytesSent,
@@ -3418,12 +3399,8 @@ namespace net
         return g_server->Send(data, length, bytesSent);
     }
 
-    NTSTATUS WskSocket::Receive(WskBuffer&, SIZE_T, SIZE_T*, ULONG, ULONG, const WskCancellationToken*) noexcept
-    {
-        return STATUS_NOT_SUPPORTED;
-    }
-
-    NTSTATUS WskSocket::Receive(
+    NTSTATUS WskSocketReceive(
+        WskSocket*,
         void* data,
         SIZE_T length,
         SIZE_T* bytesReceived,
@@ -3438,31 +3415,65 @@ namespace net
         return g_server->Receive(data, length, bytesReceived);
     }
 
-    NTSTATUS WskSocket::Disconnect(ULONG) noexcept
-    {
-        return STATUS_SUCCESS;
-    }
-
-    NTSTATUS WskSocket::Close() noexcept
+    NTSTATUS WskSocketClose(WskSocket*) noexcept
     {
         if (g_server != nullptr) {
-            const NTSTATUS status = g_server->Close();
-            socket_ = nullptr;
-            return status;
+            return g_server->Close();
         }
-
-        socket_ = nullptr;
         return STATUS_SUCCESS;
     }
 
-    bool WskSocket::IsConnected() const noexcept
+    void WskSocketDestroy(WskSocket*) noexcept
     {
-        return socket_ != nullptr;
     }
 
-    PWSK_SOCKET WskSocket::NativeSocket() const noexcept
+    bool WskSocketIsConnected(const WskSocket*) noexcept
     {
-        return socket_;
+        return g_server != nullptr && g_server->Connected;
+    }
+}
+
+namespace transport
+{
+    namespace
+    {
+        NTSTATUS TestWskSend(
+            void* context, const void* data, SIZE_T length, SIZE_T* bytesSent) noexcept
+        {
+            return net::WskSocketSend(
+                static_cast<net::WskSocket*>(context), data, length, bytesSent);
+        }
+
+        NTSTATUS TestWskReceive(
+            void* context, void* data, SIZE_T length, SIZE_T* bytesReceived) noexcept
+        {
+            return net::WskSocketReceive(
+                static_cast<net::WskSocket*>(context), data, length, bytesReceived);
+        }
+
+        NTSTATUS TestWskReceiveWithTimeout(
+            void* context, void* data, SIZE_T length, SIZE_T* bytesReceived,
+            ULONG timeoutMilliseconds) noexcept
+        {
+            return net::WskSocketReceive(
+                static_cast<net::WskSocket*>(context),
+                data,
+                length,
+                bytesReceived,
+                0,
+                timeoutMilliseconds);
+        }
+    }
+
+    NTSTATUS TransportCreateWsk(net::WskSocket* socket, Transport** transport) noexcept
+    {
+        const TransportCallbacks callbacks = {
+            TestWskSend,
+            TestWskReceive,
+            TestWskReceiveWithTimeout,
+            nullptr
+        };
+        return TransportCreateCallbacks(&callbacks, socket, transport);
     }
 }
 }

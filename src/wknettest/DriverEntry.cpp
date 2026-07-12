@@ -2,7 +2,7 @@
 #include "session/EngineInternal.h"
 
 #include "WknetTestLog.h"
-#include "samples/KhttpSamples.h"
+#include "samples/HttpApiSamples.h"
 
 extern "C" NTSYSAPI NTSTATUS NTAPI ZwWaitForSingleObject(
     _In_ HANDLE Handle,
@@ -443,8 +443,7 @@ namespace wknet
         void ReleaseWskClient() noexcept
         {
             if (g_wskClient != nullptr) {
-                g_wskClient->Shutdown();
-                delete g_wskClient;
+                net::WskClientClose(g_wskClient);
                 g_wskClient = nullptr;
             }
         }
@@ -462,18 +461,18 @@ namespace wknet
     {
         NTSTATUS finalStatus = STATUS_SUCCESS;
 
-        if (g_wskClient == nullptr || !g_wskClient->IsInitialized()) {
+        if (!net::WskClientIsInitialized(g_wskClient)) {
             return STATUS_DEVICE_NOT_READY;
         }
 
-        samples::wknettestSampleResults khttpResults = {};
-        NTSTATUS khttpStatus = samples::RunwknettestSamples(
+        samples::DriverSampleResults sampleResults = {};
+        NTSTATUS sampleStatus = samples::RunDriverSamples(
             g_wskClient,
             certificateBundlePath,
-            &khttpResults);
-        if (!NT_SUCCESS(khttpStatus)) {
-            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "wknettest 全量示例完成，但存在失败项: 0x%08X\r\n", static_cast<ULONG>(khttpStatus));
-            finalStatus = khttpStatus;
+            &sampleResults);
+        if (!NT_SUCCESS(sampleStatus)) {
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "wknettest 全量示例完成，但存在失败项: 0x%08X\r\n", static_cast<ULONG>(sampleStatus));
+            finalStatus = sampleStatus;
         }
         else {
             WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "wknettest 全量示例全部完成\r\n");
@@ -540,14 +539,14 @@ DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
         wknet::g_certificateBundlePath[0] = '\0';
     }
 
-    wknet::g_wskClient = new wknet::net::WskClient();
-    if (wknet::g_wskClient == nullptr) {
+    status = wknet::net::WskClientCreate(&wknet::g_wskClient);
+    if (!NT_SUCCESS(status)) {
         WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "WskClient 分配失败\r\n");
         wknet::testlog::Shutdown();
-        return STATUS_INSUFFICIENT_RESOURCES;
+        return status;
     }
 
-    status = wknet::g_wskClient->Initialize();
+    status = wknet::net::WskClientInitialize(wknet::g_wskClient);
     if (!NT_SUCCESS(status)) {
         if (!wknet::IsLoadTimeWskProviderUnavailable(status)) {
             WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "WSK 初始化失败: 0x%08X\r\n", static_cast<ULONG>(status));

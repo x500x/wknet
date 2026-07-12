@@ -4,7 +4,7 @@
 
 namespace wknet
 {
-namespace core
+namespace rtl
 {
     class LookasideList;
 }
@@ -60,7 +60,7 @@ namespace session
     _Must_inspect_result_
     NTSTATUS WorkspaceCreateFromLookaside(
         _In_opt_ const WorkspaceOptions* options,
-        _In_opt_ core::LookasideList* lookaside,
+        _In_opt_ rtl::LookasideList* lookaside,
         _Out_ Workspace** workspace) noexcept;
 
     void WorkspaceReset(_In_opt_ Workspace* workspace) noexcept;
@@ -69,7 +69,7 @@ namespace session
 
     void WorkspaceReleaseToLookaside(
         _In_opt_ Workspace* workspace,
-        _In_opt_ core::LookasideList* lookaside) noexcept;
+        _In_opt_ rtl::LookasideList* lookaside) noexcept;
 
     _Must_inspect_result_
     NTSTATUS WorkspaceEnsureResponseCapacity(

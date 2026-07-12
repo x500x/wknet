@@ -29,27 +29,24 @@ if (-not (Test-Path $testCpp)) {
 
 $binDir = Join-Path $repoRoot 'tests\out\bin'
 $objDir = Join-Path $repoRoot "tests\out\obj\$Test"
+$thirdPartyObjDir = Join-Path $objDir 'third_party'
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 New-Item -ItemType Directory -Force -Path $objDir | Out-Null
+New-Item -ItemType Directory -Force -Path $thirdPartyObjDir | Out-Null
 $exePath = Join-Path $binDir "$Test.exe"
 
 # Kernel-facing entry points are opt-in per test. Some tests provide local stubs
 # for WSK/TLS classes, so keep the default source set conservative.
 $excludedLibSources = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 @(
-    'WknetConfig.cpp', 'WsConnection.cpp', 'WskSocket.cpp'
+    'WknetConfig.cpp', 'WsConnection.cpp', 'WskSocket.cpp', 'TransportWsk.cpp'
 ) | ForEach-Object { [void]$excludedLibSources.Add($_) }
 
 switch ($Test) {
-    'http2_client_tests' {
-        @(
-            'TlsConnection.cpp', 'TlsConnect12.cpp', 'TlsConnect13.cpp',
-            'TlsPostHandshake.cpp', 'TlsRecordIo.cpp', 'TlsTransport.cpp'
-        ) | ForEach-Object { [void]$excludedLibSources.Add($_) }
-    }
-    'khttp_tests' {
+    'http_api_tests' {
         [void]$excludedLibSources.Remove('WskClient.cpp')
         [void]$excludedLibSources.Remove('WskSocket.cpp')
+        [void]$excludedLibSources.Remove('TransportWsk.cpp')
     }
     'high_level_api_tests' {
         [void]$excludedLibSources.Remove('WskClient.cpp')
@@ -84,6 +81,23 @@ $brotliSources = @(
 $zstdSources = @(
     Join-Path $repoRoot 'third_party\zstd\zstddeclib.c'
 )
+$thirdPartySources = @($brotliSources) + @($zstdSources)
+$thirdPartyObjects = @($thirdPartySources | ForEach-Object {
+    Join-Path $thirdPartyObjDir (([System.IO.Path]::GetFileNameWithoutExtension($_)) + '.obj')
+})
+
+$thirdPartyArgs = @(
+    '/nologo', '/c', '/TC', '/W3', '/WX-',
+    '/source-charset:utf-8', '/execution-charset:.936',
+    '/D', 'WKNET_USER_MODE_TEST=1',
+    '/I', (Join-Path $brotliRoot 'include'),
+    "/Fo:$thirdPartyObjDir\"
+) + $thirdPartySources
+
+& cl.exe @thirdPartyArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "third-party cl.exe failed with exit code $LASTEXITCODE"
+}
 
 $includeArgs = @(
     "/I", (Join-Path $repoRoot 'include'),
@@ -94,12 +108,16 @@ $includeArgs = @(
 
 $clArgs = @(
     '/nologo', '/source-charset:utf-8', '/execution-charset:.936',
-    '/std:c++17', '/EHsc-', '/GR-', '/W4', '/WX', '/wd4100', '/wd4127',
+    '/std:c++17', '/EHsc-', '/GR-', '/Wall', '/WX',
+    '/wd4061', '/wd4100', '/wd4127', '/wd4255', '/wd4365', '/wd4464',
+    '/wd4514', '/wd4603', '/wd4623', '/wd4625', '/wd4626', '/wd4627',
+    '/wd4668', '/wd4710', '/wd4711', '/wd4820', '/wd4986', '/wd4987', '/wd5026',
+    '/wd5027', '/wd5032', '/wd5045', '/wd5220', '/wd5246',
     '/D', 'WKNET_USER_MODE_TEST=1'
 ) + $includeArgs + @(
     "/Fe:$exePath",
     "/Fo:$objDir\"
-) + @($testCpp) + $libSources + $sampleSources + $brotliSources + $zstdSources
+) + @($testCpp) + $libSources + $sampleSources + $thirdPartyObjects
 
 & cl.exe @clArgs
 if ($LASTEXITCODE -ne 0) {

@@ -57,14 +57,17 @@ namespace session
         testRequest->Policy = request.Tls.Policy;
         testRequest->MaxTls12Renegotiations = request.Tls.MaxTls12Renegotiations;
         testRequest->ProxyEnabled = session.Options.Proxy.Enabled;
-        testRequest->ProxyAddress = session.Options.Proxy.Address;
+        testRequest->ProxyHost = session.Options.Proxy.Host;
+        testRequest->ProxyHostLength = session.Options.Proxy.HostLength;
+        testRequest->ProxyPort = session.Options.Proxy.Port;
+        testRequest->ProxyFamily = session.Options.Proxy.Family;
         testRequest->ProxyAuthority = session.Options.Proxy.Authority;
         testRequest->ProxyAuthorityLength = session.Options.Proxy.AuthorityLength;
         testRequest->ProxyAuthHeader = session.Options.Proxy.AuthHeader;
         testRequest->ProxyAuthHeaderLength = session.Options.Proxy.AuthHeaderLength;
         testRequest->PoolableConnection = request.ConnectionPolicy != ConnectionPolicy::NoPool;
         testRequest->ReusedConnection = reusedConnection;
-        testRequest->ConnectionId = pooledConnection != nullptr ? pooledConnection->Id : 0;
+        testRequest->ConnectionId = PooledConnectionId(pooledConnection);
         testRequest->Http11PipelineEnabled = http11PipelineEnabled;
         testRequest->Http11PipelineLease = http11PipelineLease;
         testRequest->Http11PipelineSequence = http11PipelineSequence;
@@ -486,19 +489,17 @@ namespace session
                 return status;
             }
 
-            tlsConnection = pooledConnection->Tls;
+            tlsConnection = PooledConnectionTls(pooledConnection);
         }
 
         if (tlsConnection != nullptr && IsAutomaticHttpAlpnMode(request)) {
-            const char* negotiatedAlpn = tlsConnection->NegotiatedAlpn();
-            const SIZE_T negotiatedAlpnLength = tlsConnection->NegotiatedAlpnLength();
+            const char* negotiatedAlpn = tls::TlsConnectionNegotiatedAlpn(tlsConnection);
+            const SIZE_T negotiatedAlpnLength = tls::TlsConnectionNegotiatedAlpnLength(tlsConnection);
             if (negotiatedAlpnLength != 0) {
-                NTSTATUS keyStatus = CopyExactText(
+                NTSTATUS keyStatus = PooledConnectionSetAlpn(
+                    pooledConnection,
                     negotiatedAlpn,
-                    negotiatedAlpnLength,
-                    pooledConnection->Key.Alpn,
-                    sizeof(pooledConnection->Key.Alpn),
-                    &pooledConnection->Key.AlpnLength);
+                    negotiatedAlpnLength);
                 if (!NT_SUCCESS(keyStatus)) {
                     return keyStatus;
                 }
@@ -506,18 +507,18 @@ namespace session
         }
 
 #if !defined(WKNET_USER_MODE_TEST)
-        WskCancellationScope cancellationScope(pooledConnection->RawTransport, cancellationOperation);
+        WskCancellationScope cancellationScope(PooledConnectionRawTransport(pooledConnection), cancellationOperation);
 #else
         UNREFERENCED_PARAMETER(cancellationOperation);
 #endif
 
         if (useHttp2Cleartext) {
-            if (pooledConnection->Transport == nullptr) {
+            if (PooledConnectionTransport(pooledConnection) == nullptr) {
                 return STATUS_INVALID_DEVICE_STATE;
             }
 
             if (http2CleartextMode == Http2CleartextMode::Upgrade &&
-                pooledConnection->Http2 == nullptr) {
+                PooledConnectionHttp2(pooledConnection) == nullptr) {
                 status = SendH2cUpgradeViaTransport(
                     request,
                     workspace,
@@ -550,9 +551,8 @@ namespace session
                 return status;
             }
 
-            *connectionReusable =
-                pooledConnection->Http2 != nullptr &&
-                pooledConnection->Http2->IsReusable();
+            http2::Http2Connection* http2Connection = PooledConnectionHttp2(pooledConnection);
+            *connectionReusable = http2Connection != nullptr && http2::Http2ConnectionIsReusable(http2Connection);
             return STATUS_SUCCESS;
         }
 
@@ -563,8 +563,8 @@ namespace session
         const bool h2Negotiated =
             tlsConnection != nullptr &&
             TextEqualsLiteral(
-                tlsConnection->NegotiatedAlpn(),
-                tlsConnection->NegotiatedAlpnLength(),
+                tls::TlsConnectionNegotiatedAlpn(tlsConnection),
+                tls::TlsConnectionNegotiatedAlpnLength(tlsConnection),
                 "h2");
 
         if (h2Negotiated || h2ExplicitlyRequested) {
@@ -572,12 +572,12 @@ namespace session
                 return STATUS_NOT_SUPPORTED;
             }
 
-            if (pooledConnection->Transport == nullptr) {
+            if (PooledConnectionTransport(pooledConnection) == nullptr) {
                 return STATUS_INVALID_DEVICE_STATE;
             }
 
-            const char* negotiatedAlpn = tlsConnection->NegotiatedAlpn();
-            const SIZE_T negotiatedAlpnLength = tlsConnection->NegotiatedAlpnLength();
+            const char* negotiatedAlpn = tls::TlsConnectionNegotiatedAlpn(tlsConnection);
+            const SIZE_T negotiatedAlpnLength = tls::TlsConnectionNegotiatedAlpnLength(tlsConnection);
             if (!TextEqualsLiteral(negotiatedAlpn, negotiatedAlpnLength, "h2")) {
                 WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "High-level HTTP/2 ALPN not negotiated: %.*s\r\n",
                     static_cast<int>(negotiatedAlpnLength),
@@ -602,13 +602,13 @@ namespace session
                 return status;
             }
 
-            *connectionReusable =
-                pooledConnection->Http2 != nullptr &&
-                pooledConnection->Http2->IsReusable();
+            http2::Http2Connection* http2Connection = PooledConnectionHttp2(pooledConnection);
+            *connectionReusable = http2Connection != nullptr && http2::Http2ConnectionIsReusable(http2Connection);
             return STATUS_SUCCESS;
         }
 
-        if (pooledConnection->Transport == nullptr) {
+        transport::Transport* activeTransport = PooledConnectionTransport(pooledConnection);
+        if (activeTransport == nullptr) {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
@@ -630,7 +630,7 @@ namespace session
             return SendHttp1PipelineRequestBuffer(
                 &session->ConnectionPool,
                 pooledConnection,
-                *pooledConnection->Transport,
+                activeTransport,
                 workspace,
                 workspace.Request.Data,
                 builtRequestLength,
@@ -649,7 +649,7 @@ namespace session
         if (useExpectContinue) {
             if (request.BodySourceCallback != nullptr) {
                 status = SendHttp1RequestSourceWithExpect(
-                    *pooledConnection->Transport,
+                    activeTransport,
                     workspace,
                     request,
                     workspace.Request.Data,
@@ -667,7 +667,7 @@ namespace session
             }
             else {
                 status = SendHttp1RequestBufferWithExpect(
-                    *pooledConnection->Transport,
+                    activeTransport,
                     workspace,
                     workspace.Request.Data,
                     builtRequestLength,
@@ -685,7 +685,7 @@ namespace session
         }
         else {
             status = SendHttp1RequestBuffer(
-                *pooledConnection->Transport,
+                activeTransport,
                 workspace.Request.Data,
                 builtRequestLength);
             if (!NT_SUCCESS(status)) {
@@ -693,7 +693,7 @@ namespace session
             }
             if (request.BodySourceCallback != nullptr) {
                 status = SendHttp1RequestBodySource(
-                    *pooledConnection->Transport,
+                    activeTransport,
                     request,
                     workspace);
                 if (!NT_SUCCESS(status)) {
@@ -702,7 +702,7 @@ namespace session
             }
 
             status = ReadHttpResponseFromSocket(
-                *pooledConnection->Transport,
+                activeTransport,
                 workspace,
                 request.Method == HttpMethod::Head,
                 &acceptPolicy,

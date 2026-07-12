@@ -140,7 +140,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendTransportSegment(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _In_reads_bytes_opt_(length) const UCHAR* data,
         SIZE_T length) noexcept
     {
@@ -154,7 +154,7 @@ namespace session
         SIZE_T totalSent = 0;
         while (totalSent < length) {
             SIZE_T sent = 0;
-            NTSTATUS status = transport.Send(data + totalSent, length - totalSent, &sent);
+            NTSTATUS status = transport::TransportSend(transport, data + totalSent, length - totalSent, &sent);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
@@ -169,7 +169,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestBuffer(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
         SIZE_T requestLength) noexcept
     {
@@ -192,7 +192,7 @@ namespace session
 #if !defined(WKNET_USER_MODE_TEST)
     _Must_inspect_result_
     NTSTATUS ReadHttpResponseFromSocket(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         bool responseBodyForbidden,
         _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
@@ -208,7 +208,7 @@ namespace session
     NTSTATUS SendHttp1PipelineRequestBuffer(
         _Inout_ ConnectionPool* connectionPool,
         _Inout_ PooledConnection* pooledConnection,
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
         SIZE_T requestLength,
@@ -364,7 +364,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestTrailers(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _In_ const Request& request) noexcept
     {
         NTSTATUS status = SendTransportSegment(
@@ -448,7 +448,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestBodySource(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _In_ const Request& request,
         _Inout_ Workspace& workspace) noexcept
     {
@@ -670,7 +670,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS ReadHttpResponseFromSocketEx(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         bool responseBodyForbidden,
         bool preserveInformationalResponses,
@@ -776,7 +776,7 @@ namespace session
                 return STATUS_IO_TIMEOUT;
             }
 
-            status = transport.ReceiveWithTimeout(
+            status = transport::TransportReceiveWithTimeout(transport,
                 workspace.Response.Data + responseLength,
                 workspace.Response.Length - responseLength,
                 &received,
@@ -886,7 +886,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS ReadHttpResponseFromSocket(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         bool responseBodyForbidden,
         _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
@@ -916,7 +916,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestBufferWithExpect(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,
         SIZE_T requestLength,
@@ -1060,7 +1060,7 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS SendHttp1RequestSourceWithExpect(
-        _Inout_ core::ITransport& transport,
+        _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         _In_ const Request& request,
         _In_reads_bytes_(requestLength) const UCHAR* requestBytes,

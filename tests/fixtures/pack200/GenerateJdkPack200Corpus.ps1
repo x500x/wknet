@@ -58,7 +58,7 @@ foreach ($path in @($generatorSource, $javac, $java, $AsmJar, $CommonsCompressJa
     Assert-File $path
 }
 
-$classes = Join-Path ([System.IO.Path]::GetTempPath()) 'win-khttp-pack200-generator-classes'
+$classes = Join-Path ([System.IO.Path]::GetTempPath()) 'wknet-pack200-generator-classes'
 New-Item -ItemType Directory -Force -Path $classes | Out-Null
 $classpath = "$AsmJar;$CommonsCompressJar"
 Invoke-Native $javac @('-cp', $classpath, '-d', $classes, $generatorSource)

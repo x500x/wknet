@@ -45,11 +45,9 @@ namespace
             cache->Header.Closed == 0;
     }
 
+#if !defined(WKNET_USER_MODE_TEST)
     void EnsureLockInitialized(HttpCacheHandle cache) noexcept
     {
-#if defined(WKNET_USER_MODE_TEST)
-        UNREFERENCED_PARAMETER(cache);
-#else
         if (cache == nullptr ||
             InterlockedCompareExchange(&cache->LockInitialized, 0, 0) == 2) {
             return;
@@ -64,8 +62,8 @@ namespace
         while (InterlockedCompareExchange(&cache->LockInitialized, 0, 0) != 2) {
             KeDelayExecutionThread(KernelMode, FALSE, &delay);
         }
-#endif
     }
+#endif
 
     void AcquireCacheLock(HttpCacheHandle cache) noexcept
     {

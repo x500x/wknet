@@ -6,7 +6,7 @@ x509_extensions = v3_req
 
 [req_distinguished_name]
 CN = localhost
-O = KernelHttp Test
+O = wknet Test
 
 [v3_req]
 basicConstraints = critical,CA:FALSE

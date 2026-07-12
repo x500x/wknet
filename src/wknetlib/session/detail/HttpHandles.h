@@ -4,6 +4,7 @@
 #include "session/HandleTypes.h"
 #include <wknet/http/Types.h>
 #include "net/WskClient.h"
+#include "tls/CertificateStore.h"
 
 namespace wknet::http {
 namespace detail
@@ -13,6 +14,7 @@ namespace detail
     constexpr ULONG HighHeadersMagic = 0x4B484432;
     constexpr ULONG HighBodyMagic = 0x4B484232;
     constexpr ULONG HighCacheMagic = 0x4B484332;
+    constexpr ULONG HighCertificateStoreMagic = 0x4B484353;
 
     enum class BodyStorageKind : ULONG
     {
@@ -108,6 +110,24 @@ struct Cache final
     ::wknet::session::HttpCacheHandle Engine = nullptr;
 };
 
+struct CertificateStore final
+{
+    ULONG Magic = detail::HighCertificateStoreMagic;
+    ::wknet::tls::CertificateStore* Engine = nullptr;
+    CertificateRevocationProviderCallback RevocationProvider = nullptr;
+    void* RevocationProviderContext = nullptr;
+    ::wknet::tls::CertificateTrustAnchor TrustAnchors[CertificateMaxTrustAnchors] = {};
+    SIZE_T TrustAnchorCount = 0;
+    ::wknet::tls::CertificateAuthorityBundle AuthorityBundles[CertificateMaxAuthorityBundles] = {};
+    UCHAR* OwnedAuthorityBundleData[CertificateMaxAuthorityBundles] = {};
+    SIZE_T AuthorityBundleCount = 0;
+    ::wknet::tls::CertificatePin Pins[CertificateMaxPins] = {};
+    SIZE_T PinCount = 0;
+    ::wknet::tls::CertificateRevocationEntry RevocationEntries[CertificateMaxRevocationEntries] = {};
+    SIZE_T RevocationEntryCount = 0;
+    ::wknet::tls::CertificateStoreOptions EngineOptions = {};
+};
+
 namespace detail
 {
     inline ::wknet::session::Session* ToApiSession(Session* s) noexcept
@@ -155,6 +175,17 @@ namespace detail
             return nullptr;
         }
         return cache->Engine;
+    }
+
+    inline ::wknet::tls::CertificateStore* ToInternalCertificateStore(
+        const CertificateStore* store) noexcept
+    {
+        if (store == nullptr ||
+            store->Magic != HighCertificateStoreMagic ||
+            store->Engine == nullptr) {
+            return nullptr;
+        }
+        return store->Engine;
     }
 
     inline const ::wknet::session::HttpCache* ToApiCacheConst(const Cache* cache) noexcept
@@ -244,8 +275,7 @@ namespace detail
             session->Engine = nullptr;
         }
         if (session->Wsk != nullptr) {
-            session->Wsk->Shutdown();
-            ::wknet::FreeNonPagedObject(session->Wsk);
+            ::wknet::net::WskClientClose(session->Wsk);
             session->Wsk = nullptr;
         }
         session->Magic = 0;
@@ -413,7 +443,7 @@ namespace detail
         dst.MinVersion = ToApiTlsVersion(src.MinVersion);
         dst.MaxVersion = ToApiTlsVersion(src.MaxVersion);
         dst.CertificatePolicy = ToApiCertPolicy(src.Certificate);
-        dst.CertificateStore = src.Store;
+        dst.CertificateStore = ToInternalCertificateStore(src.Store);
         dst.ServerName = src.ServerName;
         dst.ServerNameLength = src.ServerNameLength;
         dst.Alpn = src.Alpn;

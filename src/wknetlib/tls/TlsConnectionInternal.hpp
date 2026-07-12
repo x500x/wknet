@@ -1,6 +1,6 @@
 #pragma once
 
-#include "tls/TlsConnection.h"
+#include "tls/TlsConnectionPrivate.hpp"
 
 #include <wknet/WknetLimits.h>
 #include <wknet/crypto/CngProviderCache.h>
@@ -1656,7 +1656,7 @@ namespace tls
         }
 
         _Must_inspect_result_
-        inline NTSTATUS SendAll(core::ITransport& transport, const UCHAR* data, SIZE_T length) noexcept
+        inline NTSTATUS SendAll(transport::Transport* transport, const UCHAR* data, SIZE_T length) noexcept
         {
             if (!IsValidBuffer(data, length)) {
                 return STATUS_INVALID_PARAMETER;
@@ -1665,7 +1665,7 @@ namespace tls
             SIZE_T sentTotal = 0;
             while (sentTotal < length) {
                 SIZE_T sent = 0;
-                NTSTATUS status = transport.Send(data + sentTotal, length - sentTotal, &sent);
+                NTSTATUS status = transport::TransportSend(transport, data + sentTotal, length - sentTotal, &sent);
                 if (!NT_SUCCESS(status)) {
                     return status;
                 }
@@ -1682,7 +1682,7 @@ namespace tls
 
         _Must_inspect_result_
         inline NTSTATUS ReadExact(
-            core::ITransport& transport,
+            transport::Transport* transport,
             UCHAR* data,
             SIZE_T length,
             ULONG receiveTimeoutMilliseconds = WskOperationTimeoutMilliseconds,
@@ -1704,7 +1704,7 @@ namespace tls
                     return status;
                 }
 
-                status = transport.ReceiveWithTimeout(
+                status = transport::TransportReceiveWithTimeout(transport,
                     data + receivedTotal,
                     length - receivedTotal,
                     &received,

@@ -36,7 +36,7 @@
     <ClCompile Include="samples\HighLevelApiSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
-    <ClCompile Include="samples\KhttpSamples.cpp">
+    <ClCompile Include="samples\HttpApiSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
   </ItemGroup>
@@ -59,7 +59,7 @@
     <ClInclude Include="samples\HighLevelApiSamples.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
-    <ClInclude Include="samples\KhttpSamples.h">
+    <ClInclude Include="samples\HttpApiSamples.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
   </ItemGroup>

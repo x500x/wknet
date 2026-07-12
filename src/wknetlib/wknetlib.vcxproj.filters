@@ -30,7 +30,7 @@
     <Filter Include="Source Files\http2">
       <UniqueIdentifier>{9B7EAA2E-6E7E-4B4F-9B6C-28E4C0F3B2B5}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\khttp">
+    <Filter Include="Source Files\http_api">
       <UniqueIdentifier>{C8A1D720-C92E-4E2F-91A4-3F4B9C73C0FA}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\net">
@@ -63,10 +63,10 @@
     <Filter Include="Header Files\http2">
       <UniqueIdentifier>{2E6B0494-D9B1-4D13-8E4E-5D6D67D1CF11}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\khttp">
+    <Filter Include="Header Files\http">
       <UniqueIdentifier>{D9B2E831-DA3F-4F30-A2B5-405C0D84D1FB}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\kws">
+    <Filter Include="Header Files\websocket">
       <UniqueIdentifier>{C1083AE5-F39A-4B5C-9E2B-A0C9B2F91841}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\net">
@@ -98,7 +98,10 @@
     <ClCompile Include="session\WsConnection.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
-    <ClCompile Include="transport\TlsTransport.cpp">
+    <ClCompile Include="transport\Transport.cpp">
+      <Filter>Source Files\transport</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\TransportWsk.cpp">
       <Filter>Source Files\transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\ProxyConnect.cpp">
@@ -306,43 +309,46 @@
       <Filter>Source Files\http2</Filter>
     </ClCompile>
     <ClCompile Include="http_api\AsyncOp.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\Body.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\Cache.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
+    </ClCompile>
+    <ClCompile Include="http_api\Certificate.cpp">
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\Headers.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\Http.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\HttpAsync.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
-    <ClCompile Include="http_api\Khttp.cpp">
-      <Filter>Source Files\khttp</Filter>
+    <ClCompile Include="http_api\Test.cpp">
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\Lifecycle.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\Options.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\Request.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\Response.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\Session.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="http_api\WebSocket.cpp">
-      <Filter>Source Files\khttp</Filter>
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="net\WskClient.cpp">
       <Filter>Source Files\net</Filter>
@@ -445,24 +451,6 @@
     <ClInclude Include="session\WsConnection.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\transport\IScratchAllocator.h">
-      <Filter>Header Files\core</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\transport\ITransport.h">
-      <Filter>Header Files\core</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\transport\Irql.h">
-      <Filter>Header Files\core</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\transport\TlsTransport.h">
-      <Filter>Header Files\core</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\transport\WorkspaceScratchAllocator.h">
-      <Filter>Header Files\core</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\transport\WskTransport.h">
-      <Filter>Header Files\core</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\wknet\crypto\Aead.h">
       <Filter>Header Files\crypto</Filter>
     </ClInclude>
@@ -481,80 +469,41 @@
     <ClInclude Include="..\..\include\wknet\crypto\KeyExchange.h">
       <Filter>Header Files\crypto</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\Engine.h">
-      <Filter>Header Files\engine</Filter>
-    </ClInclude>
     <ClInclude Include="session\EnginePrivate.hpp">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\EngineImpl.h">
+    <ClInclude Include="session\ConnectionPoolPrivate.hpp">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\EngineInternal.h">
-      <Filter>Header Files\engine</Filter>
+    <ClInclude Include="transport\Transport.h">
+      <Filter>Header Files\core</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\EngineUtils.h">
-      <Filter>Header Files\engine</Filter>
+    <ClInclude Include="transport\TransportPrivate.hpp">
+      <Filter>Header Files\core</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\HandleAlloc.h">
-      <Filter>Header Files\engine</Filter>
+    <ClInclude Include="net\WskClientPrivate.hpp">
+      <Filter>Header Files\net</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\HandleTypes.h">
-      <Filter>Header Files\engine</Filter>
+    <ClInclude Include="net\WskSocketPrivate.hpp">
+      <Filter>Header Files\net</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\HttpEngine.h">
-      <Filter>Header Files\engine</Filter>
+    <ClInclude Include="http2\Http2ConnectionPrivate.hpp">
+      <Filter>Header Files\http2</Filter>
+    </ClInclude>
+    <ClInclude Include="tls\TlsConnectionPrivate.hpp">
+      <Filter>Header Files\tls</Filter>
     </ClInclude>
     <ClInclude Include="session\HttpEngineInternal.hpp">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\HttpCache.h">
-      <Filter>Header Files\engine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\UrlParser.h">
-      <Filter>Header Files\engine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\WsEngine.h">
-      <Filter>Header Files\engine</Filter>
-    </ClInclude>
     <ClInclude Include="session\WsEngineInternal.hpp">
       <Filter>Header Files\engine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\Async.h">
-      <Filter>Header Files\engine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\ConnectionPool.h">
-      <Filter>Header Files\engine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\session\Workspace.h">
-      <Filter>Header Files\engine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http1\HttpContentEncoding.h">
-      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="codec\ContentCoding.h">
       <Filter>Header Files\codec</Filter>
     </ClInclude>
     <ClInclude Include="codec\CodecInternal.h">
       <Filter>Header Files\codec</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http1\HttpCachePolicy.h">
-      <Filter>Header Files\http</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http1\HttpParser.h">
-      <Filter>Header Files\http</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http1\HttpRequest.h">
-      <Filter>Header Files\http</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http1\HttpResponse.h">
-      <Filter>Header Files\http</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http1\HttpTransferCoding.h">
-      <Filter>Header Files\http</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http1\HttpTypes.h">
-      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="codec\ExiDecoder.h">
       <Filter>Header Files\codec</Filter>
@@ -613,110 +562,44 @@
     <ClInclude Include="rtl\Text.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http2\Hpack.h">
-      <Filter>Header Files\http2</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http2\HpackHuffman.h">
-      <Filter>Header Files\http2</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http2\HpackStaticTable.h">
-      <Filter>Header Files\http2</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http2\Http2Connection.h">
-      <Filter>Header Files\http2</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http2\Http2Frame.h">
-      <Filter>Header Files\http2</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http2\Http2Stream.h">
-      <Filter>Header Files\http2</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\AsyncOp.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\Body.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\Cache.h">
-      <Filter>Header Files\khttp</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http\Detail.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\Headers.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\Http.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\HttpAsync.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\Options.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\Request.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\Response.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\Session.h">
-      <Filter>Header Files\khttp</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\http\Test.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\wknet\http\Types.h">
-      <Filter>Header Files\khttp</Filter>
+      <Filter>Header Files\http</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\wknet\ws\WebSocket.h">
-      <Filter>Header Files\kws</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\net\WskBuffer.h">
-      <Filter>Header Files\net</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\net\WskClient.h">
-      <Filter>Header Files\net</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\net\WskSocket.h">
-      <Filter>Header Files\net</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\tls\TlsContext.h">
-      <Filter>Header Files\tls</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\tls\CertificateStore.h">
-      <Filter>Header Files\tls</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\tls\CertificateValidator.h">
-      <Filter>Header Files\tls</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\tls\TlsCapabilities.h">
-      <Filter>Header Files\tls</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\tls\TlsConnection.h">
+    <ClInclude Include="tls\CertificateStore.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
     <ClInclude Include="tls\TlsConnectionInternal.hpp">
       <Filter>Header Files\tls</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\tls\TlsHandshake12.h">
-      <Filter>Header Files\tls</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\tls\TlsHandshake13.h">
-      <Filter>Header Files\tls</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\tls\TlsPolicy.h">
-      <Filter>Header Files\tls</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\tls\TlsRecord.h">
-      <Filter>Header Files\tls</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\ws\WebSocketDeflate.h">
-      <Filter>Header Files\websocket</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\wknet\ws\WebSocketFrame.h">
-      <Filter>Header Files\websocket</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

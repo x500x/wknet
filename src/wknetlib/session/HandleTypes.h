@@ -50,7 +50,7 @@ namespace session
         SessionOptions Options = {};
         Workspace* Workspace = nullptr;
         HttpCache* Cache = nullptr;
-        core::LookasideList WorkspaceLookaside = {};
+        rtl::LookasideList WorkspaceLookaside = {};
         crypto::CngProviderCache* ProviderCache = nullptr;
         ConnectionPool ConnectionPool = {};
         volatile LONG InFlight = 0;
