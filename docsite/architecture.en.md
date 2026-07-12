@@ -24,4 +24,4 @@ See [Transport Layer](transport-layer.md), [Memory Model](memory-model.md), [Con
 
 ### Kernel-constrained design
 
-No exceptions, no RTTI; avoid raw `new/delete` (the lib overrides them to non-paged pool in `KernelHttpConfig.cpp`); heap via `HeapObject<T>`/`HeapArray<T>`; no stack buffers in the lib; hot buffers resident in the Workspace; synchronous paths at `PASSIVE_LEVEL`; all public functions `noexcept` with SAL annotations.
+No exceptions, no RTTI; avoid raw `new/delete` (the lib overrides them to non-paged pool in `WknetConfig.cpp`); heap via `HeapObject<T>`/`HeapArray<T>`; no stack buffers in the lib; hot buffers resident in the Workspace; synchronous paths at `PASSIVE_LEVEL`; all public functions `noexcept` with SAL annotations.

@@ -12,7 +12,7 @@
 **HTTP/2**
 - server push（客户端 `ENABLE_PUSH=0`，收到 `PUSH_PROMISE` 安全拒绝）
 
-**WebSocket**（注：分片发送 `kws::SendContinuation` 与显式接收分片 `ReceiveOptions.DeliverFragments=true` **已支持**）
+**WebSocket**（注：分片发送 `wknet::websocket::SendContinuation` 与显式接收分片 `ReceiveOptions.DeliverFragments=true` **已支持**）
 - 握手 redirect / 401 / 407 跟随（当前安全拒绝为 `STATUS_NOT_SUPPORTED`；未来若做必须显式 opt-in）
 
 **TLS**

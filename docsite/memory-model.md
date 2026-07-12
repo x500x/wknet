@@ -4,7 +4,7 @@
 
 - **无异常、无 RTTI**；避免直接 `new/delete`。
 - **lib 内禁止栈缓冲**——一切走堆；高频缓冲常驻 Workspace（避免反复分配）。
-- 全局 `new`/`delete` 在 `KernelHttpConfig.cpp` 被重载，路由到**非分页池**，统一池标记 `KERNEL_HTTP_POOL_TAG = 'ptHK'`。
+- 全局 `new`/`delete` 在 `WknetConfig.cpp` 被重载，路由到**非分页池**，统一池标记 `WKNET_POOL_TAG = 'tenW'`。
 
 ### 堆封装（`http/HttpTypes.h`）
 

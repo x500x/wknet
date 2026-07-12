@@ -28,8 +28,8 @@
 
 ### 请求生命周期（高层同步 GET 为例）
 
-1. `khttp::SessionCreate` 创建隐藏 WSK runtime，并创建 engine session、`KhWorkspace`、`CngProviderCache`、`KhConnectionPool`。
-2. `khttp::GetEx` / `SendEx` 接收 send handle、method、URL、headers/body/options → 解析 URL → 按 `KhConnectionPoolKey` 从连接池 acquire 连接（命中则复用，未命中则新建：WSK connect → 可选 TLS handshake → 可选 HTTP/2 init）。
+1. `wknet::http::SessionCreate` 创建隐藏 WSK runtime，并创建 engine session、`KhWorkspace`、`CngProviderCache`、`KhConnectionPool`。
+2. `wknet::http::GetEx` / `SendEx` 接收 send handle、method、URL、headers/body/options → 解析 URL → 按 `KhConnectionPoolKey` 从连接池 acquire 连接（命中则复用，未命中则新建：WSK connect → 可选 TLS handshake → 可选 HTTP/2 init）。
 3. 在 Workspace 缓冲内构建请求、发送、解析响应（解链 Transfer-Encoding / Content-Encoding）。
 4. 连接按 keep-alive 规则 release 回池；`Response` 句柄独立返回。
 5. `ResponseRelease` / `SessionClose` 释放。
@@ -50,7 +50,7 @@
 
 ### 内核约束下的设计
 
-- **无异常、无 RTTI**；避免直接 `new/delete`（lib 内通过 `KernelHttpConfig.cpp` 重载 `new/delete` 路由到非分页池）。
+- **无异常、无 RTTI**；避免直接 `new/delete`（lib 内通过 `WknetConfig.cpp` 重载 `new/delete` 路由到非分页池）。
 - 统一用 `HeapObject<T>` / `HeapArray<T>` 管理堆内存（`http/HttpTypes.h`）。
 - **lib 内禁止栈缓冲**；高频缓冲常驻 Workspace。
 - 同步路径要求 `PASSIVE_LEVEL`；异步带并发保护与 Workspace 隔离。
@@ -59,9 +59,9 @@
 ### 目录速查
 
 ```
-include/KernelHttp/
-├── KernelHttp.h         # 总头文件入口
-├── KernelHttpConfig.h   # 池标记、分配器、RAII、配置常量
+include/wknet/
+├── Wknet.h         # 总头文件入口
+├── WknetConfig.h   # 池标记、分配器、RAII、配置常量
 ├── client/              # HttpClient/HttpsClient/Http2Client/WebSocketClient
 ├── core/                # ITransport / 传输适配器 / scratch allocator
 ├── khttp/               # 高层 HTTP API（namespace khttp）

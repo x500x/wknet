@@ -91,12 +91,12 @@ The following header files are involved in the low-level API:
 
 | Header | Contents |
 |--------|----------|
-| `KernelHttp/KernelHttp.h` | Main entry; includes low-level engine API |
-| `KernelHttp/engine/Engine.h` | Low-level session, request, response, async operations |
-| `KernelHttp/engine/Async.h` | Async operations and runtime |
-| `KernelHttp/engine/Workspace.h` | Workspace buffer management |
-| `KernelHttp/engine/ConnectionPool.h` | Connection pool |
-| `KernelHttp/engine/Types.h` | Low-level enums, structs, config types |
+| `wknet/Wknet.h` | Main entry; includes low-level engine API |
+| `wknet/engine/Engine.h` | Low-level session, request, response, async operations |
+| `wknet/engine/Async.h` | Async operations and runtime |
+| `wknet/engine/Workspace.h` | Workspace buffer management |
+| `wknet/engine/ConnectionPool.h` | Connection pool |
+| `wknet/engine/Types.h` | Low-level enums, structs, config types |
 
 ### Handle Types
 
@@ -232,7 +232,7 @@ NTSTATUS KhSessionCreate(
 ) noexcept;
 ```
 
-Creates a low-level HTTP/WS session. Unlike the high-level `khttp::SessionCreate`, the low-level version requires passing `net::WskClient*`.
+Creates a low-level HTTP/WS session. Unlike the high-level `wknet::http::SessionCreate`, the low-level version requires passing `net::WskClient*`.
 
 | Parameter | Description |
 |-----------|-------------|
@@ -1095,7 +1095,7 @@ No parameters.
 
 No return value.
 
-### Test Hooks (only `KERNEL_HTTP_USER_MODE_TEST`)
+### Test Hooks (only `WKNET_USER_MODE_TEST`)
 
 These functions are used for unit tests; not included in kernel builds:
 

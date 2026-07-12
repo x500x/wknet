@@ -5,71 +5,71 @@
 #### 发送一个 GET 请求
 
 ```cpp
-khttp::Session* session = nullptr;
-khttp::Response* response = nullptr;
+wknet::http::Session* session = nullptr;
+wknet::http::Response* response = nullptr;
 
 // 创建会话
-khttp::SessionCreate(&session);
+wknet::http::SessionCreate(&session);
 
 // 发送 GET 请求
-khttp::Get(session, "https://httpbin.org/get", &response);
+wknet::http::Get(session, "https://httpbin.org/get", &response);
 
 // 读取响应
 if (response) {
-    ULONG statusCode = khttp::ResponseStatusCode(response);
-    const UCHAR* body = khttp::ResponseBody(response);
-    SIZE_T bodyLength = khttp::ResponseBodyLength(response);
+    ULONG statusCode = wknet::http::ResponseStatusCode(response);
+    const UCHAR* body = wknet::http::ResponseBody(response);
+    SIZE_T bodyLength = wknet::http::ResponseBodyLength(response);
 }
 
 // 释放资源
-khttp::ResponseRelease(response);
-khttp::SessionClose(session);
+wknet::http::ResponseRelease(response);
+wknet::http::SessionClose(session);
 ```
 
 #### 发送 POST JSON
 
 ```cpp
-khttp::Session* session = nullptr;
-khttp::Response* response = nullptr;
+wknet::http::Session* session = nullptr;
+wknet::http::Response* response = nullptr;
 
-khttp::SessionCreate(&session);
+wknet::http::SessionCreate(&session);
 
 // 创建 JSON 请求体
-khttp::Body* body = nullptr;
-khttp::BodyCreateJsonCopy("{\"key\":\"value\"}", 13, &body);
+wknet::http::Body* body = nullptr;
+wknet::http::BodyCreateJsonCopy("{\"key\":\"value\"}", 13, &body);
 
 // 发送 POST 请求
-khttp::Post(session, "https://httpbin.org/post", body, &response);
+wknet::http::Post(session, "https://httpbin.org/post", body, &response);
 
-khttp::BodyRelease(body);
-khttp::ResponseRelease(response);
-khttp::SessionClose(session);
+wknet::http::BodyRelease(body);
+wknet::http::ResponseRelease(response);
+wknet::http::SessionClose(session);
 ```
 
 #### 异步请求
 
 ```cpp
-khttp::AsyncOp* op = nullptr;
-khttp::Response* response = nullptr;
+wknet::http::AsyncOp* op = nullptr;
+wknet::http::Response* response = nullptr;
 
 // 异步发送 GET
-khttp::AsyncGet(session, "https://httpbin.org/get", &op);
+wknet::http::AsyncGet(session, "https://httpbin.org/get", &op);
 
 // 等待完成
-khttp::AsyncWait(op, 30000);
+wknet::http::AsyncWait(op, 30000);
 
 // 获取响应
-khttp::AsyncGetResponse(op, &response);
+wknet::http::AsyncGetResponse(op, &response);
 
-khttp::ResponseRelease(response);
-khttp::AsyncRelease(op);
+wknet::http::ResponseRelease(response);
+wknet::http::AsyncRelease(op);
 ```
 
 ### 阅读约定
 
 在使用高层 API 前，请记住以下几点：
 
-- **句柄都是堆对象**：所有高层公开句柄（`Session`、`Request`、`Response`、`AsyncOp`、`Headers`、`Body`、`kws::WebSocket`）都是不透明的堆指针。不要在栈上声明这些对象，使用对应的 `Create` 函数创建，用匹配的 `Close` / `Release` 函数释放。
+- **句柄都是堆对象**：所有高层公开句柄（`Session`、`Request`、`Response`、`AsyncOp`、`Headers`、`Body`、`wknet::websocket::WebSocket`）都是不透明的堆指针。不要在栈上声明这些对象，使用对应的 `Create` 函数创建，用匹配的 `Close` / `Release` 函数释放。
 - **选项也是堆对象**：`SendOptions` / `AsyncOptions` 同样需要通过 `SendOptionsCreate` / `AsyncOptionsCreate` 创建，拿到指针后再修改字段。
 - **调用级别**：所有高层 HTTP/WS 调用必须在 `PASSIVE_LEVEL` 执行。
 - **错误处理**：返回值统一为 `NTSTATUS`，用 `NT_SUCCESS(status)` 判断成功。标记 `_Must_inspect_result_` 的返回值必须检查，这是内核代码的基本纪律。
@@ -79,23 +79,23 @@ khttp::AsyncRelease(op);
 
 ### 头文件总览
 
-以下是高层 API 涉及的主要头文件。大多数情况下，你只需要包含 `KernelHttp/KernelHttp.h` 即可使用所有功能，但了解各个头文件的职责有助于理解代码组织：
+以下是高层 API 涉及的主要头文件。大多数情况下，你只需要包含 `wknet/Wknet.h` 即可使用所有功能，但了解各个头文件的职责有助于理解代码组织：
 
 | 头文件 | 内容 |
 |--------|------|
-| `KernelHttp/KernelHttp.h` | 总入口，包含高层 HTTP、WebSocket、底层 engine 与基础类型 |
-| `KernelHttp/khttp/Types.h` | 枚举、配置结构体、回调类型、公开常量 |
-| `KernelHttp/khttp/Session.h` | `SessionCreate` / `SessionClose` |
-| `KernelHttp/khttp/Request.h` | `RequestCreate` / `RequestRelease` |
-| `KernelHttp/khttp/Headers.h` | `Headers` 句柄创建、添加、释放 |
-| `KernelHttp/khttp/Body.h` | `Body` 句柄创建、模式、trailer、释放 |
-| `KernelHttp/khttp/Options.h` | `SendOptions` / `AsyncOptions` 创建与释放 |
-| `KernelHttp/khttp/Http.h` | 同步 HTTP 发送与便捷函数（Get、Post 等） |
-| `KernelHttp/khttp/HttpAsync.h` | 异步 HTTP 发送与便捷函数（AsyncGet、AsyncPost 等） |
-| `KernelHttp/khttp/AsyncOp.h` | 异步操作等待、取消、取结果、释放 |
-| `KernelHttp/khttp/Response.h` | 响应只读访问与释放 |
-| `KernelHttp/khttp/Lifecycle.h` | `Destroy` 异步收尾入口 |
-| `KernelHttp/kws/WebSocket.h` | 高层 WebSocket 连接、收发、关闭 |
+| `wknet/Wknet.h` | 总入口，包含高层 HTTP、WebSocket、底层 engine 与基础类型 |
+| `wknet/http/Types.h` | 枚举、配置结构体、回调类型、公开常量 |
+| `wknet/http/Session.h` | `SessionCreate` / `SessionClose` |
+| `wknet/http/Request.h` | `RequestCreate` / `RequestRelease` |
+| `wknet/http/Headers.h` | `Headers` 句柄创建、添加、释放 |
+| `wknet/http/Body.h` | `Body` 句柄创建、模式、trailer、释放 |
+| `wknet/http/Options.h` | `SendOptions` / `AsyncOptions` 创建与释放 |
+| `wknet/http/Http.h` | 同步 HTTP 发送与便捷函数（Get、Post 等） |
+| `wknet/http/HttpAsync.h` | 异步 HTTP 发送与便捷函数（AsyncGet、AsyncPost 等） |
+| `wknet/http/AsyncOp.h` | 异步操作等待、取消、取结果、释放 |
+| `wknet/http/Response.h` | 响应只读访问与释放 |
+| `wknet/http/Lifecycle.h` | `Destroy` 异步收尾入口 |
+| `wknet/websocket/WebSocket.h` | 高层 WebSocket 连接、收发、关闭 |
 
 ## 类型与结构体总览
 
@@ -252,14 +252,14 @@ struct TlsConfig final {
     TlsVersion MinVersion;
     TlsVersion MaxVersion;
     CertPolicy Certificate;
-    const KernelHttp::tls::CertificateStore* Store;
+    const wknet::tls::CertificateStore* Store;
     const char* ServerName;
     SIZE_T ServerNameLength;
     const char* Alpn;
     SIZE_T AlpnLength;
     bool PreferHttp2;
-    KernelHttp::tls::TlsPolicy Policy;
-    const KernelHttp::tls::TlsClientCredential* ClientCredential;
+    wknet::tls::TlsPolicy Policy;
+    const wknet::tls::TlsClientCredential* ClientCredential;
     ULONG HandshakeTimeoutMs;
     ULONG MaxTls12Renegotiations;
 };
@@ -357,7 +357,7 @@ struct SendOptions final {
     ConnPolicy ConnectionPolicy;
     AddressFamily Family;
     Http2CleartextMode Http2CleartextMode;
-    const ::KernelHttp::http2::Http2Priority* Http2Priority;
+    const ::wknet::http2::Http2Priority* Http2Priority;
     Cache* Cache;
 };
 ```
@@ -450,7 +450,7 @@ struct MultipartPart final {
 
 以下是 WebSocket 相关的结构体。WebSocket 提供了全双工通信能力，适合实时数据推送、聊天、游戏等场景。
 
-#### `kws::Header`
+#### `wknet::websocket::Header`
 
 `Header` 结构体用于在 WebSocket 连接时添加额外的 HTTP 头。这些头会在 opening handshake 时发送给服务器。
 
@@ -465,7 +465,7 @@ struct Header final {
 
 可以添加的头包括 `Origin`、`Authorization`、`Cookie` 等。但库受控头如 `Host`、`Connection`、`Upgrade`、`Sec-WebSocket-*` 会被拒绝，因为这些头由库自动管理。
 
-#### `kws::ConnectConfig`
+#### `wknet::websocket::ConnectConfig`
 
 `ConnectConfig` 结构体用于配置 WebSocket 连接参数。你可以设置 URL、子协议、额外头、TLS 配置等。
 
@@ -477,12 +477,12 @@ struct ConnectConfig final {
     SIZE_T SubprotocolLength;
     const Header* Headers;
     SIZE_T HeaderCount;
-    khttp::TlsConfig Tls;
-    khttp::AddressFamily Family;
+    wknet::http::TlsConfig Tls;
+    wknet::http::AddressFamily Family;
     SIZE_T MaxMessageBytes;
     bool AutoReplyPing;
     bool AllowWebSocketOverHttp2;
-    khttp::WebSocketTransportMode TransportMode;
+    wknet::http::WebSocketTransportMode TransportMode;
 };
 ```
 
@@ -498,7 +498,7 @@ struct ConnectConfig final {
 | `AllowWebSocketOverHttp2` | `false` | `LegacyBoolean` 兼容字段；新代码优先使用 `TransportMode` |
 | `TransportMode` | `Auto` | `wss` 默认自动选择 RFC 8441 WebSocket over HTTP/2；使用 `Http11Only` 可强制 HTTP/1.1 |
 
-#### `kws::SendOptions`
+#### `wknet::websocket::SendOptions`
 
 `SendOptions` 结构体用于控制 WebSocket 消息的发送行为，特别是分片消息。
 
@@ -510,7 +510,7 @@ struct SendOptions final {
 
 `FinalFragment=false` 用于发送分片消息的非最后帧，后续用 `SendContinuation` / `SendContinuationEx` 续发。分片消息适合发送大块数据，避免一次性占用太多内存。
 
-#### `kws::ReceiveOptions`
+#### `wknet::websocket::ReceiveOptions`
 
 `ReceiveOptions` 结构体用于控制 WebSocket 消息的接收行为。
 
@@ -530,7 +530,7 @@ struct ReceiveOptions final {
 | `OnMessage` | `nullptr` | 收到消息/分片时的回调。用于流式处理消息 |
 | `CallbackContext` | `nullptr` | 传给 `OnMessage` 的上下文 |
 
-#### `kws::Message`
+#### `wknet::websocket::Message`
 
 `Message` 结构体表示接收到的 WebSocket 消息。它包含了消息类型、数据、以及分片信息。
 
@@ -559,7 +559,7 @@ struct Message final {
 | `DefaultTlsConfig` | 返回默认 TLS 配置值 |
 | `DefaultSessionConfig` | 返回默认会话配置值 |
 | `DefaultSendOptions` | 返回默认发送选项值；正式使用优先选择 `SendOptionsCreate` |
-| `kws::DefaultConnectConfig` | 返回默认 WebSocket 连接配置值 |
+| `wknet::websocket::DefaultConnectConfig` | 返回默认 WebSocket 连接配置值 |
 
 ### HTTP 生命周期与句柄
 
@@ -645,13 +645,13 @@ struct Message final {
 
 | 函数族 | 功能 |
 |--------|------|
-| `kws::Connect` / `ConnectEx` | 同步连接 WebSocket |
-| `kws::ConnectAsync` / `ConnectAsyncEx` | 异步连接 WebSocket |
-| `kws::AsyncGetWebSocket` | 从异步操作取 WebSocket 句柄 |
-| `kws::SendText*` / `SendBinary*` / `SendContinuation*` / `SendPing` / `SendPong` | 发送 WebSocket 帧 |
-| `kws::Receive` / `ReceiveEx` | 接收 WebSocket 消息 |
-| `kws::Close` / `CloseEx` | 关闭 WebSocket |
-| `kws::SelectedSubprotocol` | 查询协商子协议 |
+| `wknet::websocket::Connect` / `ConnectEx` | 同步连接 WebSocket |
+| `wknet::websocket::ConnectAsync` / `ConnectAsyncEx` | 异步连接 WebSocket |
+| `wknet::websocket::AsyncGetWebSocket` | 从异步操作取 WebSocket 句柄 |
+| `wknet::websocket::SendText*` / `SendBinary*` / `SendContinuation*` / `SendPing` / `SendPong` | 发送 WebSocket 帧 |
+| `wknet::websocket::Receive` / `ReceiveEx` | 接收 WebSocket 消息 |
+| `wknet::websocket::Close` / `CloseEx` | 关闭 WebSocket |
+| `wknet::websocket::SelectedSubprotocol` | 查询协商子协议 |
 
 ## 函数详细参考
 
@@ -1776,10 +1776,10 @@ void ResponseRelease(
 
 这些函数用于 WebSocket 连接和通信。WebSocket 提供全双工通信能力，适合实时数据推送、聊天、游戏等场景。
 
-### `kws::DefaultConnectConfig`
+### `wknet::websocket::DefaultConnectConfig`
 
 ```cpp
-kws::ConnectConfig DefaultConnectConfig() noexcept;
+wknet::websocket::ConnectConfig DefaultConnectConfig() noexcept;
 ```
 
 返回默认 WebSocket 连接配置。在创建连接前，可以先用这个函数获取默认配置，然后根据需要修改。
@@ -1788,12 +1788,12 @@ kws::ConnectConfig DefaultConnectConfig() noexcept;
 
 返回值：`ConnectConfig` 值
 
-### `kws::Connect` / `kws::ConnectEx`
+### `wknet::websocket::Connect` / `wknet::websocket::ConnectEx`
 
 ```cpp
 // 简单版本：只传 URL
 NTSTATUS Connect(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const char* url,
     _In_ SIZE_T urlLength,
     _Out_ WebSocket** websocket
@@ -1801,13 +1801,13 @@ NTSTATUS Connect(
 
 // 完整版本：传配置结构体
 NTSTATUS Connect(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const ConnectConfig* config,
     _Out_ WebSocket** websocket
 ) noexcept;
 
 NTSTATUS ConnectEx(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const ConnectConfig* config,
     _Out_ WebSocket** websocket
 ) noexcept;
@@ -1824,36 +1824,36 @@ NTSTATUS ConnectEx(
 
 返回值：`STATUS_SUCCESS`、`STATUS_INVALID_PARAMETER`、`STATUS_NOT_SUPPORTED`、网络/TLS/HTTP 握手失败状态
 
-### `kws::ConnectAsync` / `kws::ConnectAsyncEx`
+### `wknet::websocket::ConnectAsync` / `wknet::websocket::ConnectAsyncEx`
 
 ```cpp
 NTSTATUS ConnectAsync(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const char* url,
     _In_ SIZE_T urlLength,
-    _Out_ khttp::AsyncOp** operation
+    _Out_ wknet::http::AsyncOp** operation
 ) noexcept;
 
 NTSTATUS ConnectAsync(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const ConnectConfig* config,
-    _Out_ khttp::AsyncOp** operation
+    _Out_ wknet::http::AsyncOp** operation
 ) noexcept;
 
 NTSTATUS ConnectAsyncEx(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const ConnectConfig* config,
-    _Out_ khttp::AsyncOp** operation
+    _Out_ wknet::http::AsyncOp** operation
 ) noexcept;
 ```
 
-异步建立 WebSocket 连接。参数与 `Connect` 类似，但输出为 `AsyncOp**`。成功后用 `AsyncWait` 等待，再用 `kws::AsyncGetWebSocket` 取连接。
+异步建立 WebSocket 连接。参数与 `Connect` 类似，但输出为 `AsyncOp**`。成功后用 `AsyncWait` 等待，再用 `wknet::websocket::AsyncGetWebSocket` 取连接。
 
-### `kws::AsyncGetWebSocket`
+### `wknet::websocket::AsyncGetWebSocket`
 
 ```cpp
 NTSTATUS AsyncGetWebSocket(
-    _In_ khttp::AsyncOp* operation,
+    _In_ wknet::http::AsyncOp* operation,
     _Out_ WebSocket** websocket
 ) noexcept;
 ```
@@ -1929,7 +1929,7 @@ NTSTATUS SendPong(
 
 返回值：`STATUS_SUCCESS`、`STATUS_INVALID_PARAMETER`、连接关闭/断开/超时等传输失败状态
 
-### `kws::Receive` / `kws::ReceiveEx`
+### `wknet::websocket::Receive` / `wknet::websocket::ReceiveEx`
 
 ```cpp
 NTSTATUS Receive(
@@ -1954,7 +1954,7 @@ NTSTATUS ReceiveEx(
 
 返回值：`STATUS_SUCCESS`、`STATUS_INVALID_PARAMETER`、`STATUS_BUFFER_TOO_SMALL`、连接关闭/断开/超时等状态
 
-### `kws::Close` / `kws::CloseEx`
+### `wknet::websocket::Close` / `wknet::websocket::CloseEx`
 
 ```cpp
 NTSTATUS Close(
@@ -1982,7 +1982,7 @@ NTSTATUS CloseEx(
 
 NOTE: 不要在同一 `WebSocket` 上并发执行 `Close` 和新的发送/接收。关闭操作应该是最后的操作。
 
-### `kws::SelectedSubprotocol`
+### `wknet::websocket::SelectedSubprotocol`
 
 ```cpp
 NTSTATUS SelectedSubprotocol(

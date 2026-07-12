@@ -3,14 +3,14 @@
 ### 构建库
 
 ```powershell
-# 构建 KernelHttpLib 全部内核 ABI（x64、ARM64）
+# 构建 wknetlib 全部内核 ABI（x64、ARM64）
 pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1
 
 # 只构建单个 ABI（脚本会先检查对应 ABI 的 MSVC/WDK 工具链）
 pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1 -Configuration Debug -Platform x64
 
 # 直接 msbuild（带 restore，构建库 + 示例驱动）
-msbuild KernelHttp.sln /m /restore /p:Configuration=Debug /p:Platform=x64
+msbuild wknet.sln /m /restore /p:Configuration=Debug /p:Platform=x64
 ```
 
 > 约定：使用 `pwsh`，不要用 `powershell`（两者语法有差异）。Debug/Release 构建均视警告为错误并保持最高警告等级。

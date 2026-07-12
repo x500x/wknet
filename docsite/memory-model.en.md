@@ -1,6 +1,6 @@
 # Memory Model
 
-Kernel constraints: no exceptions, no RTTI, no raw `new/delete`, **no stack buffers in the lib** — everything on heap, hot buffers resident in the Workspace. Global `new`/`delete` are overridden in `KernelHttpConfig.cpp` to non-paged pool under tag `'ptHK'`.
+Kernel constraints: no exceptions, no RTTI, no raw `new/delete`, **no stack buffers in the lib** — everything on heap, hot buffers resident in the Workspace. Global `new`/`delete` are overridden in `WknetConfig.cpp` to non-paged pool under tag `'tenW'`.
 
 Heap wrappers (`http/HttpTypes.h`): `HeapArray<T>` and `HeapObject<T>` (RAII, non-copyable) over `AllocateNonPagedObject/Array/Bytes` helpers with overflow validation.
 

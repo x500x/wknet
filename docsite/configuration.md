@@ -1,8 +1,8 @@
 # 配置项与常量
 
-### 高层会话配置 `khttp::SessionConfig`
+### 高层会话配置 `wknet::http::SessionConfig`
 
-用 `khttp::DefaultSessionConfig()` 取默认值后按需覆盖：
+用 `wknet::http::DefaultSessionConfig()` 取默认值后按需覆盖：
 
 | 字段 | 类型 | 默认 | 说明 |
 |------|------|------|------|
@@ -19,7 +19,7 @@
 | `Tls` | `TlsConfig` | 见下 | TLS 子配置 |
 | `Proxy` | `ProxyConfig` | disabled | 显式 HTTP 代理配置；HTTPS 使用 CONNECT，明文 HTTP 使用 absolute-form |
 
-### 高层 TLS 配置 `khttp::TlsConfig`（`DefaultTlsConfig()`）
+### 高层 TLS 配置 `wknet::http::TlsConfig`（`DefaultTlsConfig()`）
 
 | 字段 | 类型 | 默认 |
 |------|------|------|
@@ -47,24 +47,24 @@
 ### 连接策略与地址族（单次发送）
 
 ```cpp
-khttp::SendOptions* options = nullptr;
-khttp::SendOptionsCreate(&options);
-options->ConnectionPolicy = khttp::ConnPolicy::ReuseOrCreate; // 复用或新建（默认）
-options->ConnectionPolicy = khttp::ConnPolicy::ForceNew;      // 强制新建
-options->ConnectionPolicy = khttp::ConnPolicy::NoPool;        // 不进连接池
-options->Family = khttp::AddressFamily::Ipv4;                 // Any / Ipv4 / Ipv6
-khttp::SendOptionsRelease(options);
+wknet::http::SendOptions* options = nullptr;
+wknet::http::SendOptionsCreate(&options);
+options->ConnectionPolicy = wknet::http::ConnPolicy::ReuseOrCreate; // 复用或新建（默认）
+options->ConnectionPolicy = wknet::http::ConnPolicy::ForceNew;      // 强制新建
+options->ConnectionPolicy = wknet::http::ConnPolicy::NoPool;        // 不进连接池
+options->Family = wknet::http::AddressFamily::Ipv4;                 // Any / Ipv4 / Ipv6
+wknet::http::SendOptionsRelease(options);
 ```
 
-### 单次发送覆盖 `khttp::SendOptions`
+### 单次发送覆盖 `wknet::http::SendOptions`
 
 见 [高层 API](high-level-api.md)：`MaxResponseBytes`、`Flags`、`MaxRedirects`、`OnHeader`/`OnBody`（流式）、TLS 覆盖、连接策略、地址族、h2c 显式模式与 HTTP/2 per-request priority。HTTP/1.1 pipeline 是 session 级策略，不在单次发送选项中。异步完成回调在 `AsyncOptions` 中。
 
-### 全局常量（`KernelHttpConfig.h`）
+### 全局常量（`WknetConfig.h`）
 
 | 名称 | 值 | 含义 |
 |------|----|------|
-| `KERNEL_HTTP_POOL_TAG` | `'ptHK'` | 全部内核池分配的池标记 |
+| `WKNET_POOL_TAG` | `'tenW'` | 全部内核池分配的池标记 |
 | `WskProviderCaptureTimeoutMilliseconds` | 3000 | 捕获 WSK provider NPI 超时 |
 | `WskOperationTimeoutMilliseconds` | 30000 | WSK 连接/收发默认超时 |
 | `WskCloseTimeoutMilliseconds` | 3000 | 关闭 WSK socket 超时 |

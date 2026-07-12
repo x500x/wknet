@@ -16,26 +16,26 @@
    git clone https://github.com/x500x/khttp.git
    cd khttp
    ```
-2. Open `KernelHttp.sln` in Visual Studio, pick a configuration (Debug/Release) and platform (x64/ARM64), then `Ctrl+Shift+B`.
+2. Open `wknet.sln` in Visual Studio, pick a configuration (Debug/Release) and platform (x64/ARM64), then `Ctrl+Shift+B`.
 3. Or from the command line:
    ```powershell
    pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1
    pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1 -Configuration Debug -Platform x64
-   msbuild KernelHttp.sln /p:Configuration=Release /p:Platform=x64
+   msbuild wknet.sln /p:Configuration=Release /p:Platform=x64
    ```
-4. Output: `<Platform>/<Configuration>/KernelHttpLib.lib`.
+4. Output: `<Platform>/<Configuration>/wknetlib.lib`.
 
 ### Step 2: Integrate into your driver project
 
 1. Include the umbrella header:
    ```cpp
-   #include <KernelHttp/KernelHttp.h>
+   #include <wknet/Wknet.h>
    ```
 2. In project properties add:
    - Additional include directories: `$(SolutionDir)include`
-   - Additional library directories: `$(SolutionDir)src\KernelHttpLib\$(Platform)\$(Configuration)\`
-   - Additional dependencies: `KernelHttpLib.lib`
-3. Add the `KernelHttpLib` project to your solution and set it as a build dependency.
+   - Additional library directories: `$(SolutionDir)src\wknetlib\$(Platform)\$(Configuration)\`
+   - Additional dependencies: `wknetlib.lib`
+3. Add the `wknetlib` project to your solution and set it as a build dependency.
 
 ### Minimal example (high-level API)
 

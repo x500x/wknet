@@ -53,7 +53,7 @@ enum class Http2FrameType : UCHAR {
 ### PRIORITY
 
 - `Http2Priority` 使用 RFC 权重范围 1..256，支持 stream dependency 与 exclusive 标志；拒绝自依赖和非法权重。
-- 单次请求可通过 `Http2RequestBody.Priority`、`Http2RequestOptions.Priority`、`KhHttpSendOptions.Http2Priority` 或 `khttp::SendOptions.Http2Priority` 显式设置。
+- 单次请求可通过 `Http2RequestBody.Priority`、`Http2RequestOptions.Priority`、`KhHttpSendOptions.Http2Priority` 或 `wknet::http::SendOptions.Http2Priority` 显式设置。
 - 首个 HEADERS 帧携带 priority 字段；底层也提供独立 PRIORITY frame 编解码。收到 peer PRIORITY 会校验长度和自依赖，不改变本地安全边界或调度策略。
 
 ### RFC 8441 extended CONNECT

@@ -37,7 +37,7 @@
 ### 处理示例
 
 ```cpp
-NTSTATUS s = khttp::GetEx(session, url, urlLen, nullptr, nullptr, &resp);
+NTSTATUS s = wknet::http::GetEx(session, url, urlLen, nullptr, nullptr, &resp);
 if (!NT_SUCCESS(s)) {
     switch (s) {
     case STATUS_IO_TIMEOUT:             /* 重试或报告 */ break;

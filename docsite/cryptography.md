@@ -45,4 +45,4 @@ enum class KeyExchangeGroup : USHORT { Secp256r1=23, Secp384r1=24, Secp521r1=25,
 
 ### 用户态测试
 
-`KERNEL_HTTP_USER_MODE_TEST` 下 `bcrypt.h` 类型被 stub，并提供软件 SHA-1/SHA-256 实现以便无内核环境跑通。
+`WKNET_USER_MODE_TEST` 下 `bcrypt.h` 类型被 stub，并提供软件 SHA-1/SHA-256 实现以便无内核环境跑通。

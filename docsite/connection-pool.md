@@ -28,4 +28,4 @@
 | `ForceNew` | 总是新建；release 时关闭 |
 | `NoPool` | 绕过池；不挤占活跃连接；release 时关闭 |
 
-高层按单次发送设置：`khttp::SendOptions::ConnectionPolicy`。底层按请求设置：`KhHttpRequestSetConnectionPolicy`。
+高层按单次发送设置：`wknet::http::SendOptions::ConnectionPolicy`。底层按请求设置：`KhHttpRequestSetConnectionPolicy`。

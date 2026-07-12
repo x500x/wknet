@@ -23,21 +23,21 @@ tests/run-cookbook-tests.ps1  —— 一键编译并运行测试
 | HttpsTls | HTTPS + 显式 TLS：SNI、ALPN、始终开启证书校验 | `SendOptions.Tls` / `TlsConfig` |
 | AsyncRequest | 异步发起 → 等待 → 取响应 | `AsyncGetEx` / `AsyncWait` / `AsyncGetResponse` |
 | AsyncCancel | 协作式取消（取消后仍需收尾等待） | `AsyncCancel` / `AsyncWait` / `AsyncGetStatus` |
-| WebSocketEcho | 连接→发→收→关，含全双工时序说明 | `kws::Connect` / `kws::SendText` / `kws::Receive` / `kws::Close` |
+| WebSocketEcho | 连接→发→收→关，含全双工时序说明 | `wknet::websocket::Connect` / `wknet::websocket::SendText` / `wknet::websocket::Receive` / `wknet::websocket::Close` |
 
 每个范例独立运行，单个失败不阻断后续；入口返回首个失败状态用于汇总。
 
-> 注：当前公开 WebSocket API 在命名空间 `kws`（`kws::Connect/SendText/Receive/Close`，见 [WebSocket 协议](websocket.md)）。若你的 Cookbook 源码包仍写作 `khttp::WsConnect/WsSendText/...`，那是命名空间统一前的旧写法，请对照当前头文件 `kws/WebSocket.h` 调整。
+> 注：当前公开 WebSocket API 在命名空间 `kws`（`wknet::websocket::Connect/SendText/Receive/Close`，见 [WebSocket 协议](websocket.md)）。若你的 Cookbook 源码包仍写作 `wknet::http::WsConnect/WsSendText/...`，那是命名空间统一前的旧写法，请对照当前头文件 `kws/WebSocket.h` 调整。
 
 ### RAII 资源守卫（KhttpScopeGuard.h）
 
 | 守卫 | 管理对象 | 析构调用 |
 |------|---------|---------|
-| `SessionGuard` | `khttp::Session` | `SessionClose` |
-| `RequestGuard` | `khttp::Request` | `RequestRelease` |
-| `ResponseGuard` | `khttp::Response` | `ResponseRelease` |
-| `AsyncOpGuard` | `khttp::AsyncOp` | `AsyncRelease` |
-| `WebSocketGuard` | `kws::WebSocket` | `kws::Close` |
+| `SessionGuard` | `wknet::http::Session` | `SessionClose` |
+| `RequestGuard` | `wknet::http::Request` | `RequestRelease` |
+| `ResponseGuard` | `wknet::http::Response` | `ResponseRelease` |
+| `AsyncOpGuard` | `wknet::http::AsyncOp` | `AsyncRelease` |
+| `WebSocketGuard` | `wknet::websocket::WebSocket` | `wknet::websocket::Close` |
 
 常用成员：`Receive()`（取地址传给 `_Out_` 句柄，接收前先释放已持有的）、`Get()`（取裸指针）、`Detach()`（放弃所有权）、`Reset()`（立即释放）、`operator bool`。守卫不可复制、可移动。析构调用 Release/Close，须在 `PASSIVE_LEVEL`。
 
@@ -46,14 +46,14 @@ tests/run-cookbook-tests.ps1  —— 一键编译并运行测试
 1. 把 `samples/` 三个文件拷到 `src/KernelHttpExample/samples/`。
 2. 在 `.vcxproj` 加入 `CookbookSamples.cpp` 与两个头文件。
 3. 在 `DriverEntry.cpp` 包含 `samples/CookbookSamples.h`，在 `RunLoadHttpSamples()` 里追加 `RunCookbookSamples(g_wskClient, &cookbookResults)`。
-4. 卸载路径无需改动——现有 `DriverUnload` 已调用 `khttp::Destroy()`。
+4. 卸载路径无需改动——现有 `DriverUnload` 已调用 `wknet::http::Destroy()`。
 
 ### 注意事项
 
 1. **IRQL**：所有调用与守卫析构都在 `PASSIVE_LEVEL`。
 2. **所有权**：`Response` 与 `Request`/`AsyncOp` 独立生命周期，分别释放。
-3. **卸载**：用异步 API 后卸载前必须 `khttp::Destroy()`；同步-only 路径可不调用，但可无条件调用。
-4. **WebSocket 全双工时序**：`kws::Close` 不得与同句柄「新 I/O 发起」并发；最安全是单线程内 连接→发→收→关。
-5. **`kws::Receive` 的 `message.Data`** 指向内部缓冲，下次收/关前有效，关闭后勿引用。
+3. **卸载**：用异步 API 后卸载前必须 `wknet::http::Destroy()`；同步-only 路径可不调用，但可无条件调用。
+4. **WebSocket 全双工时序**：`wknet::websocket::Close` 不得与同句柄「新 I/O 发起」并发；最安全是单线程内 连接→发→收→关。
+5. **`wknet::websocket::Receive` 的 `message.Data`** 指向内部缓冲，下次收/关前有效，关闭后勿引用。
 
 详见仓库内 `src/KernelHttpExample_Cookbook/README.md` 与 `tests/README.md`。

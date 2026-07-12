@@ -4,7 +4,7 @@
 
 **HTTP/1.1（RFC 9110/9112）**
 - 请求体支持 `Content-Length`、库生成 chunked 与真流式上传：高层 `BodyCreateStream` / 底层 `KhHttpRequestSetBodySource` 按块读取；用户手设 `Transfer-Encoding`/`TE` 仍安全拒绝；`Trailer` 头仅在 chunked 请求 trailer 场景允许。
-- 请求 trailer：`KhHttpRequestAddTrailer` / `khttp::RequestAddTrailer` 在 `Chunked` body 模式下发送终止块后的 trailer 字段，并拒绝禁止字段与 CRLF 注入。
+- 请求 trailer：`KhHttpRequestAddTrailer` / `wknet::http::RequestAddTrailer` 在 `Chunked` body 模式下发送终止块后的 trailer 字段，并拒绝禁止字段与 CRLF 注入。
 - 响应解析：状态行仅接受 HTTP/1.0、1.1；头行 ≤8 KiB、头段 ≤64 KiB、头数 ≤200；**拒绝 obs-fold 折行**；多个 `Content-Length`、`TE`+`CL` 冲突 → `STATUS_INVALID_NETWORK_RESPONSE`。
 - body 框定：Content-Length / chunked / close-delimited；**无 body 状态**：1xx、204、**205**、304，及 HEAD 响应。
 - chunked：块数 ≤8192、chunk-size 行 ≤32、严格 chunk 扩展语法校验；trailer 校验并拒绝禁止字段（`Content-Length`/`Transfer-Encoding`/`Host`/`Authorization`/`Proxy-Authorization`/`Cookie`/`Set-Cookie`）。
@@ -39,7 +39,7 @@
 - 支持调用方提供 opening-handshake headers（如 `Origin`、`Authorization`、`Cookie`），拒绝库受控头（`Host`、`Connection`、`Upgrade`、`Sec-WebSocket-*` 等）和非法头文本。
 - HTTP/1.1 Upgrade 路径客户端帧**始终掩码**（每帧新随机键）；RFC 8441 over HTTP/2 路径按规范发送无掩码帧；收到**被掩码的服务端帧**→协议错误 1002。
 - `wss` 默认自动 offer `h2,http/1.1` 并在协商到 h2 时使用 RFC 8441；peer 未启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 时按 Auto 规则回到 HTTP/1.1，`ws://` 不隐式走 h2c。
-- **分片发送**：`kws::SendContinuation` + `SendOptions{FinalFragment}`，自动按帧缓冲分块；跨片增量 UTF-8 校验。
+- **分片发送**：`wknet::websocket::SendContinuation` + `SendOptions{FinalFragment}`，自动按帧缓冲分块；跨片增量 UTF-8 校验。
 - **接收分片回调**：默认聚合完整消息；显式 `ReceiveOptions.DeliverFragments=true` 时，`ReceiveOptions.OnMessage` 或返回式按 wire fragment 交付并暴露真实 `finalFragment`。
 - 控制帧：自动 Pong（可关）、单次接收控制帧 ≤100（超限 close 1008）；文本/close payload UTF-8 校验（非法 1007）；超 `MaxMessageBytes` close 1009。
 - close 握手：主动（发 close 后等 peer close，3s 超时）与被动（echo 后关）。

@@ -91,12 +91,12 @@ KhHttpRequestRelease(request);
 
 | 头文件 | 内容 |
 |--------|------|
-| `KernelHttp/KernelHttp.h` | 总入口，包含底层 engine API |
-| `KernelHttp/engine/Engine.h` | 底层会话、请求、响应、异步操作 |
-| `KernelHttp/engine/Async.h` | 异步操作与运行时 |
-| `KernelHttp/engine/Workspace.h` | Workspace 缓冲管理 |
-| `KernelHttp/engine/ConnectionPool.h` | 连接池 |
-| `KernelHttp/engine/Types.h` | 底层枚举、结构体、配置类型 |
+| `wknet/Wknet.h` | 总入口，包含底层 engine API |
+| `wknet/engine/Engine.h` | 底层会话、请求、响应、异步操作 |
+| `wknet/engine/Async.h` | 异步操作与运行时 |
+| `wknet/engine/Workspace.h` | Workspace 缓冲管理 |
+| `wknet/engine/ConnectionPool.h` | 连接池 |
+| `wknet/engine/Types.h` | 底层枚举、结构体、配置类型 |
 
 ## 句柄类型
 
@@ -232,7 +232,7 @@ NTSTATUS KhSessionCreate(
 ) noexcept;
 ```
 
-创建底层 HTTP/WS 会话。与高层 `khttp::SessionCreate` 不同，底层版本需要传入 `net::WskClient*`。
+创建底层 HTTP/WS 会话。与高层 `wknet::http::SessionCreate` 不同，底层版本需要传入 `net::WskClient*`。
 
 | 参数 | 说明 |
 |------|------|
@@ -1095,7 +1095,7 @@ void KhEngineCloseActiveHandles() noexcept;
 
 无返回值。
 
-### 测试钩子（仅 `KERNEL_HTTP_USER_MODE_TEST`）
+### 测试钩子（仅 `WKNET_USER_MODE_TEST`）
 
 这些函数用于单元测试，不进内核构建：
 

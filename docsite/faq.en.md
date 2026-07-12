@@ -31,4 +31,4 @@ A: Yes, and `wss` uses automatic selection by default. The client offers `h2,htt
 A: Kernel constraints. The library forbids stack buffers (use heap; hot buffers resident in Workspace) and raw `new/delete` (unless overloaded in the lib). Use `HeapObject<T>` / `HeapArray<T>`.
 
 **Q: Anything special on driver unload after async APIs?**
-A: Call `khttp::Destroy()` before releasing WSK. Synchronous-only paths do not require it, but may call it unconditionally.
+A: Call `wknet::http::Destroy()` before releasing WSK. Synchronous-only paths do not require it, but may call it unconditionally.

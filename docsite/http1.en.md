@@ -1,6 +1,6 @@
 # HTTP/1.1 Protocol
 
-Namespace `KernelHttp::http`, grounded in `src/KernelHttpLib/http/`.
+Namespace `wknet::http`, grounded in `src/wknetlib/http/`.
 
 **Request building** (`HttpRequestBuilder::Build`): serializes request line + headers + body via a length-measuring `BufferWriter` (`STATUS_BUFFER_TOO_SMALL` with required size if it won't fit); **Host emitted first** from `options.Host`; CONNECT requests can be built (`CONNECT authority HTTP/1.1`), TRACE requires explicit `SendFlagAllowTrace` and rejects bodies, trailers, and sensitive headers; body via Content-Length, builder-generated chunked, or streaming body sources (`BodyCreateStream` / `KhHttpRequestSetBodySource`); request trailers are supported only with chunked framing; forbidden extra headers Host/Content-Length/Connection (`STATUS_INVALID_PARAMETER`) and Transfer-Encoding/TE (`STATUS_NOT_SUPPORTED`); caller-supplied `Expect: 100-continue` with a body is accepted only through the library expect-continue path (`SendFlagExpectContinue`); `Trailer` is allowed only for chunked request trailers; typed Range/conditional helpers generate request headers and participate in RFC 9111 cache validation/partial combining when a cache is attached; engine injects default `Accept-Encoding: gzip, deflate, br, zstd, identity` (or `br, identity` when deflate runtime is unavailable), and typed preferences generate qvalue headers that drive response `Content-Encoding` fail-closed validation. HTTPS proxy uses CONNECT; plaintext HTTP over proxy uses absolute-form targets and does not create a CONNECT tunnel.
 

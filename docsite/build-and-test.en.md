@@ -5,7 +5,7 @@
 ```powershell
 pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1
 pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1 -Configuration Debug -Platform x64
-msbuild KernelHttp.sln /m /restore /p:Configuration=Debug /p:Platform=x64
+msbuild wknet.sln /m /restore /p:Configuration=Debug /p:Platform=x64
 ```
 
 Use `pwsh` (not `powershell`). Debug/Release builds treat warnings as errors at the highest warning level.

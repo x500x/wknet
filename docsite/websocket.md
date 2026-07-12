@@ -20,21 +20,21 @@ enum class WebSocketOpcode : UCHAR {
 
 ```cpp
 // 连接（同步/异步，URL 或 ConnectConfig）
-kws::Connect / ConnectEx / ConnectAsync / ConnectAsyncEx ; kws::AsyncGetWebSocket
+wknet::websocket::Connect / ConnectEx / ConnectAsync / ConnectAsyncEx ; wknet::websocket::AsyncGetWebSocket
 // 发送（各有 *Ex 带 SendOptions{ bool FinalFragment }）
-kws::SendText / SendBinary / SendContinuation / SendPing / SendPong
+wknet::websocket::SendText / SendBinary / SendContinuation / SendPing / SendPong
 // 接收 / 关闭 / 查询
-kws::Receive / ReceiveEx ; kws::Close / CloseEx ; kws::SelectedSubprotocol
+wknet::websocket::Receive / ReceiveEx ; wknet::websocket::Close / CloseEx ; wknet::websocket::SelectedSubprotocol
 ```
 ```cpp
-enum class kws::MsgType { Text, Binary, Close, Continuation, Ping, Pong };
-struct kws::Message { MsgType Type; const UCHAR* Data; SIZE_T DataLength; bool Final; bool FinalFragment; };
-struct kws::ReceiveOptions { SIZE_T MaxMessageBytes; bool AutoAllocate=true; MessageCallback OnMessage; void* CallbackContext; bool DeliverFragments=false; };
-struct kws::Header { const char* Name; SIZE_T NameLength; const char* Value; SIZE_T ValueLength; };
-struct kws::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subprotocol; SIZE_T SubprotocolLength;
+enum class wknet::websocket::MsgType { Text, Binary, Close, Continuation, Ping, Pong };
+struct wknet::websocket::Message { MsgType Type; const UCHAR* Data; SIZE_T DataLength; bool Final; bool FinalFragment; };
+struct wknet::websocket::ReceiveOptions { SIZE_T MaxMessageBytes; bool AutoAllocate=true; MessageCallback OnMessage; void* CallbackContext; bool DeliverFragments=false; };
+struct wknet::websocket::Header { const char* Name; SIZE_T NameLength; const char* Value; SIZE_T ValueLength; };
+struct wknet::websocket::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subprotocol; SIZE_T SubprotocolLength;
                             const Header* Headers; SIZE_T HeaderCount;
                             websocket::PerMessageDeflateOptions PerMessageDeflate;
-                            khttp::TlsConfig Tls; khttp::AddressFamily Family; SIZE_T MaxMessageBytes; bool AutoReplyPing=true; };
+                            wknet::http::TlsConfig Tls; wknet::http::AddressFamily Family; SIZE_T MaxMessageBytes; bool AutoReplyPing=true; };
 ```
 
 ### Opening handshake headers
@@ -54,7 +54,7 @@ struct kws::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subpr
 
 ### 分片（**已支持**）
 
-- **发送**：`kws::SendContinuation(Ex)` 续帧；`SendText/SendBinary` 的 `*Ex` 可带 `FinalFragment=false` 开启分片。客户端会按帧缓冲自动分块（首帧用真实 opcode，后续用 Continuation），并对文本消息**跨分片增量 UTF-8 校验**，最终片不完整码点 → `STATUS_INVALID_PARAMETER`。
+- **发送**：`wknet::websocket::SendContinuation(Ex)` 续帧；`SendText/SendBinary` 的 `*Ex` 可带 `FinalFragment=false` 开启分片。客户端会按帧缓冲自动分块（首帧用真实 opcode，后续用 Continuation），并对文本消息**跨分片增量 UTF-8 校验**，最终片不完整码点 → `STATUS_INVALID_PARAMETER`。
 - **接收**：默认 `ReceiveOptions.DeliverFragments=false`，`ReceiveOptions.OnMessage` 回调或默认返回式都返回**客户端已重组的完整消息**，`finalFragment=true`。显式设置 `DeliverFragments=true` 后，接收路径按 wire fragment 交付：首帧返回 Text/Binary，续帧返回 Continuation，`finalFragment` 承载真实 FIN；文本消息仍跨分片做增量 UTF-8 校验，最终片不完整码点 → close 1007 / `STATUS_INVALID_NETWORK_RESPONSE`。`Message.Data` 指向内部缓冲，下次收/关前有效。
 
 ### 行为与时序
@@ -73,13 +73,13 @@ struct kws::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subpr
 ### 示例
 
 ```cpp
-kws::WebSocket* ws = nullptr;
-if (NT_SUCCESS(kws::Connect(session, "wss://echo.example/ws", 21, &ws))) {
-    kws::SendText(ws, "hello", 5);
-    kws::Message msg = {};
-    if (NT_SUCCESS(kws::Receive(ws, &msg)) && msg.Type == kws::MsgType::Text) {
+wknet::websocket::WebSocket* ws = nullptr;
+if (NT_SUCCESS(wknet::websocket::Connect(session, "wss://echo.example/ws", 21, &ws))) {
+    wknet::websocket::SendText(ws, "hello", 5);
+    wknet::websocket::Message msg = {};
+    if (NT_SUCCESS(wknet::websocket::Receive(ws, &msg)) && msg.Type == wknet::websocket::MsgType::Text) {
         // 使用 msg.Data / msg.DataLength（下次收/关前有效）
     }
-    kws::Close(ws);
+    wknet::websocket::Close(ws);
 }
 ```

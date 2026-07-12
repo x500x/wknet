@@ -5,71 +5,71 @@
 #### Send a GET Request
 
 ```cpp
-khttp::Session* session = nullptr;
-khttp::Response* response = nullptr;
+wknet::http::Session* session = nullptr;
+wknet::http::Response* response = nullptr;
 
 // Create session
-khttp::SessionCreate(&session);
+wknet::http::SessionCreate(&session);
 
 // Send GET request
-khttp::Get(session, "https://httpbin.org/get", &response);
+wknet::http::Get(session, "https://httpbin.org/get", &response);
 
 // Read response
 if (response) {
-    ULONG statusCode = khttp::ResponseStatusCode(response);
-    const UCHAR* body = khttp::ResponseBody(response);
-    SIZE_T bodyLength = khttp::ResponseBodyLength(response);
+    ULONG statusCode = wknet::http::ResponseStatusCode(response);
+    const UCHAR* body = wknet::http::ResponseBody(response);
+    SIZE_T bodyLength = wknet::http::ResponseBodyLength(response);
 }
 
 // Release resources
-khttp::ResponseRelease(response);
-khttp::SessionClose(session);
+wknet::http::ResponseRelease(response);
+wknet::http::SessionClose(session);
 ```
 
 #### Send POST JSON
 
 ```cpp
-khttp::Session* session = nullptr;
-khttp::Response* response = nullptr;
+wknet::http::Session* session = nullptr;
+wknet::http::Response* response = nullptr;
 
-khttp::SessionCreate(&session);
+wknet::http::SessionCreate(&session);
 
 // Create JSON body
-khttp::Body* body = nullptr;
-khttp::BodyCreateJsonCopy("{\"key\":\"value\"}", 13, &body);
+wknet::http::Body* body = nullptr;
+wknet::http::BodyCreateJsonCopy("{\"key\":\"value\"}", 13, &body);
 
 // Send POST request
-khttp::Post(session, "https://httpbin.org/post", body, &response);
+wknet::http::Post(session, "https://httpbin.org/post", body, &response);
 
-khttp::BodyRelease(body);
-khttp::ResponseRelease(response);
-khttp::SessionClose(session);
+wknet::http::BodyRelease(body);
+wknet::http::ResponseRelease(response);
+wknet::http::SessionClose(session);
 ```
 
 #### Async Request
 
 ```cpp
-khttp::AsyncOp* op = nullptr;
-khttp::Response* response = nullptr;
+wknet::http::AsyncOp* op = nullptr;
+wknet::http::Response* response = nullptr;
 
 // Async GET
-khttp::AsyncGet(session, "https://httpbin.org/get", &op);
+wknet::http::AsyncGet(session, "https://httpbin.org/get", &op);
 
 // Wait for completion
-khttp::AsyncWait(op, 30000);
+wknet::http::AsyncWait(op, 30000);
 
 // Get response
-khttp::AsyncGetResponse(op, &response);
+wknet::http::AsyncGetResponse(op, &response);
 
-khttp::ResponseRelease(response);
-khttp::AsyncRelease(op);
+wknet::http::ResponseRelease(response);
+wknet::http::AsyncRelease(op);
 ```
 
 ### Conventions
 
 Before using the high-level API, keep these points in mind:
 
-- **All handles are heap objects**: All high-level public handles (`Session`, `Request`, `Response`, `AsyncOp`, `Headers`, `Body`, `kws::WebSocket`) are opaque heap pointers. Do not declare these objects on the stack; use the corresponding `Create` functions to create them and matching `Close` / `Release` functions to release them.
+- **All handles are heap objects**: All high-level public handles (`Session`, `Request`, `Response`, `AsyncOp`, `Headers`, `Body`, `wknet::websocket::WebSocket`) are opaque heap pointers. Do not declare these objects on the stack; use the corresponding `Create` functions to create them and matching `Close` / `Release` functions to release them.
 - **Options are also heap objects**: `SendOptions` / `AsyncOptions` must be created via `SendOptionsCreate` / `AsyncOptionsCreate` before modifying their fields.
 - **IRQL requirement**: All high-level HTTP/WS calls require `PASSIVE_LEVEL`.
 - **Error handling**: Return values are uniformly `NTSTATUS`; use `NT_SUCCESS(status)` to check success. Return values marked with `_Must_inspect_result_` must be checked.
@@ -79,23 +79,23 @@ Before using the high-level API, keep these points in mind:
 
 ### Header File Overview
 
-The following header files are involved in the high-level API. In most cases, you only need to include `KernelHttp/KernelHttp.h` to use all functionality:
+The following header files are involved in the high-level API. In most cases, you only need to include `wknet/Wknet.h` to use all functionality:
 
 | Header | Contents |
 |--------|----------|
-| `KernelHttp/KernelHttp.h` | Main entry; includes high-level HTTP, WebSocket, low-level engine, and base types |
-| `KernelHttp/khttp/Types.h` | Enums, config structs, callback types, public constants |
-| `KernelHttp/khttp/Session.h` | `SessionCreate` / `SessionClose` |
-| `KernelHttp/khttp/Request.h` | `RequestCreate` / `RequestRelease` |
-| `KernelHttp/khttp/Headers.h` | `Headers` handle creation, adding, release |
-| `KernelHttp/khttp/Body.h` | `Body` handle creation, mode, trailer, release |
-| `KernelHttp/khttp/Options.h` | `SendOptions` / `AsyncOptions` creation and release |
-| `KernelHttp/khttp/Http.h` | Synchronous HTTP sends and convenience functions |
-| `KernelHttp/khttp/HttpAsync.h` | Asynchronous HTTP sends and convenience functions |
-| `KernelHttp/khttp/AsyncOp.h` | Async operation wait, cancel, get result, release |
-| `KernelHttp/khttp/Response.h` | Response read-only access and release |
-| `KernelHttp/khttp/Lifecycle.h` | `Destroy` async cleanup entry point |
-| `KernelHttp/kws/WebSocket.h` | High-level WebSocket connection, send/receive, close |
+| `wknet/Wknet.h` | Main entry; includes high-level HTTP, WebSocket, low-level engine, and base types |
+| `wknet/http/Types.h` | Enums, config structs, callback types, public constants |
+| `wknet/http/Session.h` | `SessionCreate` / `SessionClose` |
+| `wknet/http/Request.h` | `RequestCreate` / `RequestRelease` |
+| `wknet/http/Headers.h` | `Headers` handle creation, adding, release |
+| `wknet/http/Body.h` | `Body` handle creation, mode, trailer, release |
+| `wknet/http/Options.h` | `SendOptions` / `AsyncOptions` creation and release |
+| `wknet/http/Http.h` | Synchronous HTTP sends and convenience functions |
+| `wknet/http/HttpAsync.h` | Asynchronous HTTP sends and convenience functions |
+| `wknet/http/AsyncOp.h` | Async operation wait, cancel, get result, release |
+| `wknet/http/Response.h` | Response read-only access and release |
+| `wknet/http/Lifecycle.h` | `Destroy` async cleanup entry point |
+| `wknet/websocket/WebSocket.h` | High-level WebSocket connection, send/receive, close |
 
 ### Types and Structs Overview
 
@@ -246,14 +246,14 @@ struct TlsConfig final {
     TlsVersion MinVersion;
     TlsVersion MaxVersion;
     CertPolicy Certificate;
-    const KernelHttp::tls::CertificateStore* Store;
+    const wknet::tls::CertificateStore* Store;
     const char* ServerName;
     SIZE_T ServerNameLength;
     const char* Alpn;
     SIZE_T AlpnLength;
     bool PreferHttp2;
-    KernelHttp::tls::TlsPolicy Policy;
-    const KernelHttp::tls::TlsClientCredential* ClientCredential;
+    wknet::tls::TlsPolicy Policy;
+    const wknet::tls::TlsClientCredential* ClientCredential;
     ULONG HandshakeTimeoutMs;
     ULONG MaxTls12Renegotiations;
 };
@@ -351,7 +351,7 @@ struct SendOptions final {
     ConnPolicy ConnectionPolicy;
     AddressFamily Family;
     Http2CleartextMode Http2CleartextMode;
-    const ::KernelHttp::http2::Http2Priority* Http2Priority;
+    const ::wknet::http2::Http2Priority* Http2Priority;
     Cache* Cache;
 };
 ```
@@ -442,7 +442,7 @@ struct MultipartPart final {
 
 #### `kws` WebSocket Structs
 
-##### `kws::Header`
+##### `wknet::websocket::Header`
 
 The `Header` struct is used to add extra HTTP headers during WebSocket connection.
 
@@ -457,7 +457,7 @@ struct Header final {
 
 Headers that can be added include `Origin`, `Authorization`, `Cookie`, etc. Library-controlled headers like `Host`, `Connection`, `Upgrade`, `Sec-WebSocket-*` will be rejected.
 
-##### `kws::ConnectConfig`
+##### `wknet::websocket::ConnectConfig`
 
 The `ConnectConfig` struct configures WebSocket connection parameters.
 
@@ -469,12 +469,12 @@ struct ConnectConfig final {
     SIZE_T SubprotocolLength;
     const Header* Headers;
     SIZE_T HeaderCount;
-    khttp::TlsConfig Tls;
-    khttp::AddressFamily Family;
+    wknet::http::TlsConfig Tls;
+    wknet::http::AddressFamily Family;
     SIZE_T MaxMessageBytes;
     bool AutoReplyPing;
     bool AllowWebSocketOverHttp2;
-    khttp::WebSocketTransportMode TransportMode;
+    wknet::http::WebSocketTransportMode TransportMode;
 };
 ```
 
@@ -490,7 +490,7 @@ struct ConnectConfig final {
 | `AllowWebSocketOverHttp2` | `false` | LegacyBoolean compatibility field; new code should prefer `TransportMode` |
 | `TransportMode` | `Auto` | `wss` selects RFC 8441 WebSocket over HTTP/2 automatically; use `Http11Only` to force HTTP/1.1 |
 
-##### `kws::SendOptions`
+##### `wknet::websocket::SendOptions`
 
 The `SendOptions` struct controls WebSocket message send behavior.
 
@@ -502,7 +502,7 @@ struct SendOptions final {
 
 `FinalFragment=false` is used for non-final frames of fragmented messages; subsequent frames use `SendContinuation` / `SendContinuationEx`.
 
-##### `kws::ReceiveOptions`
+##### `wknet::websocket::ReceiveOptions`
 
 The `ReceiveOptions` struct controls WebSocket message receive behavior.
 
@@ -522,7 +522,7 @@ struct ReceiveOptions final {
 | `OnMessage` | `nullptr` | Callback on message/chunk received |
 | `CallbackContext` | `nullptr` | Context passed to `OnMessage` |
 
-##### `kws::Message`
+##### `wknet::websocket::Message`
 
 The `Message` struct represents a received WebSocket message.
 
@@ -551,7 +551,7 @@ These functions return default values for various config structs:
 | `DefaultTlsConfig` | Returns default TLS config value |
 | `DefaultSessionConfig` | Returns default session config value |
 | `DefaultSendOptions` | Returns default send options value; prefer `SendOptionsCreate` for actual use |
-| `kws::DefaultConnectConfig` | Returns default WebSocket connection config value |
+| `wknet::websocket::DefaultConnectConfig` | Returns default WebSocket connection config value |
 
 #### HTTP Lifecycle and Handles
 
@@ -637,13 +637,13 @@ These functions handle WebSocket connections and communication:
 
 | Function | Description |
 |----------|-------------|
-| `kws::Connect` / `ConnectEx` | Synchronous WebSocket connection |
-| `kws::ConnectAsync` / `ConnectAsyncEx` | Asynchronous WebSocket connection |
-| `kws::AsyncGetWebSocket` | Get WebSocket handle from async operation |
-| `kws::SendText*` / `SendBinary*` / `SendContinuation*` / `SendPing` / `SendPong` | Send WebSocket frames |
-| `kws::Receive` / `ReceiveEx` | Receive WebSocket messages |
-| `kws::Close` / `CloseEx` | Close WebSocket |
-| `kws::SelectedSubprotocol` | Query negotiated subprotocol |
+| `wknet::websocket::Connect` / `ConnectEx` | Synchronous WebSocket connection |
+| `wknet::websocket::ConnectAsync` / `ConnectAsyncEx` | Asynchronous WebSocket connection |
+| `wknet::websocket::AsyncGetWebSocket` | Get WebSocket handle from async operation |
+| `wknet::websocket::SendText*` / `SendBinary*` / `SendContinuation*` / `SendPing` / `SendPong` | Send WebSocket frames |
+| `wknet::websocket::Receive` / `ReceiveEx` | Receive WebSocket messages |
+| `wknet::websocket::Close` / `CloseEx` | Close WebSocket |
+| `wknet::websocket::SelectedSubprotocol` | Query negotiated subprotocol |
 
 ### Detailed Function Reference
 
@@ -1674,10 +1674,10 @@ No return value.
 
 #### WebSocket Functions
 
-##### `kws::DefaultConnectConfig`
+##### `wknet::websocket::DefaultConnectConfig`
 
 ```cpp
-kws::ConnectConfig DefaultConnectConfig() noexcept;
+wknet::websocket::ConnectConfig DefaultConnectConfig() noexcept;
 ```
 
 Returns default WebSocket connection config.
@@ -1686,24 +1686,24 @@ No parameters.
 
 Returns: `ConnectConfig` value.
 
-##### `kws::Connect` / `kws::ConnectEx`
+##### `wknet::websocket::Connect` / `wknet::websocket::ConnectEx`
 
 ```cpp
 NTSTATUS Connect(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const char* url,
     _In_ SIZE_T urlLength,
     _Out_ WebSocket** websocket
 ) noexcept;
 
 NTSTATUS Connect(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const ConnectConfig* config,
     _Out_ WebSocket** websocket
 ) noexcept;
 
 NTSTATUS ConnectEx(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const ConnectConfig* config,
     _Out_ WebSocket** websocket
 ) noexcept;
@@ -1720,37 +1720,37 @@ Synchronous WebSocket connection. Function blocks until handshake completes.
 
 Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_NOT_SUPPORTED`, network/TLS/HTTP handshake failure.
 
-##### `kws::ConnectAsync` / `kws::ConnectAsyncEx`
+##### `wknet::websocket::ConnectAsync` / `wknet::websocket::ConnectAsyncEx`
 
 ```cpp
 NTSTATUS ConnectAsync(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const char* url,
     _In_ SIZE_T urlLength,
-    _Out_ khttp::AsyncOp** operation
+    _Out_ wknet::http::AsyncOp** operation
 ) noexcept;
 
 NTSTATUS ConnectAsync(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const ConnectConfig* config,
-    _Out_ khttp::AsyncOp** operation
+    _Out_ wknet::http::AsyncOp** operation
 ) noexcept;
 
 NTSTATUS ConnectAsyncEx(
-    _In_ khttp::Session* session,
+    _In_ wknet::http::Session* session,
     _In_ const ConnectConfig* config,
-    _Out_ khttp::AsyncOp** operation
+    _Out_ wknet::http::AsyncOp** operation
 ) noexcept;
 ```
 
 Asynchronous WebSocket connection. Parameters similar to `Connect`, but output is `AsyncOp**`. Use `AsyncWait` after
-success, then `kws::AsyncGetWebSocket` to get connection.
+success, then `wknet::websocket::AsyncGetWebSocket` to get connection.
 
-##### `kws::AsyncGetWebSocket`
+##### `wknet::websocket::AsyncGetWebSocket`
 
 ```cpp
 NTSTATUS AsyncGetWebSocket(
-    _In_ khttp::AsyncOp* operation,
+    _In_ wknet::http::AsyncOp* operation,
     _Out_ WebSocket** websocket
 ) noexcept;
 ```
@@ -1824,7 +1824,7 @@ NTSTATUS SendPong(
 
 Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, connection closed/disconnected/timeout failure.
 
-##### `kws::Receive` / `kws::ReceiveEx`
+##### `wknet::websocket::Receive` / `wknet::websocket::ReceiveEx`
 
 ```cpp
 NTSTATUS Receive(
@@ -1850,7 +1850,7 @@ Receives WebSocket message. Blocking call, waits until message received or error
 Returns: `STATUS_SUCCESS`, `STATUS_INVALID_PARAMETER`, `STATUS_BUFFER_TOO_SMALL`, connection
 closed/disconnected/timeout.
 
-##### `kws::Close` / `kws::CloseEx`
+##### `wknet::websocket::Close` / `wknet::websocket::CloseEx`
 
 ```cpp
 NTSTATUS Close(
@@ -1879,7 +1879,7 @@ Returns: Close success or transport failure.
 NOTE: Do not concurrently execute `Close` and new send/receive on the same `WebSocket`. Close should be the last
 operation.
 
-##### `kws::SelectedSubprotocol`
+##### `wknet::websocket::SelectedSubprotocol`
 
 ```cpp
 NTSTATUS SelectedSubprotocol(
