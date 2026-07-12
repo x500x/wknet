@@ -2,8 +2,8 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include "client/Http2Client.h"
 #include "client/HttpsClient.h"
+#include "session/Http2RequestBuilder.h"
 #include "session/Workspace.h"
 #include "http2/Http2Connection.h"
 #include "net/WskSocket.h"
@@ -14,15 +14,15 @@
 #include <stdio.h>
 #include <string.h>
 
-using wknet::client::BuildHttp2RequestHeaders;
-using wknet::client::Http2ContentLengthBufferLength;
-using wknet::client::Http2MaxHeaderNameLength;
-using wknet::client::Http2MaxRequestHeaders;
-using wknet::client::Http2RequestOptions;
-using wknet::client::Http2TransportMode;
 using wknet::client::HttpsClient;
 using wknet::client::HttpsRequestOptions;
 using wknet::client::HttpsResponseBuffers;
+using wknet::session::BuildHttp2RequestHeaders;
+using wknet::session::Http2ContentLengthBufferLength;
+using wknet::session::Http2MaxHeaderNameLength;
+using wknet::session::Http2MaxRequestHeaders;
+using wknet::session::Http2RequestOptions;
+using wknet::session::Http2TransportMode;
 using wknet::session::Workspace;
 using wknet::session::WorkspaceAppendResponse;
 using wknet::session::WorkspaceCreate;

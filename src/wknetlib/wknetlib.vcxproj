@@ -54,6 +54,7 @@
     <ClCompile Include="session\WsSendData.cpp" />
     <ClCompile Include="session\Async.cpp" />
     <ClCompile Include="session\ConnectionPool.cpp" />
+    <ClCompile Include="session\Http2RequestBuilder.cpp" />
     <ClCompile Include="session\Workspace.cpp" />
     <ClCompile Include="client\HttpClient.cpp" />
     <ClCompile Include="client\Http2Client.cpp" />
@@ -190,6 +191,7 @@
     <ClInclude Include="..\..\include\wknet\session\HandleTypes.h" />
     <ClInclude Include="..\..\include\wknet\session\HttpEngine.h" />
     <ClInclude Include="session\HttpEngineInternal.hpp" />
+    <ClInclude Include="session\Http2RequestBuilder.h" />
     <ClInclude Include="..\..\include\wknet\session\HttpCache.h" />
     <ClInclude Include="..\..\include\wknet\session\UrlParser.h" />
     <ClInclude Include="..\..\include\wknet\session\WsEngine.h" />

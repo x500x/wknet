@@ -16,8 +16,8 @@ namespace session
         _In_opt_ const http2::Http2RequestBodySource* bodySource,
         _Out_writes_(trailerCapacity) http1::HttpHeader* trailers,
         SIZE_T trailerCapacity,
-        char lowerTrailerNames[client::Http2MaxRequestTrailers][client::Http2MaxHeaderNameLength],
-        _Out_ client::Http2RequestOptions* options) noexcept
+        char lowerTrailerNames[Http2MaxRequestTrailers][Http2MaxHeaderNameLength],
+        _Out_ Http2RequestOptions* options) noexcept
     {
         if (requestHeaders == nullptr || extraHeaders == nullptr || options == nullptr) {
             return STATUS_INVALID_PARAMETER;
@@ -32,7 +32,7 @@ namespace session
         }
 
         *options = {};
-        options->TransportMode = client::Http2TransportMode::TlsAlpn;
+        options->TransportMode = Http2TransportMode::TlsAlpn;
         options->ServerName = request.Tls.ServerName != nullptr ? request.Tls.ServerName : request.Host;
         options->ServerNameLength = request.Tls.ServerName != nullptr ?
             request.Tls.ServerNameLength :
@@ -46,12 +46,6 @@ namespace session
         options->IncludeContentLength =
             request.HasBody &&
             request.BodyMode == RequestBodyMode::ContentLength;
-        options->CertificateStore = request.Tls.CertificateStore;
-        options->VerifyCertificate = request.Tls.CertificatePolicy == CertificatePolicy::Verify;
-        options->Policy = request.Tls.Policy;
-        options->ClientCredential = request.Tls.ClientCredential;
-        options->MaxTls12Renegotiations = request.Tls.MaxTls12Renegotiations;
-
         SIZE_T extraHeaderCount = 0;
         for (SIZE_T index = 0; index < requestHeaderCount; ++index) {
             const http1::HttpHeader& header = requestHeaders[index];
@@ -210,17 +204,17 @@ namespace session
             h2BodySourcePtr = &h2BodySource;
         }
 
-        client::Http2RequestOptions h2Options = {};
+        Http2RequestOptions h2Options = {};
         status = BuildHttp2OptionsFromRequest(
             request,
             requestHeaders,
             requestHeaderCount,
             { h2Scratch.AuthorityBuffer, authorityLength },
             h2Scratch.ExtraHeaders,
-            client::Http2MaxRequestHeaders,
+            Http2MaxRequestHeaders,
             h2BodySourcePtr,
             h2Scratch.Trailers,
-            client::Http2MaxRequestTrailers,
+            Http2MaxRequestTrailers,
             h2Scratch.LowerTrailerNames,
             &h2Options);
         if (!NT_SUCCESS(status)) {
@@ -229,10 +223,10 @@ namespace session
         h2Options.Priority = sendOptions.Http2Priority;
 
         SIZE_T h2HeaderCount = 0;
-        status = client::BuildHttp2RequestHeaders(
+        status = BuildHttp2RequestHeaders(
             h2Options,
             h2Scratch.Headers,
-            client::Http2MaxRequestHeaders,
+            Http2MaxRequestHeaders,
             h2Scratch.LowerHeaderNames,
             h2Scratch.ContentLengthBuffer,
             &h2HeaderCount);

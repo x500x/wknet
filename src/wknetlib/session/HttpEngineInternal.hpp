@@ -6,7 +6,7 @@
 #include "rtl/WorkspaceScratchAllocator.h"
 #include "transport/WskTransport.h"
 #include "session/HttpCache.h"
-#include "client/Http2Client.h"
+#include "session/Http2RequestBuilder.h"
 #include "session/EngineImpl.h"
 #include "session/HandleAlloc.h"
 #include <wknet/codec/Codec.h>
@@ -49,30 +49,30 @@ namespace session
     constexpr SIZE_T WorkspaceCacheMaxRetainedBytes = 256 * 1024;
 
     constexpr SIZE_T Http2HeaderScratchBytes =
-        sizeof(http1::HttpHeader) * client::Http2MaxRequestHeaders;
+        sizeof(http1::HttpHeader) * Http2MaxRequestHeaders;
     constexpr SIZE_T Http2ExtraHeaderScratchBytes =
-        sizeof(http1::HttpHeader) * client::Http2MaxRequestHeaders;
+        sizeof(http1::HttpHeader) * Http2MaxRequestHeaders;
     constexpr SIZE_T Http2TrailerScratchBytes =
-        sizeof(http1::HttpHeader) * client::Http2MaxRequestTrailers;
+        sizeof(http1::HttpHeader) * Http2MaxRequestTrailers;
     constexpr SIZE_T Http2LowerHeaderScratchBytes =
-        client::Http2MaxRequestHeaders * client::Http2MaxHeaderNameLength;
+        Http2MaxRequestHeaders * Http2MaxHeaderNameLength;
     constexpr SIZE_T Http2LowerTrailerScratchBytes =
-        client::Http2MaxRequestTrailers * client::Http2MaxHeaderNameLength;
+        Http2MaxRequestTrailers * Http2MaxHeaderNameLength;
     constexpr SIZE_T Http2RequestScratchBytes =
         Http2HeaderScratchBytes +
         Http2ExtraHeaderScratchBytes +
         Http2TrailerScratchBytes +
         Http2LowerHeaderScratchBytes +
         Http2LowerTrailerScratchBytes +
-        client::Http2ContentLengthBufferLength;
+        Http2ContentLengthBufferLength;
 
     struct ApiHttp2Scratch final
     {
         http1::HttpHeader* Headers = nullptr;
         http1::HttpHeader* ExtraHeaders = nullptr;
         http1::HttpHeader* Trailers = nullptr;
-        char (*LowerHeaderNames)[client::Http2MaxHeaderNameLength] = nullptr;
-        char (*LowerTrailerNames)[client::Http2MaxHeaderNameLength] = nullptr;
+        char (*LowerHeaderNames)[Http2MaxHeaderNameLength] = nullptr;
+        char (*LowerTrailerNames)[Http2MaxHeaderNameLength] = nullptr;
         char* ContentLengthBuffer = nullptr;
         char* AuthorityBuffer = nullptr;
         SIZE_T AuthorityCapacity = 0;
@@ -462,12 +462,12 @@ namespace session
             workspace.Http2HeaderScratch.Data +
             Http2HeaderScratchBytes +
             Http2ExtraHeaderScratchBytes);
-        scratch->LowerHeaderNames = reinterpret_cast<char (*)[client::Http2MaxHeaderNameLength]>(
+        scratch->LowerHeaderNames = reinterpret_cast<char (*)[Http2MaxHeaderNameLength]>(
             workspace.Http2HeaderScratch.Data +
             Http2HeaderScratchBytes +
             Http2ExtraHeaderScratchBytes +
             Http2TrailerScratchBytes);
-        scratch->LowerTrailerNames = reinterpret_cast<char (*)[client::Http2MaxHeaderNameLength]>(
+        scratch->LowerTrailerNames = reinterpret_cast<char (*)[Http2MaxHeaderNameLength]>(
             workspace.Http2HeaderScratch.Data +
             Http2HeaderScratchBytes +
             Http2ExtraHeaderScratchBytes +
@@ -497,7 +497,7 @@ namespace session
         }
         if (name.Data == nullptr ||
             name.Length == 0 ||
-            name.Length > client::Http2MaxHeaderNameLength ||
+            name.Length > Http2MaxHeaderNameLength ||
             output == nullptr ||
             lowered == nullptr ||
             name.Length > capacity ||
@@ -528,7 +528,7 @@ namespace session
         const Request& request,
         _Out_writes_(trailerCapacity) http1::HttpHeader* trailers,
         SIZE_T trailerCapacity,
-        char lowerTrailerNames[client::Http2MaxRequestTrailers][client::Http2MaxHeaderNameLength],
+        char lowerTrailerNames[Http2MaxRequestTrailers][Http2MaxHeaderNameLength],
         _Out_ SIZE_T* trailerCount) noexcept
     {
         if (trailerCount != nullptr) {
@@ -537,7 +537,7 @@ namespace session
         if (trailerCount == nullptr ||
             (request.TrailerCount != 0 && (trailers == nullptr || lowerTrailerNames == nullptr)) ||
             request.TrailerCount > trailerCapacity ||
-            request.TrailerCount > client::Http2MaxRequestTrailers) {
+            request.TrailerCount > Http2MaxRequestTrailers) {
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -547,7 +547,7 @@ namespace session
             if (!LowercaseHttp2HeaderName(
                 { trailer.Name, trailer.NameLength },
                 lowerTrailerNames[index],
-                client::Http2MaxHeaderNameLength,
+                Http2MaxHeaderNameLength,
                 &loweredName) ||
                 (trailer.Value == nullptr && trailer.ValueLength != 0)) {
                 return STATUS_INVALID_PARAMETER;
