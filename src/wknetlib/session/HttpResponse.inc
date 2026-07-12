@@ -257,7 +257,7 @@
         SIZE_T responseLength,
         bool messageCompleteOnConnectionClose,
         _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
-        _In_opt_ const http1::HttpCodingDecodeMaterials* materials,
+        _In_opt_ const codec::DecodeMaterials* materials,
         _Out_ http1::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http1::HttpHeader* headers,
         SIZE_T headerCapacity,

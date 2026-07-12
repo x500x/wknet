@@ -784,7 +784,7 @@ namespace http1
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
-            HttpCodingDecodeBuffers buffers = {};
+            codec::DecodeBuffers buffers = {};
             buffers.DecodedBody = options.DecodedBody;
             buffers.DecodedBodyCapacity = options.DecodedBodyCapacity;
             buffers.ScratchBody = options.ScratchBody;

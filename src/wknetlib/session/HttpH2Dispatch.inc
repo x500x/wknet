@@ -109,7 +109,7 @@
         SIZE_T responseBodyLength,
         _Inout_ Workspace& workspace,
         _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
-        _In_opt_ const http1::HttpCodingDecodeMaterials* materials,
+        _In_opt_ const codec::DecodeMaterials* materials,
         _Out_ http1::HttpContentDecodeResult* decoded) noexcept
     {
         if (decoded == nullptr) {

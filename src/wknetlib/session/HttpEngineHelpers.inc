@@ -75,7 +75,7 @@
     http1::HttpText DefaultAcceptEncoding() noexcept
     {
         return http1::MakeText(
-            http1::HttpCodingCodec::DeflateRuntimeAvailable() ?
+            codec::DeflateRuntimeAvailable() ?
                 DefaultAcceptEncodingValue :
                 DeflateUnavailableAcceptEncoding);
     }

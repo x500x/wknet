@@ -1,6 +1,6 @@
 #include "http1/HttpContentEncoding.h"
 
-#include "http1/HttpCoding.h"
+#include <wknet/codec/Codec.h>
 
 namespace wknet
 {
@@ -103,7 +103,7 @@ namespace http1
         }
 
         _Must_inspect_result_
-        NTSTATUS ParseCoding(HttpText token, HttpCoding* coding) noexcept
+        NTSTATUS ParseCoding(HttpText token, codec::Coding* coding) noexcept
         {
             if (coding == nullptr) {
                 return STATUS_INVALID_PARAMETER;
@@ -115,59 +115,59 @@ namespace http1
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("identity"))) {
-                *coding = HttpCoding::Identity;
+                *coding = codec::Coding::Identity;
                 return STATUS_SUCCESS;
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("gzip")) ||
                 TextEqualsIgnoreCase(token, MakeText("x-gzip"))) {
-                *coding = HttpCoding::Gzip;
+                *coding = codec::Coding::Gzip;
                 return STATUS_SUCCESS;
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("deflate"))) {
-                *coding = HttpCoding::Deflate;
+                *coding = codec::Coding::Deflate;
                 return STATUS_SUCCESS;
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("br"))) {
-                *coding = HttpCoding::Brotli;
+                *coding = codec::Coding::Brotli;
                 return STATUS_SUCCESS;
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("compress")) ||
                 TextEqualsIgnoreCase(token, MakeText("x-compress"))) {
-                *coding = HttpCoding::Compress;
+                *coding = codec::Coding::Compress;
                 return STATUS_SUCCESS;
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("zstd"))) {
-                *coding = HttpCoding::Zstd;
+                *coding = codec::Coding::Zstd;
                 return STATUS_SUCCESS;
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("dcb"))) {
-                *coding = HttpCoding::DictionaryCompressedBrotli;
+                *coding = codec::Coding::DictionaryCompressedBrotli;
                 return STATUS_SUCCESS;
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("dcz"))) {
-                *coding = HttpCoding::DictionaryCompressedZstd;
+                *coding = codec::Coding::DictionaryCompressedZstd;
                 return STATUS_SUCCESS;
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("aes128gcm"))) {
-                *coding = HttpCoding::Aes128Gcm;
+                *coding = codec::Coding::Aes128Gcm;
                 return STATUS_SUCCESS;
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("exi"))) {
-                *coding = HttpCoding::Exi;
+                *coding = codec::Coding::Exi;
                 return STATUS_SUCCESS;
             }
 
             if (TextEqualsIgnoreCase(token, MakeText("pack200-gzip"))) {
-                *coding = HttpCoding::Pack200Gzip;
+                *coding = codec::Coding::Pack200Gzip;
                 return STATUS_SUCCESS;
             }
 
@@ -177,7 +177,7 @@ namespace http1
         _Must_inspect_result_
         NTSTATUS AppendCodings(
             HttpText value,
-            HttpCoding* codings,
+            codec::Coding* codings,
             SIZE_T* codingCount) noexcept
         {
             if (codings == nullptr || codingCount == nullptr) {
@@ -276,30 +276,30 @@ namespace http1
             }
         }
 
-        HttpAcceptCoding ToAcceptCoding(HttpCoding coding) noexcept
+        HttpAcceptCoding ToAcceptCoding(codec::Coding coding) noexcept
         {
             switch (coding) {
-            case HttpCoding::Gzip:
+            case codec::Coding::Gzip:
                 return HttpAcceptCoding::Gzip;
-            case HttpCoding::Deflate:
+            case codec::Coding::Deflate:
                 return HttpAcceptCoding::Deflate;
-            case HttpCoding::Brotli:
+            case codec::Coding::Brotli:
                 return HttpAcceptCoding::Brotli;
-            case HttpCoding::Compress:
+            case codec::Coding::Compress:
                 return HttpAcceptCoding::Compress;
-            case HttpCoding::Zstd:
+            case codec::Coding::Zstd:
                 return HttpAcceptCoding::Zstd;
-            case HttpCoding::DictionaryCompressedBrotli:
+            case codec::Coding::DictionaryCompressedBrotli:
                 return HttpAcceptCoding::DictionaryCompressedBrotli;
-            case HttpCoding::DictionaryCompressedZstd:
+            case codec::Coding::DictionaryCompressedZstd:
                 return HttpAcceptCoding::DictionaryCompressedZstd;
-            case HttpCoding::Aes128Gcm:
+            case codec::Coding::Aes128Gcm:
                 return HttpAcceptCoding::Aes128Gcm;
-            case HttpCoding::Exi:
+            case codec::Coding::Exi:
                 return HttpAcceptCoding::Exi;
-            case HttpCoding::Pack200Gzip:
+            case codec::Coding::Pack200Gzip:
                 return HttpAcceptCoding::Pack200Gzip;
-            case HttpCoding::Identity:
+            case codec::Coding::Identity:
             default:
                 return HttpAcceptCoding::Identity;
             }
@@ -797,7 +797,7 @@ namespace http1
             return STATUS_INVALID_PARAMETER;
         }
 
-        HeapArray<HttpCoding> codings(MaxContentCodings);
+        HeapArray<codec::Coding> codings(MaxContentCodings);
         if (!codings.IsValid()) {
             result = {};
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -842,15 +842,15 @@ namespace http1
             return STATUS_SUCCESS;
         }
 
-        HttpCodingDecodeBuffers codingBuffers = {};
+        codec::DecodeBuffers codingBuffers = {};
         codingBuffers.DecodedBody = buffers.DecodedBody;
         codingBuffers.DecodedBodyCapacity = buffers.DecodedBodyCapacity;
         codingBuffers.ScratchBody = buffers.ScratchBody;
         codingBuffers.ScratchBodyCapacity = buffers.ScratchBodyCapacity;
         codingBuffers.Materials = buffers.Materials;
 
-        HttpCodingDecodeResult decoded = {};
-        status = HttpCodingCodec::DecodeChainReverse(
+        codec::DecodeResult decoded = {};
+        status = codec::DecodeChain(
             codings.Get(),
             codingCount,
             body,
@@ -921,7 +921,7 @@ namespace http1
 
         if (preferenceCount == 0) {
             *value = MakeText(
-                HttpCodingCodec::DeflateRuntimeAvailable() ?
+                codec::DeflateRuntimeAvailable() ?
                     DefaultAcceptEncoding :
                     DeflateUnavailableAcceptEncoding);
             return STATUS_SUCCESS;
@@ -932,7 +932,7 @@ namespace http1
         }
 
         HeaderWriter writer(destination, destinationCapacity);
-        const bool deflateRuntimeAvailable = HttpCodingCodec::DeflateRuntimeAvailable();
+        const bool deflateRuntimeAvailable = codec::DeflateRuntimeAvailable();
         for (SIZE_T index = 0; index < preferenceCount; ++index) {
             const HttpAcceptEncodingPreference& preference = preferences[index];
             if (preference.QValue != 0 &&

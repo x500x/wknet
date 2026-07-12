@@ -7,7 +7,7 @@
 #include "client/Http2Client.h"
 #include "session/EngineImpl.h"
 #include "session/HandleAlloc.h"
-#include "http1/HttpCoding.h"
+#include <wknet/codec/Codec.h>
 #include "http1/HttpContentEncoding.h"
 #include "http1/HttpParser.h"
 #include "http1/HttpRequest.h"

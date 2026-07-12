@@ -6,16 +6,6 @@ namespace http1
 {
     namespace
     {
-        bool IsUpperAscii(char value) noexcept
-        {
-            return value >= 'A' && value <= 'Z';
-        }
-
-        char ToLowerAscii(char value) noexcept
-        {
-            return IsUpperAscii(value) ? static_cast<char>(value + ('a' - 'A')) : value;
-        }
-
         bool IsTokenBoundary(char value) noexcept
         {
             return value == ',' || value == ' ' || value == '\t';
@@ -35,37 +25,6 @@ namespace http1
 
             return text;
         }
-    }
-
-    HttpText MakeText(const char* value) noexcept
-    {
-        HttpText text = {};
-
-        if (value == nullptr) {
-            return text;
-        }
-
-        text.Data = value;
-        while (value[text.Length] != '\0') {
-            ++text.Length;
-        }
-
-        return text;
-    }
-
-    bool TextEqualsIgnoreCase(HttpText left, HttpText right) noexcept
-    {
-        if (left.Length != right.Length || left.Data == nullptr || right.Data == nullptr) {
-            return false;
-        }
-
-        for (SIZE_T index = 0; index < left.Length; ++index) {
-            if (ToLowerAscii(left.Data[index]) != ToLowerAscii(right.Data[index])) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     bool HeaderValueHasToken(HttpText value, HttpText token) noexcept

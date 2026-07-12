@@ -2,27 +2,29 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include "../src/wknetlib/http1/HttpExiEventReader.h"
-#include "../src/wknetlib/http1/HttpExiOptions.h"
-#include "../src/wknetlib/http1/HttpExiStringTable.h"
-#include "../src/wknetlib/http1/HttpExiDecoder.h"
-#include "../src/wknetlib/http1/HttpXmlWriter.h"
+#include "../src/wknetlib/codec/ExiEventReader.h"
+#include "../src/wknetlib/codec/ExiOptions.h"
+#include "../src/wknetlib/codec/ExiStringTable.h"
+#include "../src/wknetlib/codec/ExiDecoder.h"
+#include "../src/wknetlib/codec/XmlWriter.h"
+#include <wknet/codec/Codec.h>
 #include <wknet/crypto/CngProvider.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using wknet::http1::HttpExiBitInput;
-using wknet::http1::HttpExiAlignment;
-using wknet::http1::HttpExiOptions;
-using wknet::http1::HttpExiParseHeader;
-using wknet::http1::HttpExiReadLiteralString;
-using wknet::http1::HttpExiStringTable;
-using wknet::http1::HttpExiValueTable;
-using wknet::http1::DecodeExiContent;
-using wknet::http1::HttpXmlText;
-using wknet::http1::HttpXmlName;
-using wknet::http1::HttpXmlWriter;
+using wknet::codec::HttpExiBitInput;
+using wknet::codec::HttpExiAlignment;
+using wknet::codec::HttpExiOptions;
+using wknet::codec::HttpExiParseHeader;
+using wknet::codec::HttpExiReadLiteralString;
+using wknet::codec::HttpExiStringTable;
+using wknet::codec::HttpExiValueTable;
+using wknet::codec::DecodeExiContent;
+using wknet::codec::DecodeExi;
+using wknet::codec::HttpXmlText;
+using wknet::codec::HttpXmlName;
+using wknet::codec::HttpXmlWriter;
 using wknet::crypto::CngProvider;
 using wknet::crypto::HashAlgorithm;
 using wknet::HeapArray;
@@ -115,7 +117,7 @@ namespace
         HeapArray<char> output(1024);
         if (!output.IsValid()) return false;
         SIZE_T outputLength = 0;
-        const NTSTATUS status = DecodeExiContent(
+        const NTSTATUS status = DecodeExi(
             fixture.Get(),
             fixture.Count(),
             output.Get(),
@@ -150,7 +152,7 @@ namespace
         }
         char output[256] = {};
         SIZE_T outputLength = 1;
-        const NTSTATUS status = DecodeExiContent(
+        const NTSTATUS status = DecodeExi(
             fixture.Get(),
             fixture.Count(),
             output,

@@ -2,52 +2,55 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include "../src/wknetlib/http1/HttpPack200BandCodec.h"
-#include "../src/wknetlib/http1/HttpPack200AttributeLayout.h"
-#include "../src/wknetlib/http1/HttpPack200BandParser.h"
-#include "../src/wknetlib/http1/HttpPack200Bands.h"
-#include "../src/wknetlib/http1/HttpPack200Codec.h"
-#include "../src/wknetlib/http1/HttpPack200Decoder.h"
-#include "../src/wknetlib/http1/HttpPack200ClassWriter.h"
-#include "../src/wknetlib/http1/HttpPack200JarWriter.h"
-#include "../src/wknetlib/http1/HttpDeflateDecoder.h"
+#include "../src/wknetlib/codec/Pack200BandCodec.h"
+#include "../src/wknetlib/codec/Pack200AttributeLayout.h"
+#include "../src/wknetlib/codec/Pack200BandParser.h"
+#include "../src/wknetlib/codec/Pack200Bands.h"
+#include "../src/wknetlib/codec/Pack200Codec.h"
+#include "../src/wknetlib/codec/Pack200Decoder.h"
+#include "../src/wknetlib/codec/Pack200ClassWriter.h"
+#include "../src/wknetlib/codec/Pack200JarWriter.h"
+#include "../src/wknetlib/codec/DeflateDecoder.h"
+#include <wknet/codec/Codec.h>
 #include <wknet/crypto/CngProvider.h>
 
 #include <stdio.h>
 #include <string.h>
 
-using wknet::http1::DecodePack200GzipContent;
-using wknet::http1::HttpPack200BandCodec;
-using wknet::http1::HttpPack200AttributeLayout;
-using wknet::http1::HttpPack200AttributeElementKind;
-using wknet::http1::HttpPack200AttributeReferenceKind;
-using wknet::http1::HttpPack200AttributeValueBands;
-using wknet::http1::HttpPack200AttributeRelocation;
-using wknet::http1::HttpPack200BandCodecKind;
-using wknet::http1::HttpPack200BandReader;
-using wknet::http1::HttpPack200CpBands;
-using wknet::http1::HttpPack200CpCounts;
-using wknet::http1::HttpPack200ClassBands;
-using wknet::http1::HttpPack200CodeBands;
-using wknet::http1::HttpPack200RelocationKind;
-using wknet::http1::HttpPack200ClassWriter;
-using wknet::http1::HttpPack200BootstrapMethod;
-using wknet::http1::HttpPack200ClassMember;
-using wknet::http1::HttpPack200FileBands;
-using wknet::http1::HttpPack200Coding;
-using wknet::http1::HttpPack200CodecArena;
-using wknet::http1::HttpPack200DecodeBand;
-using wknet::http1::HttpPack200DecodeBandWithMeta;
-using wknet::http1::HttpPack200ParseMetaCodec;
-using wknet::http1::HttpPack200ReadCpBands;
-using wknet::http1::HttpPack200ReadAttributeDefinitionBands;
-using wknet::http1::HttpPack200ReadInnerClassBands;
-using wknet::http1::HttpPack200ReadBytecodeBands;
-using wknet::http1::HttpPack200ReadClassBandsWithMeta;
-using wknet::http1::HttpPack200ReadFileBands;
-using wknet::http1::HttpPack200JarWriter;
-using wknet::http1::HttpDecodeRawDeflate;
-using wknet::http1::HttpXmlText;
+using wknet::codec::DecodePack200GzipContent;
+using wknet::codec::DecodePack200;
+using wknet::codec::DecodeOne;
+using wknet::codec::Coding;
+using wknet::codec::HttpPack200BandCodec;
+using wknet::codec::HttpPack200AttributeLayout;
+using wknet::codec::HttpPack200AttributeElementKind;
+using wknet::codec::HttpPack200AttributeReferenceKind;
+using wknet::codec::HttpPack200AttributeValueBands;
+using wknet::codec::HttpPack200AttributeRelocation;
+using wknet::codec::HttpPack200BandCodecKind;
+using wknet::codec::HttpPack200BandReader;
+using wknet::codec::HttpPack200CpBands;
+using wknet::codec::HttpPack200CpCounts;
+using wknet::codec::HttpPack200ClassBands;
+using wknet::codec::HttpPack200CodeBands;
+using wknet::codec::HttpPack200RelocationKind;
+using wknet::codec::HttpPack200ClassWriter;
+using wknet::codec::HttpPack200BootstrapMethod;
+using wknet::codec::HttpPack200ClassMember;
+using wknet::codec::HttpPack200FileBands;
+using wknet::codec::HttpPack200Coding;
+using wknet::codec::HttpPack200CodecArena;
+using wknet::codec::HttpPack200DecodeBand;
+using wknet::codec::HttpPack200DecodeBandWithMeta;
+using wknet::codec::HttpPack200ParseMetaCodec;
+using wknet::codec::HttpPack200ReadCpBands;
+using wknet::codec::HttpPack200ReadAttributeDefinitionBands;
+using wknet::codec::HttpPack200ReadInnerClassBands;
+using wknet::codec::HttpPack200ReadBytecodeBands;
+using wknet::codec::HttpPack200ReadClassBandsWithMeta;
+using wknet::codec::HttpPack200ReadFileBands;
+using wknet::codec::HttpPack200JarWriter;
+using wknet::codec::HttpXmlText;
 using wknet::HeapArray;
 using wknet::crypto::CngProvider;
 using wknet::crypto::HashAlgorithm;
@@ -128,7 +131,7 @@ namespace
         }
 
         SIZE_T jarLength = 0;
-        if (!NT_SUCCESS(DecodePack200GzipContent(
+        if (!NT_SUCCESS(DecodePack200(
                 packed.Get(), packed.Count(), jar.Get(), jar.Count(), &jarLength)) ||
             jarLength < 8 ||
             CountBytes(jar.Get(), jarLength, expectedClassName, strlen(expectedClassName)) == 0 ||
@@ -211,7 +214,7 @@ namespace
 
     NTSTATUS DecodeAttributeBandFixture(
         void* context,
-        wknet::http1::HttpPack200CodingKind,
+        wknet::codec::HttpPack200CodingKind,
         LONG* values,
         SIZE_T valueCount) noexcept
     {
@@ -468,8 +471,8 @@ namespace
         HttpPack200BandReader reader(bytes, sizeof(bytes));
         LONG value = 0;
         Expect(
-            reader.ReadInt(wknet::http1::HttpPack200CodingFor(
-                wknet::http1::HttpPack200CodingKind::Unsigned5), &value) &&
+            reader.ReadInt(wknet::codec::HttpPack200CodingFor(
+                wknet::codec::HttpPack200CodingKind::Unsigned5), &value) &&
                 static_cast<ULONG>(value) == 0x80000000UL,
             "Pack200 UNSIGNED5 preserves the full 32-bit flags word");
     }
@@ -798,7 +801,7 @@ namespace
         HttpPack200BandReader emptyHeaders(nullptr, 0);
         HttpPack200CodecArena arena = {};
         NTSTATUS status = arena.Initialize(32);
-        wknet::http1::HttpPack200AttributeDefinitionBands definitions = {};
+        wknet::codec::HttpPack200AttributeDefinitionBands definitions = {};
         if (NT_SUCCESS(status)) {
             status = HttpPack200ReadAttributeDefinitionBands(
                 &attributeReader,
@@ -822,7 +825,7 @@ namespace
         const unsigned char innerBytes[] = { 1, 0xc1, 0xfd, 0x0c, 2, 4 };
         HttpPack200BandReader innerReader(innerBytes, sizeof(innerBytes));
         HttpPack200BandReader innerHeaders(nullptr, 0);
-        wknet::http1::HttpPack200InnerClassBands inner = {};
+        wknet::codec::HttpPack200InnerClassBands inner = {};
         status = HttpPack200ReadInnerClassBands(
             &innerReader,
             &innerHeaders,
@@ -2725,8 +2728,9 @@ namespace
 
         char decoded[16] = {};
         SIZE_T decodedLength = 0;
-        status = HttpDecodeRawDeflate(
-            bytes + compressedOffset,
+        status = DecodeOne(
+            Coding::Deflate,
+            reinterpret_cast<const char*>(bytes + compressedOffset),
             compressedLength,
             decoded,
             sizeof(decoded),

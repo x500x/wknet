@@ -1,6 +1,6 @@
 #pragma once
 
-#include "http1/HttpCoding.h"
+#include <wknet/codec/Codec.h>
 #include "http1/HttpTypes.h"
 
 namespace wknet
@@ -66,7 +66,7 @@ namespace http1
         SIZE_T DecodedBodyCapacity = 0;
         char* ScratchBody = nullptr;
         SIZE_T ScratchBodyCapacity = 0;
-        const HttpCodingDecodeMaterials* Materials = nullptr;
+        const codec::DecodeMaterials* Materials = nullptr;
     };
 
     struct HttpContentDecodeResult final

@@ -311,7 +311,7 @@ namespace session
         Http2CleartextMode Http2CleartextMode = Http2CleartextMode::Disabled;
         const http1::HttpAcceptEncodingPreference* AcceptEncodingPreferences = nullptr;
         SIZE_T AcceptEncodingPreferenceCount = 0;
-        const http1::HttpCodingDecodeMaterials* ContentCodingMaterials = nullptr;
+        const codec::DecodeMaterials* ContentCodingMaterials = nullptr;
         const http2::Http2Priority* Http2Priority = nullptr;
         HttpCacheHandle Cache = nullptr;
     };

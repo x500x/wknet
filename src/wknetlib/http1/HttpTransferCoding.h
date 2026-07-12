@@ -1,6 +1,6 @@
 #pragma once
 
-#include "http1/HttpCoding.h"
+#include <wknet/codec/Codec.h>
 #include "http1/HttpResponse.h"
 
 namespace wknet
@@ -53,7 +53,7 @@ namespace http1
             _In_reads_bytes_(wireBodyLength) const char* wireBody,
             SIZE_T wireBodyLength,
             bool messageCompleteOnConnectionClose,
-            _In_ const HttpCodingDecodeBuffers& buffers,
+            _In_ const codec::DecodeBuffers& buffers,
             _Out_writes_(trailerCapacity) HttpHeader* trailers,
             SIZE_T trailerCapacity,
             _Out_opt_ SIZE_T* trailerCount,

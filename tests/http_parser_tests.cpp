@@ -7,20 +7,20 @@
 #include "http1/HttpCachePolicy.h"
 #include "http1/HttpContentEncoding.h"
 
-#include "../src/wknetlib/http1/HttpXmlWriter.h"
-#include "../src/wknetlib/http1/HttpExiEventReader.h"
-#include "../src/wknetlib/http1/HttpExiGrammar.h"
-#include "../src/wknetlib/http1/HttpExiGrammarTable.h"
-#include "../src/wknetlib/http1/HttpExiQNameReader.h"
-#include "../src/wknetlib/http1/HttpExiStringTable.h"
-#include "../src/wknetlib/http1/HttpExiValueDecoder.h"
-#include "../src/wknetlib/http1/HttpPack200BandCodec.h"
-#include "../src/wknetlib/http1/HttpPack200BandParser.h"
-#include "../src/wknetlib/http1/HttpPack200Bands.h"
-#include "../src/wknetlib/http1/HttpPack200ClassWriter.h"
-#include "../src/wknetlib/http1/HttpPack200Codec.h"
-#include "../src/wknetlib/http1/HttpPack200Decoder.h"
-#include "../src/wknetlib/http1/HttpPack200JarWriter.h"
+#include "../src/wknetlib/codec/XmlWriter.h"
+#include "../src/wknetlib/codec/ExiEventReader.h"
+#include "../src/wknetlib/codec/ExiGrammar.h"
+#include "../src/wknetlib/codec/ExiGrammarTable.h"
+#include "../src/wknetlib/codec/ExiQNameReader.h"
+#include "../src/wknetlib/codec/ExiStringTable.h"
+#include "../src/wknetlib/codec/ExiValueDecoder.h"
+#include "../src/wknetlib/codec/Pack200BandCodec.h"
+#include "../src/wknetlib/codec/Pack200BandParser.h"
+#include "../src/wknetlib/codec/Pack200Bands.h"
+#include "../src/wknetlib/codec/Pack200ClassWriter.h"
+#include "../src/wknetlib/codec/Pack200Codec.h"
+#include "../src/wknetlib/codec/Pack200Decoder.h"
+#include "../src/wknetlib/codec/Pack200JarWriter.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -45,49 +45,49 @@ using wknet::http1::HttpByteRange;
 using wknet::http1::HttpAcceptEncodingEntry;
 using wknet::http1::HttpAcceptEncodingRules;
 using wknet::http1::HttpContentEncoding;
-using wknet::http1::HttpXmlName;
-using wknet::http1::HttpXmlText;
-using wknet::http1::HttpXmlWriter;
-using wknet::http1::HttpPack200BandReader;
-using wknet::http1::HttpPack200AttributeBands;
-using wknet::http1::HttpPack200ClassBands;
-using wknet::http1::HttpPack200CodeBands;
-using wknet::http1::HttpPack200CodingFor;
-using wknet::http1::HttpPack200CodingKind;
-using wknet::http1::HttpPack200CpBands;
-using wknet::http1::HttpPack200CpCounts;
-using wknet::http1::HttpPack200FileBands;
-using wknet::http1::HttpExiBuiltinProduction;
-using wknet::http1::HttpExiBitInput;
-using wknet::http1::HttpExiEventKind;
-using wknet::http1::HttpExiGrammarKind;
-using wknet::http1::HttpExiEventCode;
-using wknet::http1::HttpExiGrammarTable;
-using wknet::http1::HttpExiLearnedProduction;
-using wknet::http1::HttpExiProduction;
-using wknet::http1::HttpExiQNameEntry;
-using wknet::http1::HttpExiQNameTable;
-using wknet::http1::HttpExiNameTables;
-using wknet::http1::HttpExiDecimalValue;
-using wknet::http1::HttpExiFloatValue;
-using wknet::http1::HttpExiStringTable;
-using wknet::http1::HttpExiLearnQName;
-using wknet::http1::HttpExiReadQNameLiteral;
-using wknet::http1::HttpExiResolveQName;
-using wknet::http1::HttpPack200ClassWriter;
-using wknet::http1::HttpPack200BandCodec;
-using wknet::http1::HttpPack200BandCodecKind;
-using wknet::http1::HttpPack200CodecArena;
-using wknet::http1::HttpPack200DecodeBand;
-using wknet::http1::HttpPack200DecodePopulationBand;
-using wknet::http1::HttpPack200ParseMetaCodec;
-using wknet::http1::HttpPack200ReadAttributeBands;
-using wknet::http1::HttpPack200ReadClassBands;
-using wknet::http1::HttpPack200ReadCodeBands;
-using wknet::http1::HttpPack200ReadCpBands;
-using wknet::http1::HttpPack200ReadFileBands;
-using wknet::http1::HttpPack200JarWriter;
-using wknet::http1::DecodePack200GzipContent;
+using wknet::codec::HttpXmlName;
+using wknet::codec::HttpXmlText;
+using wknet::codec::HttpXmlWriter;
+using wknet::codec::HttpPack200BandReader;
+using wknet::codec::HttpPack200AttributeBands;
+using wknet::codec::HttpPack200ClassBands;
+using wknet::codec::HttpPack200CodeBands;
+using wknet::codec::HttpPack200CodingFor;
+using wknet::codec::HttpPack200CodingKind;
+using wknet::codec::HttpPack200CpBands;
+using wknet::codec::HttpPack200CpCounts;
+using wknet::codec::HttpPack200FileBands;
+using wknet::codec::HttpExiBuiltinProduction;
+using wknet::codec::HttpExiBitInput;
+using wknet::codec::HttpExiEventKind;
+using wknet::codec::HttpExiGrammarKind;
+using wknet::codec::HttpExiEventCode;
+using wknet::codec::HttpExiGrammarTable;
+using wknet::codec::HttpExiLearnedProduction;
+using wknet::codec::HttpExiProduction;
+using wknet::codec::HttpExiQNameEntry;
+using wknet::codec::HttpExiQNameTable;
+using wknet::codec::HttpExiNameTables;
+using wknet::codec::HttpExiDecimalValue;
+using wknet::codec::HttpExiFloatValue;
+using wknet::codec::HttpExiStringTable;
+using wknet::codec::HttpExiLearnQName;
+using wknet::codec::HttpExiReadQNameLiteral;
+using wknet::codec::HttpExiResolveQName;
+using wknet::codec::HttpPack200ClassWriter;
+using wknet::codec::HttpPack200BandCodec;
+using wknet::codec::HttpPack200BandCodecKind;
+using wknet::codec::HttpPack200CodecArena;
+using wknet::codec::HttpPack200DecodeBand;
+using wknet::codec::HttpPack200DecodePopulationBand;
+using wknet::codec::HttpPack200ParseMetaCodec;
+using wknet::codec::HttpPack200ReadAttributeBands;
+using wknet::codec::HttpPack200ReadClassBands;
+using wknet::codec::HttpPack200ReadCodeBands;
+using wknet::codec::HttpPack200ReadCpBands;
+using wknet::codec::HttpPack200ReadFileBands;
+using wknet::codec::HttpPack200JarWriter;
+using wknet::codec::DecodePack200GzipContent;
 
 namespace
 {
@@ -355,7 +355,7 @@ namespace
         HttpExiBitInput eventInput(eventBytes, sizeof(eventBytes));
         HttpExiEventCode eventCode = {};
         HttpExiProduction production = {};
-        NTSTATUS status = wknet::http1::HttpExiReadEventCode(
+        NTSTATUS status = wknet::codec::HttpExiReadEventCode(
             &eventInput,
             HttpExiGrammarKind::ElementContent,
             false,
@@ -378,13 +378,13 @@ namespace
         status = values.Initialize(4, 16);
         Expect(NT_SUCCESS(status), "exi value string table initializes");
         HttpXmlText literal = {};
-        status = wknet::http1::HttpExiReadLiteralString(&stringInput, &values, &literal);
+        status = wknet::codec::HttpExiReadLiteralString(&stringInput, &values, &literal);
         Expect(
             NT_SUCCESS(status) && MemoryEqualsLiteral(literal.Data, literal.Length, "abc"),
             "exi literal string reader stores string value");
 
         HttpXmlText referenced = {};
-        status = wknet::http1::HttpExiReadStringTableReference(&stringInput, values, &referenced);
+        status = wknet::codec::HttpExiReadStringTableReference(&stringInput, values, &referenced);
         Expect(
             NT_SUCCESS(status) && MemoryEqualsLiteral(referenced.Data, referenced.Length, "abc"),
             "exi string table reference reader returns stored value");
@@ -474,19 +474,19 @@ namespace
         const unsigned char booleanBytes[] = { 0x80 };
         HttpExiBitInput booleanInput(booleanBytes, sizeof(booleanBytes));
         bool booleanValue = false;
-        NTSTATUS status = wknet::http1::HttpExiReadBoolean(&booleanInput, &booleanValue);
+        NTSTATUS status = wknet::codec::HttpExiReadBoolean(&booleanInput, &booleanValue);
         Expect(NT_SUCCESS(status) && booleanValue, "exi boolean decoder reads true bit");
 
         const unsigned char integerBytes[] = { 0x82, 0x00 };
         HttpExiBitInput integerInput(integerBytes, sizeof(integerBytes));
         LONG integerValue = 0;
-        status = wknet::http1::HttpExiReadInteger(&integerInput, &integerValue);
+        status = wknet::codec::HttpExiReadInteger(&integerInput, &integerValue);
         Expect(NT_SUCCESS(status) && integerValue == -5, "exi integer decoder reads negative magnitude minus one");
 
         const unsigned char decimalBytes[] = { 0x81, 0x01, 0x80 };
         HttpExiBitInput decimalInput(decimalBytes, sizeof(decimalBytes));
         HttpExiDecimalValue decimalValue = {};
-        status = wknet::http1::HttpExiReadDecimal(&decimalInput, &decimalValue);
+        status = wknet::codec::HttpExiReadDecimal(&decimalInput, &decimalValue);
         Expect(
             NT_SUCCESS(status) &&
                 decimalValue.Negative &&
@@ -497,7 +497,7 @@ namespace
         const unsigned char floatBytes[] = { 0x02, 0xc0, 0x40 };
         HttpExiBitInput floatInput(floatBytes, sizeof(floatBytes));
         HttpExiFloatValue floatValue = {};
-        status = wknet::http1::HttpExiReadFloat(&floatInput, &floatValue);
+        status = wknet::codec::HttpExiReadFloat(&floatInput, &floatValue);
         Expect(
             NT_SUCCESS(status) && floatValue.Mantissa == 5 && floatValue.Exponent == -2,
             "exi float decoder reads mantissa and exponent");
@@ -2193,11 +2193,11 @@ namespace
         HttpHeader headers[] = {
             { MakeText("Content-Encoding"), MakeText("dcz") }
         };
-        wknet::http1::HttpCodingExternalMaterial material = {};
-        material.Coding = wknet::http1::HttpCoding::DictionaryCompressedZstd;
+        wknet::codec::ExternalMaterial material = {};
+        material.CodingKind = wknet::codec::Coding::DictionaryCompressedZstd;
         material.Dictionary = ZstdDictionary;
         material.DictionaryLength = sizeof(ZstdDictionary);
-        wknet::http1::HttpCodingDecodeMaterials materials = {};
+        wknet::codec::DecodeMaterials materials = {};
         materials.Items = &material;
         materials.ItemCount = 1;
 
@@ -2250,11 +2250,11 @@ namespace
         HttpHeader headers[] = {
             { MakeText("Content-Encoding"), MakeText("aes128gcm") }
         };
-        wknet::http1::HttpCodingExternalMaterial material = {};
-        material.Coding = wknet::http1::HttpCoding::Aes128Gcm;
+        wknet::codec::ExternalMaterial material = {};
+        material.CodingKind = wknet::codec::Coding::Aes128Gcm;
         material.Aes128GcmKeyingMaterial = Aes128GcmIkm;
         material.Aes128GcmKeyingMaterialLength = sizeof(Aes128GcmIkm);
-        wknet::http1::HttpCodingDecodeMaterials materials = {};
+        wknet::codec::DecodeMaterials materials = {};
         materials.Items = &material;
         materials.ItemCount = 1;
 
@@ -2286,11 +2286,11 @@ namespace
             { MakeText("Content-Encoding"), MakeText("aes128gcm") }
         };
         unsigned char wrongIkm[sizeof(Aes128GcmIkm)] = {};
-        wknet::http1::HttpCodingExternalMaterial material = {};
-        material.Coding = wknet::http1::HttpCoding::Aes128Gcm;
+        wknet::codec::ExternalMaterial material = {};
+        material.CodingKind = wknet::codec::Coding::Aes128Gcm;
         material.Aes128GcmKeyingMaterial = wrongIkm;
         material.Aes128GcmKeyingMaterialLength = sizeof(wrongIkm);
-        wknet::http1::HttpCodingDecodeMaterials materials = {};
+        wknet::codec::DecodeMaterials materials = {};
         materials.Items = &material;
         materials.ItemCount = 1;
 

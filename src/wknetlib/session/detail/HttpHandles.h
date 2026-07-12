@@ -432,10 +432,10 @@ namespace detail
         return reinterpret_cast<const ::wknet::http1::HttpAcceptEncodingPreference*>(preferences);
     }
 
-    inline const ::wknet::http1::HttpCodingDecodeMaterials* ToApiCodingMaterials(
+    inline const ::wknet::codec::DecodeMaterials* ToApiCodingMaterials(
         const CodingDecodeMaterials* materials) noexcept
     {
-        return reinterpret_cast<const ::wknet::http1::HttpCodingDecodeMaterials*>(materials);
+        return reinterpret_cast<const ::wknet::codec::DecodeMaterials*>(materials);
     }
 
     inline const ::wknet::http2::Http2Priority* ToApiHttp2Priority(

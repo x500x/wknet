@@ -76,7 +76,7 @@ namespace http1
         }
 
         _Must_inspect_result_
-        bool TransferCodingToHttpCoding(HttpTransferCodingKind transferCoding, HttpCoding* coding) noexcept
+        bool TransferCodingToCodecCoding(HttpTransferCodingKind transferCoding, codec::Coding* coding) noexcept
         {
             if (coding == nullptr) {
                 return false;
@@ -84,13 +84,13 @@ namespace http1
 
             switch (transferCoding) {
             case HttpTransferCodingKind::Gzip:
-                *coding = HttpCoding::Gzip;
+                *coding = codec::Coding::Gzip;
                 return true;
             case HttpTransferCodingKind::Deflate:
-                *coding = HttpCoding::Deflate;
+                *coding = codec::Coding::Deflate;
                 return true;
             case HttpTransferCodingKind::Compress:
-                *coding = HttpCoding::Compress;
+                *coding = codec::Coding::Compress;
                 return true;
             default:
                 return false;
@@ -106,7 +106,7 @@ namespace http1
 
         void SelectDestination(
             const char* current,
-            const HttpCodingDecodeBuffers& buffers,
+            const codec::DecodeBuffers& buffers,
             char** destination,
             SIZE_T* destinationCapacity) noexcept
         {
@@ -298,7 +298,7 @@ namespace http1
             HttpTransferCodingKind transferCoding,
             const char* current,
             SIZE_T currentLength,
-            const HttpCodingDecodeBuffers& buffers,
+            const codec::DecodeBuffers& buffers,
             const char** decoded,
             SIZE_T* decodedLength,
             bool* transformed) noexcept
@@ -307,13 +307,13 @@ namespace http1
                 return STATUS_INVALID_PARAMETER;
             }
 
-            HttpCoding coding = HttpCoding::Identity;
-            if (!TransferCodingToHttpCoding(transferCoding, &coding)) {
+            codec::Coding coding = codec::Coding::Identity;
+            if (!TransferCodingToCodecCoding(transferCoding, &coding)) {
                 return STATUS_INVALID_PARAMETER;
             }
 
-            HttpCodingDecodeResult result = {};
-            NTSTATUS status = HttpCodingCodec::DecodeChainReverse(
+            codec::DecodeResult result = {};
+            NTSTATUS status = codec::DecodeChain(
                 &coding,
                 1,
                 current,
@@ -375,7 +375,7 @@ namespace http1
         const char* wireBody,
         SIZE_T wireBodyLength,
         bool messageCompleteOnConnectionClose,
-        const HttpCodingDecodeBuffers& buffers,
+        const codec::DecodeBuffers& buffers,
         HttpHeader* trailers,
         SIZE_T trailerCapacity,
         SIZE_T* trailerCount,

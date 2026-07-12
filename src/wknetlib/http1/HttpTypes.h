@@ -6,6 +6,7 @@
 #include <wknet/WknetConfig.h>
 #endif
 
+#include "rtl/Text.h"
 
 #ifndef WKNET_ALLOCATOR_DEFINED
 #define WKNET_ALLOCATOR_DEFINED
@@ -240,11 +241,7 @@ namespace wknet
 {
 namespace http1
 {
-    struct HttpText final
-    {
-        const char* Data = nullptr;
-        SIZE_T Length = 0;
-    };
+    using HttpText = rtl::Text;
 
     struct HttpHeader final
     {
@@ -252,11 +249,8 @@ namespace http1
         HttpText Value = {};
     };
 
-    _Must_inspect_result_
-    HttpText MakeText(_In_opt_ const char* value) noexcept;
-
-    _Must_inspect_result_
-    bool TextEqualsIgnoreCase(HttpText left, HttpText right) noexcept;
+    using rtl::MakeText;
+    using rtl::TextEqualsIgnoreCase;
 
     _Must_inspect_result_
     bool HeaderValueHasToken(HttpText value, HttpText token) noexcept;
