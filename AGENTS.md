@@ -22,9 +22,12 @@
 - pwsh -NoLogo -NoProfile -File .\tests\integration\https_smoke.ps1 -Configuration Debug -Platform x64 -SkipDriverBuild,因为会卡
 
 ## 本项目方向
-- 这是一个面向 Windows kernel driver 的 HTTP/HTTPS 实现项目。
-- 传输层优先使用 WSK。
-- 密码学基础优先使用内核态 CNG/BCrypt。
-- HTTP/HTTPS、TLS record/handshake、证书校验都按内核自实现路线推进。
-- 不把 WinHTTP、WinINet、SChannel 作为内核主路径。
+- 产品名 **wknet**（原 KernelHttp 已全量更名，无兼容层）。
+- 这是一个面向 Windows kernel driver 的 HTTP/HTTPS/WebSocket 客户端库。
+- 公共命名空间：`wknet::http`、`wknet::websocket`、`wknet::crypto`、`wknet::codec`。
+- 内部命名空间：`rtl` / `net` / `tls` / `http1` / `http2` / `ws` / `transport` / `session` / `detail`。
+- 传输层优先使用 WSK；密码学优先内核态 CNG/BCrypt；不把 WinHTTP、WinINet、SChannel 作为内核主路径。
+- 调试：`wknet::Trace*` 分级输出，**默认 Off**；测试/wknettest 设 Max。
+- 工程：`wknet.sln`、`src/wknetlib`、`src/wknettest`、`include/wknet`；用户态测试宏 `WKNET_USER_MODE_TEST`。
 - C++ 可以用来组织代码，例如 `namespace`、类、RAII、轻量模板，但必须符合 `/kernel` 的限制：无异常、无 RTTI，不要依赖内核不可用的标准库能力。
+- 架构分层与调用关系见计划与 `docs/plans/2026-07-12-wknet-rename-map.md`；禁止反向依赖与公共头泄漏内部实现。
