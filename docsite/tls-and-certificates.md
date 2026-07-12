@@ -5,7 +5,7 @@
 - 客户端**只走单版本路径**：TLS 1.3 在允许范围内则优先（纯 1.3 ClientHello，`supported_versions=0x0304` + key_share），否则直接 1.2。**无握手内自动降级**。
 - 1.3 解析失败时，尝试把同一字节当 1.2 ServerHello 重新解释并**分类**（不自动降级）：
   - 需满足门槛——1.2 与 1.3 都在范围内、且未配置 early data。
-  - 若能干净解析为合法 1.2 ServerHello 且**无降级哨兵** → 归类 `VersionNegotiation`，连接仍失败，由上层（`HttpsClient`/`WebSocketClient`）显式重连 1.2。
+  - 若能干净解析为合法 1.2 ServerHello 且**无降级哨兵** → 归类 `VersionNegotiation`，连接仍失败，由 `session` 显式重连 1.2。
   - 若 server random 带降级哨兵 → 视为攻击，硬失败 `DecodeError` / `STATUS_INVALID_NETWORK_RESPONSE`。
   - 解析不出合法 1.2 → 不算 1.2 证据。
 - 失败分类枚举 `TlsHandshakeFailureCategory{ None, VersionNegotiation, CertificateValidation, AlpnMismatch, NetworkIo, DecodeError, CryptoError, PeerAlert, LocalPolicy }`，可经 `LastHandshakeFailure()` 查询。

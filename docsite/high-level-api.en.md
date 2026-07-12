@@ -105,13 +105,13 @@ The high-level API uses opaque handles to manage resources. These handles are he
 
 | Type | Namespace | Create | Release | Description |
 |------|-----------|--------|---------|-------------|
-| `Session` | `khttp` | `SessionCreate` | `SessionClose` | HTTP/WS session. Internally owns hidden WSK runtime and engine session |
-| `Request` | `khttp` | `RequestCreate` | `RequestRelease` | Send handle bound to `Session`; does not store URL, method, header, or body |
-| `Response` | `khttp` | Returned by send/async result | `ResponseRelease` | Independent response handle containing status code, body, headers, trailers |
-| `AsyncOp` | `khttp` | Returned by async send or WS async connect | `AsyncRelease` | Async operation handle; can wait, cancel, get result |
-| `Headers` | `khttp` | `HeadersCreate` | `HeadersRelease` | Request header collection; copies name/value on add |
-| `Body` | `khttp` | `BodyCreate*` | `BodyRelease` | Request body descriptor; supports reference/copy, form, multipart, file, chunked trailer |
-| `WebSocket` | `kws` | `Connect` / `ConnectEx` / `AsyncGetWebSocket` | `Close` / `CloseEx` | WebSocket connection handle |
+| `Session` | `wknet::http` | `SessionCreate` | `SessionClose` | HTTP/WS session |
+| `Request` | `wknet::http` | `RequestCreate` | `RequestRelease` | Request handle |
+| `Response` | `wknet::http` | Returned by send/async | `ResponseRelease` | Status, body, headers, and trailers |
+| `AsyncOp` | `wknet::http` | Returned by async operations | `AsyncRelease` | Wait, cancel, and retrieve results |
+| `Headers` | `wknet::http` | `HeadersCreate` | `HeadersRelease` | Request-header collection |
+| `Body` | `wknet::http` | `BodyCreate*` | `BodyRelease` | Request-body descriptor |
+| `WebSocket` | `wknet::websocket` | `Connect` / `ConnectEx` | `Close` / `CloseEx` | WebSocket handle |
 
 #### Enums
 
@@ -440,7 +440,7 @@ struct MultipartPart final {
 
 **NOTE**: `BodyCreateMultipart` copies the part descriptor array, but the pointers within parts are used by reference and must remain valid until the send completes.
 
-#### `kws` WebSocket Structs
+#### `wknet::websocket` Structs
 
 ##### `wknet::websocket::Header`
 

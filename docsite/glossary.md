@@ -11,8 +11,8 @@
 | **ITransport** | 字节流传输抽象，统一明文/TLS（[传输层](transport-layer.md)） |
 | **Workspace** | 会话常驻的可复用缓冲集合，避免反复分配（[内存模型](memory-model.md)） |
 | **HeapObject / HeapArray** | RAII 堆封装，替代裸 `new/delete` |
-| **连接池 / Pool** | 连接复用，按 `KhConnectionPoolKey` 匹配（[连接池](connection-pool.md)） |
-| **khttp / kws / engine** | 高层 HTTP / 高层 WebSocket / 底层 ABI 命名空间 |
+| **连接池 / Pool** | 连接复用，按 `session::ConnectionPoolKey` 匹配（[连接池](connection-pool.md)） |
+| **公共 API** | `wknet::http` / `wknet::websocket` / `wknet::crypto` / `wknet::codec` |
 | **ALPN** | Application-Layer Protocol Negotiation；协商 `h2` / `http/1.1` |
 | **SNI** | Server Name Indication；TLS 握手中的目标主机名 |
 | **h2 / h2c** | HTTP/2 over TLS / HTTP/2 明文（prior knowledge 或 Upgrade） |
@@ -26,5 +26,5 @@
 | **Session Ticket** | TLS 会话恢复票据（1.2/1.3 缓存） |
 | **chunked** | HTTP/1.1 分块传输编码 |
 | **close-delimited** | 以连接关闭界定 body 结束的 HTTP/1.x 响应；不回连接池 |
-| **Drain** | `KhEngineDrainAsync`，卸载前等待在飞异步操作（[异步模型](async-model.md)） |
+| **Drain** | 内部卸载路径等待在飞异步操作（[异步模型](async-model.md)） |
 | **WDK** | Windows Driver Kit，构建内核驱动所需 |

@@ -42,7 +42,7 @@ enum class Http2FrameType : UCHAR {
 
 - `Http2Connection` 维护活动 stream 表（默认容量 16，并受对端 `MAX_CONCURRENT_STREAMS` 限制）。
 - `BeginRequest(...)` 只发送 HEADERS/DATA 并返回 stream id；`ReceiveResponse(streamId)` 再收该流响应，帧循环会把其它活动流的 HEADERS/DATA/WINDOW_UPDATE/RST_STREAM 暂存到对应 stream state。
-- 同步 `SendRequest` 复用两阶段路径；高层 `khttp` 连接池通过 stream 租约复用同源 H2 连接，按本地/peer 并发上限分配活动流。
+- 同步 `SendRequest` 复用两阶段路径；`wknet::http` 连接池通过 stream 租约复用同源 H2 连接。
 
 ### 请求 body source 与 trailers
 
@@ -53,7 +53,7 @@ enum class Http2FrameType : UCHAR {
 ### PRIORITY
 
 - `Http2Priority` 使用 RFC 权重范围 1..256，支持 stream dependency 与 exclusive 标志；拒绝自依赖和非法权重。
-- 单次请求可通过 `Http2RequestBody.Priority`、`Http2RequestOptions.Priority`、`KhHttpSendOptions.Http2Priority` 或 `wknet::http::SendOptions.Http2Priority` 显式设置。
+- 单次请求可通过 `wknet::http::SendOptions.Http2Priority` 显式设置。
 - 首个 HEADERS 帧携带 priority 字段；底层也提供独立 PRIORITY frame 编解码。收到 peer PRIORITY 会校验长度和自依赖，不改变本地安全边界或调度策略。
 
 ### RFC 8441 extended CONNECT
@@ -61,7 +61,7 @@ enum class Http2FrameType : UCHAR {
 - 请求头构造支持 `Method=CONNECT` + `ConnectProtocol="websocket"`，编码为 `:method: CONNECT` 与 `:protocol: websocket`。
 - 发送前校验对端 `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`，否则返回 `STATUS_NOT_SUPPORTED` 且不分配 stream。
 - tunnel stream 收到 `2xx` 响应头后，可用 `SendStreamData` / `ReceiveStreamData` 双向传输 DATA payload（例如 WebSocket frame bytes）。
-- 这是低层 HTTP/2 tunnel primitive；高层 `kws` 在 `wss` 默认自动选择 RFC 8441，显式 `Http11Only` 时强制 HTTP/1.1 Upgrade。
+- 这是内部 HTTP/2 tunnel primitive；`wknet::websocket` 在 `wss` 默认自动选择 RFC 8441，`Http11Only` 强制 HTTP/1.1 Upgrade。
 
 ### GOAWAY / RST_STREAM / PUSH_PROMISE
 
@@ -72,8 +72,8 @@ enum class Http2FrameType : UCHAR {
 ### h2c 模式
 
 - **prior knowledge**：直接 `Initialize` + `SendRequest`。
-- **Upgrade**：`InitializeAfterUpgrade` 跑完前导/SETTINGS 后置 `nextStreamId_=3`（保留 stream 1 给升级请求），用 `ReceiveResponse(streamId=1)`；`EncodeSettingsPayloadBase64Url` 产出 `HTTP2-Settings` 值。客户端 `Http2Client` 与高层 `SendOptions.Http2CleartextMode=Upgrade` 的 Upgrade 模式**禁止请求体**并重放 101 后残留字节。
-- 高层 `khttp` 默认不对 `http://` 使用 h2c；只有单次发送显式设置 `Http2CleartextMode::PriorKnowledge` 或 `Upgrade` 才进入 h2c，连接池 key 会区分 HTTP/1.1、prior knowledge 与 Upgrade。
+- **Upgrade**：`session::HttpH2Dispatch` 保留 stream 1 给升级请求，重放 101 后残留字节；`SendOptions.Http2CleartextMode=Upgrade` 禁止请求体。
+- `wknet::http` 默认不对 `http://` 使用 h2c；只有单次发送显式设置 `PriorKnowledge` 或 `Upgrade` 才进入 h2c。
 
 ### HPACK
 
@@ -85,4 +85,4 @@ enum class Http2FrameType : UCHAR {
 
 ### 边界
 
-高层 `khttp` 已接入同源 H2 连接池多活动流复用，低层继续提供 RFC 8441 extended CONNECT tunnel；`kws` 对 `wss` 默认自动选择 RFC 8441，`Http11Only` 可强制 HTTP/1.1。PRIORITY 为显式 per-request 能力，不实现复杂本地树调度；后台 PING 保活默认关闭，可在 session 上显式开启，低层仍提供显式 `SendPing`；不支持 server push；高层 h2c 是显式 opt-in，默认关闭。
+`wknet::http` 已接入同源 H2 多活动流复用；`wknet::websocket` 对 `wss` 默认自动选择 RFC 8441。PRIORITY 与后台 PING 保活均为显式能力；不支持 server push；h2c 默认关闭。

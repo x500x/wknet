@@ -16,7 +16,7 @@ enum class WebSocketOpcode : UCHAR {
 - `EncodeClientFrame`：客户端帧**必掩码**（payload XOR 4 字节键）；控制帧必须 FIN 且 ≤125。
 - `DecodeFrameHeader`：RSV2/RSV3 必须为 0；RSV1 仅供已协商的 `permessage-deflate` 首个 Text/Binary 片使用；**被掩码的服务端帧 → `STATUS_INVALID_NETWORK_RESPONSE`**；扩展长度强制最短编码。
 
-### 高层 API（`kws`，见 [高层 API](high-level-api.md)）
+### 产品 API（`wknet::websocket`，见 [产品 API](high-level-api.md)）
 
 ```cpp
 // 连接（同步/异步，URL 或 ConnectConfig）
@@ -59,7 +59,7 @@ struct wknet::websocket::ConnectConfig { const char* Url; SIZE_T UrlLength; cons
 
 ### 行为与时序
 
-- 控制帧：`AutoReplyPing`（默认开）自动回 Pong；单次接收控制帧 > 100 → close 1008（`KhWsMaxControlFramesPerReceive`）。
+- 控制帧：`AutoReplyPing`（默认开）自动回 Pong；单次接收控制帧 > 100 → close 1008（`WsMaxControlFramesPerReceive`）。
 - 校验失败均以 close 帧失败连接：被掩码帧/分片状态错 → **1002**；文本/close payload 非法 UTF-8 → **1007**；累计超 `MaxMessageBytes` → **1009**（`STATUS_BUFFER_TOO_SMALL`）。
 - 合法接收 close 码：1000–1014（除 1004/1005/1006）或 3000–4999；长度恰为 1 的 close payload → 协议错误。
 - close 握手：主动 `Close` 发空 close 后 `WaitForPeerClose`（`WskCloseTimeoutMilliseconds = 3000` 超时，吞掉终止/超时为成功）；被动收到 peer close 则 echo 后关 transport。`CloseEx` reason ≤123 字节。
@@ -68,7 +68,7 @@ struct wknet::websocket::ConnectConfig { const char* Url; SIZE_T UrlLength; cons
 
 ### 边界 / 非目标
 
-高层 `kws` 与低层 WebSocket connect options 的零值默认均为 `TransportMode::Auto`；`wss` 默认可通过 RFC 8441 extended CONNECT over HTTP/2 建立隧道，不支持时回到 HTTP/1.1 Upgrade；显式 `Http11Only` 可强制 HTTP/1.1。支持自定义 opening headers；`permessage-deflate` 仅显式 opt-in，默认不协商；`ws://` 不隐式走 h2c；不跟随握手 redirect/401/407。
+`wknet::websocket::ConnectConfig` 默认 `TransportMode::Auto`；`wss` 可通过 RFC 8441 extended CONNECT over HTTP/2 建立隧道，不支持时回到 HTTP/1.1 Upgrade；`Http11Only` 可强制 HTTP/1.1。
 
 ### 示例
 

@@ -105,13 +105,13 @@ wknet::http::AsyncRelease(op);
 
 | 类型 | 命名空间 | 创建函数 | 释放函数 | 说明 |
 |------|----------|----------|----------|------|
-| `Session` | `khttp` | `SessionCreate` | `SessionClose` | HTTP/WS 会话。内部拥有隐藏 WSK runtime 和 engine session |
-| `Request` | `khttp` | `RequestCreate` | `RequestRelease` | 绑定到 `Session` 的发送句柄；不保存 URL、method、header、body |
-| `Response` | `khttp` | 由发送/异步结果返回 | `ResponseRelease` | 独立响应句柄，包含状态码、响应体、响应头、trailer |
-| `AsyncOp` | `khttp` | 异步发送或 WS 异步连接返回 | `AsyncRelease` | 异步操作句柄，可等待、取消、取结果 |
-| `Headers` | `khttp` | `HeadersCreate` | `HeadersRelease` | 请求头集合；添加时复制 name/value |
-| `Body` | `khttp` | `BodyCreate*` | `BodyRelease` | 请求体描述；支持引用/拷贝、表单、multipart、文件、chunked trailer |
-| `WebSocket` | `kws` | `Connect` / `ConnectEx` / `AsyncGetWebSocket` | `Close` / `CloseEx` | WebSocket 连接句柄 |
+| `Session` | `wknet::http` | `SessionCreate` | `SessionClose` | HTTP/WS 会话 |
+| `Request` | `wknet::http` | `RequestCreate` | `RequestRelease` | 请求句柄 |
+| `Response` | `wknet::http` | 由发送/异步结果返回 | `ResponseRelease` | 状态码、响应体、响应头、trailer |
+| `AsyncOp` | `wknet::http` | 异步发送或 WS 异步连接返回 | `AsyncRelease` | 等待、取消、取结果 |
+| `Headers` | `wknet::http` | `HeadersCreate` | `HeadersRelease` | 请求头集合 |
+| `Body` | `wknet::http` | `BodyCreate*` | `BodyRelease` | 请求体描述 |
+| `WebSocket` | `wknet::websocket` | `Connect` / `ConnectEx` | `Close` / `CloseEx` | WebSocket 连接句柄 |
 
 ### 枚举
 
@@ -446,7 +446,7 @@ struct MultipartPart final {
 
 **重要提示**：`BodyCreateMultipart` 会复制 part 描述数组，但 part 内指针按引用使用，必须保持到发送结束。这意味着你不能在发送前释放 part 中的字符串数据。
 
-### `kws` WebSocket 结构体
+### `wknet::websocket` 结构体
 
 以下是 WebSocket 相关的结构体。WebSocket 提供了全双工通信能力，适合实时数据推送、聊天、游戏等场景。
 
@@ -886,7 +886,7 @@ void HeadersRelease(
 
 ## Body 函数
 
-这些函数用于创建和管理 HTTP 请求体。请求体是 HTTP 请求的可选部分，用于传递数据给服务器。khttp 支持多种请求体格式，包括原始字节、文本、JSON、表单、multipart 和文件。
+这些函数用于创建和管理 HTTP 请求体，包括原始字节、文本、表单、multipart 和文件。JSON 语义由调用方或其它库处理，wknet 只发送提供的字节与内容类型。
 
 ### Body 引用与拷贝规则
 

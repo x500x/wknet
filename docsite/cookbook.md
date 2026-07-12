@@ -27,7 +27,7 @@ tests/run-cookbook-tests.ps1  —— 一键编译并运行测试
 
 每个范例独立运行，单个失败不阻断后续；入口返回首个失败状态用于汇总。
 
-> 注：当前公开 WebSocket API 在命名空间 `kws`（`wknet::websocket::Connect/SendText/Receive/Close`，见 [WebSocket 协议](websocket.md)）。若你的 Cookbook 源码包仍写作 `wknet::http::WsConnect/WsSendText/...`，那是命名空间统一前的旧写法，请对照当前头文件 `kws/WebSocket.h` 调整。
+> 公开 WebSocket API 位于 `wknet::websocket`，头文件为 `<wknet/websocket/WebSocket.h>`。
 
 ### RAII 资源守卫（KhttpScopeGuard.h）
 
@@ -43,10 +43,9 @@ tests/run-cookbook-tests.ps1  —— 一键编译并运行测试
 
 ### 接入步骤（简要）
 
-1. 把 `samples/` 三个文件拷到 `src/KernelHttpExample/samples/`。
-2. 在 `.vcxproj` 加入 `CookbookSamples.cpp` 与两个头文件。
-3. 在 `DriverEntry.cpp` 包含 `samples/CookbookSamples.h`，在 `RunLoadHttpSamples()` 里追加 `RunCookbookSamples(g_wskClient, &cookbookResults)`。
-4. 卸载路径无需改动——现有 `DriverUnload` 已调用 `wknet::http::Destroy()`。
+1. 参考 `src/wknettest/samples/HighLevelApiSamples.cpp` 的公共 API 调用模式。
+2. 在自己的驱动工程中只包含 `<wknet/Wknet.h>` 或所需的细分公共头。
+3. 将同步/异步句柄释放与驱动卸载顺序纳入同一所有权设计。
 
 ### 注意事项
 
@@ -56,4 +55,4 @@ tests/run-cookbook-tests.ps1  —— 一键编译并运行测试
 4. **WebSocket 全双工时序**：`wknet::websocket::Close` 不得与同句柄「新 I/O 发起」并发；最安全是单线程内 连接→发→收→关。
 5. **`wknet::websocket::Receive` 的 `message.Data`** 指向内部缓冲，下次收/关前有效，关闭后勿引用。
 
-详见仓库内 `src/KernelHttpExample_Cookbook/README.md` 与 `tests/README.md`。
+完整可编译样例位于 `src/wknettest/samples/`，用户态 API 回归位于 `tests/high_level_api_tests.cpp`。

@@ -1,27 +1,45 @@
 # Architecture
 
-### Layered architecture
+## Layers
 
-Top to bottom: high-level `khttp` (HTTP) / `kws` (WebSocket) → low-level `engine` (`Kh*`, stable ABI) → client wrappers → core abstractions → protocol implementations → infrastructure (WSK / CNG / connection pool / Workspace). The high-level layer is a thin bridge over the engine handle ABI (`khttp/Detail.h`).
+```text
+wknet::http / websocket / crypto / codec
+                    │
+           thin http_api bridge
+                    │
+                 session
+          ┌─────────┼─────────┐
+       transport  http1/http2  ws
+          │             │       │
+        net            tls    codec
+          └─────────────┴───────┘
+                    rtl
+```
 
-### Request lifecycle (sync GET)
+- `http_api` maps parameters and wraps opaque public handles.
+- `session` owns routing, redirects, proxy policy, pooling, async work, and HTTP/WebSocket orchestration.
+- `transport::ITransport` is the only I/O seam used by protocol layers.
+- `net` owns WSK lifecycle, resolution, sockets, and byte-stream operations.
+- `tls` owns handshakes, record protection, resumption, and certificate validation.
+- `http1`, `http2`, and `ws` own protocol state machines, not pooling policy.
 
-`SessionCreate` creates a hidden WSK runtime and engine session (Workspace + provider cache + pool) → `GetEx`/`SendEx` receives the send handle, method, URL, headers/body/options and parses the URL → acquire a connection by `KhConnectionPoolKey` (reuse or build: WSK connect → optional TLS handshake → optional HTTP/2 init) → build/send/parse inside Workspace buffers (decode Transfer-/Content-Encoding) → release connection per keep-alive → return independent `Response` handle → `ResponseRelease`/`SessionClose`.
+## Request path
 
-### Core abstractions
+```text
+wknet::http::SendEx
+  → public argument mapping
+  → session::HttpSend
+  → HttpRoute / HttpProxy / ConnectionPool
+  → HttpH1Dispatch or HttpH2Dispatch
+  → transport::ITransport
+  → WSK or TLS
+```
 
-| Abstraction | Header | Role |
-|-------------|--------|------|
-| `core::ITransport` | `core/ITransport.h` | Byte-stream: `Send`/`Receive`/`ReceiveWithTimeout` |
-| `core::WskTransport` | `core/WskTransport.h` | Plaintext WSK adapter |
-| `core::TlsTransport` | `core/TlsTransport.h` | TLS adapter (auto encrypt/decrypt) |
-| `core::IScratchAllocator` | `core/IScratchAllocator.h` | `Acquire`/`Release`/`EnsureBuffer` |
-| `core::WorkspaceScratchAllocator` | `core/WorkspaceScratchAllocator.h` | Bounded buffers from a `KhWorkspace`, no on-demand alloc |
-| `engine::KhWorkspace` | `engine/Workspace.h` | Session-resident reusable buffers |
-| `engine::KhConnectionPool` | `engine/ConnectionPool.h` | Reuse, per-host cap, idle timeout |
+WebSocket connections are orchestrated by `session::WsConnect`; HTTP/1.1 Upgrade and RFC 8441 share the same TLS, connection, and cancellation model.
 
-See [Transport Layer](transport-layer.md), [Memory Model](memory-model.md), [Connection Pool](connection-pool.md).
+## Ownership boundaries
 
-### Kernel-constrained design
-
-No exceptions, no RTTI; avoid raw `new/delete` (the lib overrides them to non-paged pool in `WknetConfig.cpp`); heap via `HeapObject<T>`/`HeapArray<T>`; no stack buffers in the lib; hot buffers resident in the Workspace; synchronous paths at `PASSIVE_LEVEL`; all public functions `noexcept` with SAL annotations.
+- `ConnectionPool.cpp` is the sole writer of pool fields.
+- Workspace and aggregate protocol buffers are heap-backed; hot buffers are retained and reused.
+- `src/wknetlib` contains no `.inc` implementation fragments; responsibilities compile as independent `.cpp` units.
+- There is no separate client layer or second network lifecycle.

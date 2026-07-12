@@ -1,10 +1,10 @@
-site_name: KernelHttp
+site_name: wknet
 site_description: 面向 Windows 内核驱动的纯内核态 HTTP/HTTPS 客户端库 · A pure kernel-mode HTTP/HTTPS client library for Windows kernel drivers
 site_url: https://x500x.github.io/khttp/
 repo_url: https://github.com/x500x/khttp
 repo_name: x500x/khttp
 docs_dir: docsite
-copyright: KernelHttp · MIT License
+copyright: wknet · MIT License
 
 extra_css:
   - stylesheets/extra.css
@@ -84,10 +84,10 @@ plugins:
             HTTP/2 与 HPACK: HTTP/2 & HPACK
             TLS 与证书: TLS & Certificates
             密码学: Cryptography
-            高层 API: High-Level API
-            底层 API: Low-Level API
+            产品 API: Product API
+            内部接口: Internal Interfaces
             配置: Configuration
-            客户端类: Client Classes
+            模块边界: Module Boundaries
             传输层: Transport Layer
             NTSTATUS 错误码: NTSTATUS Errors
             机制: Mechanics
@@ -131,10 +131,10 @@ nav:
       - TLS 与证书: tls-and-certificates.md
       - 密码学: cryptography.md
   - API:
-      - 高层 API: high-level-api.md
-      - 底层 API: low-level-api.md
+      - 产品 API: high-level-api.md
+      - 内部接口: low-level-api.md
       - 配置: configuration.md
-      - 客户端类: client-classes.md
+      - 模块边界: client-classes.md
       - 传输层: transport-layer.md
       - NTSTATUS 错误码: ntstatus-reference.md
   - 机制:

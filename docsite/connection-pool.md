@@ -2,17 +2,16 @@
 
 ### 结构与默认
 
-- 数组 `Entries`/`Capacity`；`ActiveCount` 记在用槽，`NextConnectionId` 从 1 起。每槽 `KhPooledConnection` 缓存完整传输栈（`WskSocket`/`WskTransport`/`ITransport`/`TlsConnection`/可选 `Http2Connection`）+ `InUse`/`Connected`/`LastUsedTime`/`Key`，并记录 HTTP/2 stream 租约计数。
-- 默认容量 8、最大 1024（`KhMaxConnectionPoolCapacity`）、每主机 2、空闲 30000ms。`Initialize` 要求 capacity≠0、`maxPerHost∈(0,capacity]`，否则 `STATUS_INVALID_PARAMETER`。
+- 数组 `Entries`/`Capacity`；每槽 `PooledConnection` 缓存完整传输栈（`WskSocket`/`WskTransport`/`ITransport`/`TlsConnection`/可选 `Http2Connection`），并记录 HTTP/2 stream 租约计数。
+- 默认容量 8、最大 1024（`session::MaxConnectionPoolCapacity`）、每主机 2、空闲 30000ms。
 
 ### 连接键匹配
 
-`KhConnectionPoolKeysEqual`：scheme、host、port、地址族、min/max TLS 版本、证书策略/库、客户端凭据、完整 TLS `Policy`、`AutomaticAlpn`、SNI、**ALPN 字符串**、代理启用状态、代理地址与 CONNECT authority 全等。
-`KhConnectionPoolKeysEqualForAutoAlpnAcquire`：当请求键 ALPN 为空、两端都 `AutomaticAlpn`、候选已记录 ALPN 时，忽略 ALPN 匹配——**让自动 ALPN 请求复用握手后回写了协商 ALPN 的连接**。
+`ConnectionPoolKeysEqual` 比较 scheme、host、port、地址族、TLS 版本、证书身份、完整策略、SNI、ALPN 和代理身份。自动 ALPN 请求可复用握手后已回写协商 ALPN 的同源连接。
 
 ### Acquire / Release / 重试
 
-- `KhConnectionPoolAcquire`：`ForceNew`/`NoPool` 跳过普通复用扫描；否则优先取首个 connected、空闲、键匹配的槽（空闲过期则关闭不复用）。若候选是已激活的 HTTP/2 连接且 stream 租约未达上限，可在 `InUse` 状态下继续共享同一连接并增加租约。
+- `ConnectionPoolAcquire`：`ForceNew`/`NoPool` 跳过普通复用扫描；否则优先取 connected、空闲、键匹配的槽。HTTP/2 stream 租约未达上限时可共享活动连接。
 - **每主机配额**键更粗（仅 scheme+host+port+family，忽略 TLS/ALPN）：超限先尝试关一个同主机空闲连接，仍超 → `STATUS_INSUFFICIENT_RESOURCES`。
 - 新槽优先空槽；无空槽且策略≠`NoPool` 时驱逐任一非在用槽。**`NoPool` 从不挤掉活跃连接**。
 - **可回池条件**（`canReturnToPool`）：成功 + 连接可复用 + 策略 `ReuseOrCreate`。故 `ForceNew`/`NoPool` 连接 release 时总是关闭。
@@ -22,10 +21,10 @@
 
 ### 策略
 
-| `KhConnectionPolicy` | 行为 |
+| `wknet::http::ConnPolicy` | 行为 |
 |------|------|
 | `ReuseOrCreate` | 复用或新建（默认）；可回池 |
 | `ForceNew` | 总是新建；release 时关闭 |
 | `NoPool` | 绕过池；不挤占活跃连接；release 时关闭 |
 
-高层按单次发送设置：`wknet::http::SendOptions::ConnectionPolicy`。底层按请求设置：`KhHttpRequestSetConnectionPolicy`。
+单次发送通过 `wknet::http::SendOptions::ConnectionPolicy` 设置；请求对象也可用 `RequestSetConnPolicy` 设置默认值。

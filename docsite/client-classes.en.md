@@ -1,3 +1,13 @@
-# Client Classes
+# Module Boundaries
 
-`wknet::client` — protocol client wrappers below `engine` that use caller-provided buffers (no internal handles/pool). `HttpClient::SendRequest` (plaintext HTTP/1.1), `HttpsClient::SendRequest` (TLS, HTTP/2 via ALPN; optional explicit HTTP/1.1 CONNECT proxy tunnel; carries cert store, `TlsPolicy`, session caches, ALPN list, client credential, resumption/0-RTT controls), `Http2Client::SendRequest` (modes `TlsAlpn`/`H2cPriorKnowledge`/`H2cUpgrade`; returns `STATUS_NOT_SUPPORTED` if peer won't negotiate `h2`; helper `BuildHttp2RequestHeaders` with RFC 8441 `ConnectProtocol`; low-level `Http2Connection` exposes active-stream and DATA tunnel primitives), `WebSocketClient` (`Connect` with extra opening headers and automatic RFC 8441 over HTTP/2 for `wss` by default, `Http11Only` to force HTTP/1.1, `SendText`/`SendBinary`/`SendContinuation`/`SendPing`/`SendPong`/`ReceiveMessage`/`Close`/`SelectedSubprotocol`/`SendTextAndReceiveEcho`). Most applications should prefer the [High-Level API](high-level-api.md); use client classes directly for tests or full buffer/connection control.
+wknet no longer exposes separate client classes. HTTP, HTTPS, HTTP/2, and WebSocket all use the same public API and the same `session` lifecycle.
+
+| Former responsibility | Current owner |
+|---|---|
+| HTTP/1.1 request/response | `session/HttpH1Dispatch.cpp` |
+| HTTP/2 request headers and dispatch | `session/Http2RequestBuilder.cpp`, `session/HttpH2Dispatch.cpp` |
+| HTTPS connection and ALPN | `session/HttpProxy.cpp`, `session/HttpTransportDispatch.cpp`, `tls/TlsConnection.cpp` |
+| Proxy CONNECT | `transport/ProxyConnect.cpp`, `session/HttpProxy.cpp` |
+| WebSocket connect and I/O | `session/WsConnect.cpp`, `WsSendData.cpp`, `WsReceive.cpp`, `WsControl.cpp` |
+
+Product callers use only `wknet::http` and `wknet::websocket`. Pooling, redirects, cancellation, TLS, proxies, and HTTP/2 multi-stream behavior therefore stay on one consistent path.

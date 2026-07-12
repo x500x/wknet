@@ -10,7 +10,7 @@ A：同步 HTTP、WebSocket、TLS 和证书验证路径都要求在 `PASSIVE_LEV
 A：不支持。项目定位为客户端协议栈，不提供入站 request parser / server role。
 
 **Q：支持 HTTP 代理 / CONNECT / TRACE 吗？**
-A：支持。高层 `SessionConfig.Proxy` / 底层 `KhSessionOptions.Proxy` 可配置代理地址、authority 和 opaque `Proxy-Authorization` 值；HTTPS 走 HTTP/1.1 CONNECT 隧道，明文 HTTP over proxy 发送 absolute-form request target，不建立 CONNECT。TRACE 需 `SendFlagAllowTrace` 显式开启，且 body、trailer 与敏感头仍会被拒绝。
+A：支持。`SessionConfig.Proxy` 可配置代理地址、authority 和 opaque `Proxy-Authorization` 值；HTTPS 走 HTTP/1.1 CONNECT 隧道，明文 HTTP over proxy 发送 absolute-form request target，不建立 CONNECT。
 
 **Q：为什么我的 0-RTT 没有生效 / 返回 `STATUS_NOT_SUPPORTED`？**
 A：TLS 1.3 0-RTT 默认关闭；即使启用 early data，也必须由调用方显式声明该请求 replay-safe，否则返回 `STATUS_NOT_SUPPORTED` 且不发送 early data。
@@ -34,7 +34,7 @@ A：支持。发送用 `wknet::websocket::SendContinuation`（或 `SendTextEx/Se
 A：达到最大跳数（默认 10）时**不报错**，直接把当前那个 3xx 响应返回给你，由你自行处理 `Location`。
 
 **Q：WebSocket API 到底在哪个命名空间？**
-A：`wknet::kws`（`wknet::websocket::Connect/SendText/Receive/Close`），头文件 `<wknet/websocket/WebSocket.h>`。Session 仍是 `wknet::http::Session`。旧写法 `wknet::http::Ws*` 已废弃。
+A：`wknet::websocket`（`Connect`/`SendText`/`Receive`/`Close`），头文件 `<wknet/websocket/WebSocket.h>`。Session 仍是 `wknet::http::Session`。
 
 **Q：库为什么不让用栈 / new-delete？**
 A：内核环境约束。库内禁止用栈（请用堆，高频缓冲常驻 Workspace），`new/delete` 也不直接用（除非在 lib 内重载）。统一用 `HeapObject<T>` / `HeapArray<T>`。

@@ -32,7 +32,7 @@
 - HTTP/1.1 pipeline（session `EnableHttp11Pipeline=true`，默认仅 `GET`/`HEAD`/`OPTIONS`，深度和方法 mask 可配置）
 - 高层 h2c prior knowledge / Upgrade（`SendOptions.Http2CleartextMode`）
 - HTTP/2 后台 PING 保活（session `Http2KeepAlive.Enabled=true`，默认关闭）
-- HTTP/2 per-request priority（`SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority`）
+- HTTP/2 per-request priority（`SendOptions.Http2Priority`）
 - WebSocket permessage-deflate（`ConnectConfig.PerMessageDeflate.Enable=true`，默认关闭）
 
 ### 未来改进方向（持续）

@@ -34,7 +34,7 @@
 | `ClientCredential` | `const tls::TlsClientCredential*` | `nullptr`（mTLS） |
 | `HandshakeTimeoutMs` | `ULONG` | 120000 |
 
-### 底层会话配置 `engine::KhSessionOptions`
+### 内部会话配置
 
 底层无 Default 工厂，需零初始化后显式设值。比高层多出三项：
 
@@ -69,23 +69,23 @@ wknet::http::SendOptionsRelease(options);
 | `WskOperationTimeoutMilliseconds` | 30000 | WSK 连接/收发默认超时 |
 | `WskCloseTimeoutMilliseconds` | 3000 | 关闭 WSK socket 超时 |
 | `TlsHandshakeReceiveTimeoutMilliseconds` | 120000 | TLS 握手接收总期限 |
-| `KhMinRsaModulusBits` | 2048 | 接受的最小 RSA 模数位数 |
-| `KhHttpMaxHeaderLineBytes` | 8192 | 单条 HTTP 头行上限 |
-| `KhHttpMaxHeaderBytes` | 65536 | HTTP 头部总大小上限 |
-| `KhHttpMaxHeaders` | 200 | HTTP 头数量上限 |
-| `KhHttpMaxChunks` | 8192 | chunked body 最大块数 |
-| `KhHttpMaxTrailers` | 256 | trailer 字段上限 |
-| `KhHttpMaxChunkSizeLineBytes` | 32 | chunk-size 行上限 |
-| `KhWsMaxControlFramesPerReceive` | 100 | 单次接收处理控制帧上限（抗洪泛） |
-| `KhTlsMaxPostHandshakeMessagesPerRecord` | 8 | 单记录 TLS 握手后消息上限（抗洪泛） |
+| `MinRsaModulusBits` | 2048 | 接受的最小 RSA 模数位数 |
+| `HttpMaxHeaderLineBytes` | 8192 | 单条 HTTP 头行上限 |
+| `WKNET_HARD_MAX_HEADER_SECTION` | 65536 | HTTP 头部总大小上限 |
+| `WKNET_HARD_MAX_HEADERS` | 200 | HTTP 头数量上限 |
+| `HttpMaxChunks` | 8192 | chunked body 最大块数 |
+| `HttpMaxTrailers` | 256 | trailer 字段上限 |
+| `HttpMaxChunkSizeLineBytes` | 32 | chunk-size 行上限 |
+| `WsMaxControlFramesPerReceive` | 100 | 单次接收处理控制帧上限 |
+| `TlsMaxPostHandshakeMessagesPerRecord` | 8 | 单记录 TLS 握手后消息上限 |
 
-### 引擎默认常量（`engine/Engine.h`）
+### 会话默认常量
 
-`KhDefaultRequestBufferBytes`=16 KiB、`KhDefaultMaxResponseBytes`=0（不限制，按需堆增长）、`KhDefaultMaxWebSocketMessageBytes`=1 MiB、`KhDefaultMaxResponseHeaders`=64、`KhMaxConfigurableResponseHeaders`=200、`KhDefaultHttp2MaxHeaderBlockBytes`=32 KiB、`KhMaxHttp2HeaderBlockBytes`=64 KiB、`KhDefaultConnectionPoolCapacity`=8、`KhMaxConnectionPoolCapacity`=1024、`KhDefaultConnectionsPerHost`=2、`KhDefaultIdleTimeoutMilliseconds`=30000、`KhDefaultHttp11PipelineMaxDepth`=4、`KhMaxHttp11PipelineDepth`=64、`KhDefaultHttp11PipelineMethodMask`=GET/HEAD/OPTIONS、`KhDefaultHttp2KeepAliveIdleMilliseconds`=30000、`KhDefaultHttp2KeepAliveIntervalMilliseconds`=30000、`KhDefaultHttp2KeepAliveAckTimeoutMilliseconds`=5000、`KhDefaultMaxRedirects`=10。
+公共默认值定义于 `wknet::http::Types.h`：请求缓冲 16 KiB、`MaxResponseBytes=0`（调用方不设聚合上限）、WebSocket 消息 1 MiB、连接池容量 8、每主机 2、空闲 30000ms、pipeline 深度 4、HTTP/2 keepalive idle/interval 30000ms、ACK timeout 5000ms、最大重定向 10。
 
 ### 其它实测限制
 
-- 异步：工作线程 `KhAsyncWorkerCount`=4、队列深度 `KhMaxAsyncQueueDepth`=256。
+- 异步：内部工作线程 4、队列深度 256。
 - 解压：decoded aggregate 跟随响应/调用方容量，单级膨胀比 ≤64。
 - 请求头：每请求 ≤16 头、名 ≤128、值 ≤512；URL path ≤8000、host ≤255、scheme ≤5、ALPN ≤16。
 - **redirect 达最大跳数（默认 10）不报错，直接返回该 3xx 响应**。

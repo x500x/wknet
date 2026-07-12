@@ -2,20 +2,20 @@
 
 ### 运行时
 
-- **固定 4 个系统线程**工作池（`KhAsyncWorkerCount=4`），FIFO 队列，**最大深度 256**（`KhMaxAsyncQueueDepth`）；队满 → `STATUS_INSUFFICIENT_RESOURCES`。运行时经 CAS 惰性初始化。
+- **固定 4 个系统线程**工作池（`session::AsyncWorkerCount=4`），FIFO 队列，**最大深度 256**（`session::MaxAsyncQueueDepth`）；队满 → `STATUS_INSUFFICIENT_RESOURCES`。运行时经 CAS 惰性初始化。
 
 ### 状态机
 
 ```cpp
-enum class KhAsyncOperationKind { HttpSend, WebSocketConnect };
-enum class KhAsyncState { Pending, Running, Completed };
+enum class AsyncOperationKind { HttpSend, WebSocketConnect };
+enum class AsyncState { Pending, Running, Completed };
 ```
 操作创建后处于 `Pending`、`Status=STATUS_PENDING`、`ReferenceCount=1`，入队后 `Pending → Running → Completed`。已取消的 pending 入队会立即以 `STATUS_CANCELLED` 完成。
 
 ### 生命周期
 
-1. **创建**：高层 `AsyncGet`/`AsyncPost`/`AsyncSend`、`wknet::websocket::ConnectAsync`（底层 `KhHttpSendAsync`/`KhWebSocketConnectAsync`）产生一个 `KH_ASYNC_OPERATION`。
-2. **入队执行**：内部 `KhAsyncOperationQueue` 调度 `WorkerRoutine`。
+1. **创建**：`AsyncGet`/`AsyncPost`/`AsyncSend`、`wknet::websocket::ConnectAsync` 产生一个 opaque `AsyncOp`。
+2. **入队执行**：内部 `session::AsyncOperationQueue` 调度 `WorkerRoutine`。
 3. **等待**：`AsyncWait(op, timeoutMs)` 等完成事件；或轮询 `AsyncGetStatus`/`AsyncIsCompleted`。
 4. **取结果**：按 `Kind` 调 `AsyncGetResponse`（HTTP）或 `wknet::websocket::AsyncGetWebSocket`（WebSocket）。
 5. **释放**：`AsyncRelease`（引用计数归零时清理）。
@@ -29,7 +29,7 @@ enum class KhAsyncState { Pending, Running, Completed };
 ### 卸载约束
 
 ```cpp
-NTSTATUS KhEngineDrainAsync() noexcept;   // 等待全部在飞异步操作结束
+NTSTATUS EngineDrainAsync() noexcept;   // 内部卸载路径等待全部在飞异步操作结束
 ```
 高层调用方使用 `wknet::http::Destroy()` 作为卸载收尾入口；它内部等待全部在飞异步操作结束。**用过异步 API 后，驱动卸载前必须先 `wknet::http::Destroy()`**，再释放 WSK / 关闭句柄。同步-only 路径可不调用，但可无条件调用。每个句柄含 `volatile LONG InFlight` 计数与 `KEVENT DrainEvent` 做收尾同步，确保操作仍在使用时句柄不被释放。
 

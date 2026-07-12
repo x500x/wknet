@@ -20,9 +20,9 @@ template<class T> class HeapObject {  // RAII 拥有单对象，不可复制
 ```
 底层分配器：`AllocateNonPagedObject<T>` / `AllocateNonPagedArray<T>` / `AllocateNonPagedPoolBytes` 及对应 Free，并带 `NonPagedArrayCountIsValid<T>` 溢出校验。
 
-### Workspace（`engine/Workspace.h`）
+### Workspace（`session/Workspace.h`）
 
-`KhWorkspace` 是会话常驻的一组可复用缓冲，覆盖一次事务的各阶段，按需增长，`Reset` 清每次操作状态，随会话创建/释放。
+`session::Workspace` 是会话常驻的一组可复用堆缓冲，覆盖一次事务的各阶段，按需增长，`WorkspaceReset` 清每次操作状态。
 
 | 缓冲 | 默认大小 |
 |------|---------|
@@ -36,9 +36,9 @@ template<class T> class HeapObject {  // RAII 拥有单对象，不可复制
 | `WebSocketFrameScratch` | 16 KiB |
 | `WebSocketPayloadScratch` | 按需增长 |
 
-函数：`KhWorkspaceCreate`、`KhWorkspaceReset`、`KhWorkspaceRelease`、`KhWorkspaceEnsureResponseCapacity`、`KhWorkspaceAppendResponse`、`KhWorkspaceEnsureDecodedBodyCapacity`、`KhWorkspaceEnsureWebSocketPayloadCapacity`。
+函数：`WorkspaceCreate`、`WorkspaceReset`、`WorkspaceRelease`、`WorkspaceEnsureResponseCapacity`、`WorkspaceAppendResponse`、`WorkspaceEnsureDecodedBodyCapacity`、`WorkspaceEnsureWebSocketPayloadCapacity`。
 
-### Scratch 分配器（`core/WorkspaceScratchAllocator.h`）
+### Scratch 分配器（`rtl/WorkspaceScratchAllocator.h`）
 
 `WorkspaceScratchAllocator` 实现 `IScratchAllocator`，从 Workspace 取**定长有界**缓冲（按 `BufferKind { TlsHandshake, Certificate, Http2Header, WebSocketFrame }`），**不按需分配**——请求超过该缓冲返回 `STATUS_BUFFER_TOO_SMALL`。TLS 握手、证书校验、HPACK、WS 帧由此获得无栈、无重复分配的工作内存。
 
@@ -48,4 +48,4 @@ TLS 会话结束安全清零所有密钥材料；私钥用 `crypto::CngKey` RAII
 
 ### 句柄收尾
 
-每个 `Kh*` 句柄含 `volatile LONG InFlight` 与（内核构建）`KEVENT DrainEvent`，配合 `KhEngineDrainAsync` 保证仍在使用时不被释放（见 [异步模型](async-model.md)）。
+内部 opaque 句柄使用引用计数、在飞计数与 drain 事件，保证仍在使用时不被释放（见 [异步模型](async-model.md)）。

@@ -3,8 +3,8 @@
 ### 已实现 / 已验证能力
 
 **HTTP/1.1（RFC 9110/9112）**
-- 请求体支持 `Content-Length`、库生成 chunked 与真流式上传：高层 `BodyCreateStream` / 底层 `KhHttpRequestSetBodySource` 按块读取；用户手设 `Transfer-Encoding`/`TE` 仍安全拒绝；`Trailer` 头仅在 chunked 请求 trailer 场景允许。
-- 请求 trailer：`KhHttpRequestAddTrailer` / `wknet::http::RequestAddTrailer` 在 `Chunked` body 模式下发送终止块后的 trailer 字段，并拒绝禁止字段与 CRLF 注入。
+- 请求体支持 `Content-Length`、库生成 chunked 与真流式上传：`BodyCreateStream` / `RequestSetBodySource` 按块读取；用户手设 `Transfer-Encoding`/`TE` 仍安全拒绝。
+- 请求 trailer：`BodyAddTrailer` / `RequestAddTrailer` 在 `Chunked` body 模式下发送终止块后的 trailer 字段，并拒绝禁止字段与 CRLF 注入。
 - 响应解析：状态行仅接受 HTTP/1.0、1.1；头行 ≤8 KiB、头段 ≤64 KiB、头数 ≤200；**拒绝 obs-fold 折行**；多个 `Content-Length`、`TE`+`CL` 冲突 → `STATUS_INVALID_NETWORK_RESPONSE`。
 - body 框定：Content-Length / chunked / close-delimited；**无 body 状态**：1xx、204、**205**、304，及 HEAD 响应。
 - chunked：块数 ≤8192、chunk-size 行 ≤32、严格 chunk 扩展语法校验；trailer 校验并拒绝禁止字段（`Content-Length`/`Transfer-Encoding`/`Host`/`Authorization`/`Proxy-Authorization`/`Cookie`/`Set-Cookie`）。
@@ -22,13 +22,13 @@
 - 完整帧矩阵；伪头/流控/连接专属头校验；`:status` 必须先于普通头。
 - **CONTINUATION 洪泛防护**：≤64 帧、≤4 空帧（CVE-2024-27316 类）。
 - 活动 stream 表 + `BeginRequest` / `ReceiveResponse(streamId)` 两阶段接口；HEADERS/DATA/WINDOW_UPDATE/RST_STREAM 按 streamId 交错分发。
-- 高层 `khttp` 连接池接入 HTTP/2 stream 租约，同源 H2 连接可按本地/peer 并发上限承载多个活动请求；连接级错误广播给活动流。
+- `wknet::http` 连接池接入 HTTP/2 stream 租约，同源 H2 连接可按本地/peer 并发上限承载多个活动请求；连接级错误广播给活动流。
 - DATA 流控：连接级 + per-stream 窗口；连接级 WINDOW_UPDATE 阈值为初始窗口一半（32767）；初始窗口 SETTINGS 更新会同步调整活动 stream；越界 GOAWAY `FLOW_CONTROL_ERROR`。
 - 1xx interim 处理（拒绝 `:status 101` 与 interim+END_STREAM）；PUSH_PROMISE 一律协议错误。
-- RFC 8441 extended CONNECT：`CONNECT` + `:protocol: websocket` 需对端 `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`；低层 `SendStreamData` / `ReceiveStreamData` 可承载 WebSocket frame bytes，高层 `kws` 对 `wss` 默认自动选择该路径，必要时可用 `Http11Only` 强制 HTTP/1.1。
+- RFC 8441 extended CONNECT：`CONNECT` + `:protocol: websocket` 需对端 `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`；`wknet::websocket` 对 `wss` 默认自动选择该路径，可用 `Http11Only` 强制 HTTP/1.1。
 - 三模式：TLS-ALPN `h2`、显式 h2c prior knowledge、显式 h2c Upgrade（Upgrade 模式禁请求体、重放 101 后残留字节、用 stream 1）；高层通过 `SendOptions.Http2CleartextMode` opt-in，默认 HTTP/1.1。
 - HTTP/2 请求 body 由 body source 驱动，按连接/stream 流控和 peer `MAX_FRAME_SIZE` 切 DATA；请求 trailers 以 final HEADERS + END_STREAM 发送并拒绝 trailer 伪头。
-- 显式 per-request priority：`SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority` 可在首个 HEADERS 帧携带 priority 字段；底层支持独立 PRIORITY frame 编解码，收到 peer PRIORITY 只校验语义，不改变安全边界。
+- 显式 per-request priority：`SendOptions.Http2Priority` 可在首个 HEADERS 帧携带 priority 字段；协议层支持独立 PRIORITY frame 编解码。
 - 后台 PING 保活：session 通过 `Http2KeepAlive.Enabled=true` 显式开启，默认关闭；只扫描 idle 且可复用的池化 H2 连接，ACK 超时或协议错误会关闭该 idle 连接。
 - GOAWAY/RST 高层重试语义：clean GOAWAY 或 `REFUSED_STREAM` 表示未处理 stream 时返回 `STATUS_RETRY`，高层只对安全方法 fresh retry 一次，非幂等请求不自动重放。
 
@@ -70,7 +70,7 @@
 | HTTP/1.1 pipeline | session `EnableHttp11Pipeline=true`；`Http11PipelineMaxDepth` / `Http11PipelineMethodMask` 可配置，默认仅 `GET`/`HEAD`/`OPTIONS` |
 | h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode` 显式开启；默认不走明文 HTTP/2 |
 | HTTP/2 后台 PING 保活 | session `Http2KeepAlive.Enabled=true`；默认关闭 |
-| HTTP/2 per-request priority | `SendOptions.Http2Priority` / `KhHttpSendOptions.Http2Priority` |
+| HTTP/2 per-request priority | `SendOptions.Http2Priority` |
 | WebSocket permessage-deflate | `ConnectConfig.PerMessageDeflate.Enable=true`；默认不协商 |
 | TLS1.2 RSA kx / CBC / SHA-1 | `TlsPolicy.Profile=CompatibilityExplicit` 后分别开启 `EnableTls12RsaKeyExchange`、`EnableTls12Cbc`、`EnableTls12Sha1Signatures` |
 | TLS1.2 真重协商 | `CompatibilityExplicit` + `EnableTls12Renegotiation`，次数由 `MaxTls12Renegotiations` 限制 |

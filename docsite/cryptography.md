@@ -30,7 +30,7 @@ enum class KeyExchangeGroup : USHORT { Secp256r1=23, Secp384r1=24, Secp521r1=25,
 
 ### 约束与硬化
 
-- **最小 RSA 模数 2048 位**（`KhMinRsaModulusBits`），在 SPKI 解析与 RSA 导入两处强制；RSA 指数须 ≥3 且为奇。
+- **最小 RSA 模数 2048 位**（`MinRsaModulusBits`），在 SPKI 解析与 RSA 导入两处强制；RSA 指数须 ≥3 且为奇。
 - **FFDHE 公钥校验**：拒绝 `y∈{0,1}` 或 `y≥p-1`，每次派生共享密钥都做。
 - **密钥清零**：AEAD scratch、X25519/X448 中间量、ECDSA raw、RSA blob、HKDF 中间量、ECDH 共享密钥、SPKI 哈希等全部 `RtlSecureZeroMemory`；`KeyExchangeKeyPair::Reset` 清私/公钥。
 - 共享密钥从 CNG 小端原始值转成大端并左零填充。

@@ -1,6 +1,6 @@
 # 传输层
 
-### ITransport（`core/ITransport.h`）
+### ITransport（`transport/ITransport.h`）
 
 字节流抽象，统一明文与 TLS：
 ```cpp
@@ -13,12 +13,12 @@ struct ITransport {
 
 ### 适配器
 
-- **WskTransport**（`core/WskTransport.h`）：包 `net::WskSocket`，发送用 `WSK_FLAG_NODELAY`，可设取消令牌 `SetCancellation`。明文路径。
-- **TlsTransport**（`core/TlsTransport.h`）：包一个底层 `ITransport` + `tls::TlsConnection`，对字节流自动加解密。`RawTransport()` / `Tls()` 取内部对象。
+- **WskTransport**（`transport/WskTransport.h`）：包装 `net::WskSocket`，支持取消令牌。明文路径。
+- **TlsTransport**（`transport/TlsTransport.h`）：包装底层 `ITransport` + `tls::TlsConnection`，对字节流自动加解密。
 
 栈：`WskSocket` → `WskTransport`(ITransport) →（HTTPS 时）`TlsTransport`(ITransport) → 协议层。
 
-### IScratchAllocator（`core/IScratchAllocator.h`）
+### Scratch allocator（`transport/IScratchAllocator.h`）
 
 ```cpp
 struct IScratchAllocator {
@@ -56,4 +56,4 @@ NTSTATUS Disconnect(); NTSTATUS Close(); bool IsConnected();
 
 ### 自定义传输（测试 / 扩展）
 
-实现 `ITransport` 即可注入自定义传输；底层 API 与测试钩子（`KhTestSetHttpTransport`）借此做确定性、无真实网络的单元测试（参见 Cookbook 的 mock transport）。
+实现 `ITransport` 即可注入自定义传输；`WKNET_USER_MODE_TEST` 窄测试钩子借此做确定性、无真实网络的协议测试。

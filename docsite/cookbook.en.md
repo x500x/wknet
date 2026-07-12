@@ -1,6 +1,6 @@
 # Cookbook
 
-A set of production-grade samples showing correct resource/error handling for the khttp high-level API. Source: `src/KernelHttpExample_Cookbook`.
+A set of production-grade patterns for the `wknet::http` and `wknet::websocket` product APIs. Compilable examples live under `src/wknettest/samples`.
 
 ### Samples
 
@@ -27,4 +27,4 @@ A set of production-grade samples showing correct resource/error handling for th
 4. **WebSocket full-duplex**: never run `wknet::websocket::Close` concurrently with new I/O on the same handle; safest is single-threaded connect→send→recv→close.
 5. **`wknet::websocket::Receive`'s `message.Data`** points to an internal buffer valid until the next receive/close.
 
-See `src/KernelHttpExample_Cookbook/README.md` and `tests/README.md` in the repo.
+See `src/wknettest/samples/HighLevelApiSamples.cpp` and `tests/high_level_api_tests.cpp`.
