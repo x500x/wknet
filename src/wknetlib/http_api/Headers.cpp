@@ -1,5 +1,5 @@
 #include <wknet/http/Headers.h>
-#include "Detail.h"
+#include "session/detail/HttpHandles.h"
 
 namespace wknet::http {
 namespace

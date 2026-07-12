@@ -1,5 +1,5 @@
 #include <wknet/test/Test.h>
-#include "Detail.h"
+#include "session/detail/HttpHandles.h"
 #include "session/Engine.h"
 #include "http1/HttpTypes.h"
 

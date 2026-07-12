@@ -1,5 +1,5 @@
 #include <wknet/http/AsyncOp.h>
-#include "Detail.h"
+#include "session/detail/HttpHandles.h"
 #include "session/Async.h"
 #include "session/Engine.h"
 
