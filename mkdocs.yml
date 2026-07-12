@@ -94,6 +94,7 @@ plugins:
             连接池: Connection Pool
             异步模型: Async Model
             内存模型: Memory Model
+            日志与诊断: Logging & Diagnostics
             实战与项目: Guides
             Cookbook 样例: Cookbook
             常见问题: FAQ
@@ -141,6 +142,7 @@ nav:
       - 连接池: connection-pool.md
       - 异步模型: async-model.md
       - 内存模型: memory-model.md
+      - 日志与诊断: logging.md
   - 实战与项目:
       - Cookbook 样例: cookbook.md
       - 常见问题: faq.md
