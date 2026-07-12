@@ -77,6 +77,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="codec\Codec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="rtl\Trace.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

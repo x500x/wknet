@@ -16,6 +16,8 @@
 #include <wknet/http/Session.h>
 #include <wknet/http/Types.h>
 #include <wknet/websocket/WebSocket.h>
+#include <wknet/crypto/Aead.h>
+#include <wknet/codec/Codec.h>
 
 // Certificate store remains reachable for external CA loading; implementation is tls-internal.
 #include <wknet/tls/CertificateStore.h>

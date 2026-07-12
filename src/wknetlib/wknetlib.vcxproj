@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClCompile Include="WknetConfig.cpp" />
     <ClCompile Include="rtl\Trace.cpp" />
+    <ClCompile Include="codec\Codec.cpp" />
     <ClCompile Include="session\Engine.cpp" />
     <ClCompile Include="session\HttpEngine.cpp" />
     <ClCompile Include="session\HttpCache.cpp" />
