@@ -434,18 +434,8 @@ namespace tls
                 status = firstTranscript.Finish(firstHash.Get(), firstHash.Count(), &firstHashLength);
             }
 
-            HeapArray<UCHAR> synthetic;
             if (NT_SUCCESS(status)) {
-                status = synthetic.Allocate(4 + TlsMaxTranscriptHashLength);
-            }
-            if (NT_SUCCESS(status)) {
-                synthetic[0] = 254;
-                synthetic[1] = static_cast<UCHAR>((firstHashLength >> 16) & 0xff);
-                synthetic[2] = static_cast<UCHAR>((firstHashLength >> 8) & 0xff);
-                synthetic[3] = static_cast<UCHAR>(firstHashLength & 0xff);
-                RtlCopyMemory(synthetic.Get() + 4, firstHash.Get(), firstHashLength);
-                status = transcript_.Update(synthetic.Get(), 4 + firstHashLength);
-                RtlSecureZeroMemory(synthetic.Get(), synthetic.Count());
+                status = transcript_.ReplaceWithMessageHash(firstHash.Get(), firstHashLength);
             }
             RtlSecureZeroMemory(firstHash.Get(), firstHash.Count());
             if (NT_SUCCESS(status)) {

@@ -3,6 +3,7 @@
 #include "tls/TlsTypes.h"
 
 #include "tls/TlsContext.h"
+#include "tls/TlsTranscriptHash.h"
 
 namespace wknet
 {
@@ -10,7 +11,6 @@ namespace tls
 {
     constexpr SIZE_T TlsHandshakeHeaderLength = 4;
     constexpr SIZE_T TlsMaxHandshakeMessageLength = 0x00ffffff;
-    constexpr SIZE_T TlsMaxTranscriptHashLength = 64;
 
     enum class TlsHandshakeType : UCHAR
     {
@@ -148,32 +148,6 @@ namespace tls
         SIZE_T SignatureSchemeCount = 0;
         const UCHAR* DistinguishedNames = nullptr;
         SIZE_T DistinguishedNamesLength = 0;
-    };
-
-    class TlsTranscriptHash final
-    {
-    public:
-        TlsTranscriptHash() noexcept = default;
-
-        _Must_inspect_result_
-        NTSTATUS Initialize(crypto::HashAlgorithm algorithm) noexcept;
-
-        void Reset() noexcept;
-
-        _Must_inspect_result_
-        NTSTATUS Update(
-            _In_reads_bytes_(dataLength) const UCHAR* data,
-            SIZE_T dataLength) noexcept;
-
-        _Must_inspect_result_
-        NTSTATUS Finish(
-            _Out_writes_bytes_(outputLength) UCHAR* output,
-            SIZE_T outputLength,
-            _Out_opt_ SIZE_T* bytesWritten = nullptr) const noexcept;
-
-    private:
-        crypto::HashAlgorithm algorithm_ = crypto::HashAlgorithm::Sha256;
-        crypto::CngHashContext hash_ = {};
     };
 
     class TlsHandshake12 final

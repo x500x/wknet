@@ -1,4 +1,5 @@
-#include "tls/TlsHandshake13.h"
+#include "tls/Tls13HandshakeMessages.h"
+#include "tls/Tls13KeySchedule.h"
 
 namespace wknet
 {
@@ -626,123 +627,6 @@ namespace tls
         }
 
         _Must_inspect_result_
-        NTSTATUS BuildHkdfLabel(
-            _In_z_ const char* label,
-            _In_reads_bytes_opt_(contextLength) const UCHAR* context,
-            SIZE_T contextLength,
-            SIZE_T outputLength,
-            _Out_writes_bytes_(destinationCapacity) UCHAR* destination,
-            SIZE_T destinationCapacity,
-            _Out_ SIZE_T* bytesWritten) noexcept
-        {
-            if (label == nullptr ||
-                (context == nullptr && contextLength != 0) ||
-                destination == nullptr ||
-                bytesWritten == nullptr ||
-                outputLength > 0xffff ||
-                contextLength > 255) {
-                return STATUS_INVALID_PARAMETER;
-            }
-
-            SIZE_T labelLength = 0;
-            while (label[labelLength] != '\0') {
-                ++labelLength;
-            }
-
-            constexpr char LabelPrefix[] = "tls13 ";
-            constexpr SIZE_T LabelPrefixLength = sizeof(LabelPrefix) - 1;
-            if (labelLength + LabelPrefixLength > 255) {
-                return STATUS_INVALID_PARAMETER;
-            }
-
-            const SIZE_T required = 2 + 1 + LabelPrefixLength + labelLength + 1 + contextLength;
-            if (destinationCapacity < required) {
-                *bytesWritten = required;
-                return STATUS_BUFFER_TOO_SMALL;
-            }
-
-            SIZE_T offset = 0;
-            destination[offset++] = static_cast<UCHAR>((outputLength >> 8) & 0xff);
-            destination[offset++] = static_cast<UCHAR>(outputLength & 0xff);
-            destination[offset++] = static_cast<UCHAR>(LabelPrefixLength + labelLength);
-            RtlCopyMemory(destination + offset, LabelPrefix, LabelPrefixLength);
-            offset += LabelPrefixLength;
-            RtlCopyMemory(destination + offset, label, labelLength);
-            offset += labelLength;
-            destination[offset++] = static_cast<UCHAR>(contextLength);
-            if (contextLength != 0) {
-                RtlCopyMemory(destination + offset, context, contextLength);
-                offset += contextLength;
-            }
-
-            *bytesWritten = offset;
-            return STATUS_SUCCESS;
-        }
-
-        _Must_inspect_result_
-        NTSTATUS HkdfExpandLabel(
-            crypto::HashAlgorithm algorithm,
-            _In_reads_bytes_(secretLength) const UCHAR* secret,
-            SIZE_T secretLength,
-            _In_z_ const char* label,
-            _In_reads_bytes_opt_(contextLength) const UCHAR* context,
-            SIZE_T contextLength,
-            _Out_writes_bytes_(outputLength) UCHAR* output,
-            SIZE_T outputLength) noexcept
-        {
-            HeapArray<UCHAR> info(128);
-            if (!info.IsValid()) {
-                return STATUS_INSUFFICIENT_RESOURCES;
-            }
-
-            SIZE_T infoLength = 0;
-            NTSTATUS status = BuildHkdfLabel(
-                label,
-                context,
-                contextLength,
-                outputLength,
-                info.Get(),
-                info.Count(),
-                &infoLength);
-            if (!NT_SUCCESS(status)) {
-                return status;
-            }
-
-            status = crypto::CngProvider::HkdfExpand(
-                algorithm,
-                secret,
-                secretLength,
-                info.Get(),
-                infoLength,
-                output,
-                outputLength);
-            RtlSecureZeroMemory(info.Get(), info.Count());
-            return status;
-        }
-
-        _Must_inspect_result_
-        NTSTATUS DeriveSecret(
-            crypto::HashAlgorithm algorithm,
-            _In_reads_bytes_(secretLength) const UCHAR* secret,
-            SIZE_T secretLength,
-            _In_z_ const char* label,
-            _In_reads_bytes_opt_(transcriptHashLength) const UCHAR* transcriptHash,
-            SIZE_T transcriptHashLength,
-            _Out_writes_bytes_(outputLength) UCHAR* output,
-            SIZE_T outputLength) noexcept
-        {
-            return HkdfExpandLabel(
-                algorithm,
-                secret,
-                secretLength,
-                label,
-                transcriptHash,
-                transcriptHashLength,
-                output,
-                outputLength);
-        }
-
-        _Must_inspect_result_
         NTSTATUS FindExtension(
             const UCHAR* extensions,
             SIZE_T extensionsLength,
@@ -902,7 +786,7 @@ namespace tls
 
             SIZE_T hmacLength = 0;
             status = crypto::CngProvider::Hmac(
-                TlsHandshake13::HashForCipherSuite(context.CipherSuite()),
+                Tls13HandshakeMessages::HashForCipherSuite(context.CipherSuite()),
                 finishedKey.Get(),
                 finishedKeyLength,
                 transcriptHash,
@@ -918,14 +802,14 @@ namespace tls
         }
     }
 
-    crypto::HashAlgorithm TlsHandshake13::HashForCipherSuite(TlsCipherSuite cipherSuite) noexcept
+    crypto::HashAlgorithm Tls13HandshakeMessages::HashForCipherSuite(TlsCipherSuite cipherSuite) noexcept
     {
         return cipherSuite == TlsCipherSuite::TlsAes256GcmSha384 ?
             crypto::HashAlgorithm::Sha384 :
             crypto::HashAlgorithm::Sha256;
     }
 
-        bool TlsHandshake13::IsSupportedCipherSuite(TlsCipherSuite cipherSuite) noexcept
+        bool Tls13HandshakeMessages::IsSupportedCipherSuite(TlsCipherSuite cipherSuite) noexcept
     {
         return cipherSuite == TlsCipherSuite::TlsAes128GcmSha256 ||
             cipherSuite == TlsCipherSuite::TlsAes256GcmSha384 ||
@@ -991,7 +875,7 @@ namespace tls
         }
     }
 
-    NTSTATUS TlsHandshake13::EncodeClientHello(
+    NTSTATUS Tls13HandshakeMessages::EncodeClientHello(
         TlsContext& context,
         const Tls13ClientHelloOptions& options,
         UCHAR* destination,
@@ -1142,7 +1026,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::ParseServerHello(
+    NTSTATUS Tls13HandshakeMessages::ParseServerHello(
         TlsContext& context,
         const TlsHandshakeMessageView& message,
         Tls13ServerHelloView& serverHello) noexcept
@@ -1289,7 +1173,7 @@ namespace tls
         return status;
     }
 
-    NTSTATUS TlsHandshake13::ValidateServerHelloOffer(
+    NTSTATUS Tls13HandshakeMessages::ValidateServerHelloOffer(
         const Tls13ServerHelloView& serverHello,
         const Tls13ClientHelloOptions& clientHello) noexcept
     {
@@ -1325,7 +1209,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::ValidateSelectedPskIdentity(
+    NTSTATUS Tls13HandshakeMessages::ValidateSelectedPskIdentity(
         const Tls13ServerHelloView& serverHello,
         SIZE_T offeredPskIdentityCount) noexcept
     {
@@ -1342,7 +1226,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::ComputePskBinder(
+    NTSTATUS Tls13HandshakeMessages::ComputePskBinder(
         const TlsContext& context,
         const UCHAR* resumptionSecret,
         SIZE_T resumptionSecretLength,
@@ -1452,7 +1336,7 @@ namespace tls
         return status;
     }
 
-    NTSTATUS TlsHandshake13::FindPskBinderTranscriptLength(
+    NTSTATUS Tls13HandshakeMessages::FindPskBinderTranscriptLength(
         const UCHAR* clientHello,
         SIZE_T clientHelloLength,
         SIZE_T* transcriptLength) noexcept
@@ -1565,7 +1449,7 @@ namespace tls
         return STATUS_NOT_FOUND;
     }
 
-    NTSTATUS TlsHandshake13::ParseEncryptedExtensions(
+    NTSTATUS Tls13HandshakeMessages::ParseEncryptedExtensions(
         const TlsHandshakeMessageView& message,
         Tls13EncryptedExtensionsView& encryptedExtensions) noexcept
     {
@@ -1618,7 +1502,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::ParseCertificateRequest(
+    NTSTATUS Tls13HandshakeMessages::ParseCertificateRequest(
         const TlsHandshakeMessageView& message,
         Tls13CertificateRequestView& certificateRequest) noexcept
     {
@@ -1649,7 +1533,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::ParseCertificate(
+    NTSTATUS Tls13HandshakeMessages::ParseCertificate(
         const TlsHandshakeMessageView& message,
         Tls13CertificateView& certificate) noexcept
     {
@@ -1708,7 +1592,7 @@ namespace tls
         return certificate.CertificateCount == 0 ? STATUS_INVALID_NETWORK_RESPONSE : STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::EncodeEmptyCertificate(
+    NTSTATUS Tls13HandshakeMessages::EncodeEmptyCertificate(
         const UCHAR* requestContext,
         SIZE_T requestContextLength,
         UCHAR* destination,
@@ -1757,7 +1641,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::EncodeCertificate(
+    NTSTATUS Tls13HandshakeMessages::EncodeCertificate(
         const UCHAR* requestContext,
         SIZE_T requestContextLength,
         const UCHAR* certificateList,
@@ -1817,7 +1701,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::EncodeCertificateVerify(
+    NTSTATUS Tls13HandshakeMessages::EncodeCertificateVerify(
         TlsSignatureScheme signatureScheme,
         const UCHAR* signature,
         SIZE_T signatureLength,
@@ -1866,7 +1750,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::EncodeEndOfEarlyData(
+    NTSTATUS Tls13HandshakeMessages::EncodeEndOfEarlyData(
         UCHAR* destination,
         SIZE_T destinationCapacity,
         SIZE_T* bytesWritten) noexcept
@@ -1898,7 +1782,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::ParseCertificateVerify(
+    NTSTATUS Tls13HandshakeMessages::ParseCertificateVerify(
         const TlsHandshakeMessageView& message,
         Tls13CertificateVerifyView& certificateVerify) noexcept
     {
@@ -1926,7 +1810,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::ParseKeyUpdate(
+    NTSTATUS Tls13HandshakeMessages::ParseKeyUpdate(
         const TlsHandshakeMessageView& message,
         Tls13KeyUpdateView& keyUpdate) noexcept
     {
@@ -1955,7 +1839,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::EncodeKeyUpdate(
+    NTSTATUS Tls13HandshakeMessages::EncodeKeyUpdate(
         Tls13KeyUpdateRequest request,
         UCHAR* destination,
         SIZE_T destinationCapacity,
@@ -1996,7 +1880,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::ParseNewSessionTicket(
+    NTSTATUS Tls13HandshakeMessages::ParseNewSessionTicket(
         const TlsHandshakeMessageView& message,
         Tls13NewSessionTicketView& ticket) noexcept
     {
@@ -2065,7 +1949,7 @@ namespace tls
         return STATUS_SUCCESS;
     }
 
-    NTSTATUS TlsHandshake13::ParseNextNewSessionTicket(
+    NTSTATUS Tls13HandshakeMessages::ParseNextNewSessionTicket(
         const UCHAR* data,
         SIZE_T dataLength,
         SIZE_T* offset,
@@ -2101,7 +1985,7 @@ namespace tls
         return status;
     }
 
-    NTSTATUS TlsHandshake13::EncodeFinished(
+    NTSTATUS Tls13HandshakeMessages::EncodeFinished(
         const TlsContext& context,
         bool clientFinished,
         const UCHAR* transcriptHash,
@@ -2160,7 +2044,7 @@ namespace tls
         return status;
     }
 
-    NTSTATUS TlsHandshake13::VerifyFinished(
+    NTSTATUS Tls13HandshakeMessages::VerifyFinished(
         const TlsContext& context,
         bool clientFinished,
         const UCHAR* transcriptHash,
@@ -2196,7 +2080,7 @@ namespace tls
         return matches ? STATUS_SUCCESS : STATUS_INVALID_NETWORK_RESPONSE;
     }
 
-    NTSTATUS TlsHandshake13::BuildCertificateVerifyInput(
+    NTSTATUS Tls13HandshakeMessages::BuildCertificateVerifyInput(
         bool server,
         const UCHAR* transcriptHash,
         SIZE_T transcriptHashLength,

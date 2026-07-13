@@ -1380,8 +1380,7 @@ namespace tls
             }
             else {
                 HeapArray<UCHAR> firstHash(TlsMaxTranscriptHashLength);
-                HeapArray<UCHAR> synthetic(4 + TlsMaxTranscriptHashLength);
-                if (!firstHash.IsValid() || !synthetic.IsValid()) {
+                if (!firstHash.IsValid()) {
                     RtlSecureZeroMemory(partialHash.Get(), partialHash.Count());
                     return STATUS_INSUFFICIENT_RESOURCES;
                 }
@@ -1396,16 +1395,10 @@ namespace tls
                     firstHash.Count(),
                     &firstHashLength);
                 if (NT_SUCCESS(status)) {
-                    synthetic[0] = 254;
-                    synthetic[1] = static_cast<UCHAR>((firstHashLength >> 16) & 0xff);
-                    synthetic[2] = static_cast<UCHAR>((firstHashLength >> 8) & 0xff);
-                    synthetic[3] = static_cast<UCHAR>(firstHashLength & 0xff);
-                    RtlCopyMemory(synthetic.Get() + 4, firstHash.Get(), firstHashLength);
-
                     TlsTranscriptHash binderTranscript;
                     status = binderTranscript.Initialize(algorithm);
                     if (NT_SUCCESS(status)) {
-                        status = binderTranscript.Update(synthetic.Get(), 4 + firstHashLength);
+                        status = binderTranscript.ReplaceWithMessageHash(firstHash.Get(), firstHashLength);
                     }
                     if (NT_SUCCESS(status)) {
                         status = binderTranscript.Update(helloRetryRequest, helloRetryRequestLength);
@@ -1420,7 +1413,6 @@ namespace tls
                 }
 
                 RtlSecureZeroMemory(firstHash.Get(), firstHash.Count());
-                RtlSecureZeroMemory(synthetic.Get(), synthetic.Count());
             }
 
             if (NT_SUCCESS(status)) {

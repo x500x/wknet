@@ -847,27 +847,6 @@ namespace tls
         }
     }
 
-    NTSTATUS TlsTranscriptHash::Initialize(crypto::HashAlgorithm algorithm) noexcept
-    {
-        algorithm_ = algorithm;
-        return hash_.Initialize(algorithm);
-    }
-
-    void TlsTranscriptHash::Reset() noexcept
-    {
-        hash_.Reset();
-    }
-
-    NTSTATUS TlsTranscriptHash::Update(const UCHAR* data, SIZE_T dataLength) noexcept
-    {
-        return hash_.Update(data, dataLength);
-    }
-
-    NTSTATUS TlsTranscriptHash::Finish(UCHAR* output, SIZE_T outputLength, SIZE_T* bytesWritten) const noexcept
-    {
-        return hash_.Finish(output, outputLength, bytesWritten);
-    }
-
     crypto::HashAlgorithm TlsHandshake12::PrfHashForCipherSuite(TlsCipherSuite cipherSuite) noexcept
     {
         const TlsCipherSuiteCapability* capability = TlsFindCipherSuiteCapability(cipherSuite);

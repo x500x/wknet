@@ -119,7 +119,9 @@
     <ClCompile Include="tls\TlsConnect13.cpp" />
     <ClCompile Include="tls\TlsConnection.cpp" />
     <ClCompile Include="tls\TlsHandshake12.cpp" />
-    <ClCompile Include="tls\TlsHandshake13.cpp" />
+    <ClCompile Include="tls\Tls13HandshakeMessages.cpp" />
+    <ClCompile Include="tls\Tls13KeySchedule.cpp" />
+    <ClCompile Include="tls\TlsTranscriptHash.cpp" />
     <ClCompile Include="tls\TlsPolicy.cpp" />
     <ClCompile Include="tls\TlsPostHandshake.cpp" />
     <ClCompile Include="tls\TlsRecord.cpp" />
@@ -237,7 +239,11 @@
     <ClInclude Include="..\..\include\wknet\http\Session.h" />
     <ClInclude Include="..\..\include\wknet\http\Types.h" />
     <ClInclude Include="tls\CertificateStore.h" />
+    <ClInclude Include="tls\Tls13HandshakeMessages.h" />
+    <ClInclude Include="tls\Tls13KeySchedule.h" />
     <ClInclude Include="tls\TlsConnectionInternal.hpp" />
+    <ClInclude Include="tls\TlsHandshake13.h" />
+    <ClInclude Include="tls\TlsTranscriptHash.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{2F05C2F0-8C5F-4B05-B0D9-F72F40E1D5D6}</ProjectGuid>

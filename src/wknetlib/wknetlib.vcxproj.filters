@@ -380,7 +380,13 @@
     <ClCompile Include="tls\TlsHandshake12.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
-    <ClCompile Include="tls\TlsHandshake13.cpp">
+    <ClCompile Include="tls\Tls13HandshakeMessages.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\Tls13KeySchedule.cpp">
+      <Filter>Source Files\tls</Filter>
+    </ClCompile>
+    <ClCompile Include="tls\TlsTranscriptHash.cpp">
       <Filter>Source Files\tls</Filter>
     </ClCompile>
     <ClCompile Include="tls\TlsPolicy.cpp">
@@ -601,7 +607,19 @@
     <ClInclude Include="tls\CertificateStore.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
+    <ClInclude Include="tls\Tls13HandshakeMessages.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="tls\Tls13KeySchedule.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
     <ClInclude Include="tls\TlsConnectionInternal.hpp">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="tls\TlsHandshake13.h">
+      <Filter>Header Files\tls</Filter>
+    </ClInclude>
+    <ClInclude Include="tls\TlsTranscriptHash.h">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
   </ItemGroup>

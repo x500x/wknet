@@ -114,6 +114,7 @@
 
 | 条目 | RFC 级别 | 状态 | 代码入口 | 测试入口 | 备注 |
 |------|----------|------|----------|----------|------|
+| TLS 1.3 公共内部 key schedule、handshake messages、transcript | MUST/架构边界 | 已实现/已验证 | `tls/Tls13KeySchedule.cpp`、`tls/Tls13HandshakeMessages.cpp`、`tls/TlsTranscriptHash.cpp` | `tests/tls13_services_tests.cpp`、`tests/tls_handshake_tests.cpp`、`tests/tls_record_tests.cpp`、`tests/integration/tls_matrix.ps1` | TCP TLS 已原子迁移；`TlsHandshake13` 仅为源码兼容别名，QUIC 后续直接依赖三个内部服务。 |
 | TLS 1.3 优先、失败分类后显式 TLS 1.2 重连 | SHOULD | 已实现/已验证 | `tls/TlsConnection.cpp`、`session/HttpProxy.cpp` | `tests/tls_handshake_tests.cpp`、`tests/http_api_tests.cpp` | 无握手内自动降级。 |
 | 降级哨兵检测 | MUST | 已实现/已验证 | `TlsHandshake13.cpp`、`TlsConnection.cpp` | `tests/tls_handshake_tests.cpp` | 攻击硬失败。 |
 | TLS 1.2 EMS 与安全重协商指示 | SHOULD/MUST by policy | 已实现/已验证 | `TlsConnection.cpp`、`TlsHandshake12.cpp` | `tests/tls_handshake_tests.cpp` | 缺失按本库策略拒绝。 |
