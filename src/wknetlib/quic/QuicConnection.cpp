@@ -1,0 +1,3013 @@
+#if !defined(WKNET_USER_MODE_TEST)
+#include <ntifs.h>
+#endif
+#include "quic/QuicConnectionPrivate.hpp"
+#include <wknet/crypto/CngProvider.h>
+namespace wknet::quic
+{
+#if defined(WKNET_USER_MODE_TEST)
+namespace
+{
+bool g_failWorkerStart = false;
+}
+#endif
+
+namespace
+{
+constexpr LONG OperationPending = 0;
+constexpr LONG OperationQueued = 1;
+constexpr LONG OperationCompleting = 2;
+constexpr LONG OperationCompleted = 3;
+constexpr ULONGLONG QuicKeyUpdatePacketThreshold = 1ULL << 20;
+
+ULONG SocketAddressLength(USHORT family) noexcept
+{
+    return family == AF_INET ? sizeof(SOCKADDR_IN) : (family == AF_INET6 ? sizeof(SOCKADDR_IN6) : 0);
+}
+
+bool TryClaimOperation(QuicOperation *operation) noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    std::lock_guard<std::mutex> guard(operation->Lock);
+    if (operation->CompletionState != OperationPending)
+    {
+        return false;
+    }
+
+    operation->CompletionState = OperationQueued;
+    return true;
+#else
+    return InterlockedCompareExchange(&operation->CompletionState, OperationQueued, OperationPending) ==
+           OperationPending;
+#endif
+}
+
+void ReleaseOperationClaim(QuicOperation *operation) noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    std::lock_guard<std::mutex> guard(operation->Lock);
+    if (operation->CompletionState == OperationQueued)
+    {
+        operation->CompletionState = OperationPending;
+    }
+#else
+    InterlockedCompareExchange(&operation->CompletionState, OperationPending, OperationQueued);
+#endif
+}
+
+ULONGLONG EarlierDeadline(ULONGLONG current, ULONGLONG candidate) noexcept
+{
+    return candidate != 0 && (current == 0 || candidate < current) ? candidate : current;
+}
+
+ULONGLONG DeadlineAfter(ULONGLONG now, ULONGLONG duration, ULONGLONG multiplier = 1) noexcept
+{
+    if (multiplier == 0)
+    {
+        return now;
+    }
+    if (duration > (~0ULL / multiplier))
+    {
+        return ~0ULL;
+    }
+    const ULONGLONG total = duration * multiplier;
+    return now > ~0ULL - total ? ~0ULL : now + total;
+}
+} // namespace
+
+void QuicOperationInitialize(QuicOperation *op) noexcept
+{
+    if (op == nullptr)
+    {
+        return;
+    }
+
+#if defined(WKNET_USER_MODE_TEST)
+    std::lock_guard<std::mutex> guard(op->Lock);
+#endif
+    op->Status = STATUS_PENDING;
+    op->StreamId = 0;
+    op->BytesTransferred = 0;
+    op->Fin = false;
+    op->CompletionState = OperationPending;
+#if !defined(WKNET_USER_MODE_TEST)
+    KeInitializeEvent(&op->Event, NotificationEvent, FALSE);
+#endif
+}
+NTSTATUS QuicOperationWait(QuicOperation *op, ULONG timeoutMs) noexcept
+{
+    if (op == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+#if defined(WKNET_USER_MODE_TEST)
+    std::unique_lock<std::mutex> lock(op->Lock);
+    const bool done = timeoutMs == 0xffffffffUL
+                          ? (op->Event.wait(lock, [op]() { return op->CompletionState == OperationCompleted; }), true)
+                          : op->Event.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                                               [op]() { return op->CompletionState == OperationCompleted; });
+    return done ? op->Status : STATUS_IO_TIMEOUT;
+#else
+    LARGE_INTEGER timeout = {};
+    timeout.QuadPart = -static_cast<LONGLONG>(timeoutMs) * 10000LL;
+    NTSTATUS s =
+        KeWaitForSingleObject(&op->Event, Executive, KernelMode, FALSE, timeoutMs == 0xffffffffUL ? nullptr : &timeout);
+    return s == STATUS_TIMEOUT ? STATUS_IO_TIMEOUT : (NT_SUCCESS(s) ? op->Status : s);
+#endif
+}
+QuicConnection::~QuicConnection() noexcept
+{
+    Shutdown();
+}
+NTSTATUS QuicConnection::Initialize(const QuicConnectionCreateOptions &o) noexcept
+{
+    if (o.CommandCapacity == 0 || o.CommandCapacity > WKNET_HARD_MAX_QUIC_COMMANDS)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    NTSTATUS s = queue_.Allocate(o.CommandCapacity);
+    if (!NT_SUCCESS(s))
+    {
+        return s;
+    }
+
+    constexpr SIZE_T streamCapacity = WKNET_HARD_MAX_QUIC_LOCAL_BIDI_STREAMS + WKNET_HARD_MAX_QUIC_PEER_BIDI_STREAMS +
+                                      WKNET_HARD_MAX_QUIC_LOCAL_UNI_STREAMS + WKNET_HARD_MAX_QUIC_PEER_UNI_STREAMS;
+    s = streams_.Allocate(streamCapacity);
+    if (!NT_SUCCESS(s))
+    {
+        return s;
+    }
+    s = localConnectionIds_.Allocate(WKNET_HARD_MAX_QUIC_CONNECTION_IDS);
+    if (NT_SUCCESS(s))
+    {
+        s = peerConnectionIds_.Allocate(WKNET_HARD_MAX_QUIC_CONNECTION_IDS);
+    }
+    if (!NT_SUCCESS(s))
+    {
+        return s;
+    }
+
+    if (o.DatagramClient != nullptr)
+    {
+        if (o.RemoteAddress == nullptr || o.ServerName == nullptr || o.ServerNameLength == 0 ||
+            o.ServerNameLength > 253 || o.InitialDestinationConnectionId.Data == nullptr ||
+            o.InitialDestinationConnectionId.Length == 0 ||
+            o.InitialDestinationConnectionId.Length > QuicMaximumConnectionIdLength ||
+            o.InitialSourceConnectionId.Data == nullptr || o.InitialSourceConnectionId.Length == 0 ||
+            o.InitialSourceConnectionId.Length > QuicMaximumConnectionIdLength ||
+            o.RemoteAddressLength != SocketAddressLength(o.RemoteAddress->sa_family))
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+        s = serverName_.Allocate(o.ServerNameLength + 1);
+        if (NT_SUCCESS(s))
+        {
+            s = receiveBuffer_.Allocate(WKNET_HARD_MAX_QUIC_UDP_PAYLOAD_BYTES);
+        }
+        if (NT_SUCCESS(s))
+        {
+            s = packetBuffer_.Allocate(WKNET_HARD_MAX_QUIC_UDP_PAYLOAD_BYTES);
+        }
+        if (NT_SUCCESS(s))
+        {
+            s = decryptBuffer_.Allocate(WKNET_HARD_MAX_QUIC_UDP_PAYLOAD_BYTES);
+        }
+        if (NT_SUCCESS(s))
+        {
+            s = frameBuffer_.Allocate(WKNET_HARD_MAX_QUIC_FRAME_BYTES);
+        }
+        if (NT_SUCCESS(s))
+        {
+            s = clientHelloBuffer_.Allocate(tls::Tls13MaxExtensionsLength + 4096);
+        }
+        if (NT_SUCCESS(s))
+        {
+            s = ackRangeScratch_.Allocate(WKNET_HARD_MAX_QUIC_ACK_RANGES);
+        }
+        if (!NT_SUCCESS(s))
+        {
+            return s;
+        }
+        RtlCopyMemory(serverName_.Get(), o.ServerName, o.ServerNameLength);
+        serverName_[o.ServerNameLength] = '\0';
+        RtlCopyMemory(&remoteAddress_, o.RemoteAddress, o.RemoteAddressLength);
+        remoteAddressLength_ = o.RemoteAddressLength;
+        RtlCopyMemory(initialDestinationConnectionId_, o.InitialDestinationConnectionId.Data,
+                      o.InitialDestinationConnectionId.Length);
+        initialDestinationConnectionIdLength_ = o.InitialDestinationConnectionId.Length;
+        RtlCopyMemory(sourceConnectionId_, o.InitialSourceConnectionId.Data, o.InitialSourceConnectionId.Length);
+        sourceConnectionIdLength_ = o.InitialSourceConnectionId.Length;
+        RtlCopyMemory(peerConnectionId_, initialDestinationConnectionId_, initialDestinationConnectionIdLength_);
+        peerConnectionIdLength_ = initialDestinationConnectionIdLength_;
+        QuicConnectionIdEntry &localConnectionId = localConnectionIds_[localConnectionIdCount_++];
+        localConnectionId.Sequence = 0;
+        localConnectionId.ConnectionIdLength = sourceConnectionIdLength_;
+        RtlCopyMemory(localConnectionId.ConnectionId, sourceConnectionId_, sourceConnectionIdLength_);
+        QuicConnectionIdEntry &peerConnectionId = peerConnectionIds_[peerConnectionIdCount_++];
+        peerConnectionId.Sequence = 0;
+        peerConnectionId.ConnectionIdLength = peerConnectionIdLength_;
+        RtlCopyMemory(peerConnectionId.ConnectionId, peerConnectionId_, peerConnectionIdLength_);
+        datagramClient_ = o.DatagramClient;
+        certificateStore_ = o.CertificateStore;
+        certificateScratchAllocator_ = o.CertificateScratchAllocator;
+        providerCache_ = o.ProviderCache;
+        sessionCache_ = o.SessionCache;
+        tokenCache_ = o.TokenCache;
+        clientCredential_ = o.ClientCredential;
+        verifyCertificate_ = o.VerifyCertificate;
+        requireRevocationCheck_ = o.RequireRevocationCheck;
+        networkEnabled_ = true;
+    }
+    else
+    {
+        peerMaxStreamsBidi_ = WKNET_HARD_MAX_QUIC_LOCAL_BIDI_STREAMS;
+        peerMaxStreamsUni_ = WKNET_HARD_MAX_QUIC_LOCAL_UNI_STREAMS;
+        s = flowControl_.Initialize(WKNET_HARD_MAX_QUIC_CONNECTION_REASSEMBLY_BYTES,
+                                    WKNET_HARD_MAX_QUIC_CONNECTION_REASSEMBLY_BYTES);
+        if (!NT_SUCCESS(s))
+        {
+            return s;
+        }
+    }
+
+    suspended_ = o.StartWorkerSuspended;
+#if defined(WKNET_USER_MODE_TEST)
+    if (g_failWorkerStart)
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    worker_ = std::thread(WorkerEntry, this);
+#else
+    KeInitializeSpinLock(&lock_);
+    KeInitializeEvent(&wake_, NotificationEvent, FALSE);
+    HANDLE handle = nullptr;
+    s = PsCreateSystemThread(&handle, THREAD_ALL_ACCESS, nullptr, nullptr, nullptr, WorkerEntry, this);
+    if (!NT_SUCCESS(s))
+    {
+        return s;
+    }
+
+    s = ObReferenceObjectByHandle(handle, SYNCHRONIZE, *PsThreadType, KernelMode, reinterpret_cast<void **>(&worker_),
+                                  nullptr);
+    if (!NT_SUCCESS(s))
+    {
+        KIRQL irql;
+        KeAcquireSpinLock(&lock_, &irql);
+        stop_ = true;
+        suspended_ = false;
+        KeReleaseSpinLock(&lock_, irql);
+        KeSetEvent(&wake_, IO_NO_INCREMENT, FALSE);
+        ZwWaitForSingleObject(handle, FALSE, nullptr);
+        ZwClose(handle);
+        return s;
+    }
+    ZwClose(handle);
+#endif
+    return STATUS_SUCCESS;
+}
+void QuicConnection::Complete(QuicOperation *op, NTSTATUS status, ULONGLONG streamId, SIZE_T bytesTransferred,
+                              bool fin) noexcept
+{
+    if (op == nullptr)
+    {
+        return;
+    }
+
+#if defined(WKNET_USER_MODE_TEST)
+    std::lock_guard<std::mutex> guard(op->Lock);
+    if (op->CompletionState != OperationQueued)
+    {
+        return;
+    }
+
+    op->CompletionState = OperationCompleting;
+    op->Status = status;
+    op->StreamId = streamId;
+    op->BytesTransferred = bytesTransferred;
+    op->Fin = fin;
+    op->CompletionState = OperationCompleted;
+    op->Event.notify_all();
+#else
+    if (InterlockedCompareExchange(&op->CompletionState, OperationCompleting, OperationQueued) != OperationQueued)
+    {
+        return;
+    }
+
+    op->Status = status;
+    op->StreamId = streamId;
+    op->BytesTransferred = bytesTransferred;
+    op->Fin = fin;
+    KeMemoryBarrier();
+    InterlockedExchange(&op->CompletionState, OperationCompleted);
+    KeSetEvent(&op->Event, IO_NO_INCREMENT, FALSE);
+#endif
+}
+NTSTATUS QuicConnection::Enqueue(QuicCommandType type, QuicOperation *op, ULONGLONG streamId, const UCHAR *data,
+                                 SIZE_T dataLength, UCHAR *output, bool fin, ULONGLONG errorCode) noexcept
+{
+    if (op == nullptr || streamId > QuicVarIntMaximum || errorCode > QuicVarIntMaximum ||
+        (type == QuicCommandType::WriteStream && data == nullptr && dataLength != 0) ||
+        (type == QuicCommandType::ConsumeStream && output == nullptr && dataLength != 0))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    QuicCommand *command = AllocateNonPagedObject<QuicCommand>();
+    if (command == nullptr)
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    if (!TryClaimOperation(op))
+    {
+        FreeNonPagedObject(command);
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    command->Type = type;
+    command->Operation = op;
+    command->StreamId = streamId;
+    command->ErrorCode = errorCode;
+    command->Output = output;
+    command->Length = dataLength;
+    command->Fin = fin;
+    if (type == QuicCommandType::WriteStream && dataLength != 0)
+    {
+        const NTSTATUS allocationStatus = command->Data.Allocate(dataLength);
+        if (!NT_SUCCESS(allocationStatus))
+        {
+            ReleaseOperationClaim(op);
+            FreeNonPagedObject(command);
+            return allocationStatus;
+        }
+        RtlCopyMemory(command->Data.Get(), data, dataLength);
+    }
+    if (type == QuicCommandType::InjectFrame)
+    {
+        if (data == nullptr || dataLength != sizeof(QuicFrame) ||
+            streamId > static_cast<ULONGLONG>(QuicEncryptionLevel::Application) ||
+            errorCode > static_cast<ULONGLONG>(QuicPacketNumberSpace::Application))
+        {
+            ReleaseOperationClaim(op);
+            FreeNonPagedObject(command);
+            return STATUS_INVALID_PARAMETER;
+        }
+        command->Frame = *reinterpret_cast<const QuicFrame *>(data);
+        command->Level = static_cast<QuicEncryptionLevel>(streamId);
+        command->Space = static_cast<QuicPacketNumberSpace>(errorCode);
+        const QuicBufferView primary =
+            command->Frame.Data.Length != 0
+                ? command->Frame.Data
+                : (command->Frame.ConnectionId.Length != 0 ? command->Frame.ConnectionId : command->Frame.ReasonPhrase);
+        if (primary.Length != 0)
+        {
+            NTSTATUS allocationStatus = command->Data.Allocate(primary.Length);
+            if (!NT_SUCCESS(allocationStatus))
+            {
+                ReleaseOperationClaim(op);
+                FreeNonPagedObject(command);
+                return allocationStatus;
+            }
+            RtlCopyMemory(command->Data.Get(), primary.Data, primary.Length);
+            if (command->Frame.Data.Length != 0)
+            {
+                command->Frame.Data = {command->Data.Get(), command->Data.Count()};
+            }
+            else if (command->Frame.ConnectionId.Length != 0)
+            {
+                command->Frame.ConnectionId = {command->Data.Get(), command->Data.Count()};
+            }
+            else
+            {
+                command->Frame.ReasonPhrase = {command->Data.Get(), command->Data.Count()};
+            }
+        }
+        if (command->Frame.StatelessResetToken.Length != 0)
+        {
+            NTSTATUS allocationStatus = command->AuxiliaryData.Allocate(command->Frame.StatelessResetToken.Length);
+            if (!NT_SUCCESS(allocationStatus))
+            {
+                ReleaseOperationClaim(op);
+                FreeNonPagedObject(command);
+                return allocationStatus;
+            }
+            RtlCopyMemory(command->AuxiliaryData.Get(), command->Frame.StatelessResetToken.Data,
+                          command->Frame.StatelessResetToken.Length);
+            command->Frame.StatelessResetToken = {command->AuxiliaryData.Get(), command->AuxiliaryData.Count()};
+        }
+    }
+    NTSTATUS status = STATUS_SUCCESS;
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (stop_ || state_ == QuicConnectionState::Closed || state_ == QuicConnectionState::Failed ||
+            ((closeQueued_ || state_ == QuicConnectionState::Closing || state_ == QuicConnectionState::Draining) &&
+             type != QuicCommandType::ProcessTimer))
+        {
+            status = STATUS_DEVICE_NOT_READY;
+        }
+        else if (type == QuicCommandType::Connect && (state_ != QuicConnectionState::Idle || connectQueued_))
+        {
+            status = STATUS_INVALID_DEVICE_STATE;
+        }
+        else if (type == QuicCommandType::Close && state_ != QuicConnectionState::Connecting &&
+                 state_ != QuicConnectionState::Handshaking && state_ != QuicConnectionState::Established)
+        {
+            status = STATUS_INVALID_DEVICE_STATE;
+        }
+        else if (count_ >= queue_.Count())
+        {
+            status = STATUS_INSUFFICIENT_RESOURCES;
+        }
+        else
+        {
+            queue_[(head_ + count_) % queue_.Count()] = command;
+            ++count_;
+            connectQueued_ = type == QuicCommandType::Connect ? true : connectQueued_;
+            closeQueued_ = type == QuicCommandType::Close ? true : closeQueued_;
+        }
+    }
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    if (stop_ || state_ == QuicConnectionState::Closed || state_ == QuicConnectionState::Failed ||
+        ((closeQueued_ || state_ == QuicConnectionState::Closing || state_ == QuicConnectionState::Draining) &&
+         type != QuicCommandType::ProcessTimer))
+    {
+        status = STATUS_DEVICE_NOT_READY;
+    }
+    else if (type == QuicCommandType::Connect && (state_ != QuicConnectionState::Idle || connectQueued_))
+    {
+        status = STATUS_INVALID_DEVICE_STATE;
+    }
+    else if (type == QuicCommandType::Close && state_ != QuicConnectionState::Connecting &&
+             state_ != QuicConnectionState::Handshaking && state_ != QuicConnectionState::Established)
+    {
+        status = STATUS_INVALID_DEVICE_STATE;
+    }
+    else if (count_ >= queue_.Count())
+    {
+        status = STATUS_INSUFFICIENT_RESOURCES;
+    }
+    else
+    {
+        queue_[(head_ + count_) % queue_.Count()] = command;
+        ++count_;
+        connectQueued_ = type == QuicCommandType::Connect ? true : connectQueued_;
+        closeQueued_ = type == QuicCommandType::Close ? true : closeQueued_;
+    }
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+
+    if (!NT_SUCCESS(status))
+    {
+        ReleaseOperationClaim(op);
+        FreeNonPagedObject(command);
+        return status;
+    }
+
+#if defined(WKNET_USER_MODE_TEST)
+    wake_.notify_all();
+#else
+    KeSetEvent(&wake_, IO_NO_INCREMENT, FALSE);
+#endif
+    return status;
+}
+bool QuicConnection::Dequeue(QuicCommand **out) noexcept
+{
+    *out = nullptr;
+#if defined(WKNET_USER_MODE_TEST)
+    std::lock_guard<std::mutex> guard(lock_);
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+#endif
+    if (count_ != 0)
+    {
+        *out = queue_[head_];
+        queue_[head_] = nullptr;
+        head_ = (head_ + 1) % queue_.Count();
+        --count_;
+    }
+#if !defined(WKNET_USER_MODE_TEST)
+    if (count_ == 0 && !receiveReady_)
+        KeClearEvent(&wake_);
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+    return *out != nullptr;
+}
+
+bool QuicConnection::ShouldStop() const noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    std::lock_guard<std::mutex> guard(lock_);
+    return stop_;
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    const bool stop = stop_;
+    KeReleaseSpinLock(&lock_, irql);
+    return stop;
+#endif
+}
+
+bool QuicConnection::IsWorkerThread() const noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    return worker_.joinable() && std::this_thread::get_id() == worker_.get_id();
+#else
+    return worker_ != nullptr && PsGetCurrentThread() == worker_;
+#endif
+}
+
+QuicStream *QuicConnection::FindStream(ULONGLONG streamId) noexcept
+{
+    for (SIZE_T index = 0; index < streamCount_; ++index)
+    {
+        if (streams_[index] != nullptr && streams_[index]->Id() == streamId)
+        {
+            return streams_[index];
+        }
+    }
+    return nullptr;
+}
+
+NTSTATUS QuicConnection::CreateStream(ULONGLONG streamId, QuicStream **stream) noexcept
+{
+    if (stream != nullptr)
+    {
+        *stream = nullptr;
+    }
+    if (stream == nullptr || streamId > QuicVarIntMaximum || FindStream(streamId) != nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (streamCount_ >= streams_.Count())
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    const bool clientInitiated = QuicStreamIsClientInitiated(streamId);
+    const bool bidirectional = QuicStreamIsBidirectional(streamId);
+    const ULONGLONG ordinal = streamId >> 2;
+    if (clientInitiated)
+    {
+        const ULONGLONG limit = bidirectional ? peerMaxStreamsBidi_ : peerMaxStreamsUni_;
+        if (ordinal >= limit)
+        {
+            return STATUS_DEVICE_BUSY;
+        }
+    }
+    else
+    {
+        const ULONGLONG limit =
+            bidirectional ? WKNET_HARD_MAX_QUIC_PEER_BIDI_STREAMS : WKNET_HARD_MAX_QUIC_PEER_UNI_STREAMS;
+        if (ordinal >= limit)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+    }
+
+    QuicStream *created = AllocateNonPagedObject<QuicStream>();
+    if (created == nullptr)
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    NTSTATUS status = created->Initialize(streamId);
+    if (NT_SUCCESS(status) && (bidirectional || !clientInitiated))
+    {
+        status = created->SetReceiveLimit(WKNET_HARD_MAX_QUIC_STREAM_REASSEMBLY_BYTES);
+    }
+    if (NT_SUCCESS(status) && (bidirectional || clientInitiated))
+    {
+        ULONGLONG sendLimit = WKNET_HARD_MAX_QUIC_STREAM_REASSEMBLY_BYTES;
+        if (networkEnabled_ && peerTransportParametersApplied_)
+        {
+            const QuicTransportParameters &parameters = tls_.PeerTransportParameters();
+            sendLimit = bidirectional ? (clientInitiated ? parameters.InitialMaxStreamDataBidiRemote
+                                                         : parameters.InitialMaxStreamDataBidiLocal)
+                                      : parameters.InitialMaxStreamDataUni;
+        }
+        status = created->SetSendLimit(sendLimit);
+    }
+    if (!NT_SUCCESS(status))
+    {
+        FreeNonPagedObject(created);
+        return status;
+    }
+
+    streams_[streamCount_++] = created;
+    *stream = created;
+    return STATUS_SUCCESS;
+}
+
+void QuicConnection::ClearStreams() noexcept
+{
+    for (SIZE_T index = 0; index < streamCount_; ++index)
+    {
+        FreeNonPagedObject(streams_[index]);
+        streams_[index] = nullptr;
+    }
+    streamCount_ = 0;
+}
+
+bool QuicConnection::IsLocalConnectionId(QuicBufferView connectionId) const noexcept
+{
+    for (SIZE_T index = 0; index < localConnectionIdCount_; ++index)
+    {
+        const QuicConnectionIdEntry &entry = localConnectionIds_[index];
+        const bool accepted =
+            !entry.Retired || (entry.RetireDeadline100ns != 0 && QuicClockNow100ns() < entry.RetireDeadline100ns);
+        if (accepted && entry.ConnectionIdLength == connectionId.Length &&
+            RtlCompareMemory(entry.ConnectionId, connectionId.Data, connectionId.Length) == connectionId.Length)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool QuicConnection::MatchesStatelessReset(const UCHAR *packet, SIZE_T packetLength) const noexcept
+{
+    if (packet == nullptr || packetLength < 21)
+    {
+        return false;
+    }
+    const UCHAR *candidate = packet + packetLength - 16;
+    for (SIZE_T index = 0; index < peerConnectionIdCount_; ++index)
+    {
+        const QuicConnectionIdEntry &entry = peerConnectionIds_[index];
+        const bool tokenActive =
+            !entry.Retired || (entry.RetireDeadline100ns != 0 && QuicClockNow100ns() < entry.RetireDeadline100ns);
+        if (tokenActive && entry.HasStatelessResetToken)
+        {
+            UCHAR difference = 0;
+            for (SIZE_T byteIndex = 0; byteIndex < sizeof(entry.StatelessResetToken); ++byteIndex)
+            {
+                difference |= static_cast<UCHAR>(entry.StatelessResetToken[byteIndex] ^ candidate[byteIndex]);
+            }
+            if (difference == 0)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+NTSTATUS QuicConnection::IssueConnectionId() noexcept
+{
+    if (localConnectionIdCount_ >= localConnectionIds_.Count() || sourceConnectionIdLength_ == 0)
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    SIZE_T activeCount = 0;
+    for (SIZE_T index = 0; index < localConnectionIdCount_; ++index)
+    {
+        activeCount += localConnectionIds_[index].Retired ? 0 : 1;
+    }
+    const ULONGLONG peerLimit =
+        peerTransportParametersApplied_ ? tls_.PeerTransportParameters().ActiveConnectionIdLimit : 2;
+    const ULONGLONG activeLimit =
+        peerLimit < WKNET_HARD_MAX_QUIC_CONNECTION_IDS ? peerLimit : WKNET_HARD_MAX_QUIC_CONNECTION_IDS;
+    if (activeCount >= activeLimit)
+    {
+        return STATUS_DEVICE_BUSY;
+    }
+
+    QuicConnectionIdEntry candidate = {};
+    candidate.Sequence = nextLocalConnectionIdSequence_;
+    candidate.ConnectionIdLength = sourceConnectionIdLength_;
+    NTSTATUS status = crypto::CngProvider::GenerateRandom(candidate.ConnectionId, candidate.ConnectionIdLength);
+    if (NT_SUCCESS(status))
+    {
+        status =
+            crypto::CngProvider::GenerateRandom(candidate.StatelessResetToken, sizeof(candidate.StatelessResetToken));
+    }
+    if (!NT_SUCCESS(status))
+    {
+        RtlSecureZeroMemory(&candidate, sizeof(candidate));
+        return status;
+    }
+    candidate.HasStatelessResetToken = true;
+
+    for (SIZE_T index = 0; index < localConnectionIdCount_; ++index)
+    {
+        if (localConnectionIds_[index].ConnectionIdLength == candidate.ConnectionIdLength &&
+            RtlCompareMemory(localConnectionIds_[index].ConnectionId, candidate.ConnectionId,
+                             candidate.ConnectionIdLength) == candidate.ConnectionIdLength)
+        {
+            RtlSecureZeroMemory(&candidate, sizeof(candidate));
+            return STATUS_RETRY;
+        }
+    }
+
+    QuicFrame frame = {};
+    frame.Kind = QuicFrameKind::NewConnectionId;
+    frame.Sequence = candidate.Sequence;
+    frame.RetirePriorTo = 0;
+    frame.ConnectionId = {candidate.ConnectionId, candidate.ConnectionIdLength};
+    frame.StatelessResetToken = {candidate.StatelessResetToken, sizeof(candidate.StatelessResetToken)};
+    status = SendFramePacket(QuicPacketType::OneRtt, QuicPacketNumberSpace::Application, applicationWriteKey_, frame,
+                             nullptr, 0, false, true);
+    if (NT_SUCCESS(status))
+    {
+        localConnectionIds_[localConnectionIdCount_++] = candidate;
+        ++nextLocalConnectionIdSequence_;
+    }
+    RtlSecureZeroMemory(&candidate, sizeof(candidate));
+    return status;
+}
+
+NTSTATUS QuicConnection::HandleNewConnectionId(const QuicFrame &frame) noexcept
+{
+    if (frame.ConnectionId.Data == nullptr || frame.ConnectionId.Length == 0 ||
+        frame.ConnectionId.Length > QuicMaximumConnectionIdLength || frame.StatelessResetToken.Data == nullptr ||
+        frame.StatelessResetToken.Length != 16 || frame.RetirePriorTo > frame.Sequence)
+    {
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+
+    for (SIZE_T index = 0; index < peerConnectionIdCount_; ++index)
+    {
+        QuicConnectionIdEntry &entry = peerConnectionIds_[index];
+        if (entry.Sequence == frame.Sequence)
+        {
+            const bool sameConnectionId = entry.ConnectionIdLength == frame.ConnectionId.Length &&
+                                          RtlCompareMemory(entry.ConnectionId, frame.ConnectionId.Data,
+                                                           frame.ConnectionId.Length) == frame.ConnectionId.Length;
+            const bool sameToken =
+                entry.HasStatelessResetToken &&
+                RtlCompareMemory(entry.StatelessResetToken, frame.StatelessResetToken.Data, 16) == 16;
+            return sameConnectionId && sameToken ? STATUS_SUCCESS : STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if ((entry.ConnectionIdLength == frame.ConnectionId.Length &&
+             RtlCompareMemory(entry.ConnectionId, frame.ConnectionId.Data, frame.ConnectionId.Length) ==
+                 frame.ConnectionId.Length) ||
+            (entry.HasStatelessResetToken &&
+             RtlCompareMemory(entry.StatelessResetToken, frame.StatelessResetToken.Data, 16) == 16))
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+    }
+    if (peerConnectionIdCount_ >= peerConnectionIds_.Count())
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    QuicConnectionIdEntry &added = peerConnectionIds_[peerConnectionIdCount_++];
+    added.Sequence = frame.Sequence;
+    added.ConnectionIdLength = frame.ConnectionId.Length;
+    RtlCopyMemory(added.ConnectionId, frame.ConnectionId.Data, frame.ConnectionId.Length);
+    RtlCopyMemory(added.StatelessResetToken, frame.StatelessResetToken.Data, 16);
+    added.HasStatelessResetToken = true;
+
+    SIZE_T activeCount = 0;
+    QuicConnectionIdEntry *replacement = nullptr;
+    for (SIZE_T index = 0; index < peerConnectionIdCount_; ++index)
+    {
+        QuicConnectionIdEntry &entry = peerConnectionIds_[index];
+        if (entry.Sequence < frame.RetirePriorTo && !entry.Retired)
+        {
+            QuicFrame retire = {};
+            retire.Kind = QuicFrameKind::RetireConnectionId;
+            retire.Sequence = entry.Sequence;
+            const NTSTATUS retireStatus = SendFramePacket(QuicPacketType::OneRtt, QuicPacketNumberSpace::Application,
+                                                          applicationWriteKey_, retire, nullptr, 0, false, true);
+            if (!NT_SUCCESS(retireStatus))
+            {
+                return retireStatus;
+            }
+            entry.Retired = true;
+            const ULONGLONG pto = recovery_.PtoPeriod100ns(
+                QuicPacketNumberSpace::Application,
+                peerTransportParametersApplied_ ? tls_.PeerTransportParameters().MaxAckDelay : 25);
+            entry.RetireDeadline100ns = DeadlineAfter(QuicClockNow100ns(), pto, 3);
+        }
+        if (!entry.Retired)
+        {
+            ++activeCount;
+            if (replacement == nullptr || entry.Sequence < replacement->Sequence)
+            {
+                replacement = &entry;
+            }
+        }
+    }
+    if (activeCount == 0 || activeCount > WKNET_HARD_MAX_QUIC_CONNECTION_IDS)
+    {
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+
+    QuicConnectionIdEntry *current = nullptr;
+    for (SIZE_T index = 0; index < peerConnectionIdCount_; ++index)
+    {
+        if (peerConnectionIds_[index].Sequence == currentPeerConnectionIdSequence_)
+        {
+            current = &peerConnectionIds_[index];
+            break;
+        }
+    }
+    if (current == nullptr || current->Retired)
+    {
+        currentPeerConnectionIdSequence_ = replacement->Sequence;
+        peerConnectionIdLength_ = replacement->ConnectionIdLength;
+        RtlCopyMemory(peerConnectionId_, replacement->ConnectionId, replacement->ConnectionIdLength);
+    }
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS QuicConnection::HandleRetireConnectionId(const QuicFrame &frame) noexcept
+{
+    if (frame.Sequence >= nextLocalConnectionIdSequence_)
+    {
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+    QuicConnectionIdEntry *retired = nullptr;
+    for (SIZE_T index = 0; index < localConnectionIdCount_; ++index)
+    {
+        if (localConnectionIds_[index].Sequence == frame.Sequence)
+        {
+            retired = &localConnectionIds_[index];
+            break;
+        }
+    }
+    if (retired == nullptr)
+    {
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+    if (retired->Retired)
+    {
+        return STATUS_SUCCESS;
+    }
+
+    const bool isCurrent = retired->ConnectionIdLength == sourceConnectionIdLength_ &&
+                           RtlCompareMemory(retired->ConnectionId, sourceConnectionId_, sourceConnectionIdLength_) ==
+                               sourceConnectionIdLength_;
+    if (isCurrent)
+    {
+        bool issuedReplacement = false;
+        QuicConnectionIdEntry *replacement = nullptr;
+        for (SIZE_T index = 0; index < localConnectionIdCount_; ++index)
+        {
+            if (!localConnectionIds_[index].Retired && &localConnectionIds_[index] != retired)
+            {
+                replacement = &localConnectionIds_[index];
+                break;
+            }
+        }
+        if (replacement == nullptr)
+        {
+            NTSTATUS status = IssueConnectionId();
+            if (!NT_SUCCESS(status))
+            {
+                return status;
+            }
+            replacement = &localConnectionIds_[localConnectionIdCount_ - 1];
+            issuedReplacement = true;
+        }
+        sourceConnectionIdLength_ = replacement->ConnectionIdLength;
+        RtlCopyMemory(sourceConnectionId_, replacement->ConnectionId, replacement->ConnectionIdLength);
+        retired->Retired = true;
+        const ULONGLONG pto =
+            recovery_.PtoPeriod100ns(QuicPacketNumberSpace::Application,
+                                     peerTransportParametersApplied_ ? tls_.PeerTransportParameters().MaxAckDelay : 25);
+        retired->RetireDeadline100ns = DeadlineAfter(QuicClockNow100ns(), pto, 3);
+        return issuedReplacement ? STATUS_SUCCESS : IssueConnectionId();
+    }
+    retired->Retired = true;
+    const ULONGLONG pto =
+        recovery_.PtoPeriod100ns(QuicPacketNumberSpace::Application,
+                                 peerTransportParametersApplied_ ? tls_.PeerTransportParameters().MaxAckDelay : 25);
+    retired->RetireDeadline100ns = DeadlineAfter(QuicClockNow100ns(), pto, 3);
+    return IssueConnectionId();
+}
+
+NTSTATUS QuicConnection::InstallApplicationKeys() noexcept
+{
+    if (applicationKeysInstalled_)
+    {
+        return STATUS_SUCCESS;
+    }
+    if (tls_.ApplicationWriteKey().SecretLength == 0 || tls_.ApplicationReadKey().SecretLength == 0)
+    {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    applicationWriteKey_ = tls_.ApplicationWriteKey();
+    applicationReadKey_ = tls_.ApplicationReadKey();
+    NTSTATUS status = QuicDeriveNextPacketKeySet(applicationReadKey_, &nextApplicationReadKey_);
+    if (!NT_SUCCESS(status))
+    {
+        QuicClearPacketKeySet(&applicationWriteKey_);
+        QuicClearPacketKeySet(&applicationReadKey_);
+        return status;
+    }
+    applicationKeysInstalled_ = true;
+    sendKeyPhase_ = false;
+    receiveKeyPhase_ = false;
+    oneRttPacketsInSendPhase_ = 0;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS QuicConnection::InitiateKeyUpdate() noexcept
+{
+    if (!applicationKeysInstalled_ || sendKeyUpdateAwaitingAck_)
+    {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    QuicPacketKeySet next = {};
+    NTSTATUS status = QuicDeriveNextPacketKeySet(applicationWriteKey_, &next);
+    if (!NT_SUCCESS(status))
+    {
+        return status;
+    }
+    QuicClearPacketKeySet(&previousApplicationWriteKey_);
+    previousApplicationWriteKey_ = applicationWriteKey_;
+    applicationWriteKey_ = next;
+    RtlSecureZeroMemory(&next, sizeof(next));
+    sendKeyPhase_ = !sendKeyPhase_;
+    sendKeyPhaseStartPacketNumber_ = nextPacketNumber_[static_cast<SIZE_T>(QuicPacketNumberSpace::Application)];
+    oneRttPacketsInSendPhase_ = 0;
+    sendKeyUpdateAwaitingAck_ = true;
+    return STATUS_SUCCESS;
+}
+
+void QuicConnection::ConfirmSendKeyUpdate(const QuicAckRange *ranges, SIZE_T rangeCount) noexcept
+{
+    if (!sendKeyUpdateAwaitingAck_ || ranges == nullptr)
+    {
+        return;
+    }
+    for (SIZE_T index = 0; index < rangeCount; ++index)
+    {
+        if (ranges[index].Largest >= sendKeyPhaseStartPacketNumber_)
+        {
+            QuicClearPacketKeySet(&previousApplicationWriteKey_);
+            sendKeyUpdateAwaitingAck_ = false;
+            return;
+        }
+    }
+}
+
+void QuicConnection::DiscardExpiredReadKey(ULONGLONG now100ns) noexcept
+{
+    if (previousReadKeyValid_ && previousReadKeyDeadline100ns_ != 0 && now100ns >= previousReadKeyDeadline100ns_)
+    {
+        QuicClearPacketKeySet(&previousApplicationReadKey_);
+        previousReadKeyValid_ = false;
+        previousReadKeyDeadline100ns_ = 0;
+    }
+}
+
+void QuicConnection::WakeWorker() noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    wake_.notify_all();
+#else
+    KeSetEvent(&wake_, IO_NO_INCREMENT, FALSE);
+#endif
+}
+
+ULONGLONG QuicConnection::NextDeadline100ns() const noexcept
+{
+    ULONGLONG deadline = 0;
+    const ULONGLONG maxAckDelay = peerTransportParametersApplied_ ? tls_.PeerTransportParameters().MaxAckDelay : 25;
+    const QuicConnectionState state = state_;
+    if (state == QuicConnectionState::Closing || state == QuicConnectionState::Draining ||
+        state == QuicConnectionState::Failed)
+    {
+        deadline = EarlierDeadline(deadline, closingDeadline100ns_);
+        deadline = EarlierDeadline(deadline, drainingDeadline100ns_);
+        return deadline;
+    }
+    for (SIZE_T index = 0; index < 3; ++index)
+    {
+        if (ackTrackers_[index].AckPending())
+        {
+            deadline = EarlierDeadline(deadline, ackTrackers_[index].AckDeadline100ns(maxAckDelay));
+        }
+        const QuicPacketNumberSpace space = static_cast<QuicPacketNumberSpace>(index);
+        deadline = EarlierDeadline(deadline, recovery_.LossDeadline100ns(space));
+        deadline = EarlierDeadline(deadline, recovery_.PtoDeadline100ns(space, maxAckDelay));
+    }
+    if (networkEnabled_ && lastActivityTime100ns_ != 0 &&
+        (state == QuicConnectionState::Connecting || state == QuicConnectionState::Handshaking ||
+         state == QuicConnectionState::Established) &&
+        idleTimeout100ns_ != 0)
+    {
+        deadline = EarlierDeadline(deadline, DeadlineAfter(lastActivityTime100ns_, idleTimeout100ns_));
+    }
+    deadline = EarlierDeadline(deadline, closingDeadline100ns_);
+    deadline = EarlierDeadline(deadline, drainingDeadline100ns_);
+    deadline = EarlierDeadline(deadline, previousReadKeyDeadline100ns_);
+    if (deferredCommand_ != nullptr)
+    {
+        deadline = EarlierDeadline(deadline, recovery_.Congestion().PacingDeadline100ns());
+    }
+    return deadline;
+}
+
+NTSTATUS QuicConnection::SendProbe(QuicPacketNumberSpace space) noexcept
+{
+    QuicFrame ping = {};
+    ping.Kind = QuicFrameKind::Ping;
+    if (space == QuicPacketNumberSpace::Initial && initialWriteKey_.SecretLength != 0)
+    {
+        return SendFramePacket(QuicPacketType::Initial, space, initialWriteKey_, ping, nullptr, 0, true, true);
+    }
+    if (space == QuicPacketNumberSpace::Handshake && tls_.HandshakeWriteKey().SecretLength != 0)
+    {
+        return SendFramePacket(QuicPacketType::Handshake, space, tls_.HandshakeWriteKey(), ping, nullptr, 0, false,
+                               true);
+    }
+    if (space == QuicPacketNumberSpace::Application && applicationKeysInstalled_)
+    {
+        return SendFramePacket(QuicPacketType::OneRtt, space, applicationWriteKey_, ping, nullptr, 0, false, true);
+    }
+    return STATUS_NOT_FOUND;
+}
+
+NTSTATUS QuicConnection::EnterClosing(ULONGLONG errorCode, bool sendCloseFrame) noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        state_ = QuicConnectionState::Closing;
+    }
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    state_ = QuicConnectionState::Closing;
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+
+    NTSTATUS status = STATUS_SUCCESS;
+    QuicPacketNumberSpace closeSpace = QuicPacketNumberSpace::Initial;
+    if (sendCloseFrame && datagramSocket_ != nullptr)
+    {
+        QuicFrame close = {};
+        close.Kind = QuicFrameKind::ConnectionClose;
+        close.ErrorCode = errorCode;
+        if (applicationKeysInstalled_)
+        {
+            closeSpace = QuicPacketNumberSpace::Application;
+            status = SendFramePacket(QuicPacketType::OneRtt, closeSpace, applicationWriteKey_, close, nullptr, 0, false,
+                                     false);
+        }
+        else if (tls_.HandshakeWriteKey().SecretLength != 0)
+        {
+            closeSpace = QuicPacketNumberSpace::Handshake;
+            status = SendFramePacket(QuicPacketType::Handshake, closeSpace, tls_.HandshakeWriteKey(), close, nullptr, 0,
+                                     false, false);
+        }
+        else if (initialWriteKey_.SecretLength != 0)
+        {
+            status =
+                SendFramePacket(QuicPacketType::Initial, closeSpace, initialWriteKey_, close, nullptr, 0, true, false);
+        }
+    }
+    const ULONGLONG now = QuicClockNow100ns();
+    const ULONGLONG maxAckDelay = peerTransportParametersApplied_ ? tls_.PeerTransportParameters().MaxAckDelay : 25;
+    const ULONGLONG pto = recovery_.PtoPeriod100ns(closeSpace, maxAckDelay);
+    closingDeadline100ns_ = DeadlineAfter(now, pto, 3);
+    WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.closing");
+    return status;
+}
+
+void QuicConnection::EnterDraining() noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        state_ = QuicConnectionState::Draining;
+    }
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    state_ = QuicConnectionState::Draining;
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+    const ULONGLONG now = QuicClockNow100ns();
+    const ULONGLONG maxAckDelay = peerTransportParametersApplied_ ? tls_.PeerTransportParameters().MaxAckDelay : 25;
+    const ULONGLONG pto = recovery_.PtoPeriod100ns(QuicPacketNumberSpace::Application, maxAckDelay);
+    drainingDeadline100ns_ = DeadlineAfter(now, pto, 3);
+}
+
+void QuicConnection::FailConnection(NTSTATUS status, ULONGLONG transportError) noexcept
+{
+    const NTSTATUS closeStatus = EnterClosing(transportError, true);
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        state_ = QuicConnectionState::Failed;
+    }
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    state_ = QuicConnectionState::Failed;
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+    WKNET_TRACE(ComponentQuic, TraceLevel::Error,
+                "quic.connection.failed status=0x%08X transport_error=%I64u close_status=0x%08X", status,
+                transportError, closeStatus);
+}
+
+void QuicConnection::TransitionToClosed() noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        state_ = QuicConnectionState::Closed;
+    }
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    state_ = QuicConnectionState::Closed;
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+    StopNetwork();
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        stop_ = true;
+    }
+#else
+    KeAcquireSpinLock(&lock_, &irql);
+    stop_ = true;
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+    WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.closed");
+    WakeWorker();
+}
+
+NTSTATUS QuicConnection::ProcessDeadlines() noexcept
+{
+    const ULONGLONG now = QuicClockNow100ns();
+    DiscardExpiredReadKey(now);
+    const ULONGLONG maxAckDelay = peerTransportParametersApplied_ ? tls_.PeerTransportParameters().MaxAckDelay : 25;
+
+    if (state_ == QuicConnectionState::Closing || state_ == QuicConnectionState::Draining ||
+        state_ == QuicConnectionState::Failed)
+    {
+        if ((closingDeadline100ns_ != 0 && closingDeadline100ns_ <= now) ||
+            (drainingDeadline100ns_ != 0 && drainingDeadline100ns_ <= now))
+        {
+            TransitionToClosed();
+        }
+        return STATUS_SUCCESS;
+    }
+
+    for (SIZE_T index = 0; index < 3; ++index)
+    {
+        if (ackTrackers_[index].AckPending() && ackTrackers_[index].AckDeadline100ns(maxAckDelay) <= now)
+        {
+            const NTSTATUS ackStatus = SendAck(static_cast<QuicPacketNumberSpace>(index));
+            if (!NT_SUCCESS(ackStatus) && ackStatus != STATUS_NOT_FOUND && ackStatus != STATUS_INVALID_DEVICE_STATE)
+            {
+                return ackStatus;
+            }
+        }
+    }
+
+    for (SIZE_T index = 0; index < 3; ++index)
+    {
+        const QuicPacketNumberSpace space = static_cast<QuicPacketNumberSpace>(index);
+        const ULONGLONG lossDeadline = recovery_.LossDeadline100ns(space);
+        if (lossDeadline != 0 && lossDeadline <= now)
+        {
+            const NTSTATUS lossStatus = recovery_.OnLossTimerExpired(space);
+            if (NT_SUCCESS(lossStatus))
+            {
+                WKNET_TRACE(ComponentQuic, TraceLevel::Warning, "quic.loss.detected space=%u",
+                            static_cast<ULONG>(index));
+            }
+            else if (lossStatus != STATUS_NOT_FOUND)
+            {
+                return lossStatus;
+            }
+        }
+    }
+
+    ULONGLONG earliestPto = 0;
+    QuicPacketNumberSpace ptoSpace = QuicPacketNumberSpace::Initial;
+    for (SIZE_T index = 0; index < 3; ++index)
+    {
+        const QuicPacketNumberSpace space = static_cast<QuicPacketNumberSpace>(index);
+        const ULONGLONG ptoDeadline = recovery_.PtoDeadline100ns(space, maxAckDelay);
+        if (ptoDeadline != 0 && (earliestPto == 0 || ptoDeadline < earliestPto))
+        {
+            earliestPto = ptoDeadline;
+            ptoSpace = space;
+        }
+    }
+    if (earliestPto != 0 && earliestPto <= now)
+    {
+        recovery_.OnPtoFired();
+        WKNET_TRACE(ComponentQuic, TraceLevel::Warning, "quic.pto.fired space=%u", static_cast<ULONG>(ptoSpace));
+        const NTSTATUS probeStatus = SendProbe(ptoSpace);
+        if (!NT_SUCCESS(probeStatus) && probeStatus != STATUS_NOT_FOUND)
+        {
+            return probeStatus;
+        }
+    }
+
+    if (networkEnabled_ && lastActivityTime100ns_ != 0 && idleTimeout100ns_ != 0 &&
+        (state_ == QuicConnectionState::Connecting || state_ == QuicConnectionState::Handshaking ||
+         state_ == QuicConnectionState::Established) &&
+        now >= lastActivityTime100ns_ && now - lastActivityTime100ns_ >= idleTimeout100ns_)
+    {
+        const NTSTATUS closeStatus = EnterClosing(0, true);
+        if (!NT_SUCCESS(closeStatus))
+        {
+            return closeStatus;
+        }
+        WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.idle_timeout");
+    }
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS QuicConnection::SendStreamFrame(QuicStream &stream, const UCHAR *data, SIZE_T length, bool fin) noexcept
+{
+    NTSTATUS status = stream.CanWrite(length, fin);
+    if (NT_SUCCESS(status))
+    {
+        status = flowControl_.CanReserveSend(length);
+    }
+    const ULONGLONG offset = stream.SendOffset();
+    if (NT_SUCCESS(status) && networkEnabled_)
+    {
+        const ULONGLONG estimatedPacketBytes = length > 1100 ? 1200 : static_cast<ULONGLONG>(length + 100);
+        if (!recovery_.Congestion().CanSend(estimatedPacketBytes, QuicClockNow100ns()))
+        {
+            return STATUS_RETRY;
+        }
+        QuicFrame frame = {};
+        frame.Kind = QuicFrameKind::Stream;
+        frame.StreamId = stream.Id();
+        frame.Offset = offset;
+        frame.Data = {data, length};
+        frame.Fin = fin;
+        status = SendFramePacket(QuicPacketType::OneRtt, QuicPacketNumberSpace::Application, applicationWriteKey_,
+                                 frame, nullptr, 0, false, true);
+    }
+    SIZE_T accepted = 0;
+    if (NT_SUCCESS(status))
+    {
+        status = stream.Write(data, length, fin, &accepted);
+    }
+    if (NT_SUCCESS(status))
+    {
+        status = flowControl_.ReserveSend(accepted);
+    }
+    return status;
+}
+
+void QuicConnection::Process(QuicCommand *c) noexcept
+{
+    NTSTATUS s = STATUS_SUCCESS;
+    ULONGLONG stream = 0;
+    SIZE_T bytesTransferred = 0;
+    bool fin = false;
+    if (c->Type == QuicCommandType::Connect)
+    {
+#if defined(WKNET_USER_MODE_TEST)
+        {
+            std::lock_guard<std::mutex> guard(lock_);
+            connectQueued_ = false;
+            state_ = QuicConnectionState::Connecting;
+        }
+#else
+        KIRQL irql;
+        KeAcquireSpinLock(&lock_, &irql);
+        connectQueued_ = false;
+        state_ = QuicConnectionState::Connecting;
+        KeReleaseSpinLock(&lock_, irql);
+#endif
+        WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.start");
+        if (networkEnabled_)
+        {
+            s = StartNetwork();
+        }
+#if defined(WKNET_USER_MODE_TEST)
+        {
+            std::lock_guard<std::mutex> guard(lock_);
+            state_ = NT_SUCCESS(s) ? QuicConnectionState::Handshaking : QuicConnectionState::Failed;
+        }
+#else
+        KeAcquireSpinLock(&lock_, &irql);
+        state_ = NT_SUCCESS(s) ? QuicConnectionState::Handshaking : QuicConnectionState::Failed;
+        KeReleaseSpinLock(&lock_, irql);
+#endif
+        if (!NT_SUCCESS(s))
+        {
+            WKNET_TRACE(ComponentQuic, TraceLevel::Error, "quic.connection.failed status=0x%08X", s);
+        }
+    }
+    else if (c->Type == QuicCommandType::ConfirmHandshake)
+    {
+#if defined(WKNET_USER_MODE_TEST)
+        {
+            std::lock_guard<std::mutex> guard(lock_);
+            if (state_ != QuicConnectionState::Handshaking)
+            {
+                s = STATUS_INVALID_DEVICE_STATE;
+            }
+            else
+            {
+                state_ = QuicConnectionState::Established;
+            }
+        }
+#else
+        KIRQL irql;
+        KeAcquireSpinLock(&lock_, &irql);
+        if (state_ != QuicConnectionState::Handshaking)
+        {
+            s = STATUS_INVALID_DEVICE_STATE;
+        }
+        else
+        {
+            state_ = QuicConnectionState::Established;
+        }
+        KeReleaseSpinLock(&lock_, irql);
+#endif
+        if (NT_SUCCESS(s))
+        {
+            WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.handshake.complete");
+            WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.established");
+        }
+    }
+    else if (c->Type == QuicCommandType::OpenStream)
+    {
+#if defined(WKNET_USER_MODE_TEST)
+        {
+            std::lock_guard<std::mutex> guard(lock_);
+            if (state_ != QuicConnectionState::Established)
+            {
+                s = STATUS_DEVICE_NOT_READY;
+            }
+            else
+            {
+                stream = nextBidiStreamId_;
+            }
+        }
+#else
+        KIRQL irql;
+        KeAcquireSpinLock(&lock_, &irql);
+        if (state_ != QuicConnectionState::Established)
+        {
+            s = STATUS_DEVICE_NOT_READY;
+        }
+        else
+        {
+            stream = nextBidiStreamId_;
+        }
+        KeReleaseSpinLock(&lock_, irql);
+#endif
+        QuicStream *created = nullptr;
+        if (NT_SUCCESS(s))
+        {
+            s = CreateStream(stream, &created);
+        }
+        if (NT_SUCCESS(s))
+        {
+            nextBidiStreamId_ += 4;
+            WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.stream.open stream_id=%I64u", stream);
+        }
+    }
+    else if (c->Type == QuicCommandType::WriteStream)
+    {
+        QuicStream *target = FindStream(c->StreamId);
+        if (target == nullptr)
+        {
+            s = STATUS_NOT_FOUND;
+        }
+        SIZE_T offset = c->Progress;
+        while (NT_SUCCESS(s) && offset < c->Length)
+        {
+            const SIZE_T remaining = c->Length - offset;
+            const SIZE_T chunkLength = remaining > 1024 ? 1024 : remaining;
+            const bool chunkFin = c->Fin && chunkLength == remaining;
+            s = SendStreamFrame(*target, c->Data.Get() + offset, chunkLength, chunkFin);
+            if (NT_SUCCESS(s))
+            {
+                offset += chunkLength;
+                bytesTransferred = offset;
+                c->Progress = offset;
+            }
+        }
+        if (s == STATUS_RETRY)
+        {
+            deferredCommand_ = c;
+            return;
+        }
+        if (NT_SUCCESS(s) && c->Length == 0 && c->Fin)
+        {
+            s = SendStreamFrame(*target, nullptr, 0, true);
+        }
+        if (s == STATUS_RETRY)
+        {
+            deferredCommand_ = c;
+            return;
+        }
+        fin = NT_SUCCESS(s) && c->Fin;
+    }
+    else if (c->Type == QuicCommandType::ConsumeStream)
+    {
+        QuicStream *target = FindStream(c->StreamId);
+        if (target == nullptr)
+        {
+            s = STATUS_NOT_FOUND;
+        }
+        if (NT_SUCCESS(s))
+        {
+            s = target->Consume(c->Output, c->Length, &bytesTransferred, &fin);
+        }
+        if (NT_SUCCESS(s) && bytesTransferred != 0)
+        {
+            s = flowControl_.OnStreamConsumed(bytesTransferred);
+        }
+        if (NT_SUCCESS(s) && fin)
+        {
+            WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.stream.complete stream_id=%I64u", c->StreamId);
+        }
+    }
+    else if (c->Type == QuicCommandType::ResetStream)
+    {
+        QuicStream *target = FindStream(c->StreamId);
+        if (target == nullptr)
+        {
+            s = STATUS_NOT_FOUND;
+        }
+        if (NT_SUCCESS(s) && networkEnabled_)
+        {
+            QuicFrame frame = {};
+            frame.Kind = QuicFrameKind::ResetStream;
+            frame.StreamId = c->StreamId;
+            frame.ErrorCode = c->ErrorCode;
+            frame.FinalSize = target->SendOffset();
+            s = SendFramePacket(QuicPacketType::OneRtt, QuicPacketNumberSpace::Application, applicationWriteKey_, frame,
+                                nullptr, 0, false, true);
+        }
+        if (NT_SUCCESS(s))
+        {
+            s = target->Reset(c->ErrorCode, target->SendOffset());
+            if (NT_SUCCESS(s))
+            {
+                WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.stream.reset stream_id=%I64u", c->StreamId);
+            }
+        }
+    }
+    else if (c->Type == QuicCommandType::StopSending)
+    {
+        QuicStream *target = FindStream(c->StreamId);
+        if (target == nullptr)
+        {
+            s = STATUS_NOT_FOUND;
+        }
+        if (NT_SUCCESS(s) && networkEnabled_)
+        {
+            QuicFrame frame = {};
+            frame.Kind = QuicFrameKind::StopSending;
+            frame.StreamId = c->StreamId;
+            frame.ErrorCode = c->ErrorCode;
+            s = SendFramePacket(QuicPacketType::OneRtt, QuicPacketNumberSpace::Application, applicationWriteKey_, frame,
+                                nullptr, 0, false, true);
+        }
+        if (NT_SUCCESS(s))
+        {
+            s = target->StopSending(c->ErrorCode);
+        }
+    }
+    else if (c->Type == QuicCommandType::SelfClose)
+    {
+        s = STATUS_INVALID_DEVICE_STATE;
+    }
+    else if (c->Type == QuicCommandType::ProcessTimer)
+    {
+        s = ProcessDeadlines();
+    }
+    else if (c->Type == QuicCommandType::InjectFrame)
+    {
+        s = DispatchFrame(c->Level, c->Space, c->Frame);
+    }
+    else if (c->Type == QuicCommandType::Close)
+    {
+#if defined(WKNET_USER_MODE_TEST)
+        {
+            std::lock_guard<std::mutex> guard(lock_);
+            closeQueued_ = false;
+        }
+#else
+        KIRQL irql;
+        KeAcquireSpinLock(&lock_, &irql);
+        closeQueued_ = false;
+        KeReleaseSpinLock(&lock_, irql);
+#endif
+        if (networkEnabled_)
+        {
+            s = EnterClosing(0, true);
+        }
+        else
+        {
+#if defined(WKNET_USER_MODE_TEST)
+            {
+                std::lock_guard<std::mutex> guard(lock_);
+                state_ = QuicConnectionState::Closed;
+                stop_ = true;
+            }
+#else
+            KeAcquireSpinLock(&lock_, &irql);
+            state_ = QuicConnectionState::Closed;
+            stop_ = true;
+            KeReleaseSpinLock(&lock_, irql);
+#endif
+            WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.closing");
+            WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.closed");
+        }
+    }
+    Complete(c->Operation, s, stream == 0 ? c->StreamId : stream, bytesTransferred, fin);
+    FreeNonPagedObject(c);
+}
+void QuicConnection::WorkerLoop() noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        workerActive_ = true;
+    }
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    workerActive_ = true;
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+    for (;;)
+    {
+#if defined(WKNET_USER_MODE_TEST)
+        {
+            std::unique_lock<std::mutex> lock(lock_);
+            wake_.wait(lock,
+                       [this]()
+                       {
+                           return stop_ || (!suspended_ && ((deferredCommand_ == nullptr && count_ != 0) ||
+                                                            receiveReady_ || timerReady_));
+                       });
+            timerReady_ = false;
+        }
+#else
+        LARGE_INTEGER timeout = {};
+        LARGE_INTEGER *timeoutPointer = nullptr;
+        const ULONGLONG deadline = NextDeadline100ns();
+        if (deadline != 0)
+        {
+            const ULONGLONG now = QuicClockNow100ns();
+            const ULONGLONG delay = deadline > now ? deadline - now : 0;
+            timeout.QuadPart =
+                delay > static_cast<ULONGLONG>(MAXLONGLONG) ? -MAXLONGLONG : -static_cast<LONGLONG>(delay);
+            timeoutPointer = &timeout;
+        }
+        KeWaitForSingleObject(&wake_, Executive, KernelMode, FALSE, timeoutPointer);
+        KeAcquireSpinLock(&lock_, &irql);
+        const bool stop = stop_;
+        const bool suspended = suspended_;
+        if (suspended && !stop)
+        {
+            KeClearEvent(&wake_);
+        }
+        KeReleaseSpinLock(&lock_, irql);
+        if (stop)
+        {
+            break;
+        }
+        if (suspended)
+        {
+            continue;
+        }
+#endif
+        if (ShouldStop())
+        {
+            break;
+        }
+
+        if (deferredCommand_ != nullptr && recovery_.Congestion().PacingDeadline100ns() <= QuicClockNow100ns())
+        {
+            QuicCommand *deferred = deferredCommand_;
+            deferredCommand_ = nullptr;
+            Process(deferred);
+        }
+        QuicCommand *c = nullptr;
+        while (deferredCommand_ == nullptr && Dequeue(&c))
+        {
+            Process(c);
+            if (ShouldStop() || deferredCommand_ != nullptr)
+            {
+                break;
+            }
+        }
+        bool processReceive = false;
+#if defined(WKNET_USER_MODE_TEST)
+        {
+            std::lock_guard<std::mutex> guard(lock_);
+            processReceive = receiveReady_;
+            receiveReady_ = false;
+        }
+#else
+        KeAcquireSpinLock(&lock_, &irql);
+        processReceive = receiveReady_;
+        receiveReady_ = false;
+        if (count_ == 0)
+        {
+            KeClearEvent(&wake_);
+        }
+        KeReleaseSpinLock(&lock_, irql);
+#endif
+        if (deferredCommand_ != nullptr)
+        {
+#if !defined(WKNET_USER_MODE_TEST)
+            KeAcquireSpinLock(&lock_, &irql);
+            if (!receiveReady_)
+            {
+                KeClearEvent(&wake_);
+            }
+            KeReleaseSpinLock(&lock_, irql);
+#endif
+        }
+        if (processReceive && !ShouldStop())
+        {
+            const NTSTATUS receiveStatus = ProcessReceiveCompletion();
+            if (!NT_SUCCESS(receiveStatus) && receiveStatus != STATUS_CANCELLED)
+            {
+                const ULONGLONG transportError = pendingTransportError_ != 0
+                                                     ? pendingTransportError_
+                                                     : (tls_.TransportError() != 0 ? tls_.TransportError() : 0xA);
+                FailConnection(receiveStatus, transportError);
+            }
+        }
+        if (!ShouldStop())
+        {
+            const NTSTATUS deadlineStatus = ProcessDeadlines();
+            if (!NT_SUCCESS(deadlineStatus))
+            {
+                FailConnection(deadlineStatus, pendingTransportError_ != 0 ? pendingTransportError_ : 0xA);
+            }
+        }
+    }
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        workerActive_ = false;
+    }
+#else
+    KeAcquireSpinLock(&lock_, &irql);
+    workerActive_ = false;
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+}
+#if defined(WKNET_USER_MODE_TEST)
+void QuicConnection::WakeTimerForTest() noexcept
+{
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        timerReady_ = true;
+    }
+    WakeWorker();
+}
+
+NTSTATUS QuicConnection::ConfigureApplicationKeysForTest(const QuicPacketKeySet &writeKey,
+                                                         const QuicPacketKeySet &readKey) noexcept
+{
+    QuicClearPacketKeySet(&applicationWriteKey_);
+    QuicClearPacketKeySet(&applicationReadKey_);
+    QuicClearPacketKeySet(&nextApplicationReadKey_);
+    applicationWriteKey_ = writeKey;
+    applicationReadKey_ = readKey;
+    NTSTATUS status = QuicDeriveNextPacketKeySet(applicationReadKey_, &nextApplicationReadKey_);
+    if (NT_SUCCESS(status))
+    {
+        applicationKeysInstalled_ = true;
+        sendKeyPhase_ = false;
+        receiveKeyPhase_ = false;
+        sendKeyUpdateAwaitingAck_ = false;
+        oneRttPacketsInSendPhase_ = 0;
+    }
+    return status;
+}
+
+NTSTATUS QuicConnection::ForceKeyUpdateForTest() noexcept
+{
+    return InitiateKeyUpdate();
+}
+
+void QuicConnection::ConfirmKeyUpdateForTest(ULONGLONG packetNumber) noexcept
+{
+    const QuicAckRange range = {packetNumber, packetNumber};
+    ConfirmSendKeyUpdate(&range, 1);
+}
+
+bool QuicConnection::SendKeyPhaseForTest() const noexcept
+{
+    return sendKeyPhase_;
+}
+
+bool QuicConnection::SendKeyUpdatePendingForTest() const noexcept
+{
+    return sendKeyUpdateAwaitingAck_;
+}
+
+NTSTATUS QuicConnection::InjectFrameForTest(QuicEncryptionLevel level, QuicPacketNumberSpace space,
+                                            const QuicFrame &frame) noexcept
+{
+    QuicOperation operation;
+    QuicOperationInitialize(&operation);
+    const NTSTATUS status =
+        Enqueue(QuicCommandType::InjectFrame, &operation, static_cast<ULONGLONG>(level),
+                reinterpret_cast<const UCHAR *>(&frame), sizeof(frame), nullptr, false, static_cast<ULONGLONG>(space));
+    return NT_SUCCESS(status) ? QuicOperationWait(&operation, 1000) : status;
+}
+
+void QuicConnection::WorkerEntry(QuicConnection *c) noexcept
+{
+    c->WorkerLoop();
+}
+#else
+void QuicConnection::WorkerEntry(void *context)
+{
+    static_cast<QuicConnection *>(context)->WorkerLoop();
+    PsTerminateSystemThread(STATUS_SUCCESS);
+}
+#endif
+void QuicConnection::Resume() noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        suspended_ = false;
+    }
+    wake_.notify_all();
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    suspended_ = false;
+    KeReleaseSpinLock(&lock_, irql);
+    KeSetEvent(&wake_, IO_NO_INCREMENT, FALSE);
+#endif
+}
+QuicConnectionState QuicConnection::State() const noexcept
+{
+#if defined(WKNET_USER_MODE_TEST)
+    std::lock_guard<std::mutex> guard(lock_);
+    return state_;
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    QuicConnectionState s = state_;
+    KeReleaseSpinLock(&lock_, irql);
+    return s;
+#endif
+}
+
+void QuicConnection::ReceiveNotification(void *context) noexcept
+{
+    QuicConnection *connection = static_cast<QuicConnection *>(context);
+    if (connection == nullptr)
+    {
+        return;
+    }
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(connection->lock_);
+        connection->receiveReady_ = true;
+    }
+    connection->wake_.notify_all();
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&connection->lock_, &irql);
+    connection->receiveReady_ = true;
+    KeReleaseSpinLock(&connection->lock_, irql);
+    KeSetEvent(&connection->wake_, IO_NO_INCREMENT, FALSE);
+#endif
+}
+
+NTSTATUS QuicConnection::StartNetwork() noexcept
+{
+    NTSTATUS status = recovery_.Initialize();
+    for (SIZE_T index = 0; NT_SUCCESS(status) && index < 3; ++index)
+    {
+        status = ackTrackers_[index].Initialize();
+    }
+    if (NT_SUCCESS(status))
+    {
+        status = flowControl_.Initialize(0, WKNET_HARD_MAX_QUIC_CONNECTION_REASSEMBLY_BYTES);
+    }
+    if (NT_SUCCESS(status))
+    {
+        status =
+            attempt_.Initialize(QuicVersion1, {initialDestinationConnectionId_, initialDestinationConnectionIdLength_},
+                                {sourceConnectionId_, sourceConnectionIdLength_});
+    }
+    if (NT_SUCCESS(status))
+    {
+        status = QuicDeriveInitialKeySets({initialDestinationConnectionId_, initialDestinationConnectionIdLength_},
+                                          &initialWriteKey_, &initialReadKey_);
+    }
+
+    SIZE_T transportParametersLength = 0;
+    if (NT_SUCCESS(status))
+    {
+        QuicClientTransportParameterOptions transportParameterOptions = {};
+        transportParameterOptions.InitialSourceConnectionId = {sourceConnectionId_, sourceConnectionIdLength_};
+        transportParameterOptions.MaxIdleTimeout = 30000;
+        transportParameterOptions.InitialMaxData = WKNET_HARD_MAX_QUIC_CONNECTION_REASSEMBLY_BYTES;
+        transportParameterOptions.InitialMaxStreamDataBidiLocal = WKNET_HARD_MAX_QUIC_STREAM_REASSEMBLY_BYTES;
+        transportParameterOptions.InitialMaxStreamDataBidiRemote = WKNET_HARD_MAX_QUIC_STREAM_REASSEMBLY_BYTES;
+        transportParameterOptions.InitialMaxStreamDataUni = WKNET_HARD_MAX_QUIC_STREAM_REASSEMBLY_BYTES;
+        transportParameterOptions.InitialMaxStreamsBidi = WKNET_HARD_MAX_QUIC_PEER_BIDI_STREAMS;
+        transportParameterOptions.InitialMaxStreamsUni = WKNET_HARD_MAX_QUIC_PEER_UNI_STREAMS;
+        transportParameterOptions.ActiveConnectionIdLimit = WKNET_HARD_MAX_QUIC_CONNECTION_IDS;
+        status = QuicEncodeClientTransportParametersWithLimits(transportParameterOptions, frameBuffer_.Get(),
+                                                               frameBuffer_.Count(), &transportParametersLength);
+    }
+    if (NT_SUCCESS(status))
+    {
+        QuicTlsClientOptions tlsOptions = {};
+        tlsOptions.ServerName = serverName_.Get();
+        tlsOptions.ServerNameLength = serverName_.Count() - 1;
+        tlsOptions.LocalTransportParameters = {frameBuffer_.Get(), transportParametersLength};
+        tlsOptions.CertificateStore = certificateStore_;
+        tlsOptions.CertificateScratchAllocator = certificateScratchAllocator_;
+        tlsOptions.ProviderCache = providerCache_;
+        tlsOptions.SessionCache = sessionCache_;
+        tlsOptions.ClientCredential = clientCredential_;
+        tlsOptions.VerifyCertificate = verifyCertificate_;
+        tlsOptions.RequireRevocationCheck = requireRevocationCheck_;
+        status = tls_.Initialize(tlsOptions);
+    }
+    if (NT_SUCCESS(status))
+    {
+        status = net::WskDatagramSocketCreate(datagramClient_, remoteAddress_.ss_family, &datagramSocket_);
+    }
+    if (NT_SUCCESS(status))
+    {
+        net::WskDatagramSocketSetConnectionId(datagramSocket_, QuicClockNow100ns());
+        status =
+            net::WskDatagramSocketConnectPeer(datagramSocket_, reinterpret_cast<const SOCKADDR *>(&remoteAddress_));
+    }
+    if (NT_SUCCESS(status))
+    {
+        status = net::WskDatagramSocketSetReceiveNotification(datagramSocket_, ReceiveNotification, this);
+    }
+    if (NT_SUCCESS(status))
+    {
+        status = ArmReceive();
+    }
+    if (NT_SUCCESS(status))
+    {
+        status = SendInitialClientHello();
+    }
+    if (NT_SUCCESS(status))
+    {
+        lastActivityTime100ns_ = QuicClockNow100ns();
+    }
+    if (!NT_SUCCESS(status))
+    {
+        StopNetwork();
+    }
+    return status;
+}
+
+void QuicConnection::StopNetwork() noexcept
+{
+    if (datagramSocket_ != nullptr)
+    {
+        (void)net::WskDatagramSocketSetReceiveNotification(datagramSocket_, nullptr, nullptr);
+        if (receivePending_)
+        {
+            (void)net::WskDatagramSocketCancelReceive(datagramSocket_);
+            net::WskDatagramReceiveResult result = {};
+            (void)net::WskDatagramSocketCompleteReceive(datagramSocket_, 0xffffffffUL, &result);
+            receivePending_ = false;
+        }
+        (void)net::WskDatagramSocketClose(datagramSocket_);
+        net::WskDatagramSocketDestroy(datagramSocket_);
+        datagramSocket_ = nullptr;
+    }
+    tls_.Clear();
+    attempt_.Reset();
+    QuicClearPacketKeySet(&initialWriteKey_);
+    QuicClearPacketKeySet(&initialReadKey_);
+    QuicClearPacketKeySet(&applicationWriteKey_);
+    QuicClearPacketKeySet(&previousApplicationWriteKey_);
+    QuicClearPacketKeySet(&applicationReadKey_);
+    QuicClearPacketKeySet(&nextApplicationReadKey_);
+    QuicClearPacketKeySet(&previousApplicationReadKey_);
+    applicationKeysInstalled_ = false;
+    sendKeyUpdateAwaitingAck_ = false;
+    previousReadKeyValid_ = false;
+    previousReadKeyDeadline100ns_ = 0;
+    receiveReady_ = false;
+}
+
+NTSTATUS QuicConnection::ArmReceive() noexcept
+{
+    if (datagramSocket_ == nullptr || receivePending_)
+    {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+    RtlZeroMemory(receiveBuffer_.Get(), receiveBuffer_.Count());
+    const NTSTATUS status =
+        net::WskDatagramSocketStartReceive(datagramSocket_, receiveBuffer_.Get(), receiveBuffer_.Count());
+    if (NT_SUCCESS(status))
+    {
+        receivePending_ = true;
+    }
+    return status;
+}
+
+NTSTATUS QuicConnection::SendInitialClientHello() noexcept
+{
+    clientHelloLength_ = 0;
+    NTSTATUS status = tls_.Start(clientHelloBuffer_.Get(), clientHelloBuffer_.Count(), &clientHelloLength_);
+    if (NT_SUCCESS(status))
+    {
+        status = SendCryptoPacket(QuicPacketType::Initial, QuicPacketNumberSpace::Initial, initialWriteKey_, 0,
+                                  clientHelloBuffer_.Get(), clientHelloLength_, true);
+    }
+    if (NT_SUCCESS(status))
+    {
+        initialCryptoSendOffset_ = clientHelloLength_;
+    }
+    return status;
+}
+
+NTSTATUS QuicConnection::SendCryptoPacket(QuicPacketType type, QuicPacketNumberSpace space, const QuicPacketKeySet &key,
+                                          ULONGLONG cryptoOffset, const UCHAR *cryptoData, SIZE_T cryptoLength,
+                                          bool padInitial) noexcept
+{
+    QuicFrame frame = {};
+    frame.Kind = QuicFrameKind::Crypto;
+    frame.Offset = cryptoOffset;
+    frame.Data = {cryptoData, cryptoLength};
+    return SendFramePacket(type, space, key, frame, nullptr, 0, padInitial, true);
+}
+
+NTSTATUS QuicConnection::SendFramePacket(QuicPacketType type, QuicPacketNumberSpace space, const QuicPacketKeySet &key,
+                                         const QuicFrame &frame, const QuicAckRange *ackRanges, SIZE_T ackRangeCount,
+                                         bool padInitial, bool ackEliciting) noexcept
+{
+    if (datagramSocket_ == nullptr || key.SecretLength == 0)
+    {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+    SIZE_T frameLength = 0;
+    NTSTATUS status =
+        QuicEncodeFrame(frame, ackRanges, ackRangeCount, frameBuffer_.Get(), frameBuffer_.Count(), &frameLength);
+    if (!NT_SUCCESS(status))
+    {
+        return status;
+    }
+
+    const SIZE_T spaceIndex = static_cast<SIZE_T>(space);
+    if (type == QuicPacketType::OneRtt)
+    {
+        if (!applicationKeysInstalled_)
+        {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+        if (nextPacketNumber_[spaceIndex] >= QuicVarIntMaximum)
+        {
+            return STATUS_INTEGER_OVERFLOW;
+        }
+        else if (oneRttPacketsInSendPhase_ >= QuicKeyUpdatePacketThreshold && !sendKeyUpdateAwaitingAck_)
+        {
+            const NTSTATUS updateStatus = InitiateKeyUpdate();
+            if (!NT_SUCCESS(updateStatus))
+            {
+                return updateStatus;
+            }
+        }
+    }
+    const ULONGLONG packetNumber = nextPacketNumber_[spaceIndex];
+    constexpr SIZE_T packetNumberLength = 2;
+    SIZE_T packetNumberOffset = 0;
+    SIZE_T headerLength = 0;
+    SIZE_T plaintextLength = frameLength;
+
+    if (type == QuicPacketType::Initial || type == QuicPacketType::Handshake)
+    {
+        for (SIZE_T iteration = 0; iteration < 3; ++iteration)
+        {
+            QuicLongHeaderEncodeOptions headerOptions = {};
+            headerOptions.Type = type;
+            headerOptions.DestinationConnectionId = {peerConnectionId_, peerConnectionIdLength_};
+            headerOptions.SourceConnectionId = {sourceConnectionId_, sourceConnectionIdLength_};
+            if (type == QuicPacketType::Initial)
+            {
+                headerOptions.Token = attempt_.RetryAccepted()
+                                          ? attempt_.RetryToken()
+                                          : (tokenCache_ != nullptr ? tokenCache_->Latest() : QuicBufferView{});
+            }
+            headerOptions.PacketNumber = packetNumber;
+            headerOptions.PacketNumberLength = packetNumberLength;
+            headerOptions.ProtectedPayloadLength = packetNumberLength + plaintextLength + QuicRetryIntegrityTagLength;
+            status = QuicEncodeLongPacketHeader(headerOptions, packetBuffer_.Get(), packetBuffer_.Count(),
+                                                &packetNumberOffset, &headerLength);
+            if (!NT_SUCCESS(status) || !padInitial)
+            {
+                break;
+            }
+            if (headerLength + QuicRetryIntegrityTagLength > WKNET_HARD_MAX_QUIC_UDP_PAYLOAD_BYTES)
+            {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            const SIZE_T targetPlaintext =
+                WKNET_HARD_MAX_QUIC_UDP_PAYLOAD_BYTES - headerLength - QuicRetryIntegrityTagLength;
+            if (targetPlaintext < frameLength)
+            {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            if (targetPlaintext == plaintextLength)
+            {
+                break;
+            }
+            plaintextLength = targetPlaintext;
+        }
+    }
+    else if (type == QuicPacketType::OneRtt)
+    {
+        QuicShortHeaderEncodeOptions headerOptions = {};
+        headerOptions.DestinationConnectionId = {peerConnectionId_, peerConnectionIdLength_};
+        headerOptions.PacketNumber = packetNumber;
+        headerOptions.PacketNumberLength = packetNumberLength;
+        headerOptions.KeyPhase = sendKeyPhase_;
+        status = QuicEncodeShortPacketHeader(headerOptions, packetBuffer_.Get(), packetBuffer_.Count(),
+                                             &packetNumberOffset, &headerLength);
+    }
+    else
+    {
+        return STATUS_NOT_SUPPORTED;
+    }
+    if (!NT_SUCCESS(status) || plaintextLength > packetBuffer_.Count() - headerLength)
+    {
+        return NT_SUCCESS(status) ? STATUS_BUFFER_TOO_SMALL : status;
+    }
+    RtlCopyMemory(packetBuffer_.Get() + headerLength, frameBuffer_.Get(), frameLength);
+    if (plaintextLength > frameLength)
+    {
+        RtlZeroMemory(packetBuffer_.Get() + headerLength + frameLength, plaintextLength - frameLength);
+    }
+    SIZE_T packetLength = 0;
+    status = QuicProtectPacket(key, packetBuffer_.Get(), packetBuffer_.Count(), packetNumberOffset, packetNumberLength,
+                               packetNumber, plaintextLength, &packetLength);
+    SIZE_T bytesSent = 0;
+    if (NT_SUCCESS(status))
+    {
+        status = net::WskDatagramSocketSend(datagramSocket_, packetBuffer_.Get(), packetLength, &bytesSent);
+    }
+    if (NT_SUCCESS(status) && bytesSent != packetLength)
+    {
+        status = STATUS_CONNECTION_DISCONNECTED;
+    }
+    if (NT_SUCCESS(status))
+    {
+        status = recovery_.OnPacketSent(space, packetNumber, packetLength, ackEliciting);
+    }
+    if (NT_SUCCESS(status) && ackEliciting)
+    {
+        lastActivityTime100ns_ = QuicClockNow100ns();
+    }
+    if (NT_SUCCESS(status))
+    {
+        ++nextPacketNumber_[spaceIndex];
+        if (type == QuicPacketType::OneRtt)
+        {
+            ++oneRttPacketsInSendPhase_;
+        }
+        if (type == QuicPacketType::Handshake && !tls_.InitialKeysDiscarded())
+        {
+            status = tls_.DiscardInitialKeys();
+            QuicClearPacketKeySet(&initialWriteKey_);
+            QuicClearPacketKeySet(&initialReadKey_);
+        }
+    }
+    return status;
+}
+
+NTSTATUS QuicConnection::ProcessReceiveCompletion() noexcept
+{
+    if (!receivePending_ || datagramSocket_ == nullptr)
+    {
+        return STATUS_NOT_FOUND;
+    }
+    net::WskDatagramReceiveResult result = {};
+    NTSTATUS status = net::WskDatagramSocketCompleteReceive(datagramSocket_, 0xffffffffUL, &result);
+    receivePending_ = false;
+    if (!NT_SUCCESS(status))
+    {
+        return status;
+    }
+    if (result.RemoteAddressLength != remoteAddressLength_ ||
+        RtlCompareMemory(&result.RemoteAddress, &remoteAddress_, remoteAddressLength_) != remoteAddressLength_)
+    {
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+    status = ProcessDatagram(receiveBuffer_.Get(), result.BytesReceived);
+    if (NT_SUCCESS(status) && State() != QuicConnectionState::Closing && State() != QuicConnectionState::Draining &&
+        State() != QuicConnectionState::Closed && State() != QuicConnectionState::Failed)
+    {
+        status = ArmReceive();
+    }
+    return status;
+}
+
+NTSTATUS QuicConnection::ProcessDatagram(UCHAR *data, SIZE_T length) noexcept
+{
+    if (data == nullptr || length == 0 || length > WKNET_HARD_MAX_QUIC_UDP_PAYLOAD_BYTES)
+    {
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+    QuicPacketIterator iterator = {};
+    QuicPacketIteratorInitialize(&iterator, data, length, sourceConnectionIdLength_);
+    for (;;)
+    {
+        QuicPacketHeader header = {};
+        QuicBufferView packet = {};
+        NTSTATUS status = QuicPacketIteratorNext(&iterator, &header, &packet);
+        if (status == STATUS_NOT_FOUND)
+        {
+            return STATUS_SUCCESS;
+        }
+        if (!NT_SUCCESS(status))
+        {
+            return status;
+        }
+        status = ProcessPacket(const_cast<UCHAR *>(packet.Data), packet.Length, header);
+        if (!NT_SUCCESS(status))
+        {
+            return status;
+        }
+    }
+}
+
+NTSTATUS QuicConnection::ProcessPacket(UCHAR *packet, SIZE_T packetLength, QuicPacketHeader &header) noexcept
+{
+    if (header.Type == QuicPacketType::VersionNegotiation)
+    {
+        const ULONG supportedVersions[] = {QuicVersion1};
+        const NTSTATUS status = attempt_.ValidateVersionNegotiation(header, supportedVersions, 1, nullptr);
+        return status == STATUS_INVALID_NETWORK_RESPONSE ? STATUS_SUCCESS : status;
+    }
+    if (header.Type == QuicPacketType::Retry)
+    {
+        NTSTATUS status = attempt_.ValidateRetry(header, packet, packetLength);
+        if (!NT_SUCCESS(status))
+        {
+            return status == STATUS_INVALID_NETWORK_RESPONSE ? STATUS_SUCCESS : status;
+        }
+        const QuicBufferView retrySource = attempt_.RetrySourceConnectionId();
+        RtlCopyMemory(peerConnectionId_, retrySource.Data, retrySource.Length);
+        peerConnectionIdLength_ = retrySource.Length;
+        if (peerConnectionIdCount_ != 0)
+        {
+            peerConnectionIds_[0].ConnectionIdLength = retrySource.Length;
+            RtlCopyMemory(peerConnectionIds_[0].ConnectionId, retrySource.Data, retrySource.Length);
+        }
+        QuicClearPacketKeySet(&initialWriteKey_);
+        QuicClearPacketKeySet(&initialReadKey_);
+        status = QuicDeriveInitialKeySets(retrySource, &initialWriteKey_, &initialReadKey_);
+        if (NT_SUCCESS(status))
+        {
+            nextPacketNumber_[static_cast<SIZE_T>(QuicPacketNumberSpace::Initial)] = 0;
+            expectedPacketNumber_[static_cast<SIZE_T>(QuicPacketNumberSpace::Initial)] = 0;
+            status = recovery_.Initialize();
+        }
+        if (NT_SUCCESS(status))
+        {
+            status = ackTrackers_[static_cast<SIZE_T>(QuicPacketNumberSpace::Initial)].Initialize();
+        }
+        if (NT_SUCCESS(status))
+        {
+            status = SendCryptoPacket(QuicPacketType::Initial, QuicPacketNumberSpace::Initial, initialWriteKey_, 0,
+                                      clientHelloBuffer_.Get(), clientHelloLength_, true);
+        }
+        return status;
+    }
+    if (!IsLocalConnectionId(header.DestinationConnectionId))
+    {
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+
+    QuicEncryptionLevel level = QuicEncryptionLevel::Initial;
+    QuicPacketNumberSpace space = QuicPacketNumberSpace::Initial;
+    const QuicPacketKeySet *key = nullptr;
+    if (header.Type == QuicPacketType::Initial)
+    {
+        key = &initialReadKey_;
+    }
+    else if (header.Type == QuicPacketType::Handshake)
+    {
+        level = QuicEncryptionLevel::Handshake;
+        space = QuicPacketNumberSpace::Handshake;
+        key = &tls_.HandshakeReadKey();
+    }
+    else if (header.Type == QuicPacketType::OneRtt)
+    {
+        level = QuicEncryptionLevel::Application;
+        space = QuicPacketNumberSpace::Application;
+        DiscardExpiredReadKey(QuicClockNow100ns());
+        key = &applicationReadKey_;
+    }
+    else
+    {
+        return STATUS_NOT_SUPPORTED;
+    }
+    if (key == nullptr || key->SecretLength == 0)
+    {
+        return STATUS_SUCCESS;
+    }
+
+    const SIZE_T spaceIndex = static_cast<SIZE_T>(space);
+    ULONGLONG packetNumber = 0;
+    SIZE_T plaintextLength = 0;
+    if (packetLength > decryptBuffer_.Count())
+    {
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
+
+    enum class ReadKeySelection : UCHAR
+    {
+        Current,
+        Next,
+        Previous
+    };
+    ReadKeySelection selection = ReadKeySelection::Current;
+    auto tryKey = [&](const QuicPacketKeySet &candidate) noexcept -> NTSTATUS
+    {
+        RtlCopyMemory(decryptBuffer_.Get(), packet, packetLength);
+        return QuicUnprotectPacket(candidate, decryptBuffer_.Get(), packetLength, header.PacketNumberOffset,
+                                   expectedPacketNumber_[spaceIndex], &packetNumber, &plaintextLength);
+    };
+
+    NTSTATUS status = tryKey(*key);
+    if (!NT_SUCCESS(status) && header.Type == QuicPacketType::OneRtt && nextApplicationReadKey_.SecretLength != 0)
+    {
+        status = tryKey(nextApplicationReadKey_);
+        selection = ReadKeySelection::Next;
+    }
+    if (!NT_SUCCESS(status) && header.Type == QuicPacketType::OneRtt && previousReadKeyValid_)
+    {
+        status = tryKey(previousApplicationReadKey_);
+        selection = ReadKeySelection::Previous;
+    }
+    if (!NT_SUCCESS(status))
+    {
+        if (header.Type == QuicPacketType::OneRtt && MatchesStatelessReset(packet, packetLength))
+        {
+            EnterDraining();
+            WKNET_TRACE(ComponentQuic, TraceLevel::Warning, "quic.connection.stateless_reset");
+        }
+        return STATUS_SUCCESS;
+    }
+    packet = decryptBuffer_.Get();
+    status = QuicParsePacketHeader(packet, packetLength, sourceConnectionIdLength_, &header);
+    if (!NT_SUCCESS(status))
+    {
+        return status;
+    }
+    if (header.Type == QuicPacketType::OneRtt)
+    {
+        const bool packetKeyPhase = (header.FirstByte & 0x04U) != 0;
+        if (selection == ReadKeySelection::Current && packetKeyPhase != receiveKeyPhase_)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (selection == ReadKeySelection::Previous &&
+            (!previousReadKeyValid_ || packetKeyPhase != previousReceiveKeyPhase_))
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (selection == ReadKeySelection::Next)
+        {
+            if (packetKeyPhase == receiveKeyPhase_)
+            {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            QuicClearPacketKeySet(&previousApplicationReadKey_);
+            previousApplicationReadKey_ = applicationReadKey_;
+            previousReceiveKeyPhase_ = receiveKeyPhase_;
+            previousReadKeyValid_ = true;
+            applicationReadKey_ = nextApplicationReadKey_;
+            RtlSecureZeroMemory(&nextApplicationReadKey_, sizeof(nextApplicationReadKey_));
+            receiveKeyPhase_ = packetKeyPhase;
+            status = QuicDeriveNextPacketKeySet(applicationReadKey_, &nextApplicationReadKey_);
+            if (!NT_SUCCESS(status))
+            {
+                return status;
+            }
+            const ULONGLONG retentionBase =
+                recovery_.SmoothedRtt100ns() == 0 ? 10000000ULL : recovery_.SmoothedRtt100ns();
+            previousReadKeyDeadline100ns_ = DeadlineAfter(QuicClockNow100ns(), retentionBase, 3);
+        }
+    }
+    if (header.IsLongHeader && header.SourceConnectionId.Length != 0 && !peerConnectionIdAuthenticated_)
+    {
+        RtlCopyMemory(peerConnectionId_, header.SourceConnectionId.Data, header.SourceConnectionId.Length);
+        peerConnectionIdLength_ = header.SourceConnectionId.Length;
+        if (peerConnectionIdCount_ != 0)
+        {
+            peerConnectionIds_[0].ConnectionIdLength = header.SourceConnectionId.Length;
+            RtlCopyMemory(peerConnectionIds_[0].ConnectionId, header.SourceConnectionId.Data,
+                          header.SourceConnectionId.Length);
+        }
+        peerConnectionIdAuthenticated_ = true;
+    }
+    bool ackEliciting = false;
+    pendingTransportError_ = 0;
+    status = ValidateFrames(packet + header.PayloadOffset, plaintextLength, &ackEliciting);
+    if (!NT_SUCCESS(status))
+    {
+        pendingTransportError_ = 0x7;
+    }
+    bool duplicate = false;
+    if (NT_SUCCESS(status))
+    {
+        status = ackTrackers_[spaceIndex].OnPacketReceived(
+            packetNumber, ackEliciting, space != QuicPacketNumberSpace::Application, QuicClockNow100ns(), &duplicate);
+    }
+    if (!NT_SUCCESS(status) || duplicate)
+    {
+        return status;
+    }
+    if (packetNumber >= expectedPacketNumber_[spaceIndex])
+    {
+        expectedPacketNumber_[spaceIndex] = packetNumber + 1;
+    }
+    status = DispatchFrames(level, space, packet + header.PayloadOffset, plaintextLength);
+    if (!NT_SUCCESS(status) && pendingTransportError_ == 0)
+    {
+        pendingTransportError_ =
+            tls_.TransportError() != 0 ? tls_.TransportError() : (status == STATUS_INSUFFICIENT_RESOURCES ? 0x1 : 0xA);
+    }
+    if (NT_SUCCESS(status))
+    {
+        status = HandleTlsProgress();
+        if (!NT_SUCCESS(status) && pendingTransportError_ == 0)
+        {
+            pendingTransportError_ = tls_.TransportError() != 0 ? tls_.TransportError() : 0xA;
+        }
+    }
+    if (NT_SUCCESS(status) && ackTrackers_[spaceIndex].AckPending() &&
+        ackTrackers_[spaceIndex].AckDeadline100ns(tls_.PeerTransportParameters().MaxAckDelay) <= QuicClockNow100ns())
+    {
+        status = SendAck(space);
+    }
+    return status;
+}
+
+NTSTATUS QuicConnection::ValidateFrames(const UCHAR *payload, SIZE_T payloadLength, bool *ackEliciting) noexcept
+{
+    if (ackEliciting != nullptr)
+    {
+        *ackEliciting = false;
+    }
+    if ((payload == nullptr && payloadLength != 0) || ackEliciting == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    SIZE_T offset = 0;
+    while (offset < payloadLength)
+    {
+        QuicFrame frame = {};
+        SIZE_T consumed = 0;
+        NTSTATUS status = QuicParseFrame(payload + offset, payloadLength - offset, &frame, &consumed);
+        if (!NT_SUCCESS(status) || consumed == 0)
+        {
+            return NT_SUCCESS(status) ? STATUS_INVALID_NETWORK_RESPONSE : status;
+        }
+        if (frame.Kind != QuicFrameKind::Padding && frame.Kind != QuicFrameKind::Ack &&
+            frame.Kind != QuicFrameKind::ConnectionClose)
+        {
+            *ackEliciting = true;
+        }
+        offset += consumed;
+    }
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS QuicConnection::DispatchFrames(QuicEncryptionLevel level, QuicPacketNumberSpace space, const UCHAR *payload,
+                                        SIZE_T payloadLength) noexcept
+{
+    SIZE_T offset = 0;
+    while (offset < payloadLength)
+    {
+        QuicFrame frame = {};
+        SIZE_T consumed = 0;
+        NTSTATUS status = QuicParseFrame(payload + offset, payloadLength - offset, &frame, &consumed);
+        if (NT_SUCCESS(status))
+        {
+            status = DispatchFrame(level, space, frame);
+        }
+        if (!NT_SUCCESS(status))
+        {
+            return status;
+        }
+        offset += consumed;
+    }
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS QuicConnection::DispatchFrame(QuicEncryptionLevel level, QuicPacketNumberSpace space,
+                                       const QuicFrame &frame) noexcept
+{
+    if (frame.Kind == QuicFrameKind::Padding || frame.Kind == QuicFrameKind::Ping)
+    {
+        return STATUS_SUCCESS;
+    }
+    if (frame.Kind == QuicFrameKind::Ack)
+    {
+        SIZE_T rangeCount = 0;
+        NTSTATUS status = QuicDecodeAckRanges(frame, ackRangeScratch_.Get(), ackRangeScratch_.Count(), &rangeCount);
+        if (!NT_SUCCESS(status))
+        {
+            return status;
+        }
+        ULONGLONG ackDelay100ns = 0;
+        if (space == QuicPacketNumberSpace::Application)
+        {
+            const ULONGLONG exponent = tls_.PeerTransportParameters().AckDelayExponent;
+            if (exponent > 20 || frame.AckDelay > (~0ULL >> exponent) || (frame.AckDelay << exponent) > (~0ULL / 10ULL))
+            {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            ackDelay100ns = (frame.AckDelay << exponent) * 10ULL;
+        }
+        status = recovery_.OnAckRangesReceived(space, ackRangeScratch_.Get(), rangeCount, ackDelay100ns);
+        if (NT_SUCCESS(status) && space == QuicPacketNumberSpace::Application)
+        {
+            ConfirmSendKeyUpdate(ackRangeScratch_.Get(), rangeCount);
+        }
+        return status;
+    }
+    if (frame.Kind == QuicFrameKind::Crypto)
+    {
+        return tls_.ReceiveCrypto(level, frame.Offset, frame.Data.Data, frame.Data.Length);
+    }
+    lastActivityTime100ns_ = QuicClockNow100ns();
+    if (frame.Kind == QuicFrameKind::NewToken)
+    {
+        if (level != QuicEncryptionLevel::Application || tokenCache_ == nullptr)
+        {
+            return level == QuicEncryptionLevel::Application ? STATUS_SUCCESS : STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        return tokenCache_->Store(frame.Data);
+    }
+    if (frame.Kind == QuicFrameKind::MaxData)
+    {
+        return level == QuicEncryptionLevel::Application ? flowControl_.OnMaxData(frame.Maximum)
+                                                         : STATUS_INVALID_NETWORK_RESPONSE;
+    }
+    if (frame.Kind == QuicFrameKind::Stream)
+    {
+        if (level != QuicEncryptionLevel::Application)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        QuicStream *stream = FindStream(frame.StreamId);
+        if (stream == nullptr)
+        {
+            if (QuicStreamIsClientInitiated(frame.StreamId))
+            {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            NTSTATUS status = CreateStream(frame.StreamId, &stream);
+            if (!NT_SUCCESS(status))
+            {
+                return status;
+            }
+            WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.stream.open stream_id=%I64u", frame.StreamId);
+        }
+        const ULONGLONG previousMaximumOffset = stream->ReceiveFlowControlBytes();
+        NTSTATUS status = stream->Receive(frame.Offset, frame.Data.Data, frame.Data.Length, frame.Fin);
+        if (NT_SUCCESS(status))
+        {
+            status = flowControl_.OnStreamReceiveProgress(previousMaximumOffset, stream->ReceiveFlowControlBytes());
+        }
+        return status;
+    }
+    if (frame.Kind == QuicFrameKind::ResetStream)
+    {
+        if (level != QuicEncryptionLevel::Application)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        QuicStream *stream = FindStream(frame.StreamId);
+        if (stream == nullptr)
+        {
+            if (QuicStreamIsClientInitiated(frame.StreamId))
+            {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            NTSTATUS status = CreateStream(frame.StreamId, &stream);
+            if (!NT_SUCCESS(status))
+            {
+                return status;
+            }
+        }
+        const ULONGLONG previousMaximumOffset = stream->ReceiveFlowControlBytes();
+        NTSTATUS status = stream->OnResetReceived(frame.ErrorCode, frame.FinalSize);
+        if (NT_SUCCESS(status))
+        {
+            status = flowControl_.OnStreamReceiveProgress(previousMaximumOffset, frame.FinalSize);
+        }
+        if (NT_SUCCESS(status))
+        {
+            WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.stream.reset stream_id=%I64u", frame.StreamId);
+        }
+        return status;
+    }
+    if (frame.Kind == QuicFrameKind::StopSending)
+    {
+        if (level != QuicEncryptionLevel::Application)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        QuicStream *stream = FindStream(frame.StreamId);
+        if (stream == nullptr)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        const bool resetAlreadySent = stream->SendReset();
+        NTSTATUS status = stream->StopSending(frame.ErrorCode);
+        if (NT_SUCCESS(status) && !resetAlreadySent)
+        {
+            QuicFrame reset = {};
+            reset.Kind = QuicFrameKind::ResetStream;
+            reset.StreamId = frame.StreamId;
+            reset.ErrorCode = frame.ErrorCode;
+            reset.FinalSize = stream->SendOffset();
+            status = SendFramePacket(QuicPacketType::OneRtt, QuicPacketNumberSpace::Application, applicationWriteKey_,
+                                     reset, nullptr, 0, false, true);
+            if (NT_SUCCESS(status))
+            {
+                status = stream->Reset(frame.ErrorCode, stream->SendOffset());
+            }
+        }
+        return status;
+    }
+    if (frame.Kind == QuicFrameKind::MaxStreamData)
+    {
+        if (level != QuicEncryptionLevel::Application)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        QuicStream *stream = FindStream(frame.StreamId);
+        return stream == nullptr ? STATUS_INVALID_NETWORK_RESPONSE : stream->OnMaxStreamData(frame.Maximum);
+    }
+    if (frame.Kind == QuicFrameKind::MaxStreams)
+    {
+        if (level != QuicEncryptionLevel::Application || frame.Maximum > (1ULL << 60))
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        ULONGLONG &limit = frame.Bidirectional ? peerMaxStreamsBidi_ : peerMaxStreamsUni_;
+        const ULONGLONG localLimit =
+            frame.Bidirectional ? WKNET_HARD_MAX_QUIC_LOCAL_BIDI_STREAMS : WKNET_HARD_MAX_QUIC_LOCAL_UNI_STREAMS;
+        if (frame.Maximum > limit)
+        {
+            limit = frame.Maximum < localLimit ? frame.Maximum : localLimit;
+        }
+        return STATUS_SUCCESS;
+    }
+    if (frame.Kind == QuicFrameKind::DataBlocked || frame.Kind == QuicFrameKind::StreamDataBlocked ||
+        frame.Kind == QuicFrameKind::StreamsBlocked)
+    {
+        return level == QuicEncryptionLevel::Application ? STATUS_SUCCESS : STATUS_INVALID_NETWORK_RESPONSE;
+    }
+    if (frame.Kind == QuicFrameKind::NewConnectionId)
+    {
+        return level == QuicEncryptionLevel::Application ? HandleNewConnectionId(frame)
+                                                         : STATUS_INVALID_NETWORK_RESPONSE;
+    }
+    if (frame.Kind == QuicFrameKind::RetireConnectionId)
+    {
+        return level == QuicEncryptionLevel::Application ? HandleRetireConnectionId(frame)
+                                                         : STATUS_INVALID_NETWORK_RESPONSE;
+    }
+    if (frame.Kind == QuicFrameKind::PathChallenge)
+    {
+        if (level != QuicEncryptionLevel::Application || frame.Data.Data == nullptr || frame.Data.Length != 8)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        QuicFrame response = {};
+        response.Kind = QuicFrameKind::PathResponse;
+        response.Data = frame.Data;
+        return SendFramePacket(QuicPacketType::OneRtt, QuicPacketNumberSpace::Application, applicationWriteKey_,
+                               response, nullptr, 0, false, true);
+    }
+    if (frame.Kind == QuicFrameKind::PathResponse)
+    {
+        return level == QuicEncryptionLevel::Application ? STATUS_SUCCESS : STATUS_INVALID_NETWORK_RESPONSE;
+    }
+    if (frame.Kind == QuicFrameKind::ConnectionClose)
+    {
+        if (frame.WireType == 0x1d && level != QuicEncryptionLevel::Application)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        EnterDraining();
+        return STATUS_SUCCESS;
+    }
+    if (frame.Kind == QuicFrameKind::HandshakeDone)
+    {
+        if (level != QuicEncryptionLevel::Application || tls_.State() != QuicTlsState::Established)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        NTSTATUS status = tls_.ConfirmHandshake();
+        if (NT_SUCCESS(status))
+        {
+#if defined(WKNET_USER_MODE_TEST)
+            std::lock_guard<std::mutex> guard(lock_);
+            state_ = QuicConnectionState::Established;
+#else
+            KIRQL irql;
+            KeAcquireSpinLock(&lock_, &irql);
+            state_ = QuicConnectionState::Established;
+            KeReleaseSpinLock(&lock_, irql);
+#endif
+            WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.established");
+        }
+        return status;
+    }
+    return STATUS_NOT_SUPPORTED;
+}
+
+NTSTATUS QuicConnection::HandleTlsProgress() noexcept
+{
+    SIZE_T initialOutputLength = 0;
+    NTSTATUS initialOutputStatus =
+        tls_.TakeInitialOutput(clientHelloBuffer_.Get(), clientHelloBuffer_.Count(), &initialOutputLength);
+    if (NT_SUCCESS(initialOutputStatus))
+    {
+        initialOutputStatus =
+            SendCryptoPacket(QuicPacketType::Initial, QuicPacketNumberSpace::Initial, initialWriteKey_,
+                             initialCryptoSendOffset_, clientHelloBuffer_.Get(), initialOutputLength, true);
+        if (NT_SUCCESS(initialOutputStatus))
+        {
+            initialCryptoSendOffset_ += initialOutputLength;
+        }
+        return initialOutputStatus;
+    }
+    if (initialOutputStatus != STATUS_NOT_FOUND)
+    {
+        return initialOutputStatus;
+    }
+
+    if (!peerTransportParametersApplied_ && tls_.State() >= QuicTlsState::AwaitCertificate)
+    {
+        const QuicTransportParameters &parameters = tls_.PeerTransportParameters();
+        if (parameters.OriginalDestinationConnectionId.Length != initialDestinationConnectionIdLength_ ||
+            RtlCompareMemory(parameters.OriginalDestinationConnectionId.Data, initialDestinationConnectionId_,
+                             initialDestinationConnectionIdLength_) != initialDestinationConnectionIdLength_ ||
+            parameters.InitialSourceConnectionId.Length != peerConnectionIdLength_ ||
+            RtlCompareMemory(parameters.InitialSourceConnectionId.Data, peerConnectionId_, peerConnectionIdLength_) !=
+                peerConnectionIdLength_)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        const QuicBufferView retrySourceConnectionId = attempt_.RetrySourceConnectionId();
+        if (attempt_.RetryAccepted())
+        {
+            if (parameters.RetrySourceConnectionId.Length != retrySourceConnectionId.Length ||
+                RtlCompareMemory(parameters.RetrySourceConnectionId.Data, retrySourceConnectionId.Data,
+                                 retrySourceConnectionId.Length) != retrySourceConnectionId.Length)
+            {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+        }
+        else if (parameters.RetrySourceConnectionId.Length != 0)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        NTSTATUS status = flowControl_.OnMaxData(parameters.InitialMaxData);
+        if (!NT_SUCCESS(status))
+        {
+            return status;
+        }
+        peerMaxStreamsBidi_ = parameters.InitialMaxStreamsBidi < WKNET_HARD_MAX_QUIC_LOCAL_BIDI_STREAMS
+                                  ? parameters.InitialMaxStreamsBidi
+                                  : WKNET_HARD_MAX_QUIC_LOCAL_BIDI_STREAMS;
+        peerMaxStreamsUni_ = parameters.InitialMaxStreamsUni < WKNET_HARD_MAX_QUIC_LOCAL_UNI_STREAMS
+                                 ? parameters.InitialMaxStreamsUni
+                                 : WKNET_HARD_MAX_QUIC_LOCAL_UNI_STREAMS;
+        if (parameters.StatelessResetToken.Length == 16 && peerConnectionIdCount_ != 0)
+        {
+            RtlCopyMemory(peerConnectionIds_[0].StatelessResetToken, parameters.StatelessResetToken.Data, 16);
+            peerConnectionIds_[0].HasStatelessResetToken = true;
+        }
+        if (parameters.MaxIdleTimeout != 0)
+        {
+            if (parameters.MaxIdleTimeout > (~0ULL / 10000ULL))
+            {
+                return STATUS_INTEGER_OVERFLOW;
+            }
+            const ULONGLONG peerIdleTimeout = parameters.MaxIdleTimeout * 10000ULL;
+            if (idleTimeout100ns_ == 0 || peerIdleTimeout < idleTimeout100ns_)
+            {
+                idleTimeout100ns_ = peerIdleTimeout;
+            }
+        }
+        peerTransportParametersApplied_ = true;
+    }
+    if (tls_.State() == QuicTlsState::Failed)
+    {
+        return STATUS_CONNECTION_ABORTED;
+    }
+    if (tls_.State() == QuicTlsState::Established && !clientFinishedSent_)
+    {
+        NTSTATUS status = InstallApplicationKeys();
+        if (!NT_SUCCESS(status))
+        {
+            return status;
+        }
+        SIZE_T outputLength = 0;
+        status = tls_.TakeHandshakeOutput(clientHelloBuffer_.Get(), clientHelloBuffer_.Count(), &outputLength);
+        if (status == STATUS_INVALID_PARAMETER)
+        {
+            return STATUS_SUCCESS;
+        }
+        if (NT_SUCCESS(status))
+        {
+            status =
+                SendCryptoPacket(QuicPacketType::Handshake, QuicPacketNumberSpace::Handshake, tls_.HandshakeWriteKey(),
+                                 handshakeCryptoSendOffset_, clientHelloBuffer_.Get(), outputLength, false);
+            if (NT_SUCCESS(status))
+            {
+                handshakeCryptoSendOffset_ += outputLength;
+                clientFinishedSent_ = true;
+            }
+        }
+        return status;
+    }
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS QuicConnection::SendAck(QuicPacketNumberSpace space) noexcept
+{
+    const SIZE_T spaceIndex = static_cast<SIZE_T>(space);
+    SIZE_T rangeCount = 0;
+    NTSTATUS status =
+        ackTrackers_[spaceIndex].CopyRanges(ackRangeScratch_.Get(), ackRangeScratch_.Count(), &rangeCount);
+    if (!NT_SUCCESS(status) || rangeCount == 0)
+    {
+        return NT_SUCCESS(status) ? STATUS_NOT_FOUND : status;
+    }
+    QuicFrame frame = {};
+    frame.Kind = QuicFrameKind::Ack;
+    QuicPacketType packetType = QuicPacketType::Initial;
+    const QuicPacketKeySet *key = &initialWriteKey_;
+    bool padInitial = true;
+    if (space == QuicPacketNumberSpace::Handshake)
+    {
+        packetType = QuicPacketType::Handshake;
+        key = &tls_.HandshakeWriteKey();
+        padInitial = false;
+    }
+    else if (space == QuicPacketNumberSpace::Application)
+    {
+        packetType = QuicPacketType::OneRtt;
+        key = &applicationWriteKey_;
+        padInitial = false;
+    }
+    status = SendFramePacket(packetType, space, *key, frame, ackRangeScratch_.Get(), rangeCount, padInitial, false);
+    if (NT_SUCCESS(status))
+    {
+        ackTrackers_[spaceIndex].OnAckSent();
+    }
+    return status;
+}
+
+void QuicConnection::Shutdown() noexcept
+{
+    if (!queue_.IsValid())
+    {
+        return;
+    }
+
+    if (IsWorkerThread())
+    {
+        WKNET_TRACE(ComponentQuic, TraceLevel::Error, "quic.connection.shutdown_self_rejected");
+        return;
+    }
+
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        stop_ = true;
+        suspended_ = false;
+    }
+    wake_.notify_all();
+    if (datagramSocket_ != nullptr && receivePending_)
+    {
+        (void)net::WskDatagramSocketCancelReceive(datagramSocket_);
+    }
+    if (worker_.joinable())
+    {
+        worker_.join();
+    }
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    stop_ = true;
+    suspended_ = false;
+    KeReleaseSpinLock(&lock_, irql);
+    KeSetEvent(&wake_, IO_NO_INCREMENT, FALSE);
+    if (datagramSocket_ != nullptr && receivePending_)
+    {
+        (void)net::WskDatagramSocketCancelReceive(datagramSocket_);
+    }
+    if (worker_ != nullptr)
+    {
+        KeWaitForSingleObject(worker_, Executive, KernelMode, FALSE, nullptr);
+        ObDereferenceObject(worker_);
+        worker_ = nullptr;
+    }
+#endif
+    StopNetwork();
+    if (deferredCommand_ != nullptr)
+    {
+        Complete(deferredCommand_->Operation, STATUS_CANCELLED);
+        FreeNonPagedObject(deferredCommand_);
+        deferredCommand_ = nullptr;
+    }
+    QuicCommand *c = nullptr;
+    while (Dequeue(&c))
+    {
+        Complete(c->Operation, STATUS_CANCELLED);
+        FreeNonPagedObject(c);
+    }
+    queue_.Reset();
+    ClearStreams();
+    streams_.Reset();
+}
+NTSTATUS QuicConnectionCreate(const QuicConnectionCreateOptions &o, QuicConnection **out) noexcept
+{
+    if (out != nullptr)
+    {
+        *out = nullptr;
+    }
+    if (out == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    QuicConnection *c = AllocateNonPagedObject<QuicConnection>();
+    if (c == nullptr)
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    NTSTATUS s = c->Initialize(o);
+    if (!NT_SUCCESS(s))
+    {
+        FreeNonPagedObject(c);
+        return s;
+    }
+    *out = c;
+    return STATUS_SUCCESS;
+}
+NTSTATUS QuicConnectionConnect(QuicConnection *c, QuicOperation *o) noexcept
+{
+    return c != nullptr ? c->Enqueue(QuicCommandType::Connect, o) : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionOpenStream(QuicConnection *c, QuicOperation *o) noexcept
+{
+    return c != nullptr ? c->Enqueue(QuicCommandType::OpenStream, o) : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionWriteStream(QuicConnection *c, ULONGLONG streamId, const UCHAR *data, SIZE_T dataLength,
+                                   bool fin, QuicOperation *o) noexcept
+{
+    return c != nullptr ? c->Enqueue(QuicCommandType::WriteStream, o, streamId, data, dataLength, nullptr, fin)
+                        : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionConsumeStream(QuicConnection *c, ULONGLONG streamId, UCHAR *output, SIZE_T capacity,
+                                     QuicOperation *o) noexcept
+{
+    return c != nullptr ? c->Enqueue(QuicCommandType::ConsumeStream, o, streamId, nullptr, capacity, output, false)
+                        : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionResetStream(QuicConnection *c, ULONGLONG streamId, ULONGLONG errorCode,
+                                   QuicOperation *o) noexcept
+{
+    return c != nullptr ? c->Enqueue(QuicCommandType::ResetStream, o, streamId, nullptr, 0, nullptr, false, errorCode)
+                        : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionStopSending(QuicConnection *c, ULONGLONG streamId, ULONGLONG errorCode,
+                                   QuicOperation *o) noexcept
+{
+    return c != nullptr ? c->Enqueue(QuicCommandType::StopSending, o, streamId, nullptr, 0, nullptr, false, errorCode)
+                        : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionCloseAsync(QuicConnection *c, QuicOperation *o) noexcept
+{
+    return c != nullptr ? c->Enqueue(QuicCommandType::Close, o) : STATUS_INVALID_PARAMETER;
+}
+QuicConnectionState QuicConnectionStateGet(const QuicConnection *c) noexcept
+{
+    return c != nullptr ? c->State() : QuicConnectionState::Closed;
+}
+void QuicConnectionDestroy(QuicConnection *c) noexcept
+{
+    if (c != nullptr)
+    {
+        FreeNonPagedObject(c);
+    }
+}
+#if defined(WKNET_USER_MODE_TEST)
+void QuicConnectionTestSetWorkerStartFailure(bool fail) noexcept
+{
+    g_failWorkerStart = fail;
+}
+NTSTATUS QuicConnectionTestEnqueueNoop(QuicConnection *c, QuicOperation *o) noexcept
+{
+    return c != nullptr ? c->Enqueue(QuicCommandType::Noop, o) : STATUS_INVALID_PARAMETER;
+}
+void QuicConnectionTestResumeWorker(QuicConnection *c) noexcept
+{
+    if (c != nullptr)
+        c->Resume();
+}
+NTSTATUS QuicConnectionTestConfirmHandshake(QuicConnection *c) noexcept
+{
+    if (c == nullptr)
+        return STATUS_INVALID_PARAMETER;
+    QuicOperation o;
+    QuicOperationInitialize(&o);
+    NTSTATUS s = c->Enqueue(QuicCommandType::ConfirmHandshake, &o);
+    return NT_SUCCESS(s) ? QuicOperationWait(&o, 1000) : s;
+}
+NTSTATUS QuicConnectionTestCloseFromWorker(QuicConnection *c) noexcept
+{
+    if (c == nullptr)
+        return STATUS_INVALID_PARAMETER;
+    QuicOperation o;
+    QuicOperationInitialize(&o);
+    NTSTATUS s = c->Enqueue(QuicCommandType::SelfClose, &o);
+    return NT_SUCCESS(s) ? QuicOperationWait(&o, 1000) : s;
+}
+void QuicConnectionTestWakeTimer(QuicConnection *c) noexcept
+{
+    if (c == nullptr)
+    {
+        return;
+    }
+    c->WakeTimerForTest();
+}
+NTSTATUS QuicConnectionTestProcessTimer(QuicConnection *c) noexcept
+{
+    if (c == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    QuicOperation operation;
+    QuicOperationInitialize(&operation);
+    const NTSTATUS status = c->Enqueue(QuicCommandType::ProcessTimer, &operation);
+    return NT_SUCCESS(status) ? QuicOperationWait(&operation, 1000) : status;
+}
+NTSTATUS QuicConnectionTestConfigureApplicationKeys(QuicConnection *c, const QuicPacketKeySet &writeKey,
+                                                    const QuicPacketKeySet &readKey) noexcept
+{
+    return c != nullptr ? c->ConfigureApplicationKeysForTest(writeKey, readKey) : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionTestForceKeyUpdate(QuicConnection *c) noexcept
+{
+    return c != nullptr ? c->ForceKeyUpdateForTest() : STATUS_INVALID_PARAMETER;
+}
+void QuicConnectionTestConfirmKeyUpdate(QuicConnection *c, ULONGLONG packetNumber) noexcept
+{
+    if (c != nullptr)
+    {
+        c->ConfirmKeyUpdateForTest(packetNumber);
+    }
+}
+bool QuicConnectionTestSendKeyPhase(const QuicConnection *c) noexcept
+{
+    return c != nullptr && c->SendKeyPhaseForTest();
+}
+bool QuicConnectionTestSendKeyUpdatePending(const QuicConnection *c) noexcept
+{
+    return c != nullptr && c->SendKeyUpdatePendingForTest();
+}
+NTSTATUS QuicConnectionTestInjectFrame(QuicConnection *c, QuicEncryptionLevel level, QuicPacketNumberSpace space,
+                                       const QuicFrame &frame) noexcept
+{
+    return c != nullptr ? c->InjectFrameForTest(level, space, frame) : STATUS_INVALID_PARAMETER;
+}
+#endif
+} // namespace wknet::quic

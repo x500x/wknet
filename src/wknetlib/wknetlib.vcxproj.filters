@@ -363,9 +363,18 @@
       <Filter>Source Files\crypto</Filter>
     </ClCompile>
     <ClCompile Include="quic\QuicAttemptValidation.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicAckTracker.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicClock.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicCongestion.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicConnection.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="quic\QuicCrypto.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicFlowControl.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="quic\QuicFrame.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="quic\QuicPacket.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicRecovery.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicStream.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicTls.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicTokenCache.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="quic\QuicTransportParameters.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="quic\QuicVarInt.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="tls\TlsContext.cpp">
@@ -513,9 +522,19 @@
     </ClInclude>
     <ClInclude Include="crypto\PacketProtectionPrimitives.h"><Filter>Header Files\crypto</Filter></ClInclude>
     <ClInclude Include="quic\QuicAttemptValidation.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="quic\QuicAckTracker.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="quic\QuicClock.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="quic\QuicCongestion.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="quic\QuicConnection.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="quic\QuicConnectionPrivate.hpp"><Filter>Header Files\quic</Filter></ClInclude>
     <ClInclude Include="quic\QuicCrypto.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="quic\QuicFlowControl.h"><Filter>Header Files\quic</Filter></ClInclude>
     <ClInclude Include="quic\QuicFrame.h"><Filter>Header Files\quic</Filter></ClInclude>
     <ClInclude Include="quic\QuicPacket.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="quic\QuicRecovery.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="quic\QuicStream.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="quic\QuicTls.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="quic\QuicTokenCache.h"><Filter>Header Files\quic</Filter></ClInclude>
     <ClInclude Include="quic\QuicTransportParameters.h"><Filter>Header Files\quic</Filter></ClInclude>
     <ClInclude Include="quic\QuicTypes.h"><Filter>Header Files\quic</Filter></ClInclude>
     <ClInclude Include="quic\QuicVarInt.h"><Filter>Header Files\quic</Filter></ClInclude>

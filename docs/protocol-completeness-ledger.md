@@ -75,22 +75,22 @@
 
 ## QUIC v1 账本
 
-当前阶段已完成 M2：WSK Datagram 异步地基已经实现并验证，但 QUIC handshake、HTTP/3 与产品路径仍未对外可用。状态只能随对应实现与测试一同迁移。
+当前阶段已完成 M4：QUIC v1 客户端连接、TLS over QUIC、stream、恢复、CID、Key Phase 与关闭排空已经实现并验证；HTTP/3、QPACK 与 Session 产品路径仍未对外可用。状态只能随对应实现与测试一同迁移。
 
 | 条目 | RFC 级别 | 状态 | 计划代码入口 | 计划测试入口 | 备注 |
 |------|----------|------|--------------|--------------|------|
 | WSK Datagram create/bind/connect/send/async receive/cancel/close/rundown | 内核传输地基 | 已实现/已验证 | `net/WskDatagramSocket.cpp` | `tests/datagram_socket_tests.cpp` | 单在途 receive IRP；DISPATCH completion 只保存固定结果并通知，PASSIVE `CompleteReceive` 负责超时取消、排空和消费；支持 IPv4/IPv6、late completion 与来源地址快照。 |
 | varint、invariant、long/short header、packet number 与 coalesced 迭代 | MUST | 已实现/已验证 | `quic/QuicVarInt.cpp`、`quic/QuicPacket.cpp` | `tests/quic_varint_tests.cpp`、`tests/quic_packet_tests.cpp` | 接受合法非最短 varint；所有 offset/length 有界。 |
 | Version Negotiation 与 Retry attempt 验证 | MUST | 已实现/已验证 | `quic/QuicAttemptValidation.cpp`、`quic/QuicCrypto.cpp` | `tests/quic_packet_tests.cpp`、`tests/quic_crypto_tests.cpp`、`tests/trace_tests.cpp` | 校验时序、CID 交换、版本降级与 Retry integrity；token 为有界 owned copy。 |
-| Initial/Handshake/1-RTT packet 与 packet/header protection | MUST | 已实现/已验证 | `quic/QuicCrypto.cpp`、`crypto/PacketProtectionPrimitives.cpp` | `tests/quic_crypto_tests.cpp` | AES-128/256-GCM 与 ChaCha20-Poly1305；M3 显式 key set，不管理 Key Phase；0-RTT application data 关闭。 |
+| Initial/Handshake/1-RTT packet 与 packet/header protection | MUST | 已实现/已验证 | `quic/QuicCrypto.cpp`、`quic/QuicConnection.cpp`、`crypto/PacketProtectionPrimitives.cpp` | `tests/quic_crypto_tests.cpp`、`tests/quic_connection_lifecycle_tests.cpp` | AES-128/256-GCM 与 ChaCha20-Poly1305；连接层管理 current/next/previous Key Phase；0-RTT application data 关闭。 |
 | transport parameter codec | MUST | 已实现/已验证 | `quic/QuicTransportParameters.cpp` | `tests/quic_transport_parameter_tests.cpp` | 重复、角色、长度和范围严格校验；客户端固定 UDP 1200 且禁止主动迁移。 |
-| CRYPTO 重组和 TLS over QUIC | MUST | 待补全 | `quic/QuicTls.cpp` | `tests/quic_handshake_tests.cpp` | M4 实现；TLS 1.3 handshake messages，不使用 TLS record。 |
+| CRYPTO 重组和 TLS over QUIC | MUST | 已实现/已验证 | `quic/QuicTls.cpp` | `tests/quic_handshake_tests.cpp` | TLS 1.3 handshake messages，不使用 TLS record；覆盖 HRR、client credential、证书校验、NewSessionTicket、alert 与 key discard。 |
 | QUIC frame 无状态 codec | MUST | 已实现/已验证 | `quic/QuicFrame.cpp` | `tests/quic_frame_tests.cpp` | 覆盖 RFC 9000 客户端主路径 frame；跨 frame 数量与连接状态留在 M4。 |
-| 三个 PN space、ACK、loss/PTO、persistent congestion | MUST | 待补全 | `quic/QuicRecovery.cpp` | `tests/quic_recovery_tests.cpp` | RFC 9002。 |
-| NewReno、基础 pacing、固定 1200 UDP payload | MUST/安全边界 | 待补全 | `quic/QuicCongestion.cpp` | `tests/quic_recovery_tests.cpp` | ECN/DPLPMTUD 首期明确非目标。 |
-| STREAM、flow control、RESET/STOP、MAX/BLOCKED frame | MUST | 待补全 | `quic/QuicStream.cpp`、`quic/QuicConnection.cpp` | `tests/quic_stream_tests.cpp` | 稀疏重组有字节和 gap 上限。 |
-| CID、stateless reset、NEW_TOKEN、PATH response | MUST/SHOULD | 待补全 | `quic/QuicConnection.cpp`、`quic/QuicTokenCache.cpp` | `tests/quic_connection_lifecycle_tests.cpp` | 不主动迁移，只响应当前路径 challenge。 |
-| idle、closing、draining、Key Phase update、worker rundown | MUST | 待补全 | `quic/QuicConnection.cpp` | `tests/quic_connection_lifecycle_tests.cpp` | 协议状态只由每连接 PASSIVE worker 修改。 |
+| 三个 PN space、ACK、loss/PTO、persistent congestion | MUST | 已实现/已验证 | `quic/QuicAckTracker.cpp`、`quic/QuicRecovery.cpp` | `tests/quic_recovery_tests.cpp`、`tests/quic_connection_lifecycle_tests.cpp` | ACK range、packet/time threshold、loss timer、PTO backoff 与 persistent congestion 已覆盖。 |
+| NewReno、基础 pacing、固定 1200 UDP payload | MUST/安全边界 | 已实现/已验证 | `quic/QuicCongestion.cpp`、`quic/QuicConnection.cpp` | `tests/quic_recovery_tests.cpp`、`tests/quic_connection_lifecycle_tests.cpp` | stream 发送按 pacing deadline 延迟；ECN/DPLPMTUD 首期明确非目标。 |
+| STREAM、flow control、RESET/STOP、MAX/BLOCKED frame | MUST | 已实现/已验证 | `quic/QuicStream.cpp`、`quic/QuicFlowControl.cpp`、`quic/QuicConnection.cpp` | `tests/quic_stream_tests.cpp`、`tests/quic_connection_lifecycle_tests.cpp` | 稀疏重组、方向、final size、连接/stream 流控均有字节和 gap 上限。 |
+| CID、stateless reset、NEW_TOKEN、PATH response | MUST/SHOULD | 已实现/已验证 | `quic/QuicConnection.cpp`、`quic/QuicTokenCache.cpp` | `tests/quic_connection_lifecycle_tests.cpp` | 有界 CID/token、reset token 匹配与当前固定路径 PATH_RESPONSE；不主动迁移。 |
+| idle、closing、draining、Key Phase update、worker rundown | MUST | 已实现/已验证 | `quic/QuicConnection.cpp`、`quic/QuicClock.cpp` | `tests/quic_connection_lifecycle_tests.cpp` | 协议状态只由每连接 PASSIVE worker 修改；deadline、late completion、旧 key 丢弃和三 PTO 收尾可确定推进。 |
 | 主动迁移、多路径、ECN、DPLPMTUD、QUIC v2、QUIC Datagram | MAY/SHOULD | 明确非目标 | N/A | 边界测试 | 首期安全忽略或按规范拒绝。 |
 
 ## HTTP/3 与 QPACK 账本
