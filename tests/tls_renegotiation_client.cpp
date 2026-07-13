@@ -444,7 +444,7 @@ int main(int argc, char** argv)
         SIZE_T bytesSent = 0;
         status = connection.Send(transport.Handle(), request, sizeof(request) - 1, &bytesSent);
         if (!NT_SUCCESS(status) || bytesSent != sizeof(request) - 1) {
-            printf("TLS request send failed: 0x%08X sent=%Iu\n", static_cast<unsigned>(status), bytesSent);
+            printf("TLS request send failed: 0x%08X sent=%zu\n", static_cast<unsigned>(status), bytesSent);
             goto Cleanup;
         }
 
@@ -453,7 +453,7 @@ int main(int argc, char** argv)
         for (ULONG attempt = 0; attempt < 64 && responseLength < sizeof(response) - 1; ++attempt) {
             SIZE_T bytesReceived = 0;
             status = connection.Receive(
-                transport,
+                transport.Handle(),
                 response + responseLength,
                 (sizeof(response) - 1) - responseLength,
                 &bytesReceived,
@@ -464,7 +464,7 @@ int main(int argc, char** argv)
             if (!NT_SUCCESS(status)) {
                 const wknet::tls::TlsHandshakeFailure& failure = connection.LastHandshakeFailure();
                 printf(
-                    "TLS response receive failed: 0x%08X after=%Iu category=%lu detail=0x%08X alert=%u/%u\n",
+                    "TLS response receive failed: 0x%08X after=%zu category=%lu detail=0x%08X alert=%u/%u\n",
                     static_cast<unsigned>(status),
                     responseLength,
                     static_cast<unsigned long>(failure.Category),
@@ -491,7 +491,7 @@ int main(int argc, char** argv)
         }
 
         if (exitCode == 0) {
-            printf("TLS 1.2 renegotiation client received %Iu bytes\n", responseLength);
+            printf("TLS 1.2 renegotiation client received %zu bytes\n", responseLength);
         }
         else {
             printf("TLS 1.2 renegotiation client received no response\n");

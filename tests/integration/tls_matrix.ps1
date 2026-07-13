@@ -177,6 +177,7 @@ function Compile-UserModeTest {
         '/wd4127',
         '/D', 'WKNET_USER_MODE_TEST=1',
         '/I', (Join-Path $script:Root 'include'),
+        '/I', (Join-Path $script:Root 'src\wknetlib'),
         '/I', (Join-Path $script:Root 'src\wknettest'),
         '/I', (Join-Path $script:Root 'third_party\brotli\c\include'),
         ('/Fe:' + $output),
@@ -755,6 +756,7 @@ Compile-UserModeTest `
     -Name 'tls_interop_matrix_tests' `
     -Source 'tests\tls_interop_matrix_tests.cpp' `
     -ProjectSources @(
+        'src\wknetlib\rtl\Text.cpp',
         'src\wknetlib\http1\HttpTypes.cpp',
         'src\wknetlib\tls\CertificateStore.cpp',
         'src\wknetlib\tls\TlsCapabilities.cpp',

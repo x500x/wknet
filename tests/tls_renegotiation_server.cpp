@@ -19,7 +19,6 @@ namespace
     using SOCKET = uintptr_t;
 
     constexpr SOCKET InvalidSocket = static_cast<SOCKET>(~static_cast<uintptr_t>(0));
-    constexpr int SocketError = -1;
     constexpr int AddressFamilyInet = 2;
     constexpr int SocketTypeStream = 1;
     constexpr int ProtocolTcp = 6;
@@ -500,7 +499,7 @@ namespace
             total += static_cast<SIZE_T>(received);
             request[total] = '\0';
             if (strstr(request, "\r\n\r\n") != nullptr) {
-                printf("server received request bytes=%Iu\n", total);
+                printf("server received request bytes=%zu\n", total);
                 return true;
             }
         }
