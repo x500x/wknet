@@ -6,6 +6,7 @@
 #include "quic/QuicFrame.h"
 #include "quic/QuicPacket.h"
 #include "quic/QuicRecovery.h"
+#include "quic/QuicStream.h"
 #include "quic/QuicTokenCache.h"
 #if defined(WKNET_USER_MODE_TEST)
 #include <chrono>
@@ -16,12 +17,14 @@ namespace wknet::quic
 enum class QuicCommandType : UCHAR
 {
     Connect,
-    OpenStream,
+    OpenBidirectionalStream,
+    OpenUnidirectionalStream,
     WriteStream,
     ConsumeStream,
     ResetStream,
     StopSending,
     Close,
+    CloseApplication,
     Noop,
     ConfirmHandshake,
     ProcessTimer,
@@ -69,6 +72,15 @@ class QuicConnection final
     void Resume() noexcept;
     void Shutdown() noexcept;
     QuicConnectionState State() const noexcept;
+    NTSTATUS ApplicationOpenBidirectionalStream(QuicStream **stream) noexcept;
+    NTSTATUS ApplicationOpenUnidirectionalStream(QuicStream **stream) noexcept;
+    NTSTATUS ApplicationWriteStream(ULONGLONG streamId, const UCHAR *data, SIZE_T dataLength, bool fin,
+                                    SIZE_T *bytesWritten) noexcept;
+    NTSTATUS ApplicationConsumeStream(ULONGLONG streamId, UCHAR *output, SIZE_T capacity, SIZE_T *bytesConsumed,
+                                      bool *fin) noexcept;
+    NTSTATUS ApplicationResetStream(ULONGLONG streamId, ULONGLONG applicationError) noexcept;
+    NTSTATUS ApplicationStopSending(ULONGLONG streamId, ULONGLONG applicationError) noexcept;
+    NTSTATUS ApplicationClose(ULONGLONG applicationError) noexcept;
 #if defined(WKNET_USER_MODE_TEST)
     void WakeTimerForTest() noexcept;
     NTSTATUS ConfigureApplicationKeysForTest(const QuicPacketKeySet &writeKey,
@@ -126,7 +138,7 @@ class QuicConnection final
     NTSTATUS SendProbe(QuicPacketNumberSpace space) noexcept;
     void WakeWorker() noexcept;
     void TransitionToClosed() noexcept;
-    NTSTATUS EnterClosing(ULONGLONG errorCode, bool sendCloseFrame) noexcept;
+    NTSTATUS EnterClosing(ULONGLONG errorCode, bool sendCloseFrame, bool applicationError = false) noexcept;
     void EnterDraining() noexcept;
     void FailConnection(NTSTATUS status, ULONGLONG transportError) noexcept;
     static void ReceiveNotification(void *context) noexcept;
@@ -153,6 +165,7 @@ class QuicConnection final
     SIZE_T count_ = 0;
     QuicConnectionState state_ = QuicConnectionState::Idle;
     ULONGLONG nextBidiStreamId_ = 0;
+    ULONGLONG nextUniStreamId_ = 2;
     ULONGLONG peerMaxStreamsBidi_ = 0;
     ULONGLONG peerMaxStreamsUni_ = 0;
     bool connectQueued_ = false;
@@ -175,6 +188,7 @@ class QuicConnection final
     tls::Tls13SessionCache *sessionCache_ = nullptr;
     QuicTokenCache *tokenCache_ = nullptr;
     const crypto::TlsClientCredential *clientCredential_ = nullptr;
+    QuicStreamApplicationEventSink applicationEventSink_ = {};
     bool verifyCertificate_ = true;
     bool requireRevocationCheck_ = false;
     UCHAR initialDestinationConnectionId_[QuicMaximumConnectionIdLength] = {};

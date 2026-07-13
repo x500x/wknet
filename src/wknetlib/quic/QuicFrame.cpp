@@ -242,6 +242,7 @@ NTSTATUS QuicParseFrame(const UCHAR *data, SIZE_T dataLength, QuicFrame *frame, 
     else if (type == 0x1c || type == 0x1d)
     {
         frame->Kind = QuicFrameKind::ConnectionClose;
+        frame->ApplicationClose = type == 0x1d;
         status = ReadValue(data, dataLength, &offset, &frame->ErrorCode);
         if (NT_SUCCESS(status) && type == 0x1c)
             status = ReadValue(data, dataLength, &offset, &frame->TriggerFrameType);
@@ -486,10 +487,10 @@ NTSTATUS QuicEncodeFrame(const QuicFrame &frame, const QuicAckRange *ackRanges, 
             status = WriteBytes(frame.Data.Data, frame.Data.Length, output, capacity, &offset);
         break;
     case QuicFrameKind::ConnectionClose:
-        status = WriteValue(0x1c, output, capacity, &offset);
+        status = WriteValue(frame.ApplicationClose ? 0x1d : 0x1c, output, capacity, &offset);
         if (NT_SUCCESS(status))
             status = WriteValue(frame.ErrorCode, output, capacity, &offset);
-        if (NT_SUCCESS(status))
+        if (NT_SUCCESS(status) && !frame.ApplicationClose)
             status = WriteValue(frame.TriggerFrameType, output, capacity, &offset);
         if (NT_SUCCESS(status))
             status = WriteValue(frame.ReasonPhrase.Length, output, capacity, &offset);

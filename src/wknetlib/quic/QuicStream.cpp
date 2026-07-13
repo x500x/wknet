@@ -9,12 +9,136 @@ bool QuicStreamIsBidirectional(ULONGLONG id) noexcept
 {
     return (id & 2ULL) == 0;
 }
+
+bool QuicStream::HasReadableState() const noexcept
+{
+    if (!initialized_ || receiveReset_)
+    {
+        return false;
+    }
+    if (ReceiveFinished())
+    {
+        return true;
+    }
+    for (SIZE_T index = 0; index < chunkCount_; ++index)
+    {
+        if (chunks_[index].Offset == consumedOffset_ && chunks_[index].Length != 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool QuicStream::IsClosedState() const noexcept
+{
+    if (!initialized_)
+    {
+        return false;
+    }
+    const bool sendSideExists = QuicStreamIsBidirectional(streamId_) || QuicStreamIsClientInitiated(streamId_);
+    const bool receiveSideExists = QuicStreamIsBidirectional(streamId_) || !QuicStreamIsClientInitiated(streamId_);
+    const bool sendClosed = !sendSideExists || sendFin_ || reset_;
+    const bool receiveClosed = !receiveSideExists || ReceiveFinished() || receiveReset_;
+    return sendClosed && receiveClosed;
+}
+
+void QuicStream::NotifyOpened() noexcept
+{
+    if (openedNotified_ || applicationSink_.Opened == nullptr)
+    {
+        return;
+    }
+    openedNotified_ = true;
+    QuicStreamApplicationEvent callback = applicationSink_.Opened;
+    void *context = applicationSink_.Context;
+    callback(context, this);
+}
+
+void QuicStream::RefreshReadableNotification() noexcept
+{
+    if (!HasReadableState())
+    {
+        readableNotified_ = false;
+        return;
+    }
+    if (readableNotified_ || applicationSink_.Readable == nullptr)
+    {
+        return;
+    }
+    readableNotified_ = true;
+    QuicStreamApplicationEvent callback = applicationSink_.Readable;
+    void *context = applicationSink_.Context;
+    callback(context, this);
+}
+
+void QuicStream::NotifyWritable() noexcept
+{
+    if (applicationSink_.Writable == nullptr)
+    {
+        return;
+    }
+    QuicStreamApplicationEvent callback = applicationSink_.Writable;
+    void *context = applicationSink_.Context;
+    callback(context, this);
+}
+
+void QuicStream::NotifyReset(ULONGLONG errorCode, bool peerInitiated) noexcept
+{
+    if (applicationSink_.Reset == nullptr)
+    {
+        return;
+    }
+    QuicStreamApplicationResetEvent callback = applicationSink_.Reset;
+    void *context = applicationSink_.Context;
+    callback(context, this, errorCode, peerInitiated);
+}
+
+void QuicStream::NotifyClosed() noexcept
+{
+    if (closedNotified_ || applicationSink_.Closed == nullptr)
+    {
+        return;
+    }
+    closedNotified_ = true;
+    QuicStreamApplicationEvent callback = applicationSink_.Closed;
+    void *context = applicationSink_.Context;
+    callback(context, this);
+}
+
+void QuicStream::NotifyClosedIfNeeded() noexcept
+{
+    if (IsClosedState())
+    {
+        NotifyClosed();
+    }
+}
+
+void QuicStream::SetApplicationEventSink(const QuicStreamApplicationEventSink *sink) noexcept
+{
+    applicationSink_ = sink != nullptr ? *sink : QuicStreamApplicationEventSink{};
+    openedNotified_ = false;
+    readableNotified_ = false;
+    closedNotified_ = false;
+    if (!initialized_ || sink == nullptr)
+    {
+        return;
+    }
+    NotifyOpened();
+    RefreshReadableNotification();
+    NotifyClosedIfNeeded();
+}
+
 QuicStream::~QuicStream() noexcept
 {
     Clear();
 }
 void QuicStream::Clear() noexcept
 {
+    if (initialized_)
+    {
+        NotifyClosed();
+    }
     if (chunks_.IsValid())
     {
         for (SIZE_T i = 0; i < chunkCount_; ++i)
@@ -28,8 +152,12 @@ void QuicStream::Clear() noexcept
     }
     chunks_.Reset();
     affectedScratch_.Reset();
+    applicationSink_ = {};
     chunkCount_ = 0;
     initialized_ = false;
+    openedNotified_ = false;
+    readableNotified_ = false;
+    closedNotified_ = false;
 }
 NTSTATUS QuicStream::Initialize(ULONGLONG id, SIZE_T maxBytes, SIZE_T maxGaps) noexcept
 {
@@ -50,11 +178,13 @@ NTSTATUS QuicStream::Initialize(ULONGLONG id, SIZE_T maxBytes, SIZE_T maxGaps) n
     consumedOffset_ = finalSize_ = receivedUniqueBytes_ = bufferedBytes_ = highestReceivedOffset_ = sendOffset_ =
         sendLimit_ = sendResetError_ = receiveResetError_ = stopError_ = 0;
     receiveLimit_ = QuicVarIntMaximum;
-    finalSizeKnown_ = sendFin_ = reset_ = receiveReset_ = stopped_ = streamDataBlockedPending_ = false;
+    finalSizeKnown_ = sendFin_ = reset_ = receiveReset_ = stopped_ = streamDataBlockedPending_ =
+        applicationWriteBlocked_ = false;
     initialized_ = true;
     return STATUS_SUCCESS;
 }
-NTSTATUS QuicStream::Receive(ULONGLONG offset, const UCHAR *data, SIZE_T length, bool fin) noexcept
+NTSTATUS QuicStream::Receive(ULONGLONG offset, const UCHAR *data, SIZE_T length, bool fin,
+                             bool notifyApplication) noexcept
 {
     if (!initialized_ || (data == nullptr && length != 0) || offset > QuicVarIntMaximum ||
         length > QuicVarIntMaximum - offset)
@@ -96,11 +226,19 @@ NTSTATUS QuicStream::Receive(ULONGLONG offset, const UCHAR *data, SIZE_T length,
         {
             highestReceivedOffset_ = end;
         }
+        if (notifyApplication)
+        {
+            NotifyApplicationReadable();
+        }
         return STATUS_SUCCESS;
     }
 
     if (end <= consumedOffset_)
     {
+        if (notifyApplication)
+        {
+            NotifyApplicationReadable();
+        }
         return STATUS_SUCCESS;
     }
     if (offset < consumedOffset_)
@@ -193,7 +331,17 @@ NTSTATUS QuicStream::Receive(ULONGLONG offset, const UCHAR *data, SIZE_T length,
     {
         highestReceivedOffset_ = end;
     }
+    if (notifyApplication)
+    {
+        NotifyApplicationReadable();
+    }
     return STATUS_SUCCESS;
+}
+
+void QuicStream::NotifyApplicationReadable() noexcept
+{
+    RefreshReadableNotification();
+    NotifyClosedIfNeeded();
 }
 NTSTATUS QuicStream::Consume(UCHAR *output, SIZE_T capacity, SIZE_T *consumed, bool *fin) noexcept
 {
@@ -221,6 +369,7 @@ NTSTATUS QuicStream::Consume(UCHAR *output, SIZE_T capacity, SIZE_T *consumed, b
     if (index == chunkCount_)
     {
         *fin = ReceiveFinished();
+        NotifyClosedIfNeeded();
         return receiveReset_ && bufferedBytes_ == 0 ? STATUS_CONNECTION_RESET : STATUS_SUCCESS;
     }
     QuicStreamChunk &c = chunks_[index];
@@ -247,6 +396,8 @@ NTSTATUS QuicStream::Consume(UCHAR *output, SIZE_T capacity, SIZE_T *consumed, b
         --chunkCount_;
     }
     *fin = ReceiveFinished();
+    RefreshReadableNotification();
+    NotifyClosedIfNeeded();
     return STATUS_SUCCESS;
 }
 NTSTATUS QuicStream::SetReceiveLimit(ULONGLONG maximum) noexcept
@@ -264,7 +415,13 @@ NTSTATUS QuicStream::SetSendLimit(ULONGLONG maximum) noexcept
     {
         return STATUS_INVALID_PARAMETER;
     }
+    const bool becameWritable = applicationWriteBlocked_ && maximum > sendOffset_;
     sendLimit_ = maximum;
+    if (becameWritable)
+    {
+        applicationWriteBlocked_ = false;
+        NotifyWritable();
+    }
     return STATUS_SUCCESS;
 }
 NTSTATUS QuicStream::OnMaxStreamData(ULONGLONG maximum) noexcept
@@ -275,8 +432,14 @@ NTSTATUS QuicStream::OnMaxStreamData(ULONGLONG maximum) noexcept
     }
     if (maximum > sendLimit_)
     {
+        const bool becameWritable = applicationWriteBlocked_ && maximum > sendOffset_;
         sendLimit_ = maximum;
         streamDataBlockedPending_ = false;
+        if (becameWritable)
+        {
+            applicationWriteBlocked_ = false;
+            NotifyWritable();
+        }
     }
     return STATUS_SUCCESS;
 }
@@ -317,12 +480,14 @@ NTSTATUS QuicStream::Write(const UCHAR *data, SIZE_T length, bool fin, SIZE_T *a
         if (validationStatus == STATUS_DEVICE_BUSY)
         {
             streamDataBlockedPending_ = true;
+            applicationWriteBlocked_ = true;
         }
         return validationStatus;
     }
     sendOffset_ += length;
     sendFin_ = fin;
     *accepted = length;
+    NotifyClosedIfNeeded();
     return STATUS_SUCCESS;
 }
 NTSTATUS QuicStream::Reset(ULONGLONG error, ULONGLONG finalSize) noexcept
@@ -346,6 +511,8 @@ NTSTATUS QuicStream::Reset(ULONGLONG error, ULONGLONG finalSize) noexcept
     reset_ = true;
     sendResetError_ = error;
     sendFin_ = true;
+    NotifyReset(error, false);
+    NotifyClosedIfNeeded();
     return STATUS_SUCCESS;
 }
 NTSTATUS QuicStream::OnResetReceived(ULONGLONG error, ULONGLONG finalSize) noexcept
@@ -372,6 +539,8 @@ NTSTATUS QuicStream::OnResetReceived(ULONGLONG error, ULONGLONG finalSize) noexc
     receiveReset_ = true;
     receiveResetError_ = error;
     highestReceivedOffset_ = finalSize;
+    NotifyReset(error, true);
+    NotifyClosedIfNeeded();
     return STATUS_SUCCESS;
 }
 NTSTATUS QuicStream::StopSending(ULONGLONG error) noexcept

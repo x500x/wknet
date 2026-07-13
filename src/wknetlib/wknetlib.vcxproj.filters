@@ -30,6 +30,12 @@
     <Filter Include="Source Files\http2">
       <UniqueIdentifier>{9B7EAA2E-6E7E-4B4F-9B6C-28E4C0F3B2B5}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\http3">
+      <UniqueIdentifier>{3FE3D6C0-8E2B-4F54-8469-6D0F147791A1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\qpack">
+      <UniqueIdentifier>{0C7B9F25-5216-461E-BA87-8D5479F8AF67}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\http_api">
       <UniqueIdentifier>{C8A1D720-C92E-4E2F-91A4-3F4B9C73C0FA}</UniqueIdentifier>
     </Filter>
@@ -62,6 +68,12 @@
     </Filter>
     <Filter Include="Header Files\http2">
       <UniqueIdentifier>{2E6B0494-D9B1-4D13-8E4E-5D6D67D1CF11}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\http3">
+      <UniqueIdentifier>{2D923DB3-EA98-47CA-94CB-2A2879C8777E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\qpack">
+      <UniqueIdentifier>{F5533992-2F30-4D39-B01F-124089010B7A}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\http">
       <UniqueIdentifier>{D9B2E831-DA3F-4F30-A2B5-405C0D84D1FB}</UniqueIdentifier>
@@ -298,6 +310,33 @@
     </ClCompile>
     <ClCompile Include="http2\Hpack.cpp">
       <Filter>Source Files\http2</Filter>
+    </ClCompile>
+    <ClCompile Include="http3\Http3Connection.cpp">
+      <Filter>Source Files\http3</Filter>
+    </ClCompile>
+    <ClCompile Include="http3\Http3Frame.cpp">
+      <Filter>Source Files\http3</Filter>
+    </ClCompile>
+    <ClCompile Include="http3\Http3Request.cpp">
+      <Filter>Source Files\http3</Filter>
+    </ClCompile>
+    <ClCompile Include="qpack\QpackDecoder.cpp">
+      <Filter>Source Files\qpack</Filter>
+    </ClCompile>
+    <ClCompile Include="qpack\QpackDynamicTable.cpp">
+      <Filter>Source Files\qpack</Filter>
+    </ClCompile>
+    <ClCompile Include="qpack\QpackEncoder.cpp">
+      <Filter>Source Files\qpack</Filter>
+    </ClCompile>
+    <ClCompile Include="qpack\QpackHuffman.cpp">
+      <Filter>Source Files\qpack</Filter>
+    </ClCompile>
+    <ClCompile Include="qpack\QpackInteger.cpp">
+      <Filter>Source Files\qpack</Filter>
+    </ClCompile>
+    <ClCompile Include="qpack\QpackStaticTable.cpp">
+      <Filter>Source Files\qpack</Filter>
     </ClCompile>
     <ClCompile Include="http2\Http2Connection.cpp">
       <Filter>Source Files\http2</Filter>
@@ -538,6 +577,42 @@
     <ClInclude Include="quic\QuicTransportParameters.h"><Filter>Header Files\quic</Filter></ClInclude>
     <ClInclude Include="quic\QuicTypes.h"><Filter>Header Files\quic</Filter></ClInclude>
     <ClInclude Include="quic\QuicVarInt.h"><Filter>Header Files\quic</Filter></ClInclude>
+    <ClInclude Include="http3\Http3Connection.h">
+      <Filter>Header Files\http3</Filter>
+    </ClInclude>
+    <ClInclude Include="http3\Http3ConnectionPrivate.hpp">
+      <Filter>Header Files\http3</Filter>
+    </ClInclude>
+    <ClInclude Include="http3\Http3Frame.h">
+      <Filter>Header Files\http3</Filter>
+    </ClInclude>
+    <ClInclude Include="http3\Http3Request.h">
+      <Filter>Header Files\http3</Filter>
+    </ClInclude>
+    <ClInclude Include="http3\Http3Types.h">
+      <Filter>Header Files\http3</Filter>
+    </ClInclude>
+    <ClInclude Include="qpack\QpackDecoder.h">
+      <Filter>Header Files\qpack</Filter>
+    </ClInclude>
+    <ClInclude Include="qpack\QpackDynamicTable.h">
+      <Filter>Header Files\qpack</Filter>
+    </ClInclude>
+    <ClInclude Include="qpack\QpackEncoder.h">
+      <Filter>Header Files\qpack</Filter>
+    </ClInclude>
+    <ClInclude Include="qpack\QpackHuffman.h">
+      <Filter>Header Files\qpack</Filter>
+    </ClInclude>
+    <ClInclude Include="qpack\QpackInteger.h">
+      <Filter>Header Files\qpack</Filter>
+    </ClInclude>
+    <ClInclude Include="qpack\QpackStaticTable.h">
+      <Filter>Header Files\qpack</Filter>
+    </ClInclude>
+    <ClInclude Include="qpack\QpackTypes.h">
+      <Filter>Header Files\qpack</Filter>
+    </ClInclude>
     <ClInclude Include="http2\Http2ConnectionPrivate.hpp">
       <Filter>Header Files\http2</Filter>
     </ClInclude>

@@ -47,6 +47,7 @@ struct QuicFrame final
     ULONGLONG TriggerFrameType = 0;
     bool Fin = false;
     bool Bidirectional = false;
+    bool ApplicationClose = false;
     QuicBufferView Data = {};
     QuicBufferView ConnectionId = {};
     QuicBufferView StatelessResetToken = {};

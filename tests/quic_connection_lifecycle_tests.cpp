@@ -4,12 +4,30 @@
 #include "net/WskDatagramSocketTest.h"
 #include "quic/QuicClock.h"
 #include "quic/QuicConnection.h"
+#include "quic/QuicStream.h"
 #include "quic/QuicTokenCache.h"
 #include <stdio.h>
 #include <string.h>
 namespace
 {
 bool f = false;
+
+struct StreamEventState final
+{
+    SIZE_T OpenedCount = 0;
+    ULONGLONG LastOpenedStreamId = 0;
+};
+
+void OnStreamOpened(void *context, wknet::quic::QuicStream *stream) noexcept
+{
+    auto *state = static_cast<StreamEventState *>(context);
+    if (state != nullptr && stream != nullptr)
+    {
+        ++state->OpenedCount;
+        state->LastOpenedStreamId = stream->Id();
+    }
+}
+
 void E(bool c, const char *m)
 {
     if (!c)
@@ -41,6 +59,11 @@ int main()
     E(wknet::quic::QuicConnectionCreate(o, &c) == STATUS_INSUFFICIENT_RESOURCES && c == nullptr,
       "worker start failure propagates");
     wknet::quic::QuicConnectionTestSetWorkerStartFailure(false);
+    StreamEventState streamEvents = {};
+    wknet::quic::QuicStreamApplicationEventSink streamSink = {};
+    streamSink.Context = &streamEvents;
+    streamSink.Opened = OnStreamOpened;
+    o.ApplicationEventSink = &streamSink;
     o.CommandCapacity = 2;
     o.StartWorkerSuspended = true;
     E(NT_SUCCESS(wknet::quic::QuicConnectionCreate(o, &c)), "connection and suspended worker create");
@@ -91,6 +114,16 @@ int main()
     E(NT_SUCCESS(wknet::quic::QuicConnectionOpenStream(c, &open)), "OpenStream enqueues");
     E(NT_SUCCESS(wknet::quic::QuicOperationWait(&open, 1000)) && open.StreamId == 0,
       "first client bidi stream is zero");
+    E(streamEvents.OpenedCount == 1 && streamEvents.LastOpenedStreamId == 0,
+      "connection registers the application sink on a local bidirectional stream");
+    wknet::quic::QuicOperation openUni = {};
+    wknet::quic::QuicOperationInitialize(&openUni);
+    E(NT_SUCCESS(wknet::quic::QuicConnectionOpenUnidirectionalStream(c, &openUni)),
+      "OpenUnidirectionalStream enqueues");
+    E(NT_SUCCESS(wknet::quic::QuicOperationWait(&openUni, 1000)) && openUni.StreamId == 2,
+      "first client unidirectional stream is two");
+    E(streamEvents.OpenedCount == 2 && streamEvents.LastOpenedStreamId == 2,
+      "connection registers the application sink on a local unidirectional stream");
     const UCHAR requestBytes[] = {1, 2, 3};
     wknet::quic::QuicOperation write = {};
     wknet::quic::QuicOperationInitialize(&write);
@@ -159,6 +192,8 @@ int main()
     E(NT_SUCCESS(wknet::quic::QuicOperationWait(&close, 1000)), "Close operation completes");
     E(wknet::quic::QuicConnectionStateGet(c) == wknet::quic::QuicConnectionState::Closed, "local close reaches Closed");
     E(wknet::quic::QuicConnectionOpenStream(c, &overflow) == STATUS_DEVICE_NOT_READY, "Closed rejects new stream");
+    E(wknet::quic::QuicConnectionOpenUnidirectionalStream(c, &overflow) == STATUS_DEVICE_NOT_READY,
+      "Closed rejects new unidirectional stream");
     wknet::quic::QuicConnectionDestroy(c);
 
     wknet::quic::QuicConnection *pendingConnection = nullptr;

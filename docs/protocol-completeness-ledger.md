@@ -75,7 +75,7 @@
 
 ## QUIC v1 账本
 
-当前阶段已完成 M4：QUIC v1 客户端连接、TLS over QUIC、stream、恢复、CID、Key Phase 与关闭排空已经实现并验证；HTTP/3、QPACK 与 Session 产品路径仍未对外可用。状态只能随对应实现与测试一同迁移。
+当前阶段已完成 M5：QUIC v1 客户端连接以及 HTTP/3/QPACK 低层协议已经实现并验证；Session 强制 H3、Alt-Svc 与透明 Auto 产品路径仍未对外可用。状态只能随对应实现与测试一同迁移。
 
 | 条目 | RFC 级别 | 状态 | 计划代码入口 | 计划测试入口 | 备注 |
 |------|----------|------|--------------|--------------|------|
@@ -97,11 +97,12 @@
 
 | 条目 | RFC 级别 | 状态 | 计划代码入口 | 计划测试入口 | 备注 |
 |------|----------|------|--------------|--------------|------|
-| control/QPACK 单向流、SETTINGS 首帧与唯一性 | MUST | 待补全 | `http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 未知单向流安全处理。 |
-| HEADERS/DATA、伪头、字段规则、body framing、trailers | MUST | 待补全 | `http3/Http3Frame.cpp`、`http3/Http3Request.cpp` | `tests/http3_client_tests.cpp` | 包含 1xx/HEAD/204/304/CONNECT 语义。 |
-| GOAWAY、取消和安全重试判定 | MUST | 待补全 | `http3/Http3Connection.cpp`、`session/HttpH3Dispatch.cpp` | `tests/http3_client_tests.cpp`、`tests/http_api_tests.cpp` | 请求只允许确定未发送或满足安全重放规则时重试。 |
-| QPACK integer/Huffman/static/dynamic/instruction streams | MUST | 待补全 | `src/wknetlib/qpack/` | `tests/qpack_tests.cpp` | 动态表、blocked section 与引用驱逐规则完整实现。 |
-| QPACK 与 field section 资源上限 | MUST/安全边界 | 待补全 | `qpack/QpackDynamicTable.cpp`、`qpack/QpackDecoder.cpp` | `tests/qpack_tests.cpp` | 对端 SETTINGS 不能扩大本地 NonPaged 预算。 |
+| control/QPACK 单向流、SETTINGS 首帧与唯一性 | MUST | 已实现/已验证 | `http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 关键流唯一性/关闭、未知单向流增量 drain、SETTINGS 首帧/重复/保留项均精确处理。 |
+| HEADERS/DATA、伪头、字段规则、body framing、trailers | MUST | 已实现/已验证 | `http3/Http3Frame.cpp`、`http3/Http3Request.cpp`、`http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 覆盖多 1xx、HEAD/204/304/CONNECT、Content-Length、请求/响应 trailers 与流式 DATA。 |
+| GOAWAY 低层解析、合法性、单调边界与取消 | MUST | 已实现/已验证 | `http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 输出 stream 是否落在拒绝边界；取消同时发送 RESET_STREAM/STOP_SENDING。 |
+| GOAWAY/连接失败的 Session 安全重试判定 | MUST | 待补全 | `session/HttpH3Dispatch.cpp` | `tests/http_api_tests.cpp` | M6 只允许确定未发送或满足安全重放规则的请求进入重试。 |
+| QPACK integer/Huffman/static/dynamic/instruction streams | MUST | 已实现/已验证 | `src/wknetlib/qpack/` | `tests/qpack_tests.cpp` | 动态表、absolute/relative/post-base、blocked section、双向 instruction 与引用驱逐规则完整实现。 |
+| QPACK 与 field section 资源上限 | MUST/安全边界 | 已实现/已验证 | `qpack/QpackDynamicTable.cpp`、`qpack/QpackEncoder.cpp`、`qpack/QpackDecoder.cpp` | `tests/qpack_tests.cpp`、`tests/http3_client_tests.cpp` | 对端 SETTINGS 只能降低有效预算；动态表、阻塞流、单 section/总 blocked bytes 与字段数量均受 NonPaged 硬上限约束。 |
 | server push | MAY | 安全拒绝 | `http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 不发送 `MAX_PUSH_ID`；违规 push 按 RFC 9114 精确关闭。 |
 | Extended CONNECT、WebTransport、WebSocket over H3 | MAY | 明确非目标 | N/A | 边界测试 | 普通 CONNECT 仍属于 H3 请求语义。 |
 

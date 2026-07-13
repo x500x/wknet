@@ -5,6 +5,23 @@ namespace wknet::quic
 {
 bool QuicStreamIsClientInitiated(ULONGLONG streamId) noexcept;
 bool QuicStreamIsBidirectional(ULONGLONG streamId) noexcept;
+
+class QuicStream;
+
+using QuicStreamApplicationEvent = void (*)(void *context, QuicStream *stream) noexcept;
+using QuicStreamApplicationResetEvent = void (*)(void *context, QuicStream *stream, ULONGLONG errorCode,
+                                                 bool peerInitiated) noexcept;
+
+struct QuicStreamApplicationEventSink final
+{
+    void *Context = nullptr;
+    QuicStreamApplicationEvent Opened = nullptr;
+    QuicStreamApplicationEvent Readable = nullptr;
+    QuicStreamApplicationEvent Writable = nullptr;
+    QuicStreamApplicationResetEvent Reset = nullptr;
+    QuicStreamApplicationEvent Closed = nullptr;
+};
+
 struct QuicStreamChunk final
 {
     ULONGLONG Offset = 0;
@@ -22,7 +39,8 @@ class QuicStream final
     ~QuicStream() noexcept;
     NTSTATUS Initialize(ULONGLONG streamId, SIZE_T maxReassemblyBytes = WKNET_HARD_MAX_QUIC_STREAM_REASSEMBLY_BYTES,
                         SIZE_T maxGaps = WKNET_HARD_MAX_QUIC_STREAM_GAPS) noexcept;
-    NTSTATUS Receive(ULONGLONG offset, const UCHAR *data, SIZE_T length, bool fin) noexcept;
+    NTSTATUS Receive(ULONGLONG offset, const UCHAR *data, SIZE_T length, bool fin,
+                     bool notifyApplication = true) noexcept;
     NTSTATUS Consume(UCHAR *output, SIZE_T capacity, SIZE_T *bytesConsumed, bool *fin) noexcept;
     NTSTATUS SetReceiveLimit(ULONGLONG maximum) noexcept;
     NTSTATUS SetSendLimit(ULONGLONG maximum) noexcept;
@@ -65,9 +83,20 @@ class QuicStream final
     {
         return reset_;
     }
+    void NotifyApplicationReadable() noexcept;
+    void SetApplicationEventSink(const QuicStreamApplicationEventSink *sink) noexcept;
     void Clear() noexcept;
 
   private:
+    bool HasReadableState() const noexcept;
+    bool IsClosedState() const noexcept;
+    void NotifyOpened() noexcept;
+    void RefreshReadableNotification() noexcept;
+    void NotifyWritable() noexcept;
+    void NotifyReset(ULONGLONG errorCode, bool peerInitiated) noexcept;
+    void NotifyClosed() noexcept;
+    void NotifyClosedIfNeeded() noexcept;
+
     ULONGLONG streamId_ = 0;
     ULONGLONG consumedOffset_ = 0;
     ULONGLONG finalSize_ = 0;
@@ -84,6 +113,7 @@ class QuicStream final
     SIZE_T maxGaps_ = 0;
     HeapArray<QuicStreamChunk> chunks_;
     HeapArray<UCHAR> affectedScratch_;
+    QuicStreamApplicationEventSink applicationSink_ = {};
     SIZE_T chunkCount_ = 0;
     bool initialized_ = false;
     bool finalSizeKnown_ = false;
@@ -92,5 +122,9 @@ class QuicStream final
     bool receiveReset_ = false;
     bool stopped_ = false;
     bool streamDataBlockedPending_ = false;
+    bool applicationWriteBlocked_ = false;
+    bool openedNotified_ = false;
+    bool readableNotified_ = false;
+    bool closedNotified_ = false;
 };
 } // namespace wknet::quic

@@ -149,6 +149,10 @@ NTSTATUS QuicConnection::Initialize(const QuicConnectionCreateOptions &o) noexce
     {
         return s;
     }
+    if (o.ApplicationEventSink != nullptr)
+    {
+        applicationEventSink_ = *o.ApplicationEventSink;
+    }
 
     if (o.DatagramClient != nullptr)
     {
@@ -414,8 +418,9 @@ NTSTATUS QuicConnection::Enqueue(QuicCommandType type, QuicOperation *op, ULONGL
         {
             status = STATUS_INVALID_DEVICE_STATE;
         }
-        else if (type == QuicCommandType::Close && state_ != QuicConnectionState::Connecting &&
-                 state_ != QuicConnectionState::Handshaking && state_ != QuicConnectionState::Established)
+        else if ((type == QuicCommandType::Close || type == QuicCommandType::CloseApplication) &&
+                 state_ != QuicConnectionState::Connecting && state_ != QuicConnectionState::Handshaking &&
+                 state_ != QuicConnectionState::Established)
         {
             status = STATUS_INVALID_DEVICE_STATE;
         }
@@ -428,7 +433,8 @@ NTSTATUS QuicConnection::Enqueue(QuicCommandType type, QuicOperation *op, ULONGL
             queue_[(head_ + count_) % queue_.Count()] = command;
             ++count_;
             connectQueued_ = type == QuicCommandType::Connect ? true : connectQueued_;
-            closeQueued_ = type == QuicCommandType::Close ? true : closeQueued_;
+            closeQueued_ =
+                type == QuicCommandType::Close || type == QuicCommandType::CloseApplication ? true : closeQueued_;
         }
     }
 #else
@@ -444,8 +450,9 @@ NTSTATUS QuicConnection::Enqueue(QuicCommandType type, QuicOperation *op, ULONGL
     {
         status = STATUS_INVALID_DEVICE_STATE;
     }
-    else if (type == QuicCommandType::Close && state_ != QuicConnectionState::Connecting &&
-             state_ != QuicConnectionState::Handshaking && state_ != QuicConnectionState::Established)
+    else if ((type == QuicCommandType::Close || type == QuicCommandType::CloseApplication) &&
+             state_ != QuicConnectionState::Connecting && state_ != QuicConnectionState::Handshaking &&
+             state_ != QuicConnectionState::Established)
     {
         status = STATUS_INVALID_DEVICE_STATE;
     }
@@ -458,7 +465,8 @@ NTSTATUS QuicConnection::Enqueue(QuicCommandType type, QuicOperation *op, ULONGL
         queue_[(head_ + count_) % queue_.Count()] = command;
         ++count_;
         connectQueued_ = type == QuicCommandType::Connect ? true : connectQueued_;
-        closeQueued_ = type == QuicCommandType::Close ? true : closeQueued_;
+        closeQueued_ =
+            type == QuicCommandType::Close || type == QuicCommandType::CloseApplication ? true : closeQueued_;
     }
     KeReleaseSpinLock(&lock_, irql);
 #endif
@@ -602,6 +610,7 @@ NTSTATUS QuicConnection::CreateStream(ULONGLONG streamId, QuicStream **stream) n
 
     streams_[streamCount_++] = created;
     *stream = created;
+    created->SetApplicationEventSink(&applicationEventSink_);
     return STATUS_SUCCESS;
 }
 
@@ -1032,7 +1041,7 @@ NTSTATUS QuicConnection::SendProbe(QuicPacketNumberSpace space) noexcept
     return STATUS_NOT_FOUND;
 }
 
-NTSTATUS QuicConnection::EnterClosing(ULONGLONG errorCode, bool sendCloseFrame) noexcept
+NTSTATUS QuicConnection::EnterClosing(ULONGLONG errorCode, bool sendCloseFrame, bool applicationError) noexcept
 {
 #if defined(WKNET_USER_MODE_TEST)
     {
@@ -1053,6 +1062,7 @@ NTSTATUS QuicConnection::EnterClosing(ULONGLONG errorCode, bool sendCloseFrame) 
         QuicFrame close = {};
         close.Kind = QuicFrameKind::ConnectionClose;
         close.ErrorCode = errorCode;
+        close.ApplicationClose = applicationError;
         if (applicationKeysInstalled_)
         {
             closeSpace = QuicPacketNumberSpace::Application;
@@ -1268,6 +1278,186 @@ NTSTATUS QuicConnection::SendStreamFrame(QuicStream &stream, const UCHAR *data, 
     return status;
 }
 
+NTSTATUS QuicConnection::ApplicationOpenBidirectionalStream(QuicStream **stream) noexcept
+{
+    if (stream != nullptr)
+    {
+        *stream = nullptr;
+    }
+    if (stream == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (!IsWorkerThread())
+    {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+    if (state_ != QuicConnectionState::Established)
+    {
+        return STATUS_DEVICE_NOT_READY;
+    }
+    NTSTATUS status = CreateStream(nextBidiStreamId_, stream);
+    if (NT_SUCCESS(status))
+    {
+        nextBidiStreamId_ += 4;
+        WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.stream.open stream_id=%I64u", (*stream)->Id());
+    }
+    return status;
+}
+
+NTSTATUS QuicConnection::ApplicationOpenUnidirectionalStream(QuicStream **stream) noexcept
+{
+    if (stream != nullptr)
+    {
+        *stream = nullptr;
+    }
+    if (stream == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (!IsWorkerThread())
+    {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+    if (state_ != QuicConnectionState::Established)
+    {
+        return STATUS_DEVICE_NOT_READY;
+    }
+    NTSTATUS status = CreateStream(nextUniStreamId_, stream);
+    if (NT_SUCCESS(status))
+    {
+        nextUniStreamId_ += 4;
+        WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.stream.open stream_id=%I64u", (*stream)->Id());
+    }
+    return status;
+}
+
+NTSTATUS QuicConnection::ApplicationWriteStream(ULONGLONG streamId, const UCHAR *data, SIZE_T dataLength, bool fin,
+                                                SIZE_T *bytesWritten) noexcept
+{
+    if (bytesWritten != nullptr)
+    {
+        *bytesWritten = 0;
+    }
+    if (!IsWorkerThread() || bytesWritten == nullptr || (data == nullptr && dataLength != 0))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    QuicStream *stream = FindStream(streamId);
+    if (stream == nullptr)
+    {
+        return STATUS_NOT_FOUND;
+    }
+
+    SIZE_T offset = 0;
+    while (offset < dataLength)
+    {
+        const SIZE_T remaining = dataLength - offset;
+        const SIZE_T chunkLength = remaining > 1024 ? 1024 : remaining;
+        const bool chunkFin = fin && chunkLength == remaining;
+        const NTSTATUS status = SendStreamFrame(*stream, data + offset, chunkLength, chunkFin);
+        if (!NT_SUCCESS(status))
+        {
+            *bytesWritten = offset;
+            return status;
+        }
+        offset += chunkLength;
+    }
+    NTSTATUS status = STATUS_SUCCESS;
+    if (dataLength == 0 && fin)
+    {
+        status = SendStreamFrame(*stream, nullptr, 0, true);
+    }
+    *bytesWritten = offset;
+    return status;
+}
+
+NTSTATUS QuicConnection::ApplicationConsumeStream(ULONGLONG streamId, UCHAR *output, SIZE_T capacity,
+                                                  SIZE_T *bytesConsumed, bool *fin) noexcept
+{
+    if (bytesConsumed != nullptr)
+    {
+        *bytesConsumed = 0;
+    }
+    if (fin != nullptr)
+    {
+        *fin = false;
+    }
+    if (!IsWorkerThread() || bytesConsumed == nullptr || fin == nullptr || (output == nullptr && capacity != 0))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    QuicStream *stream = FindStream(streamId);
+    if (stream == nullptr)
+    {
+        return STATUS_NOT_FOUND;
+    }
+    NTSTATUS status = stream->Consume(output, capacity, bytesConsumed, fin);
+    if (NT_SUCCESS(status) && *bytesConsumed != 0)
+    {
+        status = flowControl_.OnStreamConsumed(*bytesConsumed);
+    }
+    return status;
+}
+
+NTSTATUS QuicConnection::ApplicationResetStream(ULONGLONG streamId, ULONGLONG applicationError) noexcept
+{
+    if (!IsWorkerThread() || applicationError > QuicVarIntMaximum)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    QuicStream *stream = FindStream(streamId);
+    if (stream == nullptr)
+    {
+        return STATUS_NOT_FOUND;
+    }
+    NTSTATUS status = STATUS_SUCCESS;
+    if (networkEnabled_)
+    {
+        QuicFrame frame = {};
+        frame.Kind = QuicFrameKind::ResetStream;
+        frame.StreamId = streamId;
+        frame.ErrorCode = applicationError;
+        frame.FinalSize = stream->SendOffset();
+        status = SendFramePacket(QuicPacketType::OneRtt, QuicPacketNumberSpace::Application, applicationWriteKey_,
+                                 frame, nullptr, 0, false, true);
+    }
+    return NT_SUCCESS(status) ? stream->Reset(applicationError, stream->SendOffset()) : status;
+}
+
+NTSTATUS QuicConnection::ApplicationStopSending(ULONGLONG streamId, ULONGLONG applicationError) noexcept
+{
+    if (!IsWorkerThread() || applicationError > QuicVarIntMaximum)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    QuicStream *stream = FindStream(streamId);
+    if (stream == nullptr)
+    {
+        return STATUS_NOT_FOUND;
+    }
+    NTSTATUS status = STATUS_SUCCESS;
+    if (networkEnabled_)
+    {
+        QuicFrame frame = {};
+        frame.Kind = QuicFrameKind::StopSending;
+        frame.StreamId = streamId;
+        frame.ErrorCode = applicationError;
+        status = SendFramePacket(QuicPacketType::OneRtt, QuicPacketNumberSpace::Application, applicationWriteKey_,
+                                 frame, nullptr, 0, false, true);
+    }
+    return NT_SUCCESS(status) ? stream->StopSending(applicationError) : status;
+}
+
+NTSTATUS QuicConnection::ApplicationClose(ULONGLONG applicationError) noexcept
+{
+    if (!IsWorkerThread() || applicationError > QuicVarIntMaximum)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    return EnterClosing(applicationError, true, true);
+}
+
 void QuicConnection::Process(QuicCommand *c) noexcept
 {
     NTSTATUS s = STATUS_SUCCESS;
@@ -1342,8 +1532,10 @@ void QuicConnection::Process(QuicCommand *c) noexcept
             WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.established");
         }
     }
-    else if (c->Type == QuicCommandType::OpenStream)
+    else if (c->Type == QuicCommandType::OpenBidirectionalStream ||
+             c->Type == QuicCommandType::OpenUnidirectionalStream)
     {
+        const bool bidirectional = c->Type == QuicCommandType::OpenBidirectionalStream;
 #if defined(WKNET_USER_MODE_TEST)
         {
             std::lock_guard<std::mutex> guard(lock_);
@@ -1353,7 +1545,7 @@ void QuicConnection::Process(QuicCommand *c) noexcept
             }
             else
             {
-                stream = nextBidiStreamId_;
+                stream = bidirectional ? nextBidiStreamId_ : nextUniStreamId_;
             }
         }
 #else
@@ -1365,7 +1557,7 @@ void QuicConnection::Process(QuicCommand *c) noexcept
         }
         else
         {
-            stream = nextBidiStreamId_;
+            stream = bidirectional ? nextBidiStreamId_ : nextUniStreamId_;
         }
         KeReleaseSpinLock(&lock_, irql);
 #endif
@@ -1376,7 +1568,14 @@ void QuicConnection::Process(QuicCommand *c) noexcept
         }
         if (NT_SUCCESS(s))
         {
-            nextBidiStreamId_ += 4;
+            if (bidirectional)
+            {
+                nextBidiStreamId_ += 4;
+            }
+            else
+            {
+                nextUniStreamId_ += 4;
+            }
             WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.stream.open stream_id=%I64u", stream);
         }
     }
@@ -1496,7 +1695,7 @@ void QuicConnection::Process(QuicCommand *c) noexcept
     {
         s = DispatchFrame(c->Level, c->Space, c->Frame);
     }
-    else if (c->Type == QuicCommandType::Close)
+    else if (c->Type == QuicCommandType::Close || c->Type == QuicCommandType::CloseApplication)
     {
 #if defined(WKNET_USER_MODE_TEST)
         {
@@ -1511,7 +1710,8 @@ void QuicConnection::Process(QuicCommand *c) noexcept
 #endif
         if (networkEnabled_)
         {
-            s = EnterClosing(0, true);
+            const bool applicationError = c->Type == QuicCommandType::CloseApplication;
+            s = EnterClosing(applicationError ? c->ErrorCode : 0, true, applicationError);
         }
         else
         {
@@ -2492,10 +2692,14 @@ NTSTATUS QuicConnection::DispatchFrame(QuicEncryptionLevel level, QuicPacketNumb
             WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.stream.open stream_id=%I64u", frame.StreamId);
         }
         const ULONGLONG previousMaximumOffset = stream->ReceiveFlowControlBytes();
-        NTSTATUS status = stream->Receive(frame.Offset, frame.Data.Data, frame.Data.Length, frame.Fin);
+        NTSTATUS status = stream->Receive(frame.Offset, frame.Data.Data, frame.Data.Length, frame.Fin, false);
         if (NT_SUCCESS(status))
         {
             status = flowControl_.OnStreamReceiveProgress(previousMaximumOffset, stream->ReceiveFlowControlBytes());
+        }
+        if (NT_SUCCESS(status))
+        {
+            stream->NotifyApplicationReadable();
         }
         return status;
     }
@@ -2888,7 +3092,11 @@ NTSTATUS QuicConnectionConnect(QuicConnection *c, QuicOperation *o) noexcept
 }
 NTSTATUS QuicConnectionOpenStream(QuicConnection *c, QuicOperation *o) noexcept
 {
-    return c != nullptr ? c->Enqueue(QuicCommandType::OpenStream, o) : STATUS_INVALID_PARAMETER;
+    return c != nullptr ? c->Enqueue(QuicCommandType::OpenBidirectionalStream, o) : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionOpenUnidirectionalStream(QuicConnection *c, QuicOperation *o) noexcept
+{
+    return c != nullptr ? c->Enqueue(QuicCommandType::OpenUnidirectionalStream, o) : STATUS_INVALID_PARAMETER;
 }
 NTSTATUS QuicConnectionWriteStream(QuicConnection *c, ULONGLONG streamId, const UCHAR *data, SIZE_T dataLength,
                                    bool fin, QuicOperation *o) noexcept
@@ -2917,6 +3125,80 @@ NTSTATUS QuicConnectionStopSending(QuicConnection *c, ULONGLONG streamId, ULONGL
 NTSTATUS QuicConnectionCloseAsync(QuicConnection *c, QuicOperation *o) noexcept
 {
     return c != nullptr ? c->Enqueue(QuicCommandType::Close, o) : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionCloseApplicationAsync(QuicConnection *c, ULONGLONG applicationError, QuicOperation *o) noexcept
+{
+    return c != nullptr
+               ? c->Enqueue(QuicCommandType::CloseApplication, o, 0, nullptr, 0, nullptr, false, applicationError)
+               : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionApplicationWriteStream(QuicConnection *c, ULONGLONG streamId, const UCHAR *data,
+                                              SIZE_T dataLength, bool fin, SIZE_T *bytesWritten) noexcept
+{
+    return c != nullptr ? c->ApplicationWriteStream(streamId, data, dataLength, fin, bytesWritten)
+                        : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionApplicationConsumeStream(QuicConnection *c, ULONGLONG streamId, UCHAR *output, SIZE_T capacity,
+                                                SIZE_T *bytesConsumed, bool *fin) noexcept
+{
+    return c != nullptr ? c->ApplicationConsumeStream(streamId, output, capacity, bytesConsumed, fin)
+                        : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionApplicationResetStream(QuicConnection *c, ULONGLONG streamId,
+                                              ULONGLONG applicationError) noexcept
+{
+    return c != nullptr ? c->ApplicationResetStream(streamId, applicationError) : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionApplicationStopSending(QuicConnection *c, ULONGLONG streamId,
+                                              ULONGLONG applicationError) noexcept
+{
+    return c != nullptr ? c->ApplicationStopSending(streamId, applicationError) : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionApplicationClose(QuicConnection *c, ULONGLONG applicationError) noexcept
+{
+    return c != nullptr ? c->ApplicationClose(applicationError) : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionWorkerOpenUnidirectionalStream(QuicConnection *c, QuicStream **stream) noexcept
+{
+    return c != nullptr ? c->ApplicationOpenUnidirectionalStream(stream) : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionWorkerOpenBidirectionalStream(QuicConnection *c, QuicStream **stream) noexcept
+{
+    return c != nullptr ? c->ApplicationOpenBidirectionalStream(stream) : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionWorkerConsumeStream(QuicConnection *c, QuicStream *stream, UCHAR *output, SIZE_T capacity,
+                                           SIZE_T *bytesConsumed, bool *fin) noexcept
+{
+    if (c == nullptr || stream == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    return c->ApplicationConsumeStream(stream->Id(), output, capacity, bytesConsumed, fin);
+}
+NTSTATUS QuicConnectionWorkerWriteStream(QuicConnection *c, QuicStream *stream, const UCHAR *data, SIZE_T length,
+                                         bool fin, SIZE_T *bytesWritten) noexcept
+{
+    if (c == nullptr || stream == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    SIZE_T localBytesWritten = 0;
+    SIZE_T *result = bytesWritten != nullptr ? bytesWritten : &localBytesWritten;
+    return c->ApplicationWriteStream(stream->Id(), data, length, fin, result);
+}
+NTSTATUS QuicConnectionWorkerResetStream(QuicConnection *c, QuicStream *stream, ULONGLONG applicationError) noexcept
+{
+    return c != nullptr && stream != nullptr ? c->ApplicationResetStream(stream->Id(), applicationError)
+                                             : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionWorkerStopSending(QuicConnection *c, QuicStream *stream, ULONGLONG applicationError) noexcept
+{
+    return c != nullptr && stream != nullptr ? c->ApplicationStopSending(stream->Id(), applicationError)
+                                             : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionWorkerCloseApplication(QuicConnection *c, ULONGLONG applicationError) noexcept
+{
+    return c != nullptr ? c->ApplicationClose(applicationError) : STATUS_INVALID_PARAMETER;
 }
 QuicConnectionState QuicConnectionStateGet(const QuicConnection *c) noexcept
 {

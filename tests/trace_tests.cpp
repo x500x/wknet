@@ -9,6 +9,8 @@
 #include "quic/QuicAttemptValidation.h"
 #include "quic/QuicCrypto.h"
 #include "quic/QuicPacket.h"
+#include "qpack/QpackDecoder.h"
+#include "qpack/QpackDynamicTable.h"
 #include "rtl/TraceInternal.h"
 #include "session/Async.h"
 #include "session/HandleTypes.h"
@@ -376,6 +378,62 @@ namespace
             "Retry trace does not expose token fields");
         wknet::TraceSetComponents(wknet::ComponentAll);
     }
+
+    void TestQpackTraceEvents() noexcept
+    {
+        wknet::TraceSetSink(CaptureTrace, nullptr);
+        wknet::TraceSetComponents(wknet::ComponentHttp3);
+        wknet::TraceSetLevel(wknet::TraceLevel::Max);
+
+        wknet::qpack::QpackDynamicTable table;
+        Expect(NT_SUCCESS(table.Initialize(128, 128)), "QPACK trace table initializes");
+        const UCHAR name[] = "authorization";
+        const UCHAR value[] = "Bearer-secret";
+        ResetCapture();
+        Expect(NT_SUCCESS(table.Insert(name, sizeof(name) - 1, value, sizeof(value) - 1)),
+            "QPACK trace table insert succeeds");
+        Expect(g_lastComponent == wknet::ComponentHttp3 &&
+            g_lastLevel == wknet::TraceLevel::Verbose &&
+            strstr(g_lastMessage, "qpack.dynamic_table.updated") != nullptr,
+            "QPACK dynamic table emits the frozen update event");
+        Expect(strstr(g_lastMessage, "authorization") == nullptr &&
+            strstr(g_lastMessage, "Bearer-secret") == nullptr,
+            "QPACK dynamic table trace omits field names and values");
+
+        wknet::qpack::QpackDecoder decoder;
+        Expect(NT_SUCCESS(decoder.Initialize(128, 1, 128, 4)), "QPACK trace decoder initializes");
+        const UCHAR invalidSection[] = { 0xff };
+        wknet::qpack::QpackFieldView fields[1] = {};
+        UCHAR fieldBuffer[128] = {};
+        UCHAR instruction[16] = {};
+        SIZE_T fieldCount = 0;
+        SIZE_T fieldBufferUsed = 0;
+        SIZE_T instructionLength = 0;
+        ULONGLONG applicationError = 0;
+        ResetCapture();
+        Expect(decoder.DecodeFieldSection(
+            4,
+            invalidSection,
+            sizeof(invalidSection),
+            fields,
+            sizeof(fields) / sizeof(fields[0]),
+            &fieldCount,
+            fieldBuffer,
+            sizeof(fieldBuffer),
+            &fieldBufferUsed,
+            instruction,
+            sizeof(instruction),
+            &instructionLength,
+            &applicationError) == STATUS_INVALID_NETWORK_RESPONSE,
+            "malformed QPACK field section is rejected");
+        Expect(g_lastComponent == wknet::ComponentHttp3 &&
+            g_lastLevel == wknet::TraceLevel::Error &&
+            strstr(g_lastMessage, "qpack.decode.failed") != nullptr,
+            "QPACK decode failure emits the frozen failure event");
+        Expect(strstr(g_lastMessage, "Bearer-secret") == nullptr,
+            "QPACK failure trace omits field values");
+        wknet::TraceSetComponents(wknet::ComponentAll);
+    }
 }
 
 int main()
@@ -483,6 +541,7 @@ int main()
 
     TestBusinessEventCoverage();
     TestQuicAttemptTraceEvents();
+    TestQpackTraceEvents();
 
     Expect(wknet::TraceGetLevel() == wknet::TraceLevel::Max, "trace level getter reports Max");
     Expect(wknet::TraceGetComponents() == wknet::ComponentAll, "component getter reports the active mask");

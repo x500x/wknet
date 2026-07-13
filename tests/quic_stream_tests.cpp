@@ -8,6 +8,56 @@
 namespace
 {
 bool f = false;
+
+struct StreamEventCapture final
+{
+    ULONG Opened = 0;
+    ULONG Readable = 0;
+    ULONG Writable = 0;
+    ULONG Reset = 0;
+    ULONG Closed = 0;
+    ULONGLONG LastStreamId = 0;
+    ULONGLONG LastResetError = 0;
+    bool LastResetPeerInitiated = false;
+};
+
+void OnStreamOpened(void *context, wknet::quic::QuicStream *stream) noexcept
+{
+    StreamEventCapture *capture = static_cast<StreamEventCapture *>(context);
+    ++capture->Opened;
+    capture->LastStreamId = stream->Id();
+}
+
+void OnStreamReadable(void *context, wknet::quic::QuicStream *stream) noexcept
+{
+    StreamEventCapture *capture = static_cast<StreamEventCapture *>(context);
+    ++capture->Readable;
+    capture->LastStreamId = stream->Id();
+}
+
+void OnStreamWritable(void *context, wknet::quic::QuicStream *stream) noexcept
+{
+    StreamEventCapture *capture = static_cast<StreamEventCapture *>(context);
+    ++capture->Writable;
+    capture->LastStreamId = stream->Id();
+}
+
+void OnStreamReset(void *context, wknet::quic::QuicStream *stream, ULONGLONG errorCode, bool peerInitiated) noexcept
+{
+    StreamEventCapture *capture = static_cast<StreamEventCapture *>(context);
+    ++capture->Reset;
+    capture->LastStreamId = stream->Id();
+    capture->LastResetError = errorCode;
+    capture->LastResetPeerInitiated = peerInitiated;
+}
+
+void OnStreamClosed(void *context, wknet::quic::QuicStream *stream) noexcept
+{
+    StreamEventCapture *capture = static_cast<StreamEventCapture *>(context);
+    ++capture->Closed;
+    capture->LastStreamId = stream->Id();
+}
+
 void E(bool c, const char *m)
 {
     if (!c)
@@ -112,6 +162,69 @@ int main()
       "connection consumption ledger advances independently");
     E(NT_SUCCESS(s.StopSending(42)), "STOP_SENDING recorded");
     E(NT_SUCCESS(s.Reset(7, 6)), "RESET_STREAM recorded");
+
+    StreamEventCapture eventCapture = {};
+    const wknet::quic::QuicStreamApplicationEventSink eventSink = {
+        &eventCapture, OnStreamOpened, OnStreamReadable, OnStreamWritable, OnStreamReset, OnStreamClosed,
+    };
+    wknet::quic::QuicStream eventStream;
+    E(NT_SUCCESS(eventStream.Initialize(1)), "event stream initializes");
+    eventStream.SetApplicationEventSink(&eventSink);
+    E(eventCapture.Opened == 1 && eventCapture.LastStreamId == 1,
+      "registering a sink on an initialized stream reports opened once");
+    E(NT_SUCCESS(eventStream.Receive(1, five, 1, false)) && eventCapture.Readable == 0,
+      "out-of-order data does not report readable");
+    E(NT_SUCCESS(eventStream.Receive(0, five, 1, false)) && eventCapture.Readable == 1,
+      "new contiguous data reports readable");
+    E(NT_SUCCESS(eventStream.Receive(0, five, 1, false)) && eventCapture.Readable == 1,
+      "readable remains edge-triggered while data is pending");
+    E(NT_SUCCESS(eventStream.Consume(out, sizeof(out), &consumed, &fin)) && consumed == 2 && !fin,
+      "event stream consumes the readable edge");
+    E(NT_SUCCESS(eventStream.Receive(2, nullptr, 0, true)) && eventCapture.Readable == 2,
+      "FIN-only receive reports a new readable edge");
+    E(NT_SUCCESS(eventStream.Consume(out, sizeof(out), &consumed, &fin)) && consumed == 0 && fin,
+      "FIN-only readable edge can be consumed");
+    E(NT_SUCCESS(eventStream.SetSendLimit(1)), "event stream send limit sets");
+    E(NT_SUCCESS(eventStream.Write(five, 1, false, &accepted)), "event stream consumes send credit");
+    E(eventStream.Write(five, 1, false, &accepted) == STATUS_DEVICE_BUSY, "event stream records a blocked write");
+    E(eventStream.TakeStreamDataBlocked(&blockedLimit) && blockedLimit == 1,
+      "wire STREAM_DATA_BLOCKED state is consumed independently");
+    E(NT_SUCCESS(eventStream.OnMaxStreamData(2)) && eventCapture.Writable == 1,
+      "MAX_STREAM_DATA reports writable after wire blocked state is consumed");
+    E(NT_SUCCESS(eventStream.OnMaxStreamData(3)) && eventCapture.Writable == 1,
+      "writable is not duplicated without another blocked write");
+
+    StreamEventCapture resetCapture = {};
+    const wknet::quic::QuicStreamApplicationEventSink resetSink = {
+        &resetCapture, OnStreamOpened, OnStreamReadable, OnStreamWritable, OnStreamReset, OnStreamClosed,
+    };
+    wknet::quic::QuicStream resetStream;
+    E(NT_SUCCESS(resetStream.Initialize(0)), "reset event stream initializes");
+    resetStream.SetApplicationEventSink(&resetSink);
+    E(NT_SUCCESS(resetStream.Reset(11, 0)) && resetCapture.Reset == 1 && resetCapture.LastResetError == 11 &&
+          !resetCapture.LastResetPeerInitiated,
+      "local reset reports reset metadata once");
+    E(NT_SUCCESS(resetStream.Reset(11, 0)) && resetCapture.Reset == 1,
+      "duplicate local reset does not duplicate the event");
+    E(NT_SUCCESS(resetStream.OnResetReceived(12, 0)) && resetCapture.Reset == 2 && resetCapture.LastResetError == 12 &&
+          resetCapture.LastResetPeerInitiated && resetCapture.Closed == 1,
+      "peer reset reports metadata and closes a bidirectional stream");
+    E(NT_SUCCESS(resetStream.OnResetReceived(12, 0)) && resetCapture.Reset == 2 && resetCapture.Closed == 1,
+      "duplicate peer reset does not duplicate reset or closed events");
+    resetStream.Clear();
+    E(resetCapture.Closed == 1, "clear does not duplicate an already closed event");
+
+    StreamEventCapture detachedCapture = {};
+    const wknet::quic::QuicStreamApplicationEventSink detachedSink = {
+        &detachedCapture, OnStreamOpened, OnStreamReadable, OnStreamWritable, OnStreamReset, OnStreamClosed,
+    };
+    wknet::quic::QuicStream detachedStream;
+    E(NT_SUCCESS(detachedStream.Initialize(1)), "detached event stream initializes");
+    detachedStream.SetApplicationEventSink(&detachedSink);
+    detachedStream.SetApplicationEventSink(nullptr);
+    E(NT_SUCCESS(detachedStream.Receive(0, five, 1, true)) && detachedCapture.Opened == 1 &&
+          detachedCapture.Readable == 0 && detachedCapture.Closed == 0,
+      "detached sink receives no later stream events");
     if (f)
     {
         printf("QUIC STREAM TESTS FAILED\n");

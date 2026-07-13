@@ -55,6 +55,17 @@ int main()
     P(response, sizeof(response), wknet::quic::QuicFrameKind::PathResponse, "PATH_RESPONSE");
     P(closeT, sizeof(closeT), wknet::quic::QuicFrameKind::ConnectionClose, "transport close");
     P(closeA, sizeof(closeA), wknet::quic::QuicFrameKind::ConnectionClose, "application close");
+    wknet::quic::QuicFrame applicationClose = {};
+    SIZE_T closeConsumed = 0;
+    E(NT_SUCCESS(wknet::quic::QuicParseFrame(closeA, sizeof(closeA), &applicationClose, &closeConsumed)) &&
+          applicationClose.ApplicationClose && applicationClose.ErrorCode == 1,
+      "application close retains its wire type");
+    UCHAR applicationCloseEncoded[16] = {};
+    SIZE_T applicationCloseLength = 0;
+    E(NT_SUCCESS(wknet::quic::QuicEncodeFrame(applicationClose, nullptr, 0, applicationCloseEncoded,
+                                              sizeof(applicationCloseEncoded), &applicationCloseLength)) &&
+          applicationCloseLength == sizeof(closeA) && memcmp(applicationCloseEncoded, closeA, sizeof(closeA)) == 0,
+      "application close re-encodes as 0x1d");
     P(done, sizeof(done), wknet::quic::QuicFrameKind::HandshakeDone, "HANDSHAKE_DONE");
     const UCHAR badCrypto[] = {0x06, 0, 4, 1};
     wknet::quic::QuicFrame f = {};
