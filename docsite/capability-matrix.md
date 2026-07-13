@@ -106,7 +106,7 @@
 | HTTP/2 复杂本地 priority tree 调度 | 非目标；不维护本地依赖树，不实现带宽调度器 |
 | 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；不协商其它扩展 |
 | 在线 OCSP/CRL 抓取 | 非目标；调用方通过外部 trust/cert/revocation 数据或已缓存条目驱动强撤销判定 |
-| HTTP/3 / QUIC | 非目标 |
+| HTTP/3 / QUIC | 规划中；QUIC v1/HTTP/3/QPACK 正按 M0–M9 实施，当前 `Auto` 仍关闭，不能视为已提供能力 |
 
 ### 实现策略和信任模型
 
