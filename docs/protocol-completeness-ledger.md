@@ -75,7 +75,7 @@
 
 ## QUIC v1 账本
 
-当前阶段已完成 M5：QUIC v1 客户端连接以及 HTTP/3/QPACK 低层协议已经实现并验证；Session 强制 H3、Alt-Svc 与透明 Auto 产品路径仍未对外可用。状态只能随对应实现与测试一同迁移。
+当前阶段已完成 M6：QUIC v1、HTTP/3/QPACK 低层协议与 Session 强制 H3 产品路径已经实现并验证；Alt-Svc 与透明 Auto 产品路径仍未启用。状态只能随对应实现与测试一同迁移。
 
 | 条目 | RFC 级别 | 状态 | 计划代码入口 | 计划测试入口 | 备注 |
 |------|----------|------|--------------|--------------|------|
@@ -100,7 +100,7 @@
 | control/QPACK 单向流、SETTINGS 首帧与唯一性 | MUST | 已实现/已验证 | `http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 关键流唯一性/关闭、未知单向流增量 drain、SETTINGS 首帧/重复/保留项均精确处理。 |
 | HEADERS/DATA、伪头、字段规则、body framing、trailers | MUST | 已实现/已验证 | `http3/Http3Frame.cpp`、`http3/Http3Request.cpp`、`http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 覆盖多 1xx、HEAD/204/304/CONNECT、Content-Length、请求/响应 trailers 与流式 DATA。 |
 | GOAWAY 低层解析、合法性、单调边界与取消 | MUST | 已实现/已验证 | `http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 输出 stream 是否落在拒绝边界；取消同时发送 RESET_STREAM/STOP_SENDING。 |
-| GOAWAY/连接失败的 Session 安全重试判定 | MUST | 待补全 | `session/HttpH3Dispatch.cpp` | `tests/http_api_tests.cpp` | M6 只允许确定未发送或满足安全重放规则的请求进入重试。 |
+| GOAWAY/连接失败的 Session 安全重试判定 | MUST | 已实现/已验证 | `session/HttpH3Dispatch.cpp`、`session/HttpSend.cpp` | `tests/high_level_api_tests.cpp` | 只允许确定未发送，或 GOAWAY 明确拒绝且方法/响应/body rewind 均满足安全规则的请求串行重试一次；Required 不进入 TCP。 |
 | QPACK integer/Huffman/static/dynamic/instruction streams | MUST | 已实现/已验证 | `src/wknetlib/qpack/` | `tests/qpack_tests.cpp` | 动态表、absolute/relative/post-base、blocked section、双向 instruction 与引用驱逐规则完整实现。 |
 | QPACK 与 field section 资源上限 | MUST/安全边界 | 已实现/已验证 | `qpack/QpackDynamicTable.cpp`、`qpack/QpackEncoder.cpp`、`qpack/QpackDecoder.cpp` | `tests/qpack_tests.cpp`、`tests/http3_client_tests.cpp` | 对端 SETTINGS 只能降低有效预算；动态表、阻塞流、单 section/总 blocked bytes 与字段数量均受 NonPaged 硬上限约束。 |
 | server push | MAY | 安全拒绝 | `http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 不发送 `MAX_PUSH_ID`；违规 push 按 RFC 9114 精确关闭。 |
@@ -110,10 +110,10 @@
 
 | 条目 | 状态 | 计划代码入口 | 门禁 |
 |------|------|--------------|------|
-| `Http3ConnectMode::Required` 强制 H3 | 待补全 | `session/HttpH3Dispatch.cpp` | M6 强制路径测试通过。 |
+| `Http3ConnectMode::Required` 强制 H3 | 已实现/已验证 | `session/HttpH3Dispatch.cpp`、`session/HttpH3Peer.cpp`、`session/HttpSend.cpp`、`session/ConnectionPool.cpp` | `tests/high_level_api_tests.cpp` 覆盖唯一 H3 dispatch、响应映射、GOAWAY 安全重试与取消；`tests/http_api_tests.cpp` 覆盖配置冲突和 QUIC pool lease/GOAWAY 生命周期。 |
 | Alt-Svc 严格 parser/cache 与 origin identity | 待补全 | `session/AltSvcCache.cpp` | M8 身份、过期、broken 分类测试通过。 |
 | QUIC/TCP 延迟竞速且请求唯一发送 | 待补全 | `session/HttpRoute.cpp`、`session/HttpSend.cpp` | M8 UDP 黑洞与非幂等请求测试通过。 |
-| `Http3ConnectMode::Auto` | 默认关闭 | `session/EngineValidation.cpp`、`session/HttpRoute.cpp` | 只有 M9 全部门禁通过后才真实启用。 |
+| `Http3ConnectMode::Auto` | 默认关闭 | `session/EngineValidation.cpp`、`session/HttpSend.cpp` | M6 继续 normalize 为 Disabled；只有 M9 全部门禁通过后才真实启用。 |
 
 ## TLS 1.2/1.3 账本
 

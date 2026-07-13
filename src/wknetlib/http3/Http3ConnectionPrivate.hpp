@@ -97,6 +97,9 @@ class Http3Connection final
     NTSTATUS WriteRequestData(ULONGLONG streamId, const UCHAR *data, SIZE_T length, bool fin) noexcept;
     NTSTATUS WriteRequestTrailers(ULONGLONG streamId, const qpack::QpackFieldView *fields, SIZE_T fieldCount) noexcept;
     NTSTATUS CancelRequest(ULONGLONG streamId, ULONGLONG applicationError) noexcept;
+#if defined(WKNET_USER_MODE_TEST)
+    NTSTATUS TestApplyPeerSettings(SIZE_T qpackMaximumCapacity, ULONG qpackBlockedStreams) noexcept;
+#endif
 
   private:
     static void OnStreamOpened(void *context, quic::QuicStream *stream) noexcept;

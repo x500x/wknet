@@ -28,6 +28,16 @@ namespace
         apiOptions.Http2KeepAlive.AckTimeoutMilliseconds =
             config != nullptr ? config->Http2KeepAlive.AckTimeoutMs : DefaultHttp2KeepAliveAckTimeoutMs;
 
+        const Http3Config http3 = config != nullptr ? config->Http3 : Http3Config{};
+        apiOptions.Http3.Mode = http3.Mode == Http3ConnectMode::Auto
+                                    ? ::wknet::session::Http3ConnectMode::Disabled
+                                    : static_cast<::wknet::session::Http3ConnectMode>(http3.Mode);
+        apiOptions.Http3.Race = static_cast<::wknet::session::Http3RaceMode>(http3.Race);
+        apiOptions.Http3.RaceWindowMilliseconds = http3.RaceWindowMs;
+        apiOptions.Http3.QuicProbeTimeoutMilliseconds = http3.QuicProbeTimeoutMs;
+        apiOptions.Http3.AltSvcMaxEntries = http3.AltSvcMaxEntries;
+        apiOptions.Http3.AltSvcMaxAgeSeconds = http3.AltSvcMaxAgeSec;
+
         TlsConfig tls = {};
         if (config != nullptr) {
             tls = config->Tls;
@@ -109,12 +119,22 @@ NTSTATUS SessionCreate(const SessionConfig* config, Session** session) noexcept
         return STATUS_INVALID_PARAMETER;
     }
 
+    ::wknet::session::SessionOptions apiOptions = {};
+    FillApiSessionOptions(config, apiOptions);
+    ::wknet::session::Http3ConnectMode effectiveHttp3Mode = ::wknet::session::Http3ConnectMode::Disabled;
+    NTSTATUS status = ::wknet::session::ResolveHttp3ConnectMode(
+        apiOptions.Http3, apiOptions.Tls, apiOptions.Proxy.Enabled, nullptr, true, false, &effectiveHttp3Mode);
+    if (!NT_SUCCESS(status))
+    {
+        return status;
+    }
+
     auto* highSession = ::wknet::AllocateNonPagedObject<Session>();
     if (highSession == nullptr) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    NTSTATUS status = ::wknet::net::WskClientCreate(&highSession->Wsk);
+    status = ::wknet::net::WskClientCreate(&highSession->Wsk);
     if (!NT_SUCCESS(status)) {
         detail::FreeClosedSession(highSession);
         return status;
@@ -125,9 +145,6 @@ NTSTATUS SessionCreate(const SessionConfig* config, Session** session) noexcept
         detail::FreeClosedSession(highSession);
         return status;
     }
-
-    ::wknet::session::SessionOptions apiOptions = {};
-    FillApiSessionOptions(config, apiOptions);
 
     status = ::wknet::session::SessionCreate(highSession->Wsk, &apiOptions, &highSession->Engine);
     if (!NT_SUCCESS(status)) {

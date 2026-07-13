@@ -281,6 +281,88 @@ namespace session
             options.AckTimeoutMilliseconds <= WskOperationTimeoutMilliseconds;
     }
 
+    Http3Options NormalizeHttp3Options(const Http3Options &options) noexcept
+    {
+        Http3Options normalized = options;
+        if (normalized.Mode == Http3ConnectMode::Auto)
+        {
+            normalized.Mode = Http3ConnectMode::Disabled;
+        }
+        return normalized;
+    }
+
+    bool IsValidHttp3Options(const Http3Options &options) noexcept
+    {
+        const bool validMode = options.Mode == Http3ConnectMode::Auto || options.Mode == Http3ConnectMode::Disabled ||
+                               options.Mode == Http3ConnectMode::Required;
+        const bool validRace =
+            options.Race == Http3RaceMode::DelayedTcpFallback || options.Race == Http3RaceMode::SequentialPreferHttp3;
+        if (!validMode || !validRace)
+        {
+            return false;
+        }
+        if (options.RaceWindowMilliseconds == 0 || options.RaceWindowMilliseconds > MaxHttp3RaceWindowMilliseconds ||
+            options.QuicProbeTimeoutMilliseconds == 0 ||
+            options.QuicProbeTimeoutMilliseconds > MaxHttp3QuicProbeTimeoutMilliseconds ||
+            options.AltSvcMaxEntries == 0 || options.AltSvcMaxEntries > WKNET_HARD_MAX_ALT_SVC_ENTRIES ||
+            options.AltSvcMaxAgeSeconds == 0 || options.AltSvcMaxAgeSeconds > MaxHttp3AltSvcMaxAgeSeconds)
+        {
+            return false;
+        }
+
+        const ULONGLONG altSvcAgeMilliseconds = static_cast<ULONGLONG>(options.AltSvcMaxAgeSeconds) * 1000ULL;
+        return altSvcAgeMilliseconds <= static_cast<ULONGLONG>(~static_cast<ULONG>(0));
+    }
+
+    namespace
+    {
+    bool IsHttp3CompatibleAlpn(const TlsOptions &tls) noexcept
+    {
+        if (tls.Alpn == nullptr || tls.AlpnLength == 0)
+        {
+            return true;
+        }
+        return TextEqualsLiteral(tls.Alpn, tls.AlpnLength, "h3") || TextEqualsLiteral(tls.Alpn, tls.AlpnLength, "h2") ||
+               TextEqualsLiteral(tls.Alpn, tls.AlpnLength, "http/1.1");
+    }
+    } // namespace
+
+    NTSTATUS ResolveHttp3ConnectMode(const Http3Options &options, const TlsOptions &tls, bool proxyEnabled,
+                                     const HttpSendOptions *sendOptions, bool secureHttp, bool webSocket,
+                                     Http3ConnectMode *mode) noexcept
+    {
+        if (mode != nullptr)
+        {
+            *mode = Http3ConnectMode::Disabled;
+        }
+        if (mode == nullptr || !IsValidHttp3Options(options) || !IsValidTlsOptions(tls))
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const Http3Options normalized = NormalizeHttp3Options(options);
+        if (webSocket || normalized.Mode == Http3ConnectMode::Disabled)
+        {
+            return STATUS_SUCCESS;
+        }
+        if (!secureHttp || proxyEnabled ||
+            (sendOptions != nullptr && sendOptions->Http2CleartextMode != Http2CleartextMode::Disabled))
+        {
+            return STATUS_NOT_SUPPORTED;
+        }
+        if (tls.MaxVersion != TlsVersion::Tls13)
+        {
+            return STATUS_NOT_SUPPORTED;
+        }
+        if (!IsHttp3CompatibleAlpn(tls) || (sendOptions != nullptr && sendOptions->Http2Priority != nullptr))
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *mode = Http3ConnectMode::Required;
+        return STATUS_SUCCESS;
+    }
+
     bool IsValidSessionOptions(const SessionOptions& options) noexcept
     {
         if (options.RequestBufferBytes == 0) {
@@ -311,10 +393,9 @@ namespace session
             return false;
         }
 
-        return IsValidHttp11PipelineOptions(options) &&
-            IsValidHttp2KeepAliveOptions(options.Http2KeepAlive) &&
-            IsValidTlsOptions(options.Tls) &&
-            IsValidProxyOptions(options.Proxy);
+        return IsValidHttp11PipelineOptions(options) && IsValidHttp2KeepAliveOptions(options.Http2KeepAlive) &&
+               IsValidHttp3Options(options.Http3) && IsValidTlsOptions(options.Tls) &&
+               IsValidProxyOptions(options.Proxy);
     }
 
     bool IsValidAddressFamily(AddressFamily addressFamily) noexcept
@@ -612,6 +693,11 @@ namespace session
         }
 
         if (!IsValidHttp2CleartextMode(options.Http2CleartextMode)) {
+            return false;
+        }
+
+        if (session.Options.Http3.Mode == Http3ConnectMode::Required && options.Http2Priority != nullptr)
+        {
             return false;
         }
 

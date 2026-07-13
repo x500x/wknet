@@ -59,6 +59,7 @@ These capabilities are implemented but not enabled by default; they are not miss
 | h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode`; plaintext HTTP/2 is off by default |
 | HTTP/2 background PING keepalive | Session `Http2KeepAlive.Enabled=true`; idle, interval, and ACK timeout values are configurable |
 | HTTP/2 per-request priority | `SendOptions.Http2Priority` / `HttpSendOptions.Http2Priority` |
+| HTTP/3 prior knowledge | Set `SessionConfig.Http3.Mode=Http3ConnectMode::Required` to explicitly require H3 for an HTTPS origin; this is for known prior-knowledge/test scenarios. In M6, the default `Auto` still normalizes to `Disabled` and never selects H3 transparently |
 | WebSocket permessage-deflate | `ConnectConfig.PerMessageDeflate.Enable=true`; compression is not offered by default |
 | TLS 1.2 RSA key exchange / CBC / SHA-1 signatures | `CompatibilityExplicit` policy plus the matching compatibility switches |
 | TLS 1.2 true renegotiation | `CompatibilityExplicit` + `EnableTls12Renegotiation`, limited by `MaxTls12Renegotiations` |
@@ -94,7 +95,7 @@ These capabilities are not provided today. Capabilities that are implemented but
 | Complex local HTTP/2 priority-tree scheduling | Non-goal; no local dependency tree or bandwidth scheduler is maintained |
 | WebSocket extensions other than `permessage-deflate` | Non-goal; no other extensions are negotiated |
 | Online OCSP/CRL fetching | Non-goal; callers provide external trust/certificate/revocation data or cached entries |
-| HTTP/3 / QUIC | Planned; `Auto` stays disabled until all gates pass |
+| Transparent HTTP/3 / QUIC Auto | The main path is under construction; `Required` configuration is for explicit prior-knowledge/testing, while `Auto` stays disabled until every gate passes |
 
 **Implementation strategy and trust model**:
 
@@ -419,6 +420,17 @@ config.MaxConnsPerHost = 4;
 
 // Idle timeout (default 30 seconds)
 config.IdleTimeoutMs = 60000;  // 60 seconds
+
+// HTTP/3: the public default is Auto, but M6 still normalizes it to Disabled,
+// so ordinary callers keep their existing behavior. Required is only for a
+// known HTTPS H3 origin or deterministic tests; it rejects plaintext HTTP,
+// h2c, HTTP proxies, non-HTTP ALPN, and HTTP/2 priority.
+config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
+config.Http3.Race = wknet::http::Http3RaceMode::DelayedTcpFallback;
+config.Http3.RaceWindowMs = 250;
+config.Http3.QuicProbeTimeoutMs = 1500;
+config.Http3.AltSvcMaxEntries = 64;
+config.Http3.AltSvcMaxAgeSec = 604800;
 
 // Response buffer pool type (default NonPaged; kernel path currently requires NonPaged)
 config.ResponsePool = wknet::http::PoolType::NonPaged;

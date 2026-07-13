@@ -10,12 +10,18 @@
 #include <wknet/websocket/WebSocket.h>
 #include <wknettest/SampleStatus.h>
 
+#include "http3/Http3Types.h"
 #include "samples/AdvancedScenarioSamples.h"
 #include "samples/ExternalTrustStore.h"
 #include "samples/HighLevelApiSamples.h"
+#include "session/HttpH3TestHooks.h"
 
-#include <string.h>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <stdio.h>
+#include <string.h>
+#include <thread>
 
 #ifndef STATUS_HOST_UNREACHABLE
 #define STATUS_HOST_UNREACHABLE ((NTSTATUS)0xC000023DL)
@@ -32,6 +38,30 @@
 namespace
 {
     bool g_failed = false;
+
+    struct RequiredHttp3Capture final
+    {
+        std::mutex Lock;
+        std::condition_variable Event;
+        wknet::session::HttpH3DispatchContext *Dispatch = nullptr;
+        ULONG CreateCount = 0;
+    };
+
+    NTSTATUS CreateRequiredHttp3Peer(void *context, const wknet::session::HttpH3PeerCreateOptions *options,
+                                     wknet::session::HttpH3Peer *peer) noexcept
+    {
+        RequiredHttp3Capture *capture = static_cast<RequiredHttp3Capture *>(context);
+        if (capture != nullptr)
+        {
+            {
+                std::lock_guard<std::mutex> lock(capture->Lock);
+                capture->Dispatch = options->Dispatch;
+                ++capture->CreateCount;
+            }
+            capture->Event.notify_all();
+        }
+        return wknet::session::HttpH3TestCreateInMemoryPeer(options, peer);
+    }
 
     void Expect(bool condition, const char* message) noexcept
     {
@@ -1494,6 +1524,216 @@ namespace
         wknet::http::test::SetHttpTransport(nullptr, nullptr);
         wknet::http::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
+
+    void TestRequiredHttp3UsesSingleH3Dispatch() noexcept
+    {
+        wknet::session::HttpH3TestReset();
+        RequiredHttp3Capture capture = {};
+        wknet::session::HttpH3PeerFactory factory = {};
+        factory.Context = &capture;
+        factory.Create = CreateRequiredHttp3Peer;
+        wknet::session::HttpH3TestSetPeerFactory(&factory);
+
+        wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
+        wknet::http::Session *session = nullptr;
+        NTSTATUS status = wknet::http::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "Required H3 session creation succeeds");
+
+        wknet::http::Response *response = nullptr;
+        NTSTATUS sendStatus = STATUS_PENDING;
+        constexpr char url[] = "https://example.com/required-h3";
+        std::thread sender([&]() noexcept { sendStatus = wknet::http::Get(session, url, sizeof(url) - 1, &response); });
+
+        wknet::session::HttpH3DispatchContext *dispatch = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(capture.Lock);
+            (void)capture.Event.wait_for(lock, std::chrono::seconds(2),
+                                         [&capture]() noexcept { return capture.Dispatch != nullptr; });
+            dispatch = capture.Dispatch;
+        }
+        Expect(dispatch != nullptr, "Required H3 factory receives the active dispatch");
+
+        wknet::session::HttpH3TestSnapshot snapshot = {};
+        for (ULONG attempt = 0; attempt < 1000; ++attempt)
+        {
+            wknet::session::HttpH3TestGetSnapshot(&snapshot);
+            if (snapshot.StreamId != wknet::session::HttpH3UnsetStreamId)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        Expect(snapshot.StreamId == 0, "Required H3 opens exactly the first client request stream");
+
+        if (dispatch != nullptr)
+        {
+            wknet::session::HttpH3TestInjectResponseStarted(dispatch, 200);
+            status = wknet::session::HttpH3TestInjectHeader(dispatch, "content-type", sizeof("content-type") - 1,
+                                                            "text/plain", sizeof("text/plain") - 1, false);
+            Expect(NT_SUCCESS(status), "Required H3 response header is accepted");
+            const UCHAR body[] = {'h', '3', '-', 'o', 'k'};
+            status = wknet::session::HttpH3TestInjectBody(dispatch, body, sizeof(body), true);
+            Expect(NT_SUCCESS(status), "Required H3 response body is accepted");
+            wknet::session::HttpH3TestInjectCompletion(dispatch, STATUS_SUCCESS, wknet::http3::H3_NO_ERROR);
+        }
+        sender.join();
+
+        Expect(NT_SUCCESS(sendStatus), "Required H3 request completes successfully");
+        Expect(response != nullptr && wknet::http::ResponseStatusCode(response) == 200,
+               "Required H3 response status maps to the public response");
+        Expect(response != nullptr && wknet::http::ResponseBodyLength(response) == 5 &&
+                   memcmp(wknet::http::ResponseBody(response), "h3-ok", 5) == 0,
+               "Required H3 DATA maps to the public response body");
+        wknet::session::HttpH3TestGetSnapshot(&snapshot);
+        Expect(snapshot.H3DispatchCount == 1 && snapshot.H1DispatchCount == 0 && snapshot.H2DispatchCount == 0,
+               "Required mode selects one H3 dispatch without TCP fallback");
+        Expect(snapshot.BodyReadCount == 0 && snapshot.CompletionCount == 1,
+               "Required H3 body source and completion are delivered exactly once");
+
+        wknet::http::ResponseRelease(response);
+        wknet::http::SessionClose(session);
+        wknet::session::HttpH3TestSetPeerFactory(nullptr);
+        wknet::session::HttpH3TestReset();
+    }
+
+    void TestRequiredHttp3RetriesRejectedSafeRequestOnce() noexcept
+    {
+        wknet::session::HttpH3TestReset();
+        RequiredHttp3Capture capture = {};
+        wknet::session::HttpH3PeerFactory factory = {};
+        factory.Context = &capture;
+        factory.Create = CreateRequiredHttp3Peer;
+        wknet::session::HttpH3TestSetPeerFactory(&factory);
+
+        wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
+        wknet::http::Session *session = nullptr;
+        NTSTATUS status = wknet::http::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "Required H3 GOAWAY session creation succeeds");
+
+        wknet::http::Response *response = nullptr;
+        NTSTATUS sendStatus = STATUS_PENDING;
+        constexpr char url[] = "https://example.com/goaway-retry";
+        std::thread sender([&]() noexcept { sendStatus = wknet::http::Get(session, url, sizeof(url) - 1, &response); });
+
+        wknet::session::HttpH3DispatchContext *firstDispatch = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(capture.Lock);
+            (void)capture.Event.wait_for(lock, std::chrono::seconds(2),
+                                         [&capture]() noexcept { return capture.CreateCount >= 1; });
+            firstDispatch = capture.Dispatch;
+        }
+
+        wknet::session::HttpH3TestSnapshot snapshot = {};
+        for (ULONG attempt = 0; attempt < 200; ++attempt)
+        {
+            wknet::session::HttpH3TestGetSnapshot(&snapshot);
+            if (snapshot.AttemptGeneration == 1 && snapshot.StreamId != wknet::session::HttpH3UnsetStreamId)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        wknet::session::HttpH3GoawayResult goawayResult = wknet::session::HttpH3GoawayResult::NoActiveStream;
+        if (firstDispatch != nullptr)
+        {
+            status = wknet::session::HttpH3TestInjectGoaway(firstDispatch, 0, &goawayResult);
+            Expect(NT_SUCCESS(status) && goawayResult == wknet::session::HttpH3GoawayResult::StreamRejected,
+                   "GOAWAY rejects the first safe request stream");
+            wknet::session::HttpH3TestInjectCompletion(firstDispatch, STATUS_RETRY, wknet::http3::H3_REQUEST_REJECTED);
+        }
+
+        wknet::session::HttpH3DispatchContext *secondDispatch = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(capture.Lock);
+            (void)capture.Event.wait_for(lock, std::chrono::seconds(2),
+                                         [&capture]() noexcept { return capture.CreateCount >= 2; });
+            secondDispatch = capture.Dispatch;
+        }
+        for (ULONG attempt = 0; attempt < 200; ++attempt)
+        {
+            wknet::session::HttpH3TestGetSnapshot(&snapshot);
+            if (snapshot.AttemptGeneration == 2 && snapshot.StreamId != wknet::session::HttpH3UnsetStreamId)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        if (secondDispatch != nullptr)
+        {
+            wknet::session::HttpH3TestInjectResponseStarted(secondDispatch, 204);
+            status = wknet::session::HttpH3TestInjectBody(secondDispatch, nullptr, 0, true);
+            Expect(NT_SUCCESS(status), "retried H3 response final body marker is accepted");
+            wknet::session::HttpH3TestInjectCompletion(secondDispatch, STATUS_SUCCESS, wknet::http3::H3_NO_ERROR);
+        }
+        sender.join();
+
+        Expect(NT_SUCCESS(sendStatus) && response != nullptr && wknet::http::ResponseStatusCode(response) == 204,
+               "safe GOAWAY-rejected GET retries once on a new H3 connection");
+        wknet::session::HttpH3TestGetSnapshot(&snapshot);
+        Expect(capture.CreateCount == 2 && snapshot.H3DispatchCount == 2,
+               "GOAWAY safe retry creates exactly two serial H3 attempts");
+
+        wknet::http::ResponseRelease(response);
+        wknet::http::SessionClose(session);
+        wknet::session::HttpH3TestSetPeerFactory(nullptr);
+        wknet::session::HttpH3TestReset();
+    }
+
+    void TestRequiredHttp3CancelResetsActiveStream() noexcept
+    {
+        wknet::session::HttpH3TestReset();
+        RequiredHttp3Capture capture = {};
+        wknet::session::HttpH3PeerFactory factory = {};
+        factory.Context = &capture;
+        factory.Create = CreateRequiredHttp3Peer;
+        wknet::session::HttpH3TestSetPeerFactory(&factory);
+
+        wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
+        wknet::http::Session *session = nullptr;
+        NTSTATUS status = wknet::http::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "Required H3 async-cancel session creation succeeds");
+
+        wknet::http::Response *response = nullptr;
+        NTSTATUS sendStatus = STATUS_PENDING;
+        constexpr char url[] = "https://example.com/cancel-h3";
+        std::thread sender([&]() noexcept { sendStatus = wknet::http::Get(session, url, sizeof(url) - 1, &response); });
+
+        wknet::session::HttpH3DispatchContext *dispatch = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(capture.Lock);
+            (void)capture.Event.wait_for(lock, std::chrono::seconds(2),
+                                         [&capture]() noexcept { return capture.CreateCount >= 1; });
+            dispatch = capture.Dispatch;
+        }
+        wknet::session::HttpH3TestSnapshot snapshot = {};
+        for (ULONG attempt = 0; attempt < 1000; ++attempt)
+        {
+            wknet::session::HttpH3TestGetSnapshot(&snapshot);
+            if (snapshot.StreamId != wknet::session::HttpH3UnsetStreamId)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+
+        wknet::session::HttpH3CancelResult cancelResult = wknet::session::HttpH3CancelResult::AlreadyTerminal;
+        status = wknet::session::HttpH3DispatchRequestCancel(dispatch, &cancelResult);
+        Expect(NT_SUCCESS(status) && cancelResult == wknet::session::HttpH3CancelResult::ResetAndStop,
+               "Required H3 cancellation resets and stops an active request stream");
+        sender.join();
+        Expect(sendStatus == STATUS_CANCELLED && response == nullptr,
+               "cancelled Required H3 request exposes no response");
+        wknet::session::HttpH3TestGetSnapshot(&snapshot);
+        Expect(snapshot.RequestState == wknet::session::HttpH3RequestState::Cancelled && snapshot.CompletionCount == 1,
+               "Required H3 cancellation reaches one terminal request state");
+
+        wknet::http::SessionClose(session);
+        wknet::session::HttpH3TestSetPeerFactory(nullptr);
+        wknet::session::HttpH3TestReset();
+    }
 }
 
 int main() noexcept
@@ -1517,6 +1757,9 @@ int main() noexcept
     TestHighLevelTlsVersionFallbackPolicy();
     TestWebSocketReceiveHonorsPerCallMessageLimit();
     TestHighLevelWebSocketPublicValidation();
+    TestRequiredHttp3UsesSingleH3Dispatch();
+    TestRequiredHttp3RetriesRejectedSafeRequestOnce();
+    TestRequiredHttp3CancelResetsActiveStream();
 
     if (g_failed) {
         printf("high-level API tests FAILED\n");

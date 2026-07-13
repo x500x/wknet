@@ -61,6 +61,13 @@ namespace session
     constexpr ULONG DefaultHttp2KeepAliveIntervalMilliseconds = 30000;
     constexpr ULONG DefaultHttp2KeepAliveAckTimeoutMilliseconds = 5000;
     constexpr ULONG DefaultHttp11PipelineMaxDepth = 4;
+    constexpr ULONG DefaultHttp3RaceWindowMilliseconds = 250;
+    constexpr ULONG DefaultHttp3QuicProbeTimeoutMilliseconds = 1500;
+    constexpr ULONG DefaultHttp3AltSvcMaxEntries = 64;
+    constexpr ULONG DefaultHttp3AltSvcMaxAgeSeconds = 604800;
+    constexpr ULONG MaxHttp3RaceWindowMilliseconds = 60000;
+    constexpr ULONG MaxHttp3QuicProbeTimeoutMilliseconds = 120000;
+    constexpr ULONG MaxHttp3AltSvcMaxAgeSeconds = static_cast<ULONG>(~static_cast<ULONG>(0)) / 1000;
     constexpr ULONG MaxHttp11PipelineDepth = 64;
     constexpr ULONG Http11PipelineMethodGet = 0x00000001;
     constexpr ULONG Http11PipelineMethodPost = 0x00000002;
@@ -131,6 +138,19 @@ namespace session
         Disabled = 0,
         PriorKnowledge = 1,
         Upgrade = 2
+    };
+
+    enum class Http3ConnectMode : ULONG
+    {
+        Auto = 0,
+        Disabled = 1,
+        Required = 2
+    };
+
+    enum class Http3RaceMode : ULONG
+    {
+        DelayedTcpFallback = 0,
+        SequentialPreferHttp3 = 1
     };
 
     enum class AddressFamily : ULONG
@@ -258,6 +278,16 @@ namespace session
         ULONG AckTimeoutMilliseconds = DefaultHttp2KeepAliveAckTimeoutMilliseconds;
     };
 
+    struct Http3Options final
+    {
+        Http3ConnectMode Mode = Http3ConnectMode::Disabled;
+        Http3RaceMode Race = Http3RaceMode::DelayedTcpFallback;
+        ULONG RaceWindowMilliseconds = DefaultHttp3RaceWindowMilliseconds;
+        ULONG QuicProbeTimeoutMilliseconds = DefaultHttp3QuicProbeTimeoutMilliseconds;
+        ULONG AltSvcMaxEntries = DefaultHttp3AltSvcMaxEntries;
+        ULONG AltSvcMaxAgeSeconds = DefaultHttp3AltSvcMaxAgeSeconds;
+    };
+
     struct HttpCacheOptions final
     {
         SIZE_T MaxBytes = 16 * 1024 * 1024;
@@ -292,6 +322,7 @@ namespace session
         ULONG Http11PipelineMaxDepth = DefaultHttp11PipelineMaxDepth;
         ULONG Http11PipelineMethodMask = DefaultHttp11PipelineMethodMask;
         Http2KeepAliveOptions Http2KeepAlive = {};
+        Http3Options Http3 = {};
         TlsOptions Tls = {};
         ProxyOptions Proxy = {};
         HttpCacheHandle Cache = nullptr;
@@ -319,6 +350,14 @@ namespace session
         HttpCacheHandle Cache = nullptr;
         ULONGLONG TraceOperationId = 0;
     };
+
+    Http3Options NormalizeHttp3Options(const Http3Options &options) noexcept;
+    bool IsValidHttp3Options(const Http3Options &options) noexcept;
+
+    _Must_inspect_result_ NTSTATUS ResolveHttp3ConnectMode(const Http3Options &options, const TlsOptions &tls,
+                                                           bool proxyEnabled, const HttpSendOptions *sendOptions,
+                                                           bool secureHttp, bool webSocket,
+                                                           _Out_ Http3ConnectMode *mode) noexcept;
 
     struct NameValuePair final
     {

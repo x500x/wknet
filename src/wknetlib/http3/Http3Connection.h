@@ -70,4 +70,8 @@ ULONG Http3ConnectionPeerQpackBlockedStreams(_In_ const Http3Connection *connect
 ULONGLONG Http3ConnectionGoawayId(_In_ const Http3Connection *connection) noexcept;
 SIZE_T Http3ConnectionBlockedStreamCount(_In_ const Http3Connection *connection) noexcept;
 ULONGLONG Http3ConnectionLocalDecoderBytesSent(_In_ const Http3Connection *connection) noexcept;
+#if defined(WKNET_USER_MODE_TEST)
+NTSTATUS Http3ConnectionTestApplyPeerSettings(_Inout_ Http3Connection *connection, SIZE_T qpackMaximumCapacity,
+                                              ULONG qpackBlockedStreams) noexcept;
+#endif
 } // namespace wknet::http3

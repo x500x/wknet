@@ -2,16 +2,18 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 
-#include <wknet/Wknet.h>
-#include "transport/Transport.h"
+#include "http2/Http2Connection.h"
+#include "net/WskSocket.h"
+#include "quic/QuicTypes.h"
 #include "rtl/Lookaside.h"
 #include "session/Async.h"
 #include "session/ConnectionPool.h"
 #include "session/HandleTypes.h"
 #include "session/Workspace.h"
-#include "http2/Http2Connection.h"
+#include "session/detail/HttpHandles.h"
+#include "transport/Transport.h"
+#include <wknet/Wknet.h>
 #include <wknet/test/Test.h>
-#include "net/WskSocket.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -6211,6 +6213,234 @@ namespace
         Expect(session == nullptr, "wknet SessionCreate does not allocate invalid HTTP/2 keepalive session");
     }
 
+    void TestHttp3SessionConfigDefaultsMappingAndValidation() noexcept
+    {
+        Expect(static_cast<ULONG>(wknet::http::Http3ConnectMode::Auto) == 0 &&
+                   static_cast<ULONG>(wknet::http::Http3ConnectMode::Disabled) == 1 &&
+                   static_cast<ULONG>(wknet::http::Http3ConnectMode::Required) == 2,
+               "public HTTP/3 connect modes preserve the frozen ABI values");
+        Expect(static_cast<ULONG>(wknet::http::Http3RaceMode::DelayedTcpFallback) == 0 &&
+                   static_cast<ULONG>(wknet::http::Http3RaceMode::SequentialPreferHttp3) == 1,
+               "public HTTP/3 race modes preserve the frozen ABI values");
+
+        wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+        Expect(config.Http3.Mode == wknet::http::Http3ConnectMode::Auto, "public HTTP/3 connect mode defaults to Auto");
+        Expect(config.Http3.Race == wknet::http::Http3RaceMode::DelayedTcpFallback,
+               "public HTTP/3 race mode defaults to delayed TCP fallback");
+        Expect(config.Http3.RaceWindowMs == 250 && config.Http3.QuicProbeTimeoutMs == 1500 &&
+                   config.Http3.AltSvcMaxEntries == 64 && config.Http3.AltSvcMaxAgeSec == 604800,
+               "public HTTP/3 timing and Alt-Svc defaults match the total design");
+
+        wknet::session::SessionOptions engineDefaults = {};
+        Expect(engineDefaults.Http3.Mode == wknet::session::Http3ConnectMode::Disabled,
+               "M6 internal HTTP/3 default is normalized Disabled");
+        wknet::session::Http3Options internalAuto = engineDefaults.Http3;
+        internalAuto.Mode = wknet::session::Http3ConnectMode::Auto;
+        const wknet::session::Http3Options normalized = wknet::session::NormalizeHttp3Options(internalAuto);
+        Expect(normalized.Mode == wknet::session::Http3ConnectMode::Disabled, "M6 normalization maps Auto to Disabled");
+
+        config.Http3.Race = wknet::http::Http3RaceMode::SequentialPreferHttp3;
+        config.Http3.RaceWindowMs = 333;
+        config.Http3.QuicProbeTimeoutMs = 1777;
+        config.Http3.AltSvcMaxEntries = 7;
+        config.Http3.AltSvcMaxAgeSec = 86400;
+        wknet::http::Session *session = nullptr;
+        NTSTATUS status = wknet::http::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "public Auto HTTP/3 session config is accepted while capability-gated");
+        Expect(session != nullptr && session->Engine != nullptr &&
+                   session->Engine->Options.Http3.Mode == wknet::session::Http3ConnectMode::Disabled &&
+                   session->Engine->Options.Http3.Race == wknet::session::Http3RaceMode::SequentialPreferHttp3 &&
+                   session->Engine->Options.Http3.RaceWindowMilliseconds == 333 &&
+                   session->Engine->Options.Http3.QuicProbeTimeoutMilliseconds == 1777 &&
+                   session->Engine->Options.Http3.AltSvcMaxEntries == 7 &&
+                   session->Engine->Options.Http3.AltSvcMaxAgeSeconds == 86400,
+               "public HTTP/3 config maps to internal options and Auto remains Disabled in M6");
+        wknet::http::SessionClose(session);
+
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
+        session = nullptr;
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status) && session != nullptr &&
+                   session->Engine->Options.Http3.Mode == wknet::session::Http3ConnectMode::Required,
+               "Required survives public-to-internal mapping");
+        wknet::http::SessionClose(session);
+
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.RaceWindowMs = 0;
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "HTTP/3 race window rejects zero");
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.RaceWindowMs = wknet::http::MaxHttp3RaceWindowMs + 1;
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "HTTP/3 race window rejects values above the policy maximum");
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.QuicProbeTimeoutMs = 0;
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "HTTP/3 QUIC probe timeout rejects zero");
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.QuicProbeTimeoutMs = wknet::http::MaxHttp3QuicProbeTimeoutMs + 1;
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "HTTP/3 QUIC probe timeout rejects oversized values");
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.AltSvcMaxEntries = wknet::WKNET_HARD_MAX_ALT_SVC_ENTRIES + 1;
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "HTTP/3 Alt-Svc entry count obeys the local hard limit");
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.AltSvcMaxAgeSec = wknet::http::MaxHttp3AltSvcMaxAgeSec + 1;
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(status == STATUS_INVALID_PARAMETER,
+               "HTTP/3 Alt-Svc age rejects values whose millisecond conversion overflows ULONG");
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = static_cast<wknet::http::Http3ConnectMode>(99);
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "HTTP/3 connect mode rejects unknown enum values");
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.Race = static_cast<wknet::http::Http3RaceMode>(99);
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(status == STATUS_INVALID_PARAMETER, "HTTP/3 race mode rejects unknown enum values");
+    }
+
+    void TestHttp3RequiredConflictContract() noexcept
+    {
+        wknet::session::Http3Options http3 = {};
+        http3.Mode = wknet::session::Http3ConnectMode::Required;
+        wknet::session::TlsOptions tls = {};
+        wknet::session::HttpSendOptions send = {};
+        wknet::session::Http3ConnectMode effective = wknet::session::Http3ConnectMode::Disabled;
+
+        NTSTATUS status = wknet::session::ResolveHttp3ConnectMode(http3, tls, false, &send, true, false, &effective);
+        Expect(NT_SUCCESS(status) && effective == wknet::session::Http3ConnectMode::Required,
+               "Required HTTPS without conflicts remains Required");
+
+        status = wknet::session::ResolveHttp3ConnectMode(http3, tls, false, &send, false, false, &effective);
+        Expect(status == STATUS_NOT_SUPPORTED, "Required with plaintext HTTP returns STATUS_NOT_SUPPORTED");
+        send.Http2CleartextMode = wknet::session::Http2CleartextMode::PriorKnowledge;
+        status = wknet::session::ResolveHttp3ConnectMode(http3, tls, false, &send, true, false, &effective);
+        Expect(status == STATUS_NOT_SUPPORTED, "Required with h2c prior knowledge returns STATUS_NOT_SUPPORTED");
+        send.Http2CleartextMode = wknet::session::Http2CleartextMode::Disabled;
+        status = wknet::session::ResolveHttp3ConnectMode(http3, tls, true, &send, true, false, &effective);
+        Expect(status == STATUS_NOT_SUPPORTED, "Required with an HTTP proxy returns STATUS_NOT_SUPPORTED");
+
+        tls.Alpn = "smtp";
+        tls.AlpnLength = Length("smtp");
+        status = wknet::session::ResolveHttp3ConnectMode(http3, tls, false, &send, true, false, &effective);
+        Expect(status == STATUS_INVALID_PARAMETER,
+               "Required with explicit non-HTTP ALPN returns STATUS_INVALID_PARAMETER");
+        tls.Alpn = "h2";
+        tls.AlpnLength = Length("h2");
+        wknet::http2::Http2Priority priority = {};
+        send.Http2Priority = &priority;
+        status = wknet::session::ResolveHttp3ConnectMode(http3, tls, false, &send, true, false, &effective);
+        Expect(status == STATUS_INVALID_PARAMETER, "Required with HTTP/2 priority returns STATUS_INVALID_PARAMETER");
+
+        send.Http2Priority = nullptr;
+        status = wknet::session::ResolveHttp3ConnectMode(http3, tls, true, &send, false, true, &effective);
+        Expect(NT_SUCCESS(status) && effective == wknet::session::Http3ConnectMode::Disabled,
+               "WebSocket explicitly normalizes away from H3 and keeps its existing H1/H2 selection");
+
+        wknet::session::Http3Options autoMode = http3;
+        autoMode.Mode = wknet::session::Http3ConnectMode::Auto;
+        send.Http2Priority = &priority;
+        status = wknet::session::ResolveHttp3ConnectMode(autoMode, tls, true, &send, false, false, &effective);
+        Expect(NT_SUCCESS(status) && effective == wknet::session::Http3ConnectMode::Disabled,
+               "M6 Auto remains TCP-compatible even when Required-only conflicts are present");
+
+        wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
+        FillProxyConfig(config.Proxy);
+        wknet::http::Session *session = nullptr;
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(status == STATUS_NOT_SUPPORTED && session == nullptr,
+               "public Required session rejects proxy configuration with STATUS_NOT_SUPPORTED");
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
+        config.Tls.Alpn = "acme-tls/1";
+        config.Tls.AlpnLength = Length("acme-tls/1");
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(status == STATUS_INVALID_PARAMETER && session == nullptr,
+               "public Required session rejects explicit non-HTTP ALPN with STATUS_INVALID_PARAMETER");
+    }
+
+    struct Http3PoolCloseCapture final
+    {
+        ULONG CloseCount = 0;
+    };
+
+    void CloseHttp3PoolEntry(void *context, wknet::session::ConnectionPool *pool,
+                             wknet::session::PooledConnection *connection, wknet::quic::QuicConnection *quicConnection,
+                             wknet::http3::Http3Connection *http3Connection) noexcept
+    {
+        Http3PoolCloseCapture *capture = static_cast<Http3PoolCloseCapture *>(context);
+        Expect(capture != nullptr && quicConnection != nullptr && http3Connection != nullptr,
+               "HTTP/3 pool close receives the strict QUIC holder resources");
+        if (capture != nullptr)
+        {
+            ++capture->CloseCount;
+        }
+        wknet::session::ConnectionPoolCompleteQuicClose(pool, connection);
+    }
+
+    void TestConnectionPoolHttp3LeaseAndGoawayLifecycle() noexcept
+    {
+        wknet::session::ConnectionPool pool = {};
+        NTSTATUS status = wknet::session::ConnectionPoolInitialize(&pool, 2, 2, 30000);
+        Expect(NT_SUCCESS(status), "HTTP/3 pool initializes");
+
+        wknet::session::ConnectionPoolKey key = {};
+        key.Kind = wknet::session::ConnectionKind::Quic;
+        memcpy(key.Scheme, "https", 5);
+        key.SchemeLength = 5;
+        memcpy(key.Host, "example.com", 11);
+        key.HostLength = 11;
+        key.Port = 443;
+        memcpy(key.TlsServerName, "example.com", 11);
+        key.TlsServerNameLength = 11;
+        memcpy(key.Alpn, "h3", 2);
+        key.AlpnLength = 2;
+        memcpy(key.AlternativeHost, "example.com", 11);
+        key.AlternativeHostLength = 11;
+        key.AlternativePort = 443;
+        key.QuicVersion = wknet::quic::QuicVersion1;
+
+        wknet::session::PooledConnection *connection = nullptr;
+        bool reused = true;
+        status = wknet::session::ConnectionPoolAcquire(&pool, key, wknet::session::ConnectionPolicy::ReuseOrCreate,
+                                                       &connection, &reused);
+        Expect(NT_SUCCESS(status) && connection != nullptr && !reused,
+               "first HTTP/3 pool acquire reserves a QUIC entry");
+
+        Http3PoolCloseCapture closeCapture = {};
+        auto *quicConnection = reinterpret_cast<wknet::quic::QuicConnection *>(static_cast<uintptr_t>(1));
+        auto *http3Connection = reinterpret_cast<wknet::http3::Http3Connection *>(static_cast<uintptr_t>(2));
+        status = wknet::session::PooledConnectionAdoptQuic(connection, quicConnection, http3Connection,
+                                                           CloseHttp3PoolEntry, &closeCapture);
+        Expect(NT_SUCCESS(status), "HTTP/3 pool adopts one strict QUIC/H3 holder");
+        status = wknet::session::ConnectionPoolPromoteHttp3StreamLease(&pool, connection, 0, 8, 8);
+        Expect(NT_SUCCESS(status), "new HTTP/3 request promotes its reserved stream lease");
+        wknet::session::ConnectionPoolReleaseHttp3StreamLease(&pool, connection, true);
+
+        connection = nullptr;
+        reused = false;
+        status = wknet::session::ConnectionPoolAcquire(&pool, key, wknet::session::ConnectionPolicy::ReuseOrCreate,
+                                                       &connection, &reused);
+        Expect(NT_SUCCESS(status) && reused, "idle HTTP/3 entry is reused with a reserved stream lease");
+        status = wknet::session::ConnectionPoolBindHttp3StreamLease(&pool, connection, 4, 8, 8);
+        Expect(NT_SUCCESS(status), "reused HTTP/3 stream lease binds its new stream ID");
+        wknet::session::ConnectionPoolSetHttp3GoAway(&pool, connection, 4);
+        Expect(closeCapture.CloseCount == 0, "GOAWAY waits for the active HTTP/3 request lease to drain");
+        wknet::session::ConnectionPoolReleaseHttp3StreamLease(&pool, connection, true);
+        Expect(closeCapture.CloseCount == 1, "GOAWAY closes the HTTP/3 entry after the last active lease drains");
+
+        connection = nullptr;
+        reused = true;
+        status = wknet::session::ConnectionPoolAcquire(&pool, key, wknet::session::ConnectionPolicy::ReuseOrCreate,
+                                                       &connection, &reused);
+        Expect(NT_SUCCESS(status) && !reused, "GOAWAY-drained HTTP/3 entry cannot be reused");
+        wknet::session::ConnectionPoolAbandonQuicAcquire(&pool, connection);
+        wknet::session::ConnectionPoolShutdown(&pool);
+    }
+
     void TestIrqlCheck() noexcept
     {
         wknet::http::test::SetCurrentIrql(2);
@@ -7409,6 +7639,9 @@ int main() noexcept
     TestWknetHardLimitsAreStable();
     TestPagedPoolRejected();
     TestHttp2KeepAliveSessionConfigDefaultsAndValidation();
+    TestHttp3SessionConfigDefaultsMappingAndValidation();
+    TestHttp3RequiredConflictContract();
+    TestConnectionPoolHttp3LeaseAndGoawayLifecycle();
     TestIrqlCheck();
     TestWebSocketTransportModeDefaults();
     TestWebSocketRoundTrip();

@@ -23,6 +23,17 @@
 
 namespace wknet
 {
+namespace quic
+{
+class QuicConnection;
+struct QuicStreamApplicationEventSink;
+} // namespace quic
+
+namespace http3
+{
+class Http3Connection;
+}
+
 namespace session
 {
     constexpr SIZE_T HttpRequestHeaderScratchBytes =
@@ -1004,6 +1015,160 @@ namespace session
         _Out_ bool* connectionReusable,
         _Out_opt_ bool* usedHttp11Pipeline,
         _In_opt_ AsyncOperationHandle cancellationOperation) noexcept;
+
+    constexpr ULONGLONG HttpH3UnsetStreamId = ~0ULL;
+    constexpr ULONGLONG HttpH3MaximumStreamId = (1ULL << 62) - 1;
+
+    enum class HttpH3RequestState : ULONG
+    {
+        NoStream = 0,
+        StreamCreated = 1,
+        HeadersQueued = 2,
+        HeadersCommitted = 3,
+        RequestPartiallySent = 4,
+        RequestFullySent = 5,
+        ResponseStarted = 6,
+        Completed = 7,
+        Cancelled = 8
+    };
+
+    enum class HttpH3CancelResult : ULONG
+    {
+        AlreadyTerminal = 0,
+        LocalOnly = 1,
+        CancelQueuedAndFence = 2,
+        ResetAndStop = 3
+    };
+
+    enum class HttpH3GoawayResult : ULONG
+    {
+        NoActiveStream = 0,
+        StreamRejected = 1,
+        StreamMayHaveBeenProcessed = 2
+    };
+
+    struct HttpH3DispatchContext;
+
+    using HttpH3PeerDestroy = void (*)(void *context) noexcept;
+    using HttpH3PeerAttachRequest = NTSTATUS (*)(void *context, _Inout_ HttpH3DispatchContext *dispatch) noexcept;
+    using HttpH3PeerBindStream = NTSTATUS (*)(void *context, _Inout_ HttpH3DispatchContext *dispatch,
+                                              ULONGLONG streamId) noexcept;
+
+    struct HttpH3Peer final
+    {
+        void *Context = nullptr;
+        quic::QuicConnection *Quic = nullptr;
+        http3::Http3Connection *Http3 = nullptr;
+        HttpH3PeerAttachRequest AttachRequest = nullptr;
+        HttpH3PeerBindStream BindStream = nullptr;
+        HttpH3PeerDestroy Destroy = nullptr;
+    };
+
+    struct HttpH3PeerCreateOptions final
+    {
+        SessionHandle Session = nullptr;
+        const Request *RequestObject = nullptr;
+        const HttpSendOptions *SendOptions = nullptr;
+        HttpH3DispatchContext *Dispatch = nullptr;
+        ULONGLONG AttemptGeneration = 0;
+    };
+
+    using HttpH3PeerCreate = NTSTATUS (*)(void *context, _In_ const HttpH3PeerCreateOptions *options,
+                                          _Out_ HttpH3Peer *peer) noexcept;
+
+    struct HttpH3PeerFactory final
+    {
+        void *Context = nullptr;
+        HttpH3PeerCreate Create = nullptr;
+    };
+
+    struct HttpH3DispatchStartOptions final
+    {
+        SessionHandle Session = nullptr;
+        const Request *RequestObject = nullptr;
+        const HttpSendOptions *SendOptions = nullptr;
+        const HttpH3PeerFactory *PeerFactory = nullptr;
+        Workspace *ResponseWorkspace = nullptr;
+        http1::HttpResponse *ParsedResponse = nullptr;
+        http1::HttpHeader *ResponseHeaders = nullptr;
+        SIZE_T ResponseHeaderCapacity = 0;
+        http1::HttpHeader *ResponseTrailers = nullptr;
+        SIZE_T ResponseTrailerCapacity = 0;
+        SIZE_T *RawResponseLength = nullptr;
+        AsyncOperationHandle CancellationOperation = nullptr;
+        ULONGLONG AttemptGeneration = 0;
+        bool DirectCallbacks = false;
+    };
+
+    struct HttpH3DispatchContext final
+    {
+        const Request *RequestObject = nullptr;
+        const HttpSendOptions *SendOptions = nullptr;
+        SessionHandle Session = nullptr;
+        HttpH3Peer Peer = {};
+        void *ResponseAccumulator = nullptr;
+        void *CompletionFence = nullptr;
+        HttpH3RequestState State = HttpH3RequestState::NoStream;
+        HttpH3RequestState LastProgressState = HttpH3RequestState::NoStream;
+        ULONGLONG AttemptGeneration = 0;
+        ULONGLONG StreamId = HttpH3UnsetStreamId;
+        ULONGLONG LastGoawayId = HttpH3MaximumStreamId;
+        ULONGLONG ApplicationError = 0;
+        SIZE_T BodyOffset = 0;
+        ULONG BodyReadCount = 0;
+        ULONG ResponseStatusCode = 0;
+        NTSTATUS TerminalStatus = STATUS_PENDING;
+        volatile LONG CancelRequested = 0;
+        volatile LONG CompletionClaim = 0;
+        bool PeerCreated = false;
+        bool CompletionDelivered = false;
+        bool BodyFinalDelivered = false;
+        bool GoawayReceived = false;
+        bool DirectCallbacks = false;
+        HttpH3GoawayResult GoawayResult = HttpH3GoawayResult::NoActiveStream;
+    };
+
+    _Must_inspect_result_ NTSTATUS HttpH3DispatchInitialize(_Out_ HttpH3DispatchContext *context,
+                                                            _In_ const HttpH3DispatchStartOptions *options) noexcept;
+
+    _Must_inspect_result_ NTSTATUS HttpH3DispatchRequired(_Inout_ HttpH3DispatchContext *context,
+                                                          _In_ const HttpH3DispatchStartOptions *options) noexcept;
+
+    _Must_inspect_result_ NTSTATUS HttpH3DispatchWait(_Inout_ HttpH3DispatchContext *context,
+                                                      _In_opt_ AsyncOperationHandle cancellationOperation) noexcept;
+
+    void HttpH3DispatchRelease(_Inout_opt_ HttpH3DispatchContext *context) noexcept;
+
+    _Must_inspect_result_ NTSTATUS HttpH3DispatchAdvanceState(_Inout_ HttpH3DispatchContext *context,
+                                                              HttpH3RequestState target, ULONGLONG streamId,
+                                                              NTSTATUS terminalStatus) noexcept;
+
+    _Must_inspect_result_ NTSTATUS HttpH3DispatchRequestCancel(_Inout_ HttpH3DispatchContext *context,
+                                                               _Out_ HttpH3CancelResult *result) noexcept;
+
+    _Must_inspect_result_ NTSTATUS HttpH3DispatchProcessGoaway(_Inout_ HttpH3DispatchContext *context,
+                                                               ULONGLONG goawayId,
+                                                               _Out_ HttpH3GoawayResult *result) noexcept;
+
+    void HttpH3DispatchNotifyResponseStarted(_Inout_ HttpH3DispatchContext *context, ULONG statusCode) noexcept;
+
+    _Must_inspect_result_ NTSTATUS HttpH3DispatchNotifyHeader(_Inout_ HttpH3DispatchContext *context,
+                                                              _In_reads_bytes_(nameLength) const char *name,
+                                                              SIZE_T nameLength,
+                                                              _In_reads_bytes_(valueLength) const char *value,
+                                                              SIZE_T valueLength, bool trailers) noexcept;
+
+    _Must_inspect_result_ NTSTATUS HttpH3DispatchNotifyBody(_Inout_ HttpH3DispatchContext *context,
+                                                            _In_reads_bytes_opt_(dataLength) const UCHAR *data,
+                                                            SIZE_T dataLength, bool finalChunk) noexcept;
+
+    void HttpH3DispatchNotifyComplete(_Inout_ HttpH3DispatchContext *context, NTSTATUS status,
+                                      ULONGLONG applicationError) noexcept;
+
+    bool HttpH3DispatchDefinitelyUnsent(_In_ const HttpH3DispatchContext *context) noexcept;
+    bool HttpH3DispatchResponseStarted(_In_ const HttpH3DispatchContext *context) noexcept;
+
+    void HttpH3GetProductionPeerFactory(SessionHandle session, _Out_ HttpH3PeerFactory *factory) noexcept;
 
     _Must_inspect_result_
     NTSTATUS InvokeResponseCallbacks(

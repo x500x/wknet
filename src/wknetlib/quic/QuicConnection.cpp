@@ -310,12 +310,108 @@ void QuicConnection::Complete(QuicOperation *op, NTSTATUS status, ULONGLONG stre
     KeSetEvent(&op->Event, IO_NO_INCREMENT, FALSE);
 #endif
 }
+
+void QuicConnection::CompleteEstablishedWaiter(NTSTATUS status) noexcept
+{
+    QuicOperation *operation = nullptr;
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        terminalConnectionStatus_ = status;
+        operation = establishedOperation_;
+        establishedOperation_ = nullptr;
+    }
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    terminalConnectionStatus_ = status;
+    operation = establishedOperation_;
+    establishedOperation_ = nullptr;
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+    Complete(operation, status);
+}
+
+NTSTATUS QuicConnection::WaitEstablished(QuicOperation *operation) noexcept
+{
+    if (operation == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (!TryClaimOperation(operation))
+    {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    NTSTATUS registrationStatus = STATUS_PENDING;
+    NTSTATUS completionStatus = STATUS_SUCCESS;
+#if defined(WKNET_USER_MODE_TEST)
+    {
+        std::lock_guard<std::mutex> guard(lock_);
+        if (state_ == QuicConnectionState::Established)
+        {
+            registrationStatus = STATUS_SUCCESS;
+        }
+        else if (state_ == QuicConnectionState::Failed || state_ == QuicConnectionState::Closing ||
+                 state_ == QuicConnectionState::Draining || state_ == QuicConnectionState::Closed || stop_)
+        {
+            registrationStatus = STATUS_SUCCESS;
+            completionStatus = terminalConnectionStatus_;
+        }
+        else if ((state_ == QuicConnectionState::Idle && !connectQueued_) || establishedOperation_ != nullptr)
+        {
+            registrationStatus = STATUS_INVALID_DEVICE_STATE;
+        }
+        else
+        {
+            establishedOperation_ = operation;
+        }
+    }
+#else
+    KIRQL irql;
+    KeAcquireSpinLock(&lock_, &irql);
+    if (state_ == QuicConnectionState::Established)
+    {
+        registrationStatus = STATUS_SUCCESS;
+    }
+    else if (state_ == QuicConnectionState::Failed || state_ == QuicConnectionState::Closing ||
+             state_ == QuicConnectionState::Draining || state_ == QuicConnectionState::Closed || stop_)
+    {
+        registrationStatus = STATUS_SUCCESS;
+        completionStatus = terminalConnectionStatus_;
+    }
+    else if ((state_ == QuicConnectionState::Idle && !connectQueued_) || establishedOperation_ != nullptr)
+    {
+        registrationStatus = STATUS_INVALID_DEVICE_STATE;
+    }
+    else
+    {
+        establishedOperation_ = operation;
+    }
+    KeReleaseSpinLock(&lock_, irql);
+#endif
+
+    if (registrationStatus == STATUS_PENDING)
+    {
+        return STATUS_SUCCESS;
+    }
+    if (!NT_SUCCESS(registrationStatus))
+    {
+        ReleaseOperationClaim(operation);
+        return registrationStatus;
+    }
+    Complete(operation, completionStatus);
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS QuicConnection::Enqueue(QuicCommandType type, QuicOperation *op, ULONGLONG streamId, const UCHAR *data,
-                                 SIZE_T dataLength, UCHAR *output, bool fin, ULONGLONG errorCode) noexcept
+                                 SIZE_T dataLength, UCHAR *output, bool fin, ULONGLONG errorCode,
+                                 QuicApplicationCommandCallback applicationCallback, void *applicationContext) noexcept
 {
     if (op == nullptr || streamId > QuicVarIntMaximum || errorCode > QuicVarIntMaximum ||
         (type == QuicCommandType::WriteStream && data == nullptr && dataLength != 0) ||
-        (type == QuicCommandType::ConsumeStream && output == nullptr && dataLength != 0))
+        (type == QuicCommandType::ConsumeStream && output == nullptr && dataLength != 0) ||
+        (type == QuicCommandType::Application && applicationCallback == nullptr))
     {
         return STATUS_INVALID_PARAMETER;
     }
@@ -336,6 +432,8 @@ NTSTATUS QuicConnection::Enqueue(QuicCommandType type, QuicOperation *op, ULONGL
     command->Operation = op;
     command->StreamId = streamId;
     command->ErrorCode = errorCode;
+    command->ApplicationCallback = applicationCallback;
+    command->ApplicationContext = applicationContext;
     command->Output = output;
     command->Length = dataLength;
     command->Fin = fin;
@@ -1106,6 +1204,7 @@ void QuicConnection::EnterDraining() noexcept
     const ULONGLONG maxAckDelay = peerTransportParametersApplied_ ? tls_.PeerTransportParameters().MaxAckDelay : 25;
     const ULONGLONG pto = recovery_.PtoPeriod100ns(QuicPacketNumberSpace::Application, maxAckDelay);
     drainingDeadline100ns_ = DeadlineAfter(now, pto, 3);
+    CompleteEstablishedWaiter(STATUS_CONNECTION_DISCONNECTED);
 }
 
 void QuicConnection::FailConnection(NTSTATUS status, ULONGLONG transportError) noexcept
@@ -1122,6 +1221,7 @@ void QuicConnection::FailConnection(NTSTATUS status, ULONGLONG transportError) n
     state_ = QuicConnectionState::Failed;
     KeReleaseSpinLock(&lock_, irql);
 #endif
+    CompleteEstablishedWaiter(status);
     WKNET_TRACE(ComponentQuic, TraceLevel::Error,
                 "quic.connection.failed status=0x%08X transport_error=%I64u close_status=0x%08X", status,
                 transportError, closeStatus);
@@ -1140,6 +1240,7 @@ void QuicConnection::TransitionToClosed() noexcept
     state_ = QuicConnectionState::Closed;
     KeReleaseSpinLock(&lock_, irql);
 #endif
+    CompleteEstablishedWaiter(STATUS_CONNECTION_DISCONNECTED);
     StopNetwork();
 #if defined(WKNET_USER_MODE_TEST)
     {
@@ -1496,6 +1597,7 @@ void QuicConnection::Process(QuicCommand *c) noexcept
 #endif
         if (!NT_SUCCESS(s))
         {
+            CompleteEstablishedWaiter(s);
             WKNET_TRACE(ComponentQuic, TraceLevel::Error, "quic.connection.failed status=0x%08X", s);
         }
     }
@@ -1528,6 +1630,7 @@ void QuicConnection::Process(QuicCommand *c) noexcept
 #endif
         if (NT_SUCCESS(s))
         {
+            CompleteEstablishedWaiter(STATUS_SUCCESS);
             WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.handshake.complete");
             WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.established");
         }
@@ -1683,6 +1786,11 @@ void QuicConnection::Process(QuicCommand *c) noexcept
             s = target->StopSending(c->ErrorCode);
         }
     }
+    else if (c->Type == QuicCommandType::Application)
+    {
+        s = c->ApplicationCallback != nullptr ? c->ApplicationCallback(c->ApplicationContext, this)
+                                              : STATUS_INVALID_DEVICE_STATE;
+    }
     else if (c->Type == QuicCommandType::SelfClose)
     {
         s = STATUS_INVALID_DEVICE_STATE;
@@ -1712,6 +1820,7 @@ void QuicConnection::Process(QuicCommand *c) noexcept
         {
             const bool applicationError = c->Type == QuicCommandType::CloseApplication;
             s = EnterClosing(applicationError ? c->ErrorCode : 0, true, applicationError);
+            CompleteEstablishedWaiter(STATUS_CONNECTION_DISCONNECTED);
         }
         else
         {
@@ -2846,6 +2955,7 @@ NTSTATUS QuicConnection::DispatchFrame(QuicEncryptionLevel level, QuicPacketNumb
             KeReleaseSpinLock(&lock_, irql);
 #endif
             WKNET_TRACE(ComponentQuic, TraceLevel::Info, "quic.connection.established");
+            CompleteEstablishedWaiter(STATUS_SUCCESS);
         }
         return status;
     }
@@ -3010,6 +3120,8 @@ void QuicConnection::Shutdown() noexcept
         return;
     }
 
+    CompleteEstablishedWaiter(STATUS_CANCELLED);
+
 #if defined(WKNET_USER_MODE_TEST)
     {
         std::lock_guard<std::mutex> guard(lock_);
@@ -3090,6 +3202,10 @@ NTSTATUS QuicConnectionConnect(QuicConnection *c, QuicOperation *o) noexcept
 {
     return c != nullptr ? c->Enqueue(QuicCommandType::Connect, o) : STATUS_INVALID_PARAMETER;
 }
+NTSTATUS QuicConnectionWaitEstablishedAsync(QuicConnection *c, QuicOperation *o) noexcept
+{
+    return c != nullptr ? c->WaitEstablished(o) : STATUS_INVALID_PARAMETER;
+}
 NTSTATUS QuicConnectionOpenStream(QuicConnection *c, QuicOperation *o) noexcept
 {
     return c != nullptr ? c->Enqueue(QuicCommandType::OpenBidirectionalStream, o) : STATUS_INVALID_PARAMETER;
@@ -3131,6 +3247,13 @@ NTSTATUS QuicConnectionCloseApplicationAsync(QuicConnection *c, ULONGLONG applic
     return c != nullptr
                ? c->Enqueue(QuicCommandType::CloseApplication, o, 0, nullptr, 0, nullptr, false, applicationError)
                : STATUS_INVALID_PARAMETER;
+}
+NTSTATUS QuicConnectionExecuteApplication(QuicConnection *c, QuicApplicationCommandCallback callback, void *context,
+                                          QuicOperation *operation) noexcept
+{
+    return c != nullptr ? c->Enqueue(QuicCommandType::Application, operation, 0, nullptr, 0, nullptr, false, 0,
+                                     callback, context)
+                        : STATUS_INVALID_PARAMETER;
 }
 NTSTATUS QuicConnectionApplicationWriteStream(QuicConnection *c, ULONGLONG streamId, const UCHAR *data,
                                               SIZE_T dataLength, bool fin, SIZE_T *bytesWritten) noexcept

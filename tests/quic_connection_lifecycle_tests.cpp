@@ -18,6 +18,29 @@ struct StreamEventState final
     ULONGLONG LastOpenedStreamId = 0;
 };
 
+struct ApplicationCommandState final
+{
+    bool Invoked = false;
+    ULONGLONG StreamId = 0;
+};
+
+NTSTATUS RunApplicationCommand(void *context, wknet::quic::QuicConnection *connection) noexcept
+{
+    auto *state = static_cast<ApplicationCommandState *>(context);
+    if (state == nullptr || connection == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    wknet::quic::QuicStream *stream = nullptr;
+    NTSTATUS status = wknet::quic::QuicConnectionWorkerOpenBidirectionalStream(connection, &stream);
+    if (NT_SUCCESS(status))
+    {
+        state->Invoked = true;
+        state->StreamId = stream->Id();
+    }
+    return status;
+}
+
 void OnStreamOpened(void *context, wknet::quic::QuicStream *stream) noexcept
 {
     auto *state = static_cast<StreamEventState *>(context);
@@ -84,8 +107,16 @@ int main()
     E(NT_SUCCESS(wknet::quic::QuicOperationWait(&a, 1000)), "Connect operation completes");
     E(wknet::quic::QuicConnectionStateGet(c) == wknet::quic::QuicConnectionState::Handshaking,
       "first Initial transitions to Handshaking");
+    wknet::quic::QuicOperation established = {};
+    wknet::quic::QuicOperationInitialize(&established);
+    E(NT_SUCCESS(wknet::quic::QuicConnectionWaitEstablishedAsync(c, &established)),
+      "established wait registers while handshaking");
+    E(wknet::quic::QuicOperationWait(&established, 1) == STATUS_IO_TIMEOUT,
+      "established wait remains pending before handshake confirmation");
     E(wknet::quic::QuicConnectionConnect(c, &overflow) == STATUS_INVALID_DEVICE_STATE, "repeat Connect rejected");
     E(NT_SUCCESS(wknet::quic::QuicConnectionTestConfirmHandshake(c)), "handshake confirmation injected");
+    E(NT_SUCCESS(wknet::quic::QuicOperationWait(&established, 1000)),
+      "established wait completes after handshake confirmation");
     E(wknet::quic::QuicConnectionStateGet(c) == wknet::quic::QuicConnectionState::Established,
       "confirmed handshake establishes connection");
     UCHAR applicationSecret[32] = {};
@@ -124,6 +155,15 @@ int main()
       "first client unidirectional stream is two");
     E(streamEvents.OpenedCount == 2 && streamEvents.LastOpenedStreamId == 2,
       "connection registers the application sink on a local unidirectional stream");
+    ApplicationCommandState applicationState = {};
+    wknet::quic::QuicOperation application = {};
+    wknet::quic::QuicOperationInitialize(&application);
+    E(NT_SUCCESS(
+          wknet::quic::QuicConnectionExecuteApplication(c, RunApplicationCommand, &applicationState, &application)),
+      "application command enqueues on the QUIC worker");
+    E(NT_SUCCESS(wknet::quic::QuicOperationWait(&application, 1000)) && applicationState.Invoked &&
+          applicationState.StreamId == 4,
+      "application command executes worker-only stream services with a terminal fence");
     const UCHAR requestBytes[] = {1, 2, 3};
     wknet::quic::QuicOperation write = {};
     wknet::quic::QuicOperationInitialize(&write);

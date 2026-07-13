@@ -176,6 +176,15 @@
     <ClCompile Include="session\HttpH2Dispatch.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
+    <ClCompile Include="session\HttpH3Dispatch.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\HttpH3Peer.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\HttpH3TestHooks.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
     <ClCompile Include="session\HttpProxy.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
@@ -539,6 +548,9 @@
       <Filter>Header Files\engine</Filter>
     </ClInclude>
     <ClInclude Include="session\ConnectionPoolPrivate.hpp">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="session\HttpH3TestHooks.h">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
     <ClInclude Include="transport\Transport.h">

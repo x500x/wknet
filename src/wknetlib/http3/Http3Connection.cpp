@@ -250,6 +250,23 @@ ULONGLONG Http3Connection::LocalDecoderBytesSent() const noexcept
     return localDecoderBytesSent_;
 }
 
+#if defined(WKNET_USER_MODE_TEST)
+NTSTATUS Http3Connection::TestApplyPeerSettings(SIZE_T qpackMaximumCapacity, ULONG qpackBlockedStreams) noexcept
+{
+    if (peerSettingsReceived_ || qpackMaximumCapacity > WKNET_HARD_MAX_QPACK_DYNAMIC_TABLE_BYTES ||
+        qpackBlockedStreams > WKNET_HARD_MAX_QPACK_BLOCKED_STREAMS)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    peerQpackMaximumCapacity_ = qpackMaximumCapacity;
+    peerQpackBlockedStreams_ = qpackBlockedStreams;
+    peerSettingsReceived_ = true;
+    const NTSTATUS status = encoder_.Initialize(peerQpackMaximumCapacity_, peerQpackBlockedStreams_);
+    encoderInitialized_ = NT_SUCCESS(status);
+    return status;
+}
+#endif
+
 NTSTATUS Http3Connection::OpenRequest(const Http3RequestOpenOptions &options, ULONGLONG *streamId) noexcept
 {
     if (streamId != nullptr)
@@ -1612,4 +1629,12 @@ ULONGLONG Http3ConnectionLocalDecoderBytesSent(const Http3Connection *connection
 {
     return connection != nullptr ? connection->LocalDecoderBytesSent() : 0;
 }
+#if defined(WKNET_USER_MODE_TEST)
+NTSTATUS Http3ConnectionTestApplyPeerSettings(Http3Connection *connection, SIZE_T qpackMaximumCapacity,
+                                              ULONG qpackBlockedStreams) noexcept
+{
+    return connection != nullptr ? connection->TestApplyPeerSettings(qpackMaximumCapacity, qpackBlockedStreams)
+                                 : STATUS_INVALID_PARAMETER;
+}
+#endif
 } // namespace wknet::http3

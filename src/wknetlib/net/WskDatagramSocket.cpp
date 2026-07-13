@@ -391,7 +391,7 @@ NTSTATUS WskDatagramSocket::Open(WskClient &client, USHORT addressFamily) noexce
     {
         return STATUS_INVALID_PARAMETER;
     }
-    if (!client.IsInitialized())
+    if (!WskClientIsInitialized(&client))
     {
         return STATUS_DEVICE_NOT_READY;
     }

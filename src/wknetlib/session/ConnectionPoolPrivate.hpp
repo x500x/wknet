@@ -3,8 +3,44 @@
 #include "session/ConnectionPool.h"
 
 namespace wknet::session {
+struct TcpConnectionHolder final
+{
+#if !defined(WKNET_USER_MODE_TEST)
+    net::WskSocket *Socket;
+    transport::Transport *RawTransport;
+    tls::TlsConnection *Tls;
+#endif
+    transport::Transport *Transport;
+    http2::Http2Connection *Http2;
+};
+
+struct QuicConnectionHolder final
+{
+    quic::QuicConnection *Quic;
+    http3::Http3Connection *Http3;
+    PooledQuicCloseRoutine CloseRoutine;
+    void *CloseContext;
+    ULONGLONG LastStreamId;
+    ULONGLONG GoAwayStreamId;
+    ULONG StreamLeases;
+    ULONG MaxStreamLeases;
+    bool GoAwayReceived;
+    bool ActiveRequest;
+    bool Draining;
+    bool Evicting;
+    bool WorkerExited;
+    bool CloseStarted;
+};
+
+union ConnectionHolder final
+{
+    TcpConnectionHolder Tcp;
+    QuicConnectionHolder Quic;
+};
+
     struct PooledConnection final
     {
+        ConnectionKind Kind = ConnectionKind::None;
         bool InUse = false;
         bool Connected = false;
         ULONGLONG Id = 0;
@@ -26,14 +62,10 @@ namespace wknet::session {
         ULONGLONG Http2KeepAliveSequence = 0;
         UCHAR Http2KeepAliveOpaqueData[8] = {};
         ConnectionPoolKey Key = {};
+        ConnectionHolder Holder = {};
 #if !defined(WKNET_USER_MODE_TEST)
         KMUTEX Http1PipelineSendLock = {};
         KEVENT Http1PipelineReceiveEvent = {};
-        net::WskSocket* Socket = nullptr;
-        transport::Transport* RawTransport = nullptr;
-        tls::TlsConnection* Tls = nullptr;
 #endif
-        transport::Transport* Transport = nullptr;
-        http2::Http2Connection* Http2 = nullptr;
     };
 }

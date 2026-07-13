@@ -36,6 +36,9 @@
     <ClCompile Include="session\SessionLife.cpp" />
     <ClCompile Include="session\HttpH1Dispatch.cpp" />
     <ClCompile Include="session\HttpH2Dispatch.cpp" />
+    <ClCompile Include="session\HttpH3Dispatch.cpp" />
+    <ClCompile Include="session\HttpH3Peer.cpp" />
+    <ClCompile Include="session\HttpH3TestHooks.cpp" />
     <ClCompile Include="session\HttpProxy.cpp" />
     <ClCompile Include="session\HttpRedirect.cpp" />
     <ClCompile Include="session\HttpResponseHandling.cpp" />
@@ -211,6 +214,7 @@
     <ClInclude Include="..\..\include\wknet\Wknet.h" />
     <ClInclude Include="session\EnginePrivate.hpp" />
     <ClInclude Include="session\ConnectionPoolPrivate.hpp" />
+    <ClInclude Include="session\HttpH3TestHooks.h" />
     <ClInclude Include="transport\Transport.h" />
     <ClInclude Include="transport\TransportPrivate.hpp" />
     <ClInclude Include="net\WskClientPrivate.hpp" />

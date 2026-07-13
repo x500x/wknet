@@ -109,7 +109,16 @@ Invoke-Rg -Description 'PooledConnection fields are accessed outside ConnectionP
     '-n',
     '--glob', '!ConnectionPool.cpp',
     '--glob', '!ConnectionPool.h',
-    '\b(?:pooledConnection|connection)(?:->|\.)(?:InUse|Connected|Id|LastUsedTime|Http2StreamLeases|Http2MaxStreamLeases|Http1PipelineLeases|Http1MaxPipelineLeases|Http1PipelineNextSequence|Http1PipelineNextReceiveSequence|Http1PipelineFailureStatus|Http1PipelineBufferedBytes|Http1PipelineBufferedLength|Http1PipelineBufferedCapacity|CloseWhenIdle|ProxyTunnelEstablished|Http2KeepAliveInProgress|Http2LastKeepAliveTime|Http2KeepAliveSequence|Http2KeepAliveOpaqueData|Key|Socket|RawTransport|Tls|Transport|Http2)\b',
+    '\b(?:pooledConnection|connection)(?:->|\.)(?:Kind|InUse|Connected|Id|LastUsedTime|Http2StreamLeases|Http2MaxStreamLeases|Http1PipelineLeases|Http1MaxPipelineLeases|Http1PipelineNextSequence|Http1PipelineNextReceiveSequence|Http1PipelineFailureStatus|Http1PipelineBufferedBytes|Http1PipelineBufferedLength|Http1PipelineBufferedCapacity|CloseWhenIdle|ProxyTunnelEstablished|Http2KeepAliveInProgress|Http2LastKeepAliveTime|Http2KeepAliveSequence|Http2KeepAliveOpaqueData|Key|Holder|Socket|RawTransport|Tls|Transport|Http2|Quic|Http3)\b',
+    (Join-Path $root 'src\wknetlib\session')
+)
+
+Invoke-Rg -Description 'Session files outside ConnectionPool define mixed TCP and QUIC pool ownership.' -Arguments @(
+    '-n',
+    '--glob', '!ConnectionPool.cpp',
+    '--glob', '!ConnectionPool.h',
+    '--glob', '!ConnectionPoolPrivate.hpp',
+    '(?s)(?:WskSocket|TlsConnection|Http2Connection)\s*\*[^;]{0,512}(?:QuicConnection|Http3Connection)\s*\*|(?:QuicConnection|Http3Connection)\s*\*[^;]{0,512}(?:WskSocket|TlsConnection|Http2Connection)\s*\*',
     (Join-Path $root 'src\wknetlib\session')
 )
 

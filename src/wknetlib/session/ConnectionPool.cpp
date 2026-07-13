@@ -33,14 +33,33 @@ namespace
         http2::Http2Connection* Http2 = nullptr;
     };
 
+    struct PendingQuicClose final
+    {
+        PooledQuicCloseRoutine Routine = nullptr;
+        void *Context = nullptr;
+        ConnectionPool *Pool = nullptr;
+        PooledConnection *Connection = nullptr;
+        quic::QuicConnection *Quic = nullptr;
+        http3::Http3Connection *Http3 = nullptr;
+    };
+
     void DetachConnectionResources(
         _Inout_ PooledConnection& connection,
         _Out_ DetachedConnectionResources* detached) noexcept;
+
+    void StartPendingQuicClose(_Inout_ PendingQuicClose *pending) noexcept
+    {
+        if (pending != nullptr && pending->Routine != nullptr)
+        {
+            pending->Routine(pending->Context, pending->Pool, pending->Connection, pending->Quic, pending->Http3);
+        }
+    }
 
     void InitializePoolLock(_Inout_ ConnectionPool* pool) noexcept
     {
 #if !defined(WKNET_USER_MODE_TEST)
         ExInitializeFastMutex(&pool->Lock);
+        KeInitializeEvent(&pool->QuicCloseCompleteEvent, NotificationEvent, TRUE);
 #else
         UNREFERENCED_PARAMETER(pool);
 #endif
@@ -195,6 +214,11 @@ namespace
         return RtlCompareMemory(left, right, leftLength) == leftLength;
     }
 
+    ConnectionKind EffectiveConnectionKind(ConnectionKind kind) noexcept
+    {
+        return kind == ConnectionKind::None ? ConnectionKind::Tcp : kind;
+    }
+
     bool ProxyIdentityEquals(
         const ConnectionPoolKey& left,
         const ConnectionPoolKey& right) noexcept
@@ -236,14 +260,21 @@ namespace
         }
 
 #if !defined(WKNET_USER_MODE_TEST)
-        return connection.Socket != nullptr ||
-            connection.RawTransport != nullptr ||
-            connection.Transport != nullptr ||
-            connection.Tls != nullptr ||
-            connection.Http2 != nullptr;
+        if (connection.Kind == ConnectionKind::Tcp)
+        {
+            return connection.Holder.Tcp.Socket != nullptr || connection.Holder.Tcp.RawTransport != nullptr ||
+                   connection.Holder.Tcp.Transport != nullptr || connection.Holder.Tcp.Tls != nullptr ||
+                   connection.Holder.Tcp.Http2 != nullptr;
+        }
 #else
-        return false;
+        if (connection.Kind == ConnectionKind::Tcp)
+        {
+            return connection.Holder.Tcp.Transport != nullptr || connection.Holder.Tcp.Http2 != nullptr;
+        }
 #endif
+        return connection.Kind == ConnectionKind::Quic &&
+               (connection.Holder.Quic.Quic != nullptr || connection.Holder.Quic.Http3 != nullptr ||
+                connection.Holder.Quic.Evicting);
     }
 
     _Must_inspect_result_
@@ -265,16 +296,16 @@ namespace
         _In_ const PooledConnection& connection,
         _In_ const ConnectionPoolKey& key) noexcept
     {
-        if (!connection.Connected ||
-            connection.CloseWhenIdle ||
-            connection.Http2StreamLeases == 0 ||
-            connection.Http2MaxStreamLeases == 0 ||
+        if (connection.Kind != ConnectionKind::Tcp || !connection.Connected || connection.CloseWhenIdle ||
+            connection.Http2StreamLeases == 0 || connection.Http2MaxStreamLeases == 0 ||
             connection.Http2StreamLeases >= connection.Http2MaxStreamLeases ||
-            !ConnectionPoolKeysEqualForAutoAlpnAcquire(key, connection.Key)) {
+            !ConnectionPoolKeysEqualForAutoAlpnAcquire(key, connection.Key))
+        {
             return false;
         }
 
-        if (connection.Http2 == nullptr || connection.Transport == nullptr) {
+        if (connection.Holder.Tcp.Http2 == nullptr || connection.Holder.Tcp.Transport == nullptr)
+        {
             return false;
         }
 
@@ -287,18 +318,52 @@ namespace
         _In_ const ConnectionPoolKey& key,
         ULONG maxPipelineLeases) noexcept
     {
-        if (!connection.Connected ||
-            !connection.InUse ||
-            connection.CloseWhenIdle ||
-            connection.Http1PipelineLeases == 0 ||
-            connection.Http1MaxPipelineLeases == 0 ||
-            connection.Http1PipelineLeases >= connection.Http1MaxPipelineLeases ||
-            maxPipelineLeases == 0 ||
-            connection.Http2StreamLeases != 0 ||
-            !ConnectionPoolKeysEqualForAutoAlpnAcquire(key, connection.Key)) {
+        if (connection.Kind != ConnectionKind::Tcp || !connection.Connected || !connection.InUse ||
+            connection.CloseWhenIdle || connection.Http1PipelineLeases == 0 || connection.Http1MaxPipelineLeases == 0 ||
+            connection.Http1PipelineLeases >= connection.Http1MaxPipelineLeases || maxPipelineLeases == 0 ||
+            connection.Http2StreamLeases != 0 || !ConnectionPoolKeysEqualForAutoAlpnAcquire(key, connection.Key))
+        {
             return false;
         }
 
+        return true;
+    }
+
+    _Must_inspect_result_ bool CanShareQuicConnection(_In_ const PooledConnection &connection,
+                                                      _In_ const ConnectionPoolKey &key) noexcept
+    {
+        return connection.Kind == ConnectionKind::Quic && connection.Connected && !connection.CloseWhenIdle &&
+               !connection.Holder.Quic.GoAwayReceived && !connection.Holder.Quic.ActiveRequest &&
+               !connection.Holder.Quic.Draining && !connection.Holder.Quic.Evicting &&
+               !connection.Holder.Quic.WorkerExited && connection.Holder.Quic.Quic != nullptr &&
+               connection.Holder.Quic.Http3 != nullptr &&
+               connection.Holder.Quic.StreamLeases < connection.Holder.Quic.MaxStreamLeases &&
+               ConnectionPoolKeysEqual(connection.Key, key);
+    }
+
+    _Must_inspect_result_ bool BeginQuicCloseLocked(_Inout_ ConnectionPool &pool, _Inout_ PooledConnection &connection,
+                                                    _Out_ PendingQuicClose *pending) noexcept
+    {
+        if (pending == nullptr || connection.Kind != ConnectionKind::Quic || connection.Holder.Quic.CloseStarted ||
+            connection.Holder.Quic.CloseRoutine == nullptr)
+        {
+            return false;
+        }
+
+        connection.CloseWhenIdle = true;
+        connection.InUse = true;
+        connection.Holder.Quic.Evicting = true;
+        connection.Holder.Quic.CloseStarted = true;
+        pending->Routine = connection.Holder.Quic.CloseRoutine;
+        pending->Context = connection.Holder.Quic.CloseContext;
+        pending->Pool = &pool;
+        pending->Connection = &connection;
+        pending->Quic = connection.Holder.Quic.Quic;
+        pending->Http3 = connection.Holder.Quic.Http3;
+        ++pool.QuicCloseOutstanding;
+#if !defined(WKNET_USER_MODE_TEST)
+        KeClearEvent(&pool.QuicCloseCompleteEvent);
+#endif
         return true;
     }
 
@@ -307,10 +372,10 @@ namespace
         _In_ const ConnectionPoolKey& left,
         _In_ const ConnectionPoolKey& right) noexcept
     {
-        return left.Port == right.Port &&
-            left.AddressFamily == right.AddressFamily &&
-            TextEquals(left.Scheme, left.SchemeLength, right.Scheme, right.SchemeLength) &&
-            TextEquals(left.Host, left.HostLength, right.Host, right.HostLength);
+        return EffectiveConnectionKind(left.Kind) == EffectiveConnectionKind(right.Kind) && left.Port == right.Port &&
+               left.AddressFamily == right.AddressFamily &&
+               TextEquals(left.Scheme, left.SchemeLength, right.Scheme, right.SchemeLength) &&
+               TextEquals(left.Host, left.HostLength, right.Host, right.HostLength);
     }
 
     _Must_inspect_result_
@@ -345,11 +410,10 @@ namespace
 
         for (ULONG index = 0; index < pool.Capacity; ++index) {
             PooledConnection& candidate = pool.Entries[index];
-            if (candidate.Connected &&
-                !candidate.InUse &&
-                candidate.Http2StreamLeases == 0 &&
-                candidate.Http1PipelineLeases == 0 &&
-                ConnectionPoolHostQuotaKeysEqual(candidate.Key, key)) {
+            if (candidate.Kind == ConnectionKind::Tcp && candidate.Connected && !candidate.InUse &&
+                candidate.Http2StreamLeases == 0 && candidate.Http1PipelineLeases == 0 &&
+                ConnectionPoolHostQuotaKeysEqual(candidate.Key, key))
+            {
                 DetachConnectionResources(candidate, detached);
                 if (pool.ActiveCount != 0) {
                     --pool.ActiveCount;
@@ -365,17 +429,18 @@ namespace
         _Inout_ PooledConnection& connection,
         _Out_ DetachedConnectionResources* detached) noexcept
     {
-        if (detached == nullptr) {
+        if (detached == nullptr || connection.Kind != ConnectionKind::Tcp)
+        {
             return;
         }
 
 #if !defined(WKNET_USER_MODE_TEST)
-        detached->Socket = connection.Socket;
-        detached->RawTransport = connection.RawTransport;
-        detached->Tls = connection.Tls;
+        detached->Socket = connection.Holder.Tcp.Socket;
+        detached->RawTransport = connection.Holder.Tcp.RawTransport;
+        detached->Tls = connection.Holder.Tcp.Tls;
 #endif
-        detached->Transport = connection.Transport;
-        detached->Http2 = connection.Http2;
+        detached->Transport = connection.Holder.Tcp.Transport;
+        detached->Http2 = connection.Holder.Tcp.Http2;
         FreeHttp1PipelineBuffer(connection);
         RtlZeroMemory(&connection, sizeof(connection));
         InitializePooledConnectionSlot(connection);
@@ -471,18 +536,13 @@ namespace
         _In_ const PooledConnection& connection,
         ULONGLONG now) noexcept
     {
-        if (!pool.Http2KeepAlive.Enabled ||
-            !connection.Connected ||
-            connection.InUse ||
-            connection.CloseWhenIdle ||
-            connection.Http2KeepAliveInProgress ||
-            connection.Http2StreamLeases != 0 ||
-            connection.Http1PipelineLeases != 0 ||
-            connection.Transport == nullptr ||
-            connection.Http2 == nullptr ||
-            !http2::Http2ConnectionIsReusable(connection.Http2) ||
-            connection.LastUsedTime == 0 ||
-            now < connection.LastUsedTime) {
+        if (!pool.Http2KeepAlive.Enabled || !connection.Connected || connection.InUse || connection.CloseWhenIdle ||
+            connection.Http2KeepAliveInProgress || connection.Http2StreamLeases != 0 ||
+            connection.Http1PipelineLeases != 0 || connection.Kind != ConnectionKind::Tcp ||
+            connection.Holder.Tcp.Transport == nullptr || connection.Holder.Tcp.Http2 == nullptr ||
+            !http2::Http2ConnectionIsReusable(connection.Holder.Tcp.Http2) || connection.LastUsedTime == 0 ||
+            now < connection.LastUsedTime)
+        {
             return false;
         }
 
@@ -704,8 +764,8 @@ namespace
             ++candidate.Http2KeepAliveSequence;
             StoreHttp2KeepAliveOpaqueData(candidate);
             selected = &candidate;
-            transport = candidate.Transport;
-            http2Connection = candidate.Http2;
+            transport = candidate.Holder.Tcp.Transport;
+            http2Connection = candidate.Holder.Tcp.Http2;
             opaqueData = candidate.Http2KeepAliveOpaqueData;
             if (attempted != nullptr) {
                 *attempted = true;
@@ -726,7 +786,9 @@ namespace
         DetachedConnectionResources detached = {};
         LockPool(pool);
         selected->Http2KeepAliveInProgress = false;
-        if (NT_SUCCESS(status) && selected->Http2 != nullptr && http2::Http2ConnectionIsReusable(selected->Http2)) {
+        if (NT_SUCCESS(status) && selected->Holder.Tcp.Http2 != nullptr &&
+            http2::Http2ConnectionIsReusable(selected->Holder.Tcp.Http2))
+        {
             selected->Http2LastKeepAliveTime = QueryPoolTime();
             selected->LastUsedTime = selected->Http2LastKeepAliveTime;
             selected->InUse = false;
@@ -762,12 +824,27 @@ namespace
 
         for (;;) {
             DetachedConnectionResources detached = {};
+            PendingQuicClose pending = {};
             bool found = false;
 
             LockPool(pool);
             for (ULONG index = 0; index < pool->Capacity; ++index) {
                 PooledConnection& entry = pool->Entries[index];
                 if (!HasConnectionState(entry)) {
+                    continue;
+                }
+
+                if (entry.Kind == ConnectionKind::Quic)
+                {
+                    if (entry.Holder.Quic.CloseStarted)
+                    {
+                        continue;
+                    }
+                    found = BeginQuicCloseLocked(*pool, entry, &pending);
+                    if (found)
+                    {
+                        break;
+                    }
                     continue;
                 }
 
@@ -782,10 +859,25 @@ namespace
             UnlockPool(pool);
 
             CloseDetachedConnectionResources(&detached);
+            StartPendingQuicClose(&pending);
             if (!found) {
                 break;
             }
         }
+
+#if !defined(WKNET_USER_MODE_TEST)
+        if (pool->QuicCloseOutstanding != 0)
+        {
+            const NTSTATUS waitStatus =
+                KeWaitForSingleObject(&pool->QuicCloseCompleteEvent, Executive, KernelMode, FALSE, nullptr);
+            UNREFERENCED_PARAMETER(waitStatus);
+        }
+#else
+        if (pool->QuicCloseOutstanding != 0)
+        {
+            return;
+        }
+#endif
 
         RtlSecureZeroMemory(pool->Entries, sizeof(PooledConnection) * pool->Capacity);
         FreePoolMemory(pool->Entries);
@@ -797,27 +889,26 @@ namespace
         const ConnectionPoolKey& left,
         const ConnectionPoolKey& right) noexcept
     {
-        return left.Port == right.Port &&
-            left.AddressFamily == right.AddressFamily &&
-            left.MinTlsVersion == right.MinTlsVersion &&
-            left.MaxTlsVersion == right.MaxTlsVersion &&
-            left.CertificatePolicy == right.CertificatePolicy &&
-            left.CertificateStore == right.CertificateStore &&
-            left.ClientCredential == right.ClientCredential &&
-            left.MaxTls12Renegotiations == right.MaxTls12Renegotiations &&
-            left.Policy.Profile == right.Policy.Profile &&
-            left.Policy.EnableTls12RsaKeyExchange == right.Policy.EnableTls12RsaKeyExchange &&
-            left.Policy.EnableTls12Cbc == right.Policy.EnableTls12Cbc &&
-            left.Policy.EnableTls12Renegotiation == right.Policy.EnableTls12Renegotiation &&
-            left.Policy.EnableTls12Sha1Signatures == right.Policy.EnableTls12Sha1Signatures &&
-            left.Policy.EnablePostHandshakeClientAuth == right.Policy.EnablePostHandshakeClientAuth &&
-            left.Policy.RequireRevocationCheck == right.Policy.RequireRevocationCheck &&
-            left.AutomaticAlpn == right.AutomaticAlpn &&
-            left.Http2CleartextMode == right.Http2CleartextMode &&
-            ProxyIdentityEquals(left, right) &&
-            TextEquals(left.Scheme, left.SchemeLength, right.Scheme, right.SchemeLength) &&
-            TextEquals(left.Host, left.HostLength, right.Host, right.HostLength) &&
-            TextEquals(left.TlsServerName, left.TlsServerNameLength, right.TlsServerName, right.TlsServerNameLength);
+        return EffectiveConnectionKind(left.Kind) == EffectiveConnectionKind(right.Kind) && left.Port == right.Port &&
+               left.AddressFamily == right.AddressFamily && left.MinTlsVersion == right.MinTlsVersion &&
+               left.MaxTlsVersion == right.MaxTlsVersion && left.CertificatePolicy == right.CertificatePolicy &&
+               left.CertificateStore == right.CertificateStore && left.ClientCredential == right.ClientCredential &&
+               left.MaxTls12Renegotiations == right.MaxTls12Renegotiations &&
+               left.Policy.Profile == right.Policy.Profile &&
+               left.Policy.EnableTls12RsaKeyExchange == right.Policy.EnableTls12RsaKeyExchange &&
+               left.Policy.EnableTls12Cbc == right.Policy.EnableTls12Cbc &&
+               left.Policy.EnableTls12Renegotiation == right.Policy.EnableTls12Renegotiation &&
+               left.Policy.EnableTls12Sha1Signatures == right.Policy.EnableTls12Sha1Signatures &&
+               left.Policy.EnablePostHandshakeClientAuth == right.Policy.EnablePostHandshakeClientAuth &&
+               left.Policy.RequireRevocationCheck == right.Policy.RequireRevocationCheck &&
+               left.AutomaticAlpn == right.AutomaticAlpn && left.Http2CleartextMode == right.Http2CleartextMode &&
+               ProxyIdentityEquals(left, right) && left.AlternativePort == right.AlternativePort &&
+               left.QuicVersion == right.QuicVersion &&
+               TextEquals(left.Scheme, left.SchemeLength, right.Scheme, right.SchemeLength) &&
+               TextEquals(left.Host, left.HostLength, right.Host, right.HostLength) &&
+               TextEquals(left.AlternativeHost, left.AlternativeHostLength, right.AlternativeHost,
+                          right.AlternativeHostLength) &&
+               TextEquals(left.TlsServerName, left.TlsServerNameLength, right.TlsServerName, right.TlsServerNameLength);
     }
 
     bool ConnectionPoolKeysEqual(
@@ -832,6 +923,11 @@ namespace
         const ConnectionPoolKey& left,
         const ConnectionPoolKey& right) noexcept
     {
+        if (EffectiveConnectionKind(left.Kind) != ConnectionKind::Tcp ||
+            EffectiveConnectionKind(right.Kind) != ConnectionKind::Tcp)
+        {
+            return ConnectionPoolKeysEqual(left, right);
+        }
         if (left.AlpnLength != 0 || right.AlpnLength == 0) {
             return ConnectionPoolKeysEqual(left, right);
         }
@@ -860,8 +956,15 @@ namespace
         if (pool == nullptr || pool->Entries == nullptr || connection == nullptr || reused == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
+        const ConnectionKind requestedKind = EffectiveConnectionKind(key.Kind);
+        if (requestedKind == ConnectionKind::Quic &&
+            (key.ProxyEnabled || key.QuicVersion == 0 || !TextEquals(key.Alpn, key.AlpnLength, "h3", 2)))
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
 
         DetachedConnectionResources detached = {};
+        PendingQuicClose pending = {};
         PooledConnection* selected = nullptr;
         const ULONGLONG now = QueryPoolTime();
 
@@ -869,6 +972,22 @@ namespace
         if (policy != ConnectionPolicy::ForceNew && policy != ConnectionPolicy::NoPool) {
             for (ULONG index = 0; index < pool->Capacity; ++index) {
                 PooledConnection& candidate = pool->Entries[index];
+                if (candidate.Kind == ConnectionKind::Quic && !candidate.InUse &&
+                    candidate.Holder.Quic.StreamLeases == 0 && !candidate.Holder.Quic.ActiveRequest &&
+                    IsIdleExpired(*pool, candidate, now))
+                {
+                    BeginQuicCloseLocked(*pool, candidate, &pending);
+                    continue;
+                }
+                if (CanShareQuicConnection(candidate, key))
+                {
+                    ++candidate.Holder.Quic.StreamLeases;
+                    candidate.Holder.Quic.ActiveRequest = true;
+                    candidate.InUse = true;
+                    selected = &candidate;
+                    *reused = true;
+                    break;
+                }
                 if (candidate.InUse && CanShareHttp2Connection(candidate, key)) {
                     ++candidate.Http2StreamLeases;
                     selected = &candidate;
@@ -876,11 +995,10 @@ namespace
                     break;
                 }
 
-                if (candidate.Connected &&
-                    !candidate.InUse &&
-                    candidate.Http2StreamLeases == 0 &&
-                    candidate.Http1PipelineLeases == 0 &&
-                    ConnectionPoolKeysEqualForAutoAlpnAcquire(key, candidate.Key)) {
+                if (candidate.Kind == ConnectionKind::Tcp && candidate.Connected && !candidate.InUse &&
+                    candidate.Http2StreamLeases == 0 && candidate.Http1PipelineLeases == 0 &&
+                    ConnectionPoolKeysEqualForAutoAlpnAcquire(key, candidate.Key))
+                {
                     if (IsIdleExpired(*pool, candidate, now)) {
                         DetachConnectionResources(candidate, &detached);
                         if (pool->ActiveCount != 0) {
@@ -898,6 +1016,20 @@ namespace
         }
 
         if (selected == nullptr) {
+            if (policy == ConnectionPolicy::ForceNew || policy == ConnectionPolicy::NoPool)
+            {
+                for (ULONG index = 0; index < pool->Capacity; ++index)
+                {
+                    PooledConnection &candidate = pool->Entries[index];
+                    if (candidate.Kind == ConnectionKind::Quic && !candidate.InUse &&
+                        candidate.Holder.Quic.StreamLeases == 0 && !candidate.Holder.Quic.ActiveRequest &&
+                        ConnectionPoolHostQuotaKeysEqual(candidate.Key, key))
+                    {
+                        BeginQuicCloseLocked(*pool, candidate, &pending);
+                        break;
+                    }
+                }
+            }
             if (CountConnectionsForHostQuota(*pool, key) >= pool->MaxConnectionsPerHost) {
                 bool idleDetached = HasDetachedConnectionResources(detached);
                 if (!idleDetached) {
@@ -907,16 +1039,16 @@ namespace
                     CountConnectionsForHostQuota(*pool, key) >= pool->MaxConnectionsPerHost) {
                     UnlockPool(pool);
                     CloseDetachedConnectionResources(&detached);
+                    StartPendingQuicClose(&pending);
                     return STATUS_INSUFFICIENT_RESOURCES;
                 }
             }
 
             for (ULONG index = 0; index < pool->Capacity; ++index) {
                 PooledConnection& candidate = pool->Entries[index];
-                if (!candidate.Connected &&
-                    !candidate.InUse &&
-                    candidate.Http2StreamLeases == 0 &&
-                    candidate.Http1PipelineLeases == 0) {
+                if (candidate.Kind == ConnectionKind::None && !candidate.Connected && !candidate.InUse &&
+                    candidate.Http2StreamLeases == 0 && candidate.Http1PipelineLeases == 0)
+                {
                     if (HasConnectionState(candidate)) {
                         if (HasDetachedConnectionResources(detached)) {
                             continue;
@@ -926,6 +1058,11 @@ namespace
                     candidate.InUse = true;
                     candidate.Connected = true;
                     candidate.Key = key;
+                    candidate.Kind = requestedKind;
+                    if (requestedKind == ConnectionKind::Quic)
+                    {
+                        candidate.Holder.Quic.ActiveRequest = true;
+                    }
                     candidate.Id = rtl::TraceAllocateCorrelationId();
                     candidate.LastUsedTime = 0;
                     ++pool->ActiveCount;
@@ -938,9 +1075,9 @@ namespace
         if (selected == nullptr && policy != ConnectionPolicy::NoPool) {
             for (ULONG index = 0; index < pool->Capacity; ++index) {
                 PooledConnection& candidate = pool->Entries[index];
-                if (!candidate.InUse &&
-                    candidate.Http2StreamLeases == 0 &&
-                    candidate.Http1PipelineLeases == 0) {
+                if (candidate.Kind == ConnectionKind::Tcp && !candidate.InUse && candidate.Http2StreamLeases == 0 &&
+                    candidate.Http1PipelineLeases == 0)
+                {
                     const bool wasConnected = candidate.Connected;
                     if (HasConnectionState(candidate)) {
                         if (HasDetachedConnectionResources(detached)) {
@@ -951,6 +1088,11 @@ namespace
                     candidate.InUse = true;
                     candidate.Connected = true;
                     candidate.Key = key;
+                    candidate.Kind = requestedKind;
+                    if (requestedKind == ConnectionKind::Quic)
+                    {
+                        candidate.Holder.Quic.ActiveRequest = true;
+                    }
                     candidate.Id = rtl::TraceAllocateCorrelationId();
                     candidate.LastUsedTime = 0;
                     if (!wasConnected) {
@@ -964,6 +1106,7 @@ namespace
         UnlockPool(pool);
 
         CloseDetachedConnectionResources(&detached);
+        StartPendingQuicClose(&pending);
 
         if (selected == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -1020,6 +1163,12 @@ namespace
         bool reusable) noexcept
     {
         if (pool == nullptr || pool->Entries == nullptr || connection == nullptr) {
+            return;
+        }
+
+        if (connection->Kind == ConnectionKind::Quic)
+        {
+            ConnectionPoolReleaseHttp3StreamLease(pool, connection, reusable);
             return;
         }
 
@@ -1107,6 +1256,305 @@ namespace
         CloseDetachedConnectionResources(&detached);
     }
 
+    NTSTATUS PooledConnectionAdoptQuic(PooledConnection *connection, quic::QuicConnection *quicConnection,
+                                       http3::Http3Connection *http3Connection, PooledQuicCloseRoutine closeRoutine,
+                                       void *closeContext) noexcept
+    {
+        if (connection == nullptr || quicConnection == nullptr || http3Connection == nullptr || closeRoutine == nullptr)
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (connection->Kind != ConnectionKind::Quic || connection->Holder.Quic.Quic != nullptr ||
+            connection->Holder.Quic.Http3 != nullptr)
+        {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        connection->Holder.Quic.Quic = quicConnection;
+        connection->Holder.Quic.Http3 = http3Connection;
+        connection->Holder.Quic.CloseRoutine = closeRoutine;
+        connection->Holder.Quic.CloseContext = closeContext;
+        return STATUS_SUCCESS;
+    }
+
+    void ConnectionPoolAbandonQuicAcquire(ConnectionPool *pool, PooledConnection *connection) noexcept
+    {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr)
+        {
+            return;
+        }
+
+        LockPool(pool);
+        if (connection->Kind == ConnectionKind::Quic && connection->Holder.Quic.Quic == nullptr &&
+            connection->Holder.Quic.Http3 == nullptr)
+        {
+            const bool wasConnected = connection->Connected;
+            RtlSecureZeroMemory(&connection->Holder, sizeof(connection->Holder));
+            RtlZeroMemory(&connection->Key, sizeof(connection->Key));
+            connection->Kind = ConnectionKind::None;
+            connection->InUse = false;
+            connection->Connected = false;
+            connection->CloseWhenIdle = false;
+            connection->LastUsedTime = 0;
+            if (wasConnected && pool->ActiveCount != 0)
+            {
+                --pool->ActiveCount;
+            }
+        }
+        UnlockPool(pool);
+    }
+
+    quic::QuicConnection *PooledConnectionQuic(PooledConnection *connection) noexcept
+    {
+        return connection != nullptr && connection->Kind == ConnectionKind::Quic ? connection->Holder.Quic.Quic
+                                                                                 : nullptr;
+    }
+
+    http3::Http3Connection *PooledConnectionHttp3(PooledConnection *connection) noexcept
+    {
+        return connection != nullptr && connection->Kind == ConnectionKind::Quic ? connection->Holder.Quic.Http3
+                                                                                 : nullptr;
+    }
+
+    void *PooledConnectionQuicCloseContext(PooledConnection *connection) noexcept
+    {
+        return connection != nullptr && connection->Kind == ConnectionKind::Quic ? connection->Holder.Quic.CloseContext
+                                                                                 : nullptr;
+    }
+
+    NTSTATUS ConnectionPoolPromoteHttp3StreamLease(ConnectionPool *pool, PooledConnection *connection,
+                                                   ULONGLONG streamId, ULONG peerMaxStreams,
+                                                   ULONG localMaxStreams) noexcept
+    {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr || peerMaxStreams == 0 ||
+            localMaxStreams == 0 || (streamId & 3ULL) != 0)
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        LockPool(pool);
+        if (connection->Kind != ConnectionKind::Quic || !connection->Connected || connection->CloseWhenIdle ||
+            connection->Holder.Quic.GoAwayReceived || connection->Holder.Quic.Draining ||
+            connection->Holder.Quic.Evicting || connection->Holder.Quic.WorkerExited ||
+            connection->Holder.Quic.Quic == nullptr || connection->Holder.Quic.Http3 == nullptr)
+        {
+            UnlockPool(pool);
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        const ULONG maxStreams = peerMaxStreams < localMaxStreams ? peerMaxStreams : localMaxStreams;
+        if (connection->Holder.Quic.StreamLeases >= maxStreams)
+        {
+            UnlockPool(pool);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        connection->Holder.Quic.MaxStreamLeases = maxStreams;
+        ++connection->Holder.Quic.StreamLeases;
+        connection->Holder.Quic.LastStreamId = streamId;
+        connection->InUse = true;
+        UnlockPool(pool);
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS ConnectionPoolBindHttp3StreamLease(ConnectionPool *pool, PooledConnection *connection, ULONGLONG streamId,
+                                                ULONG peerMaxStreams, ULONG localMaxStreams) noexcept
+    {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr || peerMaxStreams == 0 ||
+            localMaxStreams == 0 || (streamId & 3ULL) != 0)
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        LockPool(pool);
+        if (connection->Kind != ConnectionKind::Quic || !connection->Connected || connection->CloseWhenIdle ||
+            connection->Holder.Quic.GoAwayReceived || connection->Holder.Quic.Draining ||
+            connection->Holder.Quic.Evicting || connection->Holder.Quic.WorkerExited ||
+            connection->Holder.Quic.Quic == nullptr || connection->Holder.Quic.Http3 == nullptr ||
+            connection->Holder.Quic.StreamLeases == 0 || !connection->Holder.Quic.ActiveRequest)
+        {
+            UnlockPool(pool);
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+
+        const ULONG maxStreams = peerMaxStreams < localMaxStreams ? peerMaxStreams : localMaxStreams;
+        if (connection->Holder.Quic.StreamLeases > maxStreams)
+        {
+            UnlockPool(pool);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        connection->Holder.Quic.MaxStreamLeases = maxStreams;
+        connection->Holder.Quic.LastStreamId = streamId;
+        UnlockPool(pool);
+        return STATUS_SUCCESS;
+    }
+
+    void ConnectionPoolReleaseHttp3StreamLease(ConnectionPool *pool, PooledConnection *connection,
+                                               bool reusable) noexcept
+    {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr)
+        {
+            return;
+        }
+
+        PendingQuicClose pending = {};
+        LockPool(pool);
+        if (connection->Kind != ConnectionKind::Quic)
+        {
+            UnlockPool(pool);
+            return;
+        }
+        if (connection->Holder.Quic.StreamLeases != 0)
+        {
+            --connection->Holder.Quic.StreamLeases;
+        }
+        connection->Holder.Quic.ActiveRequest = false;
+        if (!reusable)
+        {
+            connection->CloseWhenIdle = true;
+        }
+        if (connection->Holder.Quic.StreamLeases == 0 && !connection->Holder.Quic.ActiveRequest)
+        {
+            if (connection->CloseWhenIdle || connection->Holder.Quic.GoAwayReceived ||
+                connection->Holder.Quic.Draining || connection->Holder.Quic.WorkerExited)
+            {
+                BeginQuicCloseLocked(*pool, *connection, &pending);
+            }
+            else
+            {
+                connection->InUse = false;
+                connection->LastUsedTime = QueryPoolTime();
+            }
+        }
+        UnlockPool(pool);
+        StartPendingQuicClose(&pending);
+    }
+
+    void ConnectionPoolSetHttp3GoAway(ConnectionPool *pool, PooledConnection *connection,
+                                      ULONGLONG goAwayStreamId) noexcept
+    {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr)
+        {
+            return;
+        }
+        PendingQuicClose pending = {};
+        LockPool(pool);
+        if (connection->Kind == ConnectionKind::Quic && (goAwayStreamId & 3ULL) == 0)
+        {
+            if (!connection->Holder.Quic.GoAwayReceived || goAwayStreamId <= connection->Holder.Quic.GoAwayStreamId)
+            {
+                connection->Holder.Quic.GoAwayReceived = true;
+                connection->Holder.Quic.GoAwayStreamId = goAwayStreamId;
+                connection->CloseWhenIdle = true;
+                if (connection->Holder.Quic.StreamLeases == 0 && !connection->Holder.Quic.ActiveRequest)
+                {
+                    BeginQuicCloseLocked(*pool, *connection, &pending);
+                }
+            }
+        }
+        UnlockPool(pool);
+        StartPendingQuicClose(&pending);
+    }
+
+    void ConnectionPoolSetQuicActiveRequest(ConnectionPool *pool, PooledConnection *connection, bool active) noexcept
+    {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr)
+        {
+            return;
+        }
+        PendingQuicClose pending = {};
+        LockPool(pool);
+        if (connection->Kind == ConnectionKind::Quic)
+        {
+            connection->Holder.Quic.ActiveRequest = active;
+            if (!active && connection->Holder.Quic.StreamLeases == 0 && connection->CloseWhenIdle)
+            {
+                BeginQuicCloseLocked(*pool, *connection, &pending);
+            }
+        }
+        UnlockPool(pool);
+        StartPendingQuicClose(&pending);
+    }
+
+    void ConnectionPoolSetQuicDraining(ConnectionPool *pool, PooledConnection *connection) noexcept
+    {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr)
+        {
+            return;
+        }
+        PendingQuicClose pending = {};
+        LockPool(pool);
+        if (connection->Kind == ConnectionKind::Quic)
+        {
+            connection->Holder.Quic.Draining = true;
+            connection->CloseWhenIdle = true;
+            if (connection->Holder.Quic.StreamLeases == 0 && !connection->Holder.Quic.ActiveRequest)
+            {
+                BeginQuicCloseLocked(*pool, *connection, &pending);
+            }
+        }
+        UnlockPool(pool);
+        StartPendingQuicClose(&pending);
+    }
+
+    void ConnectionPoolSetQuicWorkerExited(ConnectionPool *pool, PooledConnection *connection) noexcept
+    {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr)
+        {
+            return;
+        }
+        PendingQuicClose pending = {};
+        LockPool(pool);
+        if (connection->Kind == ConnectionKind::Quic)
+        {
+            connection->Holder.Quic.WorkerExited = true;
+            connection->CloseWhenIdle = true;
+            if (connection->Holder.Quic.StreamLeases == 0 && !connection->Holder.Quic.ActiveRequest)
+            {
+                BeginQuicCloseLocked(*pool, *connection, &pending);
+            }
+        }
+        UnlockPool(pool);
+        StartPendingQuicClose(&pending);
+    }
+
+    void ConnectionPoolCompleteQuicClose(ConnectionPool *pool, PooledConnection *connection) noexcept
+    {
+        if (pool == nullptr || pool->Entries == nullptr || connection == nullptr)
+        {
+            return;
+        }
+
+        LockPool(pool);
+        if (connection->Kind == ConnectionKind::Quic && connection->Holder.Quic.CloseStarted)
+        {
+            const bool wasConnected = connection->Connected;
+            RtlSecureZeroMemory(&connection->Holder, sizeof(connection->Holder));
+            RtlZeroMemory(&connection->Key, sizeof(connection->Key));
+            connection->Kind = ConnectionKind::None;
+            connection->InUse = false;
+            connection->Connected = false;
+            connection->CloseWhenIdle = false;
+            connection->LastUsedTime = 0;
+            if (wasConnected && pool->ActiveCount != 0)
+            {
+                --pool->ActiveCount;
+            }
+            if (pool->QuicCloseOutstanding != 0)
+            {
+                --pool->QuicCloseOutstanding;
+            }
+#if !defined(WKNET_USER_MODE_TEST)
+            if (pool->QuicCloseOutstanding == 0)
+            {
+                KeSetEvent(&pool->QuicCloseCompleteEvent, IO_NO_INCREMENT, FALSE);
+            }
+#endif
+        }
+        UnlockPool(pool);
+    }
+
 #if !defined(WKNET_USER_MODE_TEST)
     NTSTATUS PooledConnectionAdoptSocket(
         PooledConnection* connection,
@@ -1116,17 +1564,16 @@ namespace
         if (connection == nullptr || socket == nullptr || transport == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
-        if (connection->Socket != nullptr ||
-            connection->RawTransport != nullptr ||
-            connection->Transport != nullptr ||
-            connection->Tls != nullptr ||
-            connection->Http2 != nullptr) {
+        if (connection->Kind != ConnectionKind::Tcp || connection->Holder.Tcp.Socket != nullptr ||
+            connection->Holder.Tcp.RawTransport != nullptr || connection->Holder.Tcp.Transport != nullptr ||
+            connection->Holder.Tcp.Tls != nullptr || connection->Holder.Tcp.Http2 != nullptr)
+        {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        connection->Socket = socket;
-        connection->RawTransport = transport;
-        connection->Transport = transport;
+        connection->Holder.Tcp.Socket = socket;
+        connection->Holder.Tcp.RawTransport = transport;
+        connection->Holder.Tcp.Transport = transport;
         net::WskSocketSetConnectionId(socket, connection->Id);
         transport::TransportSetConnectionId(transport, connection->Id);
         connection->ProxyTunnelEstablished = false;
@@ -1141,15 +1588,15 @@ namespace
         if (connection == nullptr || tlsConnection == nullptr || transport == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
-        if (connection->RawTransport == nullptr ||
-            connection->Transport != connection->RawTransport ||
-            connection->Tls != nullptr ||
-            connection->Http2 != nullptr) {
+        if (connection->Kind != ConnectionKind::Tcp || connection->Holder.Tcp.RawTransport == nullptr ||
+            connection->Holder.Tcp.Transport != connection->Holder.Tcp.RawTransport ||
+            connection->Holder.Tcp.Tls != nullptr || connection->Holder.Tcp.Http2 != nullptr)
+        {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        connection->Tls = tlsConnection;
-        connection->Transport = transport;
+        connection->Holder.Tcp.Tls = tlsConnection;
+        connection->Holder.Tcp.Transport = transport;
         tls::TlsConnectionSetConnectionId(tlsConnection, connection->Id);
         transport::TransportSetConnectionId(transport, connection->Id);
         return STATUS_SUCCESS;
@@ -1163,26 +1610,31 @@ namespace
         if (connection == nullptr || http2Connection == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
-        if (connection->Transport == nullptr || connection->Http2 != nullptr) {
+        if (connection->Kind != ConnectionKind::Tcp || connection->Holder.Tcp.Transport == nullptr ||
+            connection->Holder.Tcp.Http2 != nullptr)
+        {
             return STATUS_INVALID_DEVICE_STATE;
         }
 
-        connection->Http2 = http2Connection;
+        connection->Holder.Tcp.Http2 = http2Connection;
         return STATUS_SUCCESS;
     }
 
     void PooledConnectionReleaseHttp2(PooledConnection* connection) noexcept
     {
-        if (connection == nullptr || connection->Http2 == nullptr) {
+        if (connection == nullptr || connection->Kind != ConnectionKind::Tcp || connection->Holder.Tcp.Http2 == nullptr)
+        {
             return;
         }
 
-        if (connection->Transport != nullptr) {
-            const NTSTATUS shutdownStatus = http2::Http2ConnectionShutdown(connection->Http2, connection->Transport);
+        if (connection->Holder.Tcp.Transport != nullptr)
+        {
+            const NTSTATUS shutdownStatus =
+                http2::Http2ConnectionShutdown(connection->Holder.Tcp.Http2, connection->Holder.Tcp.Transport);
             UNREFERENCED_PARAMETER(shutdownStatus);
         }
-        http2::Http2ConnectionClose(connection->Http2);
-        connection->Http2 = nullptr;
+        http2::Http2ConnectionClose(connection->Holder.Tcp.Http2);
+        connection->Holder.Tcp.Http2 = nullptr;
     }
 
 #if !defined(WKNET_USER_MODE_TEST)
@@ -1193,13 +1645,16 @@ namespace
         }
 
         PooledConnectionReleaseHttp2(connection);
-        if (connection->Transport != nullptr && connection->Transport != connection->RawTransport) {
-            transport::TransportClose(connection->Transport);
-            connection->Transport = connection->RawTransport;
+        if (connection->Holder.Tcp.Transport != nullptr &&
+            connection->Holder.Tcp.Transport != connection->Holder.Tcp.RawTransport)
+        {
+            transport::TransportClose(connection->Holder.Tcp.Transport);
+            connection->Holder.Tcp.Transport = connection->Holder.Tcp.RawTransport;
         }
-        if (connection->Tls != nullptr) {
-            tls::TlsConnectionClose(connection->Tls);
-            connection->Tls = nullptr;
+        if (connection->Holder.Tcp.Tls != nullptr)
+        {
+            tls::TlsConnectionClose(connection->Holder.Tcp.Tls);
+            connection->Holder.Tcp.Tls = nullptr;
         }
     }
 
@@ -1210,14 +1665,16 @@ namespace
         }
 
         PooledConnectionReleaseTls(connection);
-        if (connection->RawTransport != nullptr) {
-            transport::TransportClose(connection->RawTransport);
-            connection->RawTransport = nullptr;
-            connection->Transport = nullptr;
+        if (connection->Holder.Tcp.RawTransport != nullptr)
+        {
+            transport::TransportClose(connection->Holder.Tcp.RawTransport);
+            connection->Holder.Tcp.RawTransport = nullptr;
+            connection->Holder.Tcp.Transport = nullptr;
         }
-        if (connection->Socket != nullptr) {
-            net::WskSocketDestroy(connection->Socket);
-            connection->Socket = nullptr;
+        if (connection->Holder.Tcp.Socket != nullptr)
+        {
+            net::WskSocketDestroy(connection->Holder.Tcp.Socket);
+            connection->Holder.Tcp.Socket = nullptr;
         }
 
         connection->LastUsedTime = 0;
@@ -1246,28 +1703,32 @@ namespace
 
     transport::Transport* PooledConnectionTransport(PooledConnection* connection) noexcept
     {
-        return connection != nullptr ? connection->Transport : nullptr;
+        return connection != nullptr && connection->Kind == ConnectionKind::Tcp ? connection->Holder.Tcp.Transport
+                                                                                : nullptr;
     }
 
     http2::Http2Connection* PooledConnectionHttp2(PooledConnection* connection) noexcept
     {
-        return connection != nullptr ? connection->Http2 : nullptr;
+        return connection != nullptr && connection->Kind == ConnectionKind::Tcp ? connection->Holder.Tcp.Http2
+                                                                                : nullptr;
     }
 
 #if !defined(WKNET_USER_MODE_TEST)
     net::WskSocket* PooledConnectionSocket(PooledConnection* connection) noexcept
     {
-        return connection != nullptr ? connection->Socket : nullptr;
+        return connection != nullptr && connection->Kind == ConnectionKind::Tcp ? connection->Holder.Tcp.Socket
+                                                                                : nullptr;
     }
 
     transport::Transport* PooledConnectionRawTransport(PooledConnection* connection) noexcept
     {
-        return connection != nullptr ? connection->RawTransport : nullptr;
+        return connection != nullptr && connection->Kind == ConnectionKind::Tcp ? connection->Holder.Tcp.RawTransport
+                                                                                : nullptr;
     }
 
     tls::TlsConnection* PooledConnectionTls(PooledConnection* connection) noexcept
     {
-        return connection != nullptr ? connection->Tls : nullptr;
+        return connection != nullptr && connection->Kind == ConnectionKind::Tcp ? connection->Holder.Tcp.Tls : nullptr;
     }
 #endif
 
@@ -1296,8 +1757,8 @@ namespace
         http2::Http2Connection* http2Connection) noexcept
     {
         if (connection != nullptr) {
-            connection->Transport = transport;
-            connection->Http2 = http2Connection;
+            connection->Holder.Tcp.Transport = transport;
+            connection->Holder.Tcp.Http2 = http2Connection;
             transport::TransportSetConnectionId(transport, connection->Id);
         }
     }
@@ -1336,7 +1797,9 @@ namespace
         }
 
 #if !defined(WKNET_USER_MODE_TEST)
-        if (connection->Http2 == nullptr || connection->Transport == nullptr) {
+        if (connection->Kind != ConnectionKind::Tcp || connection->Holder.Tcp.Http2 == nullptr ||
+            connection->Holder.Tcp.Transport == nullptr)
+        {
             UnlockPool(pool);
             return STATUS_INVALID_DEVICE_STATE;
         }
@@ -1650,6 +2113,20 @@ namespace
     void ConnectionPoolClose(ConnectionPool* pool, PooledConnection* connection) noexcept
     {
         if (pool == nullptr || pool->Entries == nullptr || connection == nullptr) {
+            return;
+        }
+
+        if (connection->Kind == ConnectionKind::Quic)
+        {
+            PendingQuicClose pending = {};
+            LockPool(pool);
+            connection->CloseWhenIdle = true;
+            if (connection->Holder.Quic.StreamLeases == 0 && !connection->Holder.Quic.ActiveRequest)
+            {
+                BeginQuicCloseLocked(*pool, *connection, &pending);
+            }
+            UnlockPool(pool);
+            StartPendingQuicClose(&pending);
             return;
         }
 

@@ -23,6 +23,7 @@ enum class QuicCommandType : UCHAR
     ConsumeStream,
     ResetStream,
     StopSending,
+    Application,
     Close,
     CloseApplication,
     Noop,
@@ -43,6 +44,8 @@ struct QuicCommand final
     SIZE_T Progress = 0;
     bool Fin = false;
     QuicFrame Frame = {};
+    QuicApplicationCommandCallback ApplicationCallback = nullptr;
+    void *ApplicationContext = nullptr;
     QuicEncryptionLevel Level = QuicEncryptionLevel::Application;
     QuicPacketNumberSpace Space = QuicPacketNumberSpace::Application;
     HeapArray<UCHAR> AuxiliaryData;
@@ -68,7 +71,9 @@ class QuicConnection final
     NTSTATUS Initialize(const QuicConnectionCreateOptions &options) noexcept;
     NTSTATUS Enqueue(QuicCommandType type, QuicOperation *operation, ULONGLONG streamId = 0,
                      const UCHAR *data = nullptr, SIZE_T dataLength = 0, UCHAR *output = nullptr, bool fin = false,
-                     ULONGLONG errorCode = 0) noexcept;
+                     ULONGLONG errorCode = 0, QuicApplicationCommandCallback applicationCallback = nullptr,
+                     void *applicationContext = nullptr) noexcept;
+    NTSTATUS WaitEstablished(QuicOperation *operation) noexcept;
     void Resume() noexcept;
     void Shutdown() noexcept;
     QuicConnectionState State() const noexcept;
@@ -98,6 +103,7 @@ class QuicConnection final
     void Process(QuicCommand *command) noexcept;
     void Complete(QuicOperation *operation, NTSTATUS status, ULONGLONG streamId = 0, SIZE_T bytesTransferred = 0,
                   bool fin = false) noexcept;
+    void CompleteEstablishedWaiter(NTSTATUS status) noexcept;
     bool Dequeue(QuicCommand **command) noexcept;
     bool ShouldStop() const noexcept;
     bool IsWorkerThread() const noexcept;
@@ -177,6 +183,8 @@ class QuicConnection final
     bool timerReady_ = false;
     bool receivePending_ = false;
     bool networkEnabled_ = false;
+    QuicOperation *establishedOperation_ = nullptr;
+    NTSTATUS terminalConnectionStatus_ = STATUS_CONNECTION_DISCONNECTED;
     net::WskClient *datagramClient_ = nullptr;
     net::WskDatagramSocket *datagramSocket_ = nullptr;
     SOCKADDR_STORAGE remoteAddress_ = {};

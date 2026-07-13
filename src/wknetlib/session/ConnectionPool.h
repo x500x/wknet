@@ -24,6 +24,16 @@ namespace http2
     class Http2Connection;
 }
 
+namespace quic
+{
+class QuicConnection;
+}
+
+namespace http3
+{
+class Http3Connection;
+}
+
 namespace session
 {
     constexpr SIZE_T PoolMaxHostLength = 255;
@@ -32,8 +42,16 @@ namespace session
     constexpr SIZE_T PoolMaxProxyAuthorityLength = 255;
     constexpr SIZE_T PoolMaxProxyHostLength = 255;
 
+    enum class ConnectionKind : ULONG
+    {
+        None = 0,
+        Tcp = 1,
+        Quic = 2,
+    };
+
     struct ConnectionPoolKey final
     {
+        ConnectionKind Kind = ConnectionKind::Tcp;
         char Scheme[6] = {};
         SIZE_T SchemeLength = 0;
         char Host[PoolMaxHostLength + 1] = {};
@@ -60,9 +78,19 @@ namespace session
         ::wknet::session::AddressFamily ProxyFamily = ::wknet::session::AddressFamily::Any;
         char ProxyAuthority[PoolMaxProxyAuthorityLength + 1] = {};
         SIZE_T ProxyAuthorityLength = 0;
+        char AlternativeHost[PoolMaxHostLength + 1] = {};
+        SIZE_T AlternativeHostLength = 0;
+        USHORT AlternativePort = 0;
+        ULONG QuicVersion = 0;
     };
 
+    struct ConnectionPool;
     struct PooledConnection;
+
+    using PooledQuicCloseRoutine = void (*)(_In_opt_ void *context, _Inout_ ConnectionPool *pool,
+                                            _Inout_ PooledConnection *connection,
+                                            _Inout_ quic::QuicConnection *quicConnection,
+                                            _Inout_ http3::Http3Connection *http3Connection) noexcept;
 
     struct ConnectionPool final
     {
@@ -72,9 +100,11 @@ namespace session
         ULONG MaxConnectionsPerHost = 0;
         ULONG IdleTimeoutMilliseconds = 0;
         Http2KeepAliveOptions Http2KeepAlive = {};
+        volatile LONG QuicCloseOutstanding = 0;
 #if !defined(WKNET_USER_MODE_TEST)
         FAST_MUTEX Lock = {};
         KEVENT Http2KeepAliveStopEvent = {};
+        KEVENT QuicCloseCompleteEvent = {};
         PETHREAD Http2KeepAliveThread = nullptr;
         volatile LONG Http2KeepAliveWorkerStarted = 0;
         volatile LONG Http2KeepAliveStopping = 0;
@@ -132,6 +162,46 @@ namespace session
         _Inout_ ConnectionPool* pool,
         _Inout_opt_ PooledConnection* connection,
         bool reusable) noexcept;
+
+    _Must_inspect_result_ NTSTATUS PooledConnectionAdoptQuic(_Inout_ PooledConnection *connection,
+                                                             _In_ quic::QuicConnection *quicConnection,
+                                                             _In_ http3::Http3Connection *http3Connection,
+                                                             PooledQuicCloseRoutine closeRoutine,
+                                                             _In_opt_ void *closeContext) noexcept;
+
+    void ConnectionPoolAbandonQuicAcquire(_Inout_ ConnectionPool *pool,
+                                          _Inout_opt_ PooledConnection *connection) noexcept;
+
+    _Ret_maybenull_ quic::QuicConnection *PooledConnectionQuic(_In_opt_ PooledConnection *connection) noexcept;
+
+    _Ret_maybenull_ http3::Http3Connection *PooledConnectionHttp3(_In_opt_ PooledConnection *connection) noexcept;
+
+    _Ret_maybenull_ void *PooledConnectionQuicCloseContext(_In_opt_ PooledConnection *connection) noexcept;
+
+    _Must_inspect_result_ NTSTATUS ConnectionPoolPromoteHttp3StreamLease(_Inout_ ConnectionPool *pool,
+                                                                         _Inout_ PooledConnection *connection,
+                                                                         ULONGLONG streamId, ULONG peerMaxStreams,
+                                                                         ULONG localMaxStreams) noexcept;
+
+    _Must_inspect_result_ NTSTATUS ConnectionPoolBindHttp3StreamLease(_Inout_ ConnectionPool *pool,
+                                                                      _Inout_ PooledConnection *connection,
+                                                                      ULONGLONG streamId, ULONG peerMaxStreams,
+                                                                      ULONG localMaxStreams) noexcept;
+
+    void ConnectionPoolReleaseHttp3StreamLease(_Inout_ ConnectionPool *pool, _Inout_opt_ PooledConnection *connection,
+                                               bool reusable) noexcept;
+
+    void ConnectionPoolSetHttp3GoAway(_Inout_ ConnectionPool *pool, _Inout_ PooledConnection *connection,
+                                      ULONGLONG goAwayStreamId) noexcept;
+
+    void ConnectionPoolSetQuicActiveRequest(_Inout_ ConnectionPool *pool, _Inout_ PooledConnection *connection,
+                                            bool active) noexcept;
+
+    void ConnectionPoolSetQuicDraining(_Inout_ ConnectionPool *pool, _Inout_ PooledConnection *connection) noexcept;
+
+    void ConnectionPoolSetQuicWorkerExited(_Inout_ ConnectionPool *pool, _Inout_ PooledConnection *connection) noexcept;
+
+    void ConnectionPoolCompleteQuicClose(_Inout_ ConnectionPool *pool, _Inout_ PooledConnection *connection) noexcept;
 
 #if !defined(WKNET_USER_MODE_TEST)
     _Must_inspect_result_

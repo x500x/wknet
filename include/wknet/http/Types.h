@@ -66,6 +66,19 @@ namespace wknet::http {
         Upgrade = 2
     };
 
+    enum class Http3ConnectMode : ULONG
+    {
+        Auto = 0,
+        Disabled = 1,
+        Required = 2
+    };
+
+    enum class Http3RaceMode : ULONG
+    {
+        DelayedTcpFallback = 0,
+        SequentialPreferHttp3 = 1
+    };
+
     enum class BodyPartKind : ULONG
     {
         Field = 0,
@@ -210,6 +223,13 @@ namespace wknet::http {
     constexpr ULONG DefaultHttp2KeepAliveIntervalMs = 30000;
     constexpr ULONG DefaultHttp2KeepAliveAckTimeoutMs = 5000;
     constexpr ULONG DefaultHttp11PipelineMaxDepth = 4;
+    constexpr ULONG DefaultHttp3RaceWindowMs = 250;
+    constexpr ULONG DefaultHttp3QuicProbeTimeoutMs = 1500;
+    constexpr ULONG DefaultHttp3AltSvcMaxEntries = 64;
+    constexpr ULONG DefaultHttp3AltSvcMaxAgeSec = 604800;
+    constexpr ULONG MaxHttp3RaceWindowMs = 60000;
+    constexpr ULONG MaxHttp3QuicProbeTimeoutMs = 120000;
+    constexpr ULONG MaxHttp3AltSvcMaxAgeSec = static_cast<ULONG>(~static_cast<ULONG>(0)) / 1000;
     constexpr ULONG Http11PipelineMethodGet = 0x00000001;
     constexpr ULONG Http11PipelineMethodPost = 0x00000002;
     constexpr ULONG Http11PipelineMethodPut = 0x00000004;
@@ -289,6 +309,16 @@ namespace wknet::http {
         ULONG AckTimeoutMs = DefaultHttp2KeepAliveAckTimeoutMs;
     };
 
+    struct Http3Config final
+    {
+        Http3ConnectMode Mode = Http3ConnectMode::Auto;
+        Http3RaceMode Race = Http3RaceMode::DelayedTcpFallback;
+        ULONG RaceWindowMs = DefaultHttp3RaceWindowMs;
+        ULONG QuicProbeTimeoutMs = DefaultHttp3QuicProbeTimeoutMs;
+        ULONG AltSvcMaxEntries = DefaultHttp3AltSvcMaxEntries;
+        ULONG AltSvcMaxAgeSec = DefaultHttp3AltSvcMaxAgeSec;
+    };
+
     struct CacheOptions final
     {
         SIZE_T MaxBytes = 16 * 1024 * 1024;
@@ -321,6 +351,7 @@ namespace wknet::http {
         ULONG Http11PipelineMaxDepth = DefaultHttp11PipelineMaxDepth;
         ULONG Http11PipelineMethodMask = DefaultHttp11PipelineMethodMask;
         Http2KeepAliveConfig Http2KeepAlive = {};
+        Http3Config Http3 = {};
         TlsConfig Tls = {};
         ProxyConfig Proxy = {};
         Cache* Cache = nullptr;

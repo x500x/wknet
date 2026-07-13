@@ -63,10 +63,12 @@ struct QuicConnectionCreateOptions final
     bool RequireRevocationCheck = false;
 };
 class QuicConnection;
+using QuicApplicationCommandCallback = NTSTATUS (*)(void *context, QuicConnection *connection) noexcept;
 void QuicOperationInitialize(QuicOperation *operation) noexcept;
 NTSTATUS QuicOperationWait(QuicOperation *operation, ULONG timeoutMilliseconds) noexcept;
 NTSTATUS QuicConnectionCreate(const QuicConnectionCreateOptions &options, QuicConnection **connection) noexcept;
 NTSTATUS QuicConnectionConnect(QuicConnection *connection, QuicOperation *operation) noexcept;
+NTSTATUS QuicConnectionWaitEstablishedAsync(QuicConnection *connection, QuicOperation *operation) noexcept;
 NTSTATUS QuicConnectionOpenStream(QuicConnection *connection, QuicOperation *operation) noexcept;
 NTSTATUS QuicConnectionOpenUnidirectionalStream(QuicConnection *connection, QuicOperation *operation) noexcept;
 NTSTATUS QuicConnectionWriteStream(QuicConnection *connection, ULONGLONG streamId,
@@ -82,6 +84,8 @@ NTSTATUS QuicConnectionStopSending(QuicConnection *connection, ULONGLONG streamI
 NTSTATUS QuicConnectionCloseAsync(QuicConnection *connection, QuicOperation *operation) noexcept;
 NTSTATUS QuicConnectionCloseApplicationAsync(QuicConnection *connection, ULONGLONG applicationError,
                                              QuicOperation *operation) noexcept;
+NTSTATUS QuicConnectionExecuteApplication(QuicConnection *connection, QuicApplicationCommandCallback callback,
+                                          void *context, QuicOperation *operation) noexcept;
 NTSTATUS QuicConnectionApplicationWriteStream(QuicConnection *connection, ULONGLONG streamId,
                                               _In_reads_bytes_opt_(dataLength) const UCHAR *data, SIZE_T dataLength,
                                               bool fin, _Out_ SIZE_T *bytesWritten) noexcept;

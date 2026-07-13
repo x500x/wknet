@@ -1,10 +1,96 @@
 #include "session/HttpEngineInternal.hpp"
 #include "rtl/TraceInternal.h"
+#if defined(WKNET_USER_MODE_TEST)
+#include "session/HttpH3TestHooks.h"
+#endif
 
 namespace wknet
 {
 namespace session
 {
+namespace
+{
+bool CanRetryRequiredHttp3(const Request &request, const HttpH3DispatchContext &dispatch, ULONG attempt) noexcept
+{
+    if (attempt != 0)
+    {
+        return false;
+    }
+    if (HttpH3DispatchDefinitelyUnsent(&dispatch))
+    {
+        return true;
+    }
+    return dispatch.GoawayResult == HttpH3GoawayResult::StreamRejected &&
+           IsSafeFreshConnectionRetryMethod(request.Method) && request.BodySourceCallback == nullptr &&
+           !HttpH3DispatchResponseStarted(&dispatch);
+}
+
+NTSTATUS SendRequiredHttp3Request(SessionHandle session, const Request &request, const HttpSendOptions &sendOptions,
+                                  Workspace &workspace, ApiHttpHeaderScratch &headerScratch,
+                                  http1::HttpResponse *parsed, SIZE_T *rawResponseLength,
+                                  AsyncOperationHandle cancellationOperation) noexcept
+{
+    HttpH3PeerFactory factory = {};
+#if defined(WKNET_USER_MODE_TEST)
+    if (!HttpH3TestGetPeerFactory(&factory))
+#endif
+    {
+        HttpH3GetProductionPeerFactory(session, &factory);
+    }
+
+    for (ULONG attempt = 0; attempt < 2; ++attempt)
+    {
+        HeapObject<HttpH3DispatchContext> dispatch;
+        if (!dispatch.IsValid())
+        {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        HttpH3DispatchStartOptions startOptions = {};
+        startOptions.Session = session;
+        startOptions.RequestObject = &request;
+        startOptions.SendOptions = &sendOptions;
+        startOptions.PeerFactory = &factory;
+        startOptions.ResponseWorkspace = &workspace;
+        startOptions.ParsedResponse = parsed;
+        startOptions.ResponseHeaders = headerScratch.ResponseHeaders;
+        startOptions.ResponseHeaderCapacity = session->Options.MaxResponseHeaders;
+        startOptions.ResponseTrailers = headerScratch.ResponseTrailers;
+        startOptions.ResponseTrailerCapacity = MaxTrailersPerResponse;
+        startOptions.RawResponseLength = rawResponseLength;
+        startOptions.CancellationOperation = cancellationOperation;
+        startOptions.AttemptGeneration = static_cast<ULONGLONG>(attempt) + 1;
+
+        NTSTATUS status = HttpH3DispatchRequired(dispatch.Get(), &startOptions);
+        if (status == STATUS_PENDING)
+        {
+            status = HttpH3DispatchWait(dispatch.Get(), cancellationOperation);
+        }
+
+        const bool retry = !NT_SUCCESS(status) && CanRetryRequiredHttp3(request, *dispatch.Get(), attempt);
+        const TraceCorrelation correlation = {sendOptions.TraceOperationId, 0,
+                                              dispatch->StreamId == HttpH3UnsetStreamId ? 0 : dispatch->StreamId};
+        HttpH3DispatchRelease(dispatch.Get());
+        if (!retry)
+        {
+            return status;
+        }
+
+        WKNET_TRACE_CORRELATED(::wknet::ComponentSession, ::wknet::TraceLevel::Warning, &correlation,
+                               "http.connection.retry protocol=h3 status=0x%08X", static_cast<ULONG>(status));
+        WorkspaceReset(&workspace);
+        status = PrepareApiHttpHeaderScratch(workspace, &headerScratch);
+        if (!NT_SUCCESS(status))
+        {
+            return status;
+        }
+        *parsed = {};
+        *rawResponseLength = 0;
+    }
+    return STATUS_UNSUCCESSFUL;
+}
+} // namespace
+
     _Must_inspect_result_
     NTSTATUS SendSingleHttpRequest(
         SessionHandle session,
@@ -31,6 +117,24 @@ namespace session
         NTSTATUS status = PrepareApiHttpHeaderScratch(workspace, &headerScratch);
         if (!NT_SUCCESS(status)) {
             return status;
+        }
+
+        Http3ConnectMode http3Mode = Http3ConnectMode::Disabled;
+        status = ResolveHttp3ConnectMode(session->Options.Http3, request.Tls, session->Options.Proxy.Enabled,
+                                         &sendOptions, IsHttpsRequest(request), false, &http3Mode);
+        if (!NT_SUCCESS(status))
+        {
+            return status;
+        }
+        const TraceCorrelation protocolCorrelation = {sendOptions.TraceOperationId, 0, 0};
+        WKNET_TRACE_CORRELATED(::wknet::ComponentSession, ::wknet::TraceLevel::Info, &protocolCorrelation,
+                               "http.protocol.select protocol=%s required=%u",
+                               http3Mode == Http3ConnectMode::Required ? "h3" : "tcp",
+                               http3Mode == Http3ConnectMode::Required ? 1u : 0u);
+        if (http3Mode == Http3ConnectMode::Required)
+        {
+            return SendRequiredHttp3Request(session, request, sendOptions, workspace, headerScratch, parsed,
+                                            rawResponseLength, cancellationOperation);
         }
 
         SIZE_T builtRequestLength = 0;
