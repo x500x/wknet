@@ -66,6 +66,7 @@
     <ClCompile Include="crypto\Ed25519.cpp" />
     <ClCompile Include="crypto\Ed448.cpp" />
     <ClCompile Include="crypto\KeyExchange.cpp" />
+    <ClCompile Include="crypto\PacketProtectionPrimitives.cpp" />
     <ClCompile Include="http_api\AsyncOp.cpp" />
     <ClCompile Include="http_api\Body.cpp" />
     <ClCompile Include="http_api\Cache.cpp" />
@@ -112,6 +113,12 @@
     <ClCompile Include="net\WskClient.cpp" />
     <ClCompile Include="net\WskDatagramSocket.cpp" />
     <ClCompile Include="net\WskSocket.cpp" />
+    <ClCompile Include="quic\QuicAttemptValidation.cpp" />
+    <ClCompile Include="quic\QuicCrypto.cpp" />
+    <ClCompile Include="quic\QuicFrame.cpp" />
+    <ClCompile Include="quic\QuicPacket.cpp" />
+    <ClCompile Include="quic\QuicTransportParameters.cpp" />
+    <ClCompile Include="quic\QuicVarInt.cpp" />
     <ClCompile Include="tls\TlsContext.cpp" />
     <ClCompile Include="tls\CertificateStore.cpp" />
     <ClCompile Include="tls\CertificateValidator.cpp" />
@@ -192,6 +199,14 @@
     <ClInclude Include="net\WskDatagramSocket.h" />
     <ClInclude Include="net\WskDatagramSocketPrivate.hpp" />
     <ClInclude Include="net\WskSocketPrivate.hpp" />
+    <ClInclude Include="crypto\PacketProtectionPrimitives.h" />
+    <ClInclude Include="quic\QuicAttemptValidation.h" />
+    <ClInclude Include="quic\QuicCrypto.h" />
+    <ClInclude Include="quic\QuicFrame.h" />
+    <ClInclude Include="quic\QuicPacket.h" />
+    <ClInclude Include="quic\QuicTransportParameters.h" />
+    <ClInclude Include="quic\QuicTypes.h" />
+    <ClInclude Include="quic\QuicVarInt.h" />
     <ClInclude Include="http2\Http2ConnectionPrivate.hpp" />
     <ClInclude Include="tls\TlsConnectionPrivate.hpp" />
     <ClInclude Include="session\HttpEngineInternal.hpp" />

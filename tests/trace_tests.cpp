@@ -6,6 +6,9 @@
 #include <wknet/codec/Codec.h>
 #include <wknet/crypto/Aead.h>
 #include "http1/HttpParser.h"
+#include "quic/QuicAttemptValidation.h"
+#include "quic/QuicCrypto.h"
+#include "quic/QuicPacket.h"
 #include "rtl/TraceInternal.h"
 #include "session/Async.h"
 #include "session/HandleTypes.h"
@@ -325,6 +328,54 @@ namespace
             Expect(g_sinkCalls == configured, "configured level includes every more severe level");
         }
     }
+
+    void TestQuicAttemptTraceEvents() noexcept
+    {
+        wknet::TraceSetSink(CaptureTrace, nullptr);
+        wknet::TraceSetComponents(wknet::ComponentQuic);
+        wknet::TraceSetLevel(wknet::TraceLevel::Max);
+        const UCHAR odcid[] = { 5, 6, 7, 8 };
+        const UCHAR scid[] = { 1, 2, 3, 4 };
+        const UCHAR versions[] = { 0x6b, 0x33, 0x43, 0xcf };
+        wknet::quic::QuicPacketHeader vn = {};
+        vn.Type = wknet::quic::QuicPacketType::VersionNegotiation;
+        vn.DestinationConnectionId = { scid, sizeof(scid) };
+        vn.SourceConnectionId = { odcid, sizeof(odcid) };
+        vn.VersionList = { versions, sizeof(versions) };
+        wknet::quic::QuicAttemptValidation attempt;
+        (void)attempt.Initialize(wknet::quic::QuicVersion1,
+            { odcid, sizeof(odcid) }, { scid, sizeof(scid) });
+        const ULONG supported[] = { wknet::quic::QuicVersion1 };
+        ResetCapture();
+        (void)attempt.ValidateVersionNegotiation(vn, supported, 1, nullptr);
+        Expect(g_lastLevel == wknet::TraceLevel::Info &&
+            strstr(g_lastMessage, "quic.version_negotiation.accepted") != nullptr,
+            "valid VN emits the frozen accepted event");
+        Expect(strstr(g_lastMessage, "05060708") == nullptr,
+            "VN trace does not expose CID bytes");
+
+        const UCHAR retryPrefix[] = {
+            0xff,0,0,0,1,0,8,0xf0,0x67,0xa5,0x50,0x2a,0x42,0x62,
+            0x74,0x6f,0x6b,0x65,0x6e
+        };
+        UCHAR retry[sizeof(retryPrefix) + wknet::quic::QuicRetryIntegrityTagLength] = {};
+        RtlCopyMemory(retry, retryPrefix, sizeof(retryPrefix));
+        (void)wknet::quic::QuicComputeRetryIntegrityTag(
+            { odcid, sizeof(odcid) }, retry, sizeof(retryPrefix), retry + sizeof(retryPrefix));
+        wknet::quic::QuicPacketHeader retryHeader = {};
+        (void)wknet::quic::QuicParsePacketHeader(retry, sizeof(retry), 0, &retryHeader);
+        wknet::quic::QuicAttemptValidation retryAttempt;
+        (void)retryAttempt.Initialize(wknet::quic::QuicVersion1,
+            { odcid, sizeof(odcid) }, { nullptr, 0 });
+        ResetCapture();
+        (void)retryAttempt.ValidateRetry(retryHeader, retry, sizeof(retry));
+        Expect(g_lastLevel == wknet::TraceLevel::Info &&
+            strstr(g_lastMessage, "quic.retry.accepted") != nullptr,
+            "valid Retry emits the frozen accepted event");
+        Expect(strstr(g_lastMessage, "token") == nullptr,
+            "Retry trace does not expose token fields");
+        wknet::TraceSetComponents(wknet::ComponentAll);
+    }
 }
 
 int main()
@@ -431,6 +482,7 @@ int main()
         "concurrent writers reach installed sinks");
 
     TestBusinessEventCoverage();
+    TestQuicAttemptTraceEvents();
 
     Expect(wknet::TraceGetLevel() == wknet::TraceLevel::Max, "trace level getter reports Max");
     Expect(wknet::TraceGetComponents() == wknet::ComponentAll, "component getter reports the active mask");

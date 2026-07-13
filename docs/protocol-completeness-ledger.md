@@ -80,9 +80,12 @@
 | 条目 | RFC 级别 | 状态 | 计划代码入口 | 计划测试入口 | 备注 |
 |------|----------|------|--------------|--------------|------|
 | WSK Datagram create/bind/connect/send/async receive/cancel/close/rundown | 内核传输地基 | 已实现/已验证 | `net/WskDatagramSocket.cpp` | `tests/datagram_socket_tests.cpp` | 单在途 receive IRP；DISPATCH completion 只保存固定结果并通知，PASSIVE `CompleteReceive` 负责超时取消、排空和消费；支持 IPv4/IPv6、late completion 与来源地址快照。 |
-| invariant、long/short header、VN、Retry、packet number | MUST | 待补全 | `src/wknetlib/quic/QuicPacket.cpp` | `tests/quic_packet_tests.cpp` | QUIC v1；VN 防伪造/降级，Retry 校验 integrity tag。 |
-| Initial/Handshake/1-RTT packet 与 packet/header protection | MUST | 待补全 | `quic/QuicCrypto.cpp`、`quic/QuicPacket.cpp` | `tests/quic_crypto_tests.cpp`、`tests/quic_packet_tests.cpp` | 0-RTT application data 首期关闭。 |
-| transport parameters、CRYPTO 重组和 TLS over QUIC | MUST | 待补全 | `quic/QuicTransportParameters.cpp`、`quic/QuicTls.cpp` | `tests/quic_transport_parameter_tests.cpp`、`tests/quic_handshake_tests.cpp` | TLS 1.3 handshake messages，不使用 TLS record。 |
+| varint、invariant、long/short header、packet number 与 coalesced 迭代 | MUST | 已实现/已验证 | `quic/QuicVarInt.cpp`、`quic/QuicPacket.cpp` | `tests/quic_varint_tests.cpp`、`tests/quic_packet_tests.cpp` | 接受合法非最短 varint；所有 offset/length 有界。 |
+| Version Negotiation 与 Retry attempt 验证 | MUST | 已实现/已验证 | `quic/QuicAttemptValidation.cpp`、`quic/QuicCrypto.cpp` | `tests/quic_packet_tests.cpp`、`tests/quic_crypto_tests.cpp`、`tests/trace_tests.cpp` | 校验时序、CID 交换、版本降级与 Retry integrity；token 为有界 owned copy。 |
+| Initial/Handshake/1-RTT packet 与 packet/header protection | MUST | 已实现/已验证 | `quic/QuicCrypto.cpp`、`crypto/PacketProtectionPrimitives.cpp` | `tests/quic_crypto_tests.cpp` | AES-128/256-GCM 与 ChaCha20-Poly1305；M3 显式 key set，不管理 Key Phase；0-RTT application data 关闭。 |
+| transport parameter codec | MUST | 已实现/已验证 | `quic/QuicTransportParameters.cpp` | `tests/quic_transport_parameter_tests.cpp` | 重复、角色、长度和范围严格校验；客户端固定 UDP 1200 且禁止主动迁移。 |
+| CRYPTO 重组和 TLS over QUIC | MUST | 待补全 | `quic/QuicTls.cpp` | `tests/quic_handshake_tests.cpp` | M4 实现；TLS 1.3 handshake messages，不使用 TLS record。 |
+| QUIC frame 无状态 codec | MUST | 已实现/已验证 | `quic/QuicFrame.cpp` | `tests/quic_frame_tests.cpp` | 覆盖 RFC 9000 客户端主路径 frame；跨 frame 数量与连接状态留在 M4。 |
 | 三个 PN space、ACK、loss/PTO、persistent congestion | MUST | 待补全 | `quic/QuicRecovery.cpp` | `tests/quic_recovery_tests.cpp` | RFC 9002。 |
 | NewReno、基础 pacing、固定 1200 UDP payload | MUST/安全边界 | 待补全 | `quic/QuicCongestion.cpp` | `tests/quic_recovery_tests.cpp` | ECN/DPLPMTUD 首期明确非目标。 |
 | STREAM、flow control、RESET/STOP、MAX/BLOCKED frame | MUST | 待补全 | `quic/QuicStream.cpp`、`quic/QuicConnection.cpp` | `tests/quic_stream_tests.cpp` | 稀疏重组有字节和 gap 上限。 |

@@ -1,5 +1,6 @@
 #include <wknet/crypto/Aead.h>
 #include <wknet/crypto/CngProviderCache.h>
+#include "crypto/PacketProtectionPrimitives.h"
 
 namespace wknet
 {
@@ -1713,6 +1714,98 @@ namespace crypto
         default:
             return TraceAeadResult("decrypt", key.Algorithm, ciphertextLength, STATUS_NOT_SUPPORTED);
         }
+    }
+
+    namespace
+    {
+        struct Aes256PacketContext final { UCHAR RoundKeys[240] = {}; };
+
+        NTSTATUS Aes256PacketInitialize(
+            const UCHAR* key, AeadScratch& scratch, Aes256PacketContext& context) noexcept
+        {
+            RtlCopyMemory(context.RoundKeys, key, 32);
+            SIZE_T generated = 32;
+            SIZE_T rcon = 0;
+            UCHAR* temp = scratch.AesTemp;
+            while (generated < sizeof(context.RoundKeys)) {
+                RtlCopyMemory(temp, context.RoundKeys + generated - 4, 4);
+                if ((generated % 32) == 0) {
+                    const UCHAR rotate = temp[0];
+                    temp[0] = AesSBox[temp[1]]; temp[1] = AesSBox[temp[2]];
+                    temp[2] = AesSBox[temp[3]]; temp[3] = AesSBox[rotate];
+                    temp[0] ^= AesRcon[rcon++];
+                }
+                else if ((generated % 32) == 16) {
+                    for (SIZE_T index = 0; index < 4; ++index) temp[index] = AesSBox[temp[index]];
+                }
+                for (SIZE_T index = 0; index < 4 && generated < sizeof(context.RoundKeys); ++index) {
+                    context.RoundKeys[generated] = context.RoundKeys[generated - 32] ^ temp[index];
+                    ++generated;
+                }
+            }
+            RtlSecureZeroMemory(temp, 4);
+            return STATUS_SUCCESS;
+        }
+
+        void Aes256PacketEncrypt(
+            const Aes256PacketContext& context, AeadScratch& scratch,
+            const UCHAR* input, UCHAR* output) noexcept
+        {
+            UCHAR* state = scratch.AesState;
+            RtlCopyMemory(state, input, 16);
+            AesAddRoundKey(state, context.RoundKeys);
+            for (SIZE_T round = 1; round < 14; ++round) {
+                AesSubBytes(state); AesShiftRows(state); AesMixColumns(state);
+                AesAddRoundKey(state, context.RoundKeys + round * 16);
+            }
+            AesSubBytes(state); AesShiftRows(state);
+            AesAddRoundKey(state, context.RoundKeys + 14 * 16);
+            RtlCopyMemory(output, state, 16);
+            RtlSecureZeroMemory(state, 16);
+        }
+    }
+
+    NTSTATUS PacketProtectionAesEncryptBlock(
+        const UCHAR* key,
+        SIZE_T keyLength,
+        const UCHAR* input,
+        UCHAR* output) noexcept
+    {
+        if (key == nullptr || (keyLength != 16 && keyLength != 32) || input == nullptr || output == nullptr) return STATUS_INVALID_PARAMETER;
+        AeadScratchGuard scratchGuard;
+        if (!scratchGuard.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
+        if (keyLength == 32) {
+            HeapObject<Aes256PacketContext> context;
+            if (!context.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
+            NTSTATUS status = Aes256PacketInitialize(key, scratchGuard.Get(), *context.Get());
+            if (NT_SUCCESS(status)) Aes256PacketEncrypt(*context.Get(), scratchGuard.Get(), input, output);
+            RtlSecureZeroMemory(context->RoundKeys, sizeof(context->RoundKeys));
+            return status;
+        }
+        HeapObject<Aes128Context> context;
+        if (!context.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
+        AeadKey aeadKey = {};
+        aeadKey.Key = key;
+        aeadKey.KeyLength = keyLength;
+        NTSTATUS status = Aes128Initialize(aeadKey, scratchGuard.Get(), *context.Get());
+        if (NT_SUCCESS(status)) {
+            Aes128EncryptBlock(*context.Get(), scratchGuard.Get(), input, output);
+        }
+        RtlSecureZeroMemory(context->RoundKeys, sizeof(context->RoundKeys));
+        return status;
+    }
+
+    NTSTATUS PacketProtectionChaCha20Block(
+        const UCHAR* key,
+        ULONG counter,
+        const UCHAR* nonce,
+        UCHAR* output) noexcept
+    {
+        if (key == nullptr || nonce == nullptr || output == nullptr) return STATUS_INVALID_PARAMETER;
+        AeadScratchGuard scratchGuard;
+        if (!scratchGuard.IsValid()) return STATUS_INSUFFICIENT_RESOURCES;
+        ChaCha20Block(scratchGuard.Get(), key, counter, nonce, output);
+        return STATUS_SUCCESS;
     }
 }
 }
