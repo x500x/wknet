@@ -35,6 +35,8 @@ wknet 使用统一的 `wknet::Trace*` 分级日志。驱动和库默认等级为
 | `ComponentCodec` | 内容解码、EXI、Pack200 等编解码链 |
 | `ComponentHttp1` | HTTP/1.x 解析、传输编码和内容解码 |
 | `ComponentHttp2` | HTTP/2 帧、HPACK、流和连接控制 |
+| `ComponentQuic` | QUIC packet/frame、连接、流、恢复、拥塞与定时器 |
+| `ComponentHttp3` | HTTP/3 与 QPACK 连接、流、frame 和压缩状态 |
 | `ComponentWs` | WebSocket 连接、握手、帧与消息 |
 | `ComponentSession` | 高层请求编排、异步操作、连接池、代理和生命周期 |
 
@@ -44,7 +46,7 @@ wknet 使用统一的 `wknet::Trace*` 分级日志。驱动和库默认等级为
 
 - `op`：全局唯一 64 位 OperationId，一次高层 HTTP/WebSocket 操作保持不变。
 - `conn`：全局唯一 64 位 ConnectionId，在连接池、Transport、WSK、TLS 间保持不变。
-- `stream`：HTTP/2 StreamId；非 HTTP/2 场景为 0。
+- `stream`：无符号 64 位 HTTP/2/QUIC StreamId；非流场景为 0。该字段的 ABI 已扩展为 64 位，以无损承载 QUIC 的 62 位 stream ID。
 
 OperationId 与 ConnectionId 由日志运行时的全局关联 ID 分配器产生，不允许各子系统自行维护会重复的局部计数器。
 

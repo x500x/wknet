@@ -1,7 +1,7 @@
 # wknet 产品方向
 
 - 产品名 wknet；公共 NS：http / websocket / crypto / codec。
-- 内部 NS：rtl net tls http1 http2 ws transport session detail。
+- 内部 NS：rtl net tls http1 http2 quic http3 qpack ws transport session detail。
 - Trace 默认 Off；测试 Max。
 - `wknetlib` 各子系统及未来新增功能必须同步补齐统一的分级日志：关键失败使用 Error、可恢复异常使用 Warning、关键状态与生命周期使用 Info、详细流程使用 Verbose/Max，并使用准确的 TraceComponent；不得只完成功能而遗漏日志。
 - lib 堆模型、无 JSON、客户端 only、外部 CA trust 不变。
@@ -11,3 +11,6 @@
 - 不恢复独立 `client` 层；HTTP/HTTPS/HTTP2/WebSocket 的产品路径统一由 `session` 编排，并通过 `transport` 访问 WSK/TLS。
 - `include/wknet` 仅放稳定公共 API；`session`、`transport`、`net`、`tls`、`http1`、`http2`、`ws` 的实现头保持 src-local。
 - Phase 5–7 已完成：codec 独立、Trace 分级、god files 拆分、连接池字段所有权收紧、旧 client 层删除；后续文档不得再引用旧聚合实现文件或 client 类。
+- HTTP/3 / QUIC 已进入正式主路径建设：WSK Datagram + 内核态 CNG/BCrypt + 自研 QUIC v1/HTTP/3/QPACK；在 M9 全部门禁通过前只能使用强制 H3 测试路径，透明 `Auto` 必须保持关闭。
+- `transport::Transport` 只承载 TCP 字节流；UDP 数据报归 `net::WskDatagramSocket`，QUIC 状态机归 `quic`，HTTP/3 归 `http3`，QPACK 归 `qpack`，Alt-Svc/池化/竞速/回落唯一归 `session`。
+- 首期 QUIC 明确不实现 0-RTT application data、主动迁移、多路径、ECN、DPLPMTUD、QUIC v2、WebTransport、QUIC Datagram 与 WebSocket over HTTP/3；这些边界不得以临时回退或兼容层替代。

@@ -26,7 +26,9 @@ namespace
         ComponentSession |
         ComponentCodec |
         ComponentCrypto |
-        ComponentTransport;
+        ComponentTransport |
+        ComponentQuic |
+        ComponentHttp3;
 
     constexpr char TruncatedSuffix[] = " [truncated]";
     constexpr SIZE_T LineEndingBytes = 2;
@@ -235,6 +237,8 @@ namespace
         case ComponentCodec: return "CODEC";
         case ComponentCrypto: return "CRYPTO";
         case ComponentTransport: return "TRANSPORT";
+        case ComponentQuic: return "QUIC";
+        case ComponentHttp3: return "HTTP3";
         case ComponentNone:
         default: return "NONE";
         }

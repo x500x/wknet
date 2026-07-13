@@ -366,7 +366,7 @@ int main()
     wknet::TraceCorrelation correlation = {};
     correlation.OperationId = 101;
     correlation.ConnectionId = 202;
-    correlation.StreamId = 3;
+    correlation.StreamId = (1ULL << 61) + 3ULL;
     WKNET_TRACE_CORRELATED(
         wknet::ComponentTransport,
         wknet::TraceLevel::Verbose,
@@ -383,7 +383,9 @@ int main()
         512u);
     Expect(g_sinkCalls == 1, "correlated trace reaches the sink");
     Expect(strstr(g_lastMessage, "[TRANSPORT][VRB]") != nullptr, "transport component has a stable name");
-    Expect(strstr(g_lastMessage, "[op=101][conn=202][stream=3]") != nullptr, "all correlation identifiers are formatted");
+    Expect(
+        strstr(g_lastMessage, "[op=101][conn=202][stream=2305843009213693955]") != nullptr,
+        "62-bit stream correlation identifier is formatted without truncation");
 
     Expect(wknet::rtl::TraceTestSlotSize() == wknet::rtl::TracePageBytes, "each trace slot occupies one page");
     Expect(wknet::rtl::TraceTestSlotAlignment() == wknet::rtl::TracePageBytes, "each trace slot is page aligned");

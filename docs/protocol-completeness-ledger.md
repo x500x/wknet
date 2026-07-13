@@ -15,9 +15,9 @@
 
 ## 主路径边界
 
-- 主路径：客户端 HTTP/1.1、HTTP/2、HPACK、TLS 1.2/1.3、X.509 证书校验、WebSocket、HTTP 代理。
+- 主路径：客户端 HTTP/1.1、HTTP/2、HTTP/3、HPACK、QPACK、QUIC v1、TLS 1.2/1.3、X.509 证书校验、WebSocket、HTTP 代理。
 - 内核方向：传输层优先 WSK，密码学优先内核态 CNG/BCrypt，HTTP/TLS/证书校验按内核自实现路线推进。
-- 非主路径：HTTP/3/QUIC、服务端/入站 request parser、WinHTTP/WinINet/SChannel 作为内核主路径、在线 OCSP/CRL 抓取。
+- 非主路径：QUIC v2、WebTransport、QUIC Datagram、WebSocket over HTTP/3、服务端/入站 request parser、WinHTTP/WinINet/SChannel 作为内核主路径、在线 OCSP/CRL 抓取。
 - 资源原则：普通 buffered response 默认不设置低位总量硬上限；安全上限放在 header section、帧、消息、解压膨胀比、超时、取消与分配失败边界。
 
 ## HTTP/1.1 账本
@@ -72,6 +72,43 @@
 | PRIORITY 发送 | MAY | 已实现/已验证 | `http2/Http2Frame.cpp`、`http2/Http2Connection.cpp`、`session/Http2RequestBuilder.cpp` | `tests/http2_frame_tests.cpp`、`tests/http2_client_tests.cpp` | 显式 per-request priority；支持 HEADERS priority 字段与独立 PRIORITY frame 编解码，收到 peer PRIORITY 只校验/记录语义，不改变安全边界。 |
 | server push | MAY/deprecated | 安全拒绝 | `Http2Connection.cpp` | `tests/http2_client_tests.cpp` | 客户端 `ENABLE_PUSH=0`，`PUSH_PROMISE` 协议错误。 |
 | 后台自动 PING 保活 | MAY | 默认关闭/已验证 | `ConnectionPool.cpp`、`Http2Connection.cpp` | `tests/http_api_tests.cpp`、`tests/http2_client_tests.cpp` | session `Http2KeepAlive.Enabled=true` 显式开启；只扫描 idle 可复用池化 H2 连接，ACK 超时关闭该 idle 连接；低层保留显式 `SendPing`。 |
+
+## QUIC v1 账本
+
+当前阶段为 M0：下列主路径能力均已冻结为必须实现和验证的范围，但尚未对外可用。状态只能随对应实现与测试一同迁移。
+
+| 条目 | RFC 级别 | 状态 | 计划代码入口 | 计划测试入口 | 备注 |
+|------|----------|------|--------------|--------------|------|
+| invariant、long/short header、VN、Retry、packet number | MUST | 待补全 | `src/wknetlib/quic/QuicPacket.cpp` | `tests/quic_packet_tests.cpp` | QUIC v1；VN 防伪造/降级，Retry 校验 integrity tag。 |
+| Initial/Handshake/1-RTT packet 与 packet/header protection | MUST | 待补全 | `quic/QuicCrypto.cpp`、`quic/QuicPacket.cpp` | `tests/quic_crypto_tests.cpp`、`tests/quic_packet_tests.cpp` | 0-RTT application data 首期关闭。 |
+| transport parameters、CRYPTO 重组和 TLS over QUIC | MUST | 待补全 | `quic/QuicTransportParameters.cpp`、`quic/QuicTls.cpp` | `tests/quic_transport_parameter_tests.cpp`、`tests/quic_handshake_tests.cpp` | TLS 1.3 handshake messages，不使用 TLS record。 |
+| 三个 PN space、ACK、loss/PTO、persistent congestion | MUST | 待补全 | `quic/QuicRecovery.cpp` | `tests/quic_recovery_tests.cpp` | RFC 9002。 |
+| NewReno、基础 pacing、固定 1200 UDP payload | MUST/安全边界 | 待补全 | `quic/QuicCongestion.cpp` | `tests/quic_recovery_tests.cpp` | ECN/DPLPMTUD 首期明确非目标。 |
+| STREAM、flow control、RESET/STOP、MAX/BLOCKED frame | MUST | 待补全 | `quic/QuicStream.cpp`、`quic/QuicConnection.cpp` | `tests/quic_stream_tests.cpp` | 稀疏重组有字节和 gap 上限。 |
+| CID、stateless reset、NEW_TOKEN、PATH response | MUST/SHOULD | 待补全 | `quic/QuicConnection.cpp`、`quic/QuicTokenCache.cpp` | `tests/quic_connection_lifecycle_tests.cpp` | 不主动迁移，只响应当前路径 challenge。 |
+| idle、closing、draining、Key Phase update、worker rundown | MUST | 待补全 | `quic/QuicConnection.cpp` | `tests/quic_connection_lifecycle_tests.cpp` | 协议状态只由每连接 PASSIVE worker 修改。 |
+| 主动迁移、多路径、ECN、DPLPMTUD、QUIC v2、QUIC Datagram | MAY/SHOULD | 明确非目标 | N/A | 边界测试 | 首期安全忽略或按规范拒绝。 |
+
+## HTTP/3 与 QPACK 账本
+
+| 条目 | RFC 级别 | 状态 | 计划代码入口 | 计划测试入口 | 备注 |
+|------|----------|------|--------------|--------------|------|
+| control/QPACK 单向流、SETTINGS 首帧与唯一性 | MUST | 待补全 | `http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 未知单向流安全处理。 |
+| HEADERS/DATA、伪头、字段规则、body framing、trailers | MUST | 待补全 | `http3/Http3Frame.cpp`、`http3/Http3Request.cpp` | `tests/http3_client_tests.cpp` | 包含 1xx/HEAD/204/304/CONNECT 语义。 |
+| GOAWAY、取消和安全重试判定 | MUST | 待补全 | `http3/Http3Connection.cpp`、`session/HttpH3Dispatch.cpp` | `tests/http3_client_tests.cpp`、`tests/http_api_tests.cpp` | 请求只允许确定未发送或满足安全重放规则时重试。 |
+| QPACK integer/Huffman/static/dynamic/instruction streams | MUST | 待补全 | `src/wknetlib/qpack/` | `tests/qpack_tests.cpp` | 动态表、blocked section 与引用驱逐规则完整实现。 |
+| QPACK 与 field section 资源上限 | MUST/安全边界 | 待补全 | `qpack/QpackDynamicTable.cpp`、`qpack/QpackDecoder.cpp` | `tests/qpack_tests.cpp` | 对端 SETTINGS 不能扩大本地 NonPaged 预算。 |
+| server push | MAY | 安全拒绝 | `http3/Http3Connection.cpp` | `tests/http3_client_tests.cpp` | 不发送 `MAX_PUSH_ID`；违规 push 按 RFC 9114 精确关闭。 |
+| Extended CONNECT、WebTransport、WebSocket over H3 | MAY | 明确非目标 | N/A | 边界测试 | 普通 CONNECT 仍属于 H3 请求语义。 |
+
+## HTTP/3 产品接入账本
+
+| 条目 | 状态 | 计划代码入口 | 门禁 |
+|------|------|--------------|------|
+| `Http3ConnectMode::Required` 强制 H3 | 待补全 | `session/HttpH3Dispatch.cpp` | M6 强制路径测试通过。 |
+| Alt-Svc 严格 parser/cache 与 origin identity | 待补全 | `session/AltSvcCache.cpp` | M8 身份、过期、broken 分类测试通过。 |
+| QUIC/TCP 延迟竞速且请求唯一发送 | 待补全 | `session/HttpRoute.cpp`、`session/HttpSend.cpp` | M8 UDP 黑洞与非幂等请求测试通过。 |
+| `Http3ConnectMode::Auto` | 默认关闭 | `session/EngineValidation.cpp`、`session/HttpRoute.cpp` | 只有 M9 全部门禁通过后才真实启用。 |
 
 ## TLS 1.2/1.3 账本
 

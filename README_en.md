@@ -94,7 +94,7 @@ These capabilities are not provided today. Capabilities that are implemented but
 | Complex local HTTP/2 priority-tree scheduling | Non-goal; no local dependency tree or bandwidth scheduler is maintained |
 | WebSocket extensions other than `permessage-deflate` | Non-goal; no other extensions are negotiated |
 | Online OCSP/CRL fetching | Non-goal; callers provide external trust/certificate/revocation data or cached entries |
-| HTTP/3 / QUIC | Non-goal |
+| HTTP/3 / QUIC | Planned; `Auto` stays disabled until all gates pass |
 
 **Implementation strategy and trust model**:
 

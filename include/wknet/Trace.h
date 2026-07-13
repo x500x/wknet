@@ -27,6 +27,8 @@ namespace wknet
         ComponentCodec    = 1u << 7,
         ComponentCrypto   = 1u << 8,
         ComponentTransport = 1u << 9,
+        ComponentQuic     = 1u << 10,
+        ComponentHttp3    = 1u << 11,
         ComponentAll      = 0xFFFFFFFFu
     };
 
@@ -34,7 +36,7 @@ namespace wknet
     {
         ULONGLONG OperationId = 0;
         ULONGLONG ConnectionId = 0;
-        ULONG StreamId = 0;
+        ULONGLONG StreamId = 0;
     };
 
     struct TraceStatistics final

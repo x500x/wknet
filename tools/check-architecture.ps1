@@ -29,7 +29,7 @@ function Invoke-Rg {
 }
 
 $publicRoot = Join-Path $root 'include\wknet'
-$forbiddenPublicDirectories = @('session', 'net', 'tls', 'http1', 'http2', 'ws', 'transport', 'detail', 'client', 'engine')
+$forbiddenPublicDirectories = @('session', 'net', 'tls', 'http1', 'http2', 'quic', 'http3', 'qpack', 'ws', 'transport', 'detail', 'client', 'engine')
 foreach ($name in $forbiddenPublicDirectories) {
     $path = Join-Path $publicRoot $name
     if (Test-Path -LiteralPath $path) {
@@ -39,7 +39,7 @@ foreach ($name in $forbiddenPublicDirectories) {
 
 Invoke-Rg -Description 'Public headers reference private module paths or namespaces.' -Arguments @(
     '-n',
-    '#\s*include\s*[<"](?:wknet/)?(?:session|net|tls|http1|http2|ws|transport|detail)/|\b(?:session|net|tls|http1|http2|ws|transport|detail)::',
+    '#\s*include\s*[<"](?:wknet/)?(?:session|net|tls|http1|http2|quic|http3|qpack|ws|transport|detail)/|\b(?:session|net|tls|http1|http2|quic|http3|qpack|ws|transport|detail)::',
     $publicRoot
 )
 
@@ -70,6 +70,33 @@ Invoke-Rg -Description 'Session or transport includes HTTP/2 or TLS private conn
     (Join-Path $root 'src\wknetlib\session'),
     (Join-Path $root 'src\wknetlib\transport')
 )
+
+$quicRoot = Join-Path $root 'src\wknetlib\quic'
+if (Test-Path -LiteralPath $quicRoot) {
+    Invoke-Rg -Description 'QUIC implementation depends upward on HTTP/3, QPACK, session, or transport.' -Arguments @(
+        '-n',
+        '#\s*include\s*[<"](?:http3|qpack|session|transport)/|\b(?:http3|qpack|session|transport)::',
+        $quicRoot
+    )
+}
+
+$http3Root = Join-Path $root 'src\wknetlib\http3'
+if (Test-Path -LiteralPath $http3Root) {
+    Invoke-Rg -Description 'HTTP/3 bypasses QuicStream services or directly depends on network/packet internals.' -Arguments @(
+        '-n',
+        '#\s*include\s*[<"](?:net/|quic/(?:QuicPacket|QuicFrame|QuicCrypto|QuicTls|QuicRecovery|QuicCongestion|QuicConnectionPrivate))|\bWsk(?:Client|Socket|DatagramSocket)\b',
+        $http3Root
+    )
+}
+
+$qpackRoot = Join-Path $root 'src\wknetlib\qpack'
+if (Test-Path -LiteralPath $qpackRoot) {
+    Invoke-Rg -Description 'QPACK owns connection, session, transport, or network policy.' -Arguments @(
+        '-n',
+        '#\s*include\s*[<"](?:session|transport|net|quic)/|\b(?:session|transport|net|quic)::',
+        $qpackRoot
+    )
+}
 
 Invoke-Rg -Description 'Opaque module objects are freed outside their owning close service.' -Arguments @(
     '-n',
