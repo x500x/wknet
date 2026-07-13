@@ -75,10 +75,11 @@
 
 ## QUIC v1 账本
 
-当前阶段为 M0：下列主路径能力均已冻结为必须实现和验证的范围，但尚未对外可用。状态只能随对应实现与测试一同迁移。
+当前阶段已完成 M2：WSK Datagram 异步地基已经实现并验证，但 QUIC handshake、HTTP/3 与产品路径仍未对外可用。状态只能随对应实现与测试一同迁移。
 
 | 条目 | RFC 级别 | 状态 | 计划代码入口 | 计划测试入口 | 备注 |
 |------|----------|------|--------------|--------------|------|
+| WSK Datagram create/bind/connect/send/async receive/cancel/close/rundown | 内核传输地基 | 已实现/已验证 | `net/WskDatagramSocket.cpp` | `tests/datagram_socket_tests.cpp` | 单在途 receive IRP；DISPATCH completion 只保存固定结果并通知，PASSIVE `CompleteReceive` 负责超时取消、排空和消费；支持 IPv4/IPv6、late completion 与来源地址快照。 |
 | invariant、long/short header、VN、Retry、packet number | MUST | 待补全 | `src/wknetlib/quic/QuicPacket.cpp` | `tests/quic_packet_tests.cpp` | QUIC v1；VN 防伪造/降级，Retry 校验 integrity tag。 |
 | Initial/Handshake/1-RTT packet 与 packet/header protection | MUST | 待补全 | `quic/QuicCrypto.cpp`、`quic/QuicPacket.cpp` | `tests/quic_crypto_tests.cpp`、`tests/quic_packet_tests.cpp` | 0-RTT application data 首期关闭。 |
 | transport parameters、CRYPTO 重组和 TLS over QUIC | MUST | 待补全 | `quic/QuicTransportParameters.cpp`、`quic/QuicTls.cpp` | `tests/quic_transport_parameter_tests.cpp`、`tests/quic_handshake_tests.cpp` | TLS 1.3 handshake messages，不使用 TLS record。 |

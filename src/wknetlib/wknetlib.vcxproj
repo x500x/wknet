@@ -110,6 +110,7 @@
     <ClCompile Include="http2\Http2Frame.cpp" />
     <ClCompile Include="http2\Http2Stream.cpp" />
     <ClCompile Include="net\WskClient.cpp" />
+    <ClCompile Include="net\WskDatagramSocket.cpp" />
     <ClCompile Include="net\WskSocket.cpp" />
     <ClCompile Include="tls\TlsContext.cpp" />
     <ClCompile Include="tls\CertificateStore.cpp" />
@@ -188,6 +189,8 @@
     <ClInclude Include="transport\Transport.h" />
     <ClInclude Include="transport\TransportPrivate.hpp" />
     <ClInclude Include="net\WskClientPrivate.hpp" />
+    <ClInclude Include="net\WskDatagramSocket.h" />
+    <ClInclude Include="net\WskDatagramSocketPrivate.hpp" />
     <ClInclude Include="net\WskSocketPrivate.hpp" />
     <ClInclude Include="http2\Http2ConnectionPrivate.hpp" />
     <ClInclude Include="tls\TlsConnectionPrivate.hpp" />

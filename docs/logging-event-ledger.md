@@ -12,6 +12,7 @@
 | 名称解析 | Net | `net.resolve.failed`、`net.resolve.unspec_no_match`、`net.resolve.no_supported_address` | 可切换地址族 Warning，最终失败 Error | 可用时带 op/conn |
 | WSK 生命周期 | Net | `net.wsk_socket.opened`、`net.wsk_socket.close_started`、`net.wsk_socket.close_completed` | 生命周期 Info/Verbose，收敛失败 Error | socket 绑定后带 conn |
 | Socket I/O | Net | `net.socket.connect.complete`、`net.socket.send.failed`、`net.socket.receive.failed` | 成功细节 Verbose/Max，最终失败 Error | 必须带 conn |
+| Datagram I/O | Net | `net.datagram.opened`、`net.datagram.close_started`、`net.datagram.close_completed`、`net.datagram.send.failed`、`net.datagram.receive.failed` | 生命周期 Info，最终 I/O 失败 Error | 必须带 conn；禁止记录地址正文、地址指针、payload 或 token |
 | Transport | Transport | `transport.wsk.created`、`transport.tls.created`、`transport.send.failed`、`transport.closed` | 创建/关闭 Info，I/O 细节 Verbose/Max，失败 Error | 必须带 conn；请求路径带 op |
 | TLS 握手 | TLS | `tls.handshake.start`、`tls.handshake.complete`、`tls.handshake.failed` | 开始/完成 Info，失败 Error | 必须带 conn；请求路径带 op |
 | TLS 1.2 阶段 | TLS | `tls12.client_hello.send_failed`、`tls12.server_hello.parsed`、`tls12.server_finished.verify_failed` | 阶段细节 Verbose/Max，任何最终阶段失败 Error | 必须带 conn（可用时） |

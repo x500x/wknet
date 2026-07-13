@@ -43,6 +43,9 @@ $excludedLibSources = [System.Collections.Generic.HashSet[string]]::new([System.
 ) | ForEach-Object { [void]$excludedLibSources.Add($_) }
 
 switch ($Test) {
+    'datagram_socket_tests' {
+        [void]$excludedLibSources.Remove('WskClient.cpp')
+    }
     'http_api_tests' {
         [void]$excludedLibSources.Remove('WskClient.cpp')
         [void]$excludedLibSources.Remove('WskSocket.cpp')
