@@ -375,8 +375,18 @@ namespace tls
             certificates.CertificateCount,
             certificates.CertificatesLength);
 
+        HeapArray<UCHAR> certificateBytes(certificates.CertificatesLength);
+        if (!certificateBytes.IsValid()) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        RtlCopyMemory(
+            certificateBytes.Get(),
+            certificates.Certificates,
+            certificates.CertificatesLength);
+
         const UCHAR* stapledOcspResponse = nullptr;
         SIZE_T stapledOcspResponseLength = 0;
+        HeapArray<UCHAR> stapledOcspBytes;
         status = ReadHandshakeMessage(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
             WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Error, "tls12.post_certificate.read_failed status=0x%08X", static_cast<ULONG>(status));
@@ -395,6 +405,17 @@ namespace tls
 
             stapledOcspResponse = certificateStatus.OcspResponse;
             stapledOcspResponseLength = certificateStatus.OcspResponseLength;
+            if (stapledOcspResponseLength != 0) {
+                status = stapledOcspBytes.Allocate(stapledOcspResponseLength);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                RtlCopyMemory(
+                    stapledOcspBytes.Get(),
+                    stapledOcspResponse,
+                    stapledOcspResponseLength);
+                stapledOcspResponse = stapledOcspBytes.Get();
+            }
             WKNET_TRACE(::wknet::ComponentTls, ::wknet::TraceLevel::Verbose, "tls12.certificate_status.parsed ocsp_bytes=%Iu",
                 stapledOcspResponseLength);
 
@@ -422,7 +443,7 @@ namespace tls
         }
 
         CertificateChainView chain = {};
-        chain.Certificates = certificates.Certificates;
+        chain.Certificates = certificateBytes.Get();
         chain.CertificatesLength = certificates.CertificatesLength;
         chain.CertificateCount = certificates.CertificateCount;
         status = CertificateValidator::ValidateChain(chain, validation, validationResult.Get());
@@ -1099,8 +1120,18 @@ namespace tls
             return FinishTls12RenegotiationAttempt(status);
         }
 
+        HeapArray<UCHAR> certificateBytes(certificates.CertificatesLength);
+        if (!certificateBytes.IsValid()) {
+            return FinishTls12RenegotiationAttempt(STATUS_INSUFFICIENT_RESOURCES);
+        }
+        RtlCopyMemory(
+            certificateBytes.Get(),
+            certificates.Certificates,
+            certificates.CertificatesLength);
+
         const UCHAR* stapledOcspResponse = nullptr;
         SIZE_T stapledOcspResponseLength = 0;
+        HeapArray<UCHAR> stapledOcspBytes;
         status = ReadHandshakeMessage(transport, handshake, true);
         if (!NT_SUCCESS(status)) {
             return FinishTls12RenegotiationAttempt(status);
@@ -1114,6 +1145,17 @@ namespace tls
             }
             stapledOcspResponse = certificateStatus.OcspResponse;
             stapledOcspResponseLength = certificateStatus.OcspResponseLength;
+            if (stapledOcspResponseLength != 0) {
+                status = stapledOcspBytes.Allocate(stapledOcspResponseLength);
+                if (!NT_SUCCESS(status)) {
+                    return FinishTls12RenegotiationAttempt(status);
+                }
+                RtlCopyMemory(
+                    stapledOcspBytes.Get(),
+                    stapledOcspResponse,
+                    stapledOcspResponseLength);
+                stapledOcspResponse = stapledOcspBytes.Get();
+            }
             status = ReadHandshakeMessage(transport, handshake, true);
             if (!NT_SUCCESS(status)) {
                 return FinishTls12RenegotiationAttempt(status);
@@ -1137,7 +1179,7 @@ namespace tls
         }
 
         CertificateChainView chain = {};
-        chain.Certificates = certificates.Certificates;
+        chain.Certificates = certificateBytes.Get();
         chain.CertificatesLength = certificates.CertificatesLength;
         chain.CertificateCount = certificates.CertificateCount;
         status = CertificateValidator::ValidateChain(chain, validation, validationResult.Get());
