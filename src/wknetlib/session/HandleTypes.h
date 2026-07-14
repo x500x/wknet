@@ -12,6 +12,7 @@ namespace wknet
 namespace session
 {
     struct HttpCache;
+    struct AltSvcCache;
 
     constexpr SIZE_T MaxHeadersPerRequest = 16;
     constexpr SIZE_T MaxHeadersPerResponse = MaxConfigurableResponseHeaders;
@@ -50,9 +51,11 @@ namespace session
         SessionOptions Options = {};
         Workspace* Workspace = nullptr;
         HttpCache* Cache = nullptr;
+        AltSvcCache* AltSvc = nullptr;
         rtl::LookasideList WorkspaceLookaside = {};
         crypto::CngProviderCache* ProviderCache = nullptr;
         ConnectionPool ConnectionPool = {};
+        bool NetworkChangeSubscribed = false;
         volatile LONG InFlight = 0;
 #if !defined(WKNET_USER_MODE_TEST)
         KEVENT DrainEvent = {};

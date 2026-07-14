@@ -437,7 +437,9 @@ NTSTATUS Http3ProcessResponseFields(Http3ResponseState *state, const qpack::Qpac
     state->ContentLength = contentLength;
     state->BodyForbidden = state->RequestWasHead || statusCode == 204 || statusCode == 304 ||
                            (state->RequestWasConnect && statusCode >= 200 && statusCode < 300);
-    if (state->BodyForbidden && contentLengthSeen && contentLength != 0)
+    const bool contentLengthForbidden = statusCode == 204 ||
+                                        (state->RequestWasConnect && statusCode >= 200 && statusCode < 300);
+    if (contentLengthForbidden && contentLengthSeen)
     {
         return Fail(applicationError);
     }
@@ -477,7 +479,8 @@ NTSTATUS Http3CompleteResponse(Http3ResponseState *state, ULONGLONG *application
     {
         return STATUS_INVALID_PARAMETER;
     }
-    if (!state->FinalHeadersReceived || (state->ContentLengthPresent && state->BodyBytes != state->ContentLength))
+    if (!state->FinalHeadersReceived ||
+        (state->ContentLengthPresent && !state->BodyForbidden && state->BodyBytes != state->ContentLength))
     {
         return Fail(applicationError);
     }

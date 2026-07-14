@@ -75,7 +75,7 @@
 
 ## QUIC v1 账本
 
-当前阶段已完成 M6：QUIC v1、HTTP/3/QPACK 低层协议与 Session 强制 H3 产品路径已经实现并验证；Alt-Svc 与透明 Auto 产品路径仍未启用。状态只能随对应实现与测试一同迁移。
+M7–M9 已完成：QUIC v1、HTTP/3/QPACK、WSK Datagram 内核路径、两套本地互操作、资源/故障注入、Alt-Svc 与透明 Auto 产品路径均已实现并验证。状态只随对应实现和测试结果迁移。
 
 | 条目 | RFC 级别 | 状态 | 计划代码入口 | 计划测试入口 | 备注 |
 |------|----------|------|--------------|--------------|------|
@@ -111,9 +111,9 @@
 | 条目 | 状态 | 计划代码入口 | 门禁 |
 |------|------|--------------|------|
 | `Http3ConnectMode::Required` 强制 H3 | 已实现/已验证 | `session/HttpH3Dispatch.cpp`、`session/HttpH3Peer.cpp`、`session/HttpSend.cpp`、`session/ConnectionPool.cpp` | `tests/high_level_api_tests.cpp` 覆盖唯一 H3 dispatch、响应映射、GOAWAY 安全重试与取消；`tests/http_api_tests.cpp` 覆盖配置冲突和 QUIC pool lease/GOAWAY 生命周期。 |
-| Alt-Svc 严格 parser/cache 与 origin identity | 待补全 | `session/AltSvcCache.cpp` | M8 身份、过期、broken 分类测试通过。 |
-| QUIC/TCP 延迟竞速且请求唯一发送 | 待补全 | `session/HttpRoute.cpp`、`session/HttpSend.cpp` | M8 UDP 黑洞与非幂等请求测试通过。 |
-| `Http3ConnectMode::Auto` | 默认关闭 | `session/EngineValidation.cpp`、`session/HttpSend.cpp` | M6 继续 normalize 为 Disabled；只有 M9 全部门禁通过后才真实启用。 |
+| Alt-Svc 严格 parser/cache 与 origin identity | 已实现/已验证 | `session/AltSvcCache.cpp`、`session/AltSvcClock.cpp`、`session/SessionLife.cpp` | `tests/altsvc_tests.cpp` 覆盖 parser、原子 replace/clear、generation、expiry、entry/candidate 容量、地址族隔离、broken 分类、网络变化、故障注入和日志安全；`tests/high_level_api_tests.cpp` 覆盖跨主机 alternative、重定向来源、NoVerify 与 proxy。 |
+| 延迟 QUIC probe、安全 TCP fallback 与请求唯一发送 | 已实现/已验证 | `session/HttpH3Dispatch.cpp`、`session/HttpSend.cpp` | `tests/high_level_api_tests.cpp` 覆盖 UDP/timeout 类失败、alternative 身份、确定未发送回落、请求只提交一次和非自动 H3 冲突矩阵。 |
+| `Http3ConnectMode::Auto` | 已实现/已验证 | `session/EngineValidation.cpp`、`session/HttpSend.cpp` | 首次无先验走 TCP并学习已认证 Alt-Svc，后续请求使用 H3；过期/broken/policy/credential/AF 不匹配、NoVerify、proxy、HTTP/h2c、WebSocket、非 HTTP ALPN 和 HTTP/2 priority 不自动进入 H3。 |
 
 ## TLS 1.2/1.3 账本
 

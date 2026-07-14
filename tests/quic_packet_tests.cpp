@@ -60,10 +60,10 @@ int main()
     Expect(header.Token.Length == 0 && header.PacketNumberLength == 1, "Initial token and PN length are parsed");
     Expect(header.PacketLength == packetLength, "long-header length bounds packet");
 
-    UCHAR versionNegotiation[] = {0xc5, 0, 0, 0,    0,    4,    1,    2,    3,    4,    4,   5,
+    UCHAR versionNegotiation[] = {0x85, 0, 0, 0,    0,    4,    1,    2,    3,    4,    4,   5,
                                   6,    7, 8, 0x0a, 0x0a, 0x0a, 0x0a, 0x6b, 0x33, 0x43, 0xcf};
     Expect(NT_SUCCESS(wknet::quic::QuicParsePacketHeader(versionNegotiation, sizeof(versionNegotiation), 0, &header)),
-           "Version Negotiation header parses with random low bits");
+           "Version Negotiation header parses when the randomized Fixed Bit is zero");
     Expect(header.Type == wknet::quic::QuicPacketType::VersionNegotiation && header.VersionList.Length == 8,
            "VN version list is exposed");
     const UCHAR odcid[] = {5, 6, 7, 8};

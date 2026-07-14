@@ -1,9 +1,10 @@
-#include "session/ConnectionPoolPrivate.hpp"
-#include "rtl/TraceInternal.h"
-#include "transport/Transport.h"
 #include "http2/Http2Connection.h"
 #include "net/WskSocket.h"
+#include "rtl/ProtocolFailureInjection.h"
+#include "rtl/TraceInternal.h"
+#include "session/ConnectionPoolPrivate.hpp"
 #include "tls/TlsConnection.h"
+#include "transport/Transport.h"
 
 #if defined(WKNET_USER_MODE_TEST)
 #include <stdlib.h>
@@ -333,7 +334,7 @@ namespace
                                                       _In_ const ConnectionPoolKey &key) noexcept
     {
         return connection.Kind == ConnectionKind::Quic && connection.Connected && !connection.CloseWhenIdle &&
-               !connection.Holder.Quic.GoAwayReceived && !connection.Holder.Quic.ActiveRequest &&
+               !connection.Holder.Quic.GoAwayReceived &&
                !connection.Holder.Quic.Draining && !connection.Holder.Quic.Evicting &&
                !connection.Holder.Quic.WorkerExited && connection.Holder.Quic.Quic != nullptr &&
                connection.Holder.Quic.Http3 != nullptr &&
@@ -620,14 +621,23 @@ namespace
         if (!IsValidHttp2KeepAliveOptions(pool->Http2KeepAlive)) {
             return STATUS_INVALID_PARAMETER;
         }
+        if (static_cast<SIZE_T>(capacity) > static_cast<SIZE_T>(-1) / sizeof(PooledConnection))
+        {
+            return STATUS_INTEGER_OVERFLOW;
+        }
 #if !defined(WKNET_USER_MODE_TEST)
         KeInitializeEvent(&pool->Http2KeepAliveStopEvent, NotificationEvent, FALSE);
 #endif
+        if (rtl::ProtocolFailureInjectionShouldFail(rtl::ProtocolAllocationSite::SessionPoolEntries))
+        {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
         pool->Entries = static_cast<PooledConnection*>(
             AllocatePoolMemory(sizeof(PooledConnection) * capacity));
         if (pool->Entries == nullptr) {
             return STATUS_INSUFFICIENT_RESOURCES;
         }
+        rtl::ProtocolFailureInjectionRecordAcquire(rtl::ProtocolAllocationSite::SessionPoolEntries);
 
         pool->Capacity = capacity;
         pool->MaxConnectionsPerHost = maxConnectionsPerHost;
@@ -880,6 +890,9 @@ namespace
 #endif
 
         RtlSecureZeroMemory(pool->Entries, sizeof(PooledConnection) * pool->Capacity);
+        const bool entriesReleased =
+            rtl::ProtocolFailureInjectionRecordRelease(rtl::ProtocolAllocationSite::SessionPoolEntries);
+        UNREFERENCED_PARAMETER(entriesReleased);
         FreePoolMemory(pool->Entries);
         RtlZeroMemory(pool, sizeof(*pool));
     }
@@ -1409,7 +1422,7 @@ namespace
         {
             --connection->Holder.Quic.StreamLeases;
         }
-        connection->Holder.Quic.ActiveRequest = false;
+        connection->Holder.Quic.ActiveRequest = connection->Holder.Quic.StreamLeases != 0;
         if (!reusable)
         {
             connection->CloseWhenIdle = true;
@@ -1767,6 +1780,19 @@ namespace
         const PooledConnection* connection) noexcept
     {
         return connection != nullptr ? connection->Http2LastKeepAliveTime : 0;
+    }
+
+    ULONG PooledConnectionQuicStreamLeaseCount(const PooledConnection *connection) noexcept
+    {
+        return connection != nullptr && connection->Kind == ConnectionKind::Quic
+                   ? connection->Holder.Quic.StreamLeases
+                   : 0;
+    }
+
+    bool PooledConnectionQuicActiveRequest(const PooledConnection *connection) noexcept
+    {
+        return connection != nullptr && connection->Kind == ConnectionKind::Quic &&
+               connection->Holder.Quic.ActiveRequest;
     }
 #endif
     bool ConnectionPoolHasHttp2StreamLease(const PooledConnection* connection) noexcept

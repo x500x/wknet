@@ -81,7 +81,7 @@ NTSTATUS Http3OwnedBuffer::Reserve(SIZE_T capacity) noexcept
     {
         return STATUS_SUCCESS;
     }
-    UCHAR *replacement = AllocateNonPagedArray<UCHAR>(capacity);
+    UCHAR *replacement = AllocateProtocolNonPagedArray<UCHAR>(AllocationSite, capacity);
     if (replacement == nullptr)
     {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -90,7 +90,7 @@ NTSTATUS Http3OwnedBuffer::Reserve(SIZE_T capacity) noexcept
     {
         RtlCopyMemory(replacement, Data, Length);
     }
-    FreeNonPagedArray(Data);
+    FreeProtocolNonPagedArray(AllocationSite, Data);
     Data = replacement;
     Capacity = capacity;
     return STATUS_SUCCESS;
@@ -140,7 +140,7 @@ void Http3OwnedBuffer::ConsumePrefix(SIZE_T length) noexcept
 
 void Http3OwnedBuffer::Clear() noexcept
 {
-    FreeNonPagedArray(Data);
+    FreeProtocolNonPagedArray(AllocationSite, Data);
     Data = nullptr;
     Length = 0;
     Capacity = 0;
@@ -207,6 +207,33 @@ NTSTATUS Http3Connection::BindQuic(quic::QuicConnection *connection) noexcept
         return STATUS_INVALID_PARAMETER;
     }
     quicConnection_ = connection;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS Http3Connection::Start() noexcept
+{
+    if (quicConnection_ == nullptr || failed_ || shuttingDown_)
+    {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+    NTSTATUS status = EnsureStarted();
+    if (!NT_SUCCESS(status))
+    {
+        return status;
+    }
+    for (SIZE_T index = 0; index < streamCount_; ++index)
+    {
+        Http3ConnectionStreamState &state = streams_[index];
+        if (quic::QuicStreamIsClientInitiated(state.StreamId))
+        {
+            continue;
+        }
+        status = DrainStream(state);
+        if (!NT_SUCCESS(status) && status != STATUS_PENDING)
+        {
+            return status;
+        }
+    }
     return STATUS_SUCCESS;
 }
 
@@ -307,7 +334,7 @@ NTSTATUS Http3Connection::OpenRequest(const Http3RequestOpenOptions &options, UL
     {
         return STATUS_BUFFER_TOO_SMALL;
     }
-    HeapArray<qpack::QpackFieldView> requestFields;
+    ProtocolHeapArray<qpack::QpackFieldView, rtl::ProtocolAllocationSite::Http3RequestFields> requestFields;
     status = requestFields.Allocate(pseudoCount + options.Fields.HeaderCount);
     SIZE_T requestFieldCount = 0;
     ULONGLONG applicationError = 0;
@@ -420,12 +447,6 @@ void Http3Connection::OnStreamOpened(void *context, quic::QuicStream *stream) no
     {
         return;
     }
-    NTSTATUS status = connection->EnsureStarted();
-    if (!NT_SUCCESS(status))
-    {
-        connection->CloseConnection(status, H3_INTERNAL_ERROR);
-        return;
-    }
     if (connection->FindStream(stream) != nullptr)
     {
         return;
@@ -442,10 +463,20 @@ void Http3Connection::OnStreamOpened(void *context, quic::QuicStream *stream) no
         role = Http3ConnectionStreamRole::Request;
     }
     Http3ConnectionStreamState *state = nullptr;
-    status = connection->AddStream(stream, role, &state);
+    NTSTATUS status = connection->AddStream(stream, role, &state);
     if (!NT_SUCCESS(status))
     {
         connection->CloseConnection(status, H3_EXCESSIVE_LOAD);
+        return;
+    }
+    if (connection->quicConnection_ == nullptr)
+    {
+        return;
+    }
+    status = connection->EnsureStarted();
+    if (!NT_SUCCESS(status))
+    {
+        connection->CloseConnection(status, H3_INTERNAL_ERROR);
     }
 }
 
@@ -463,6 +494,10 @@ void Http3Connection::OnStreamReadable(void *context, quic::QuicStream *stream) 
         state = connection->FindStream(stream);
     }
     if (state == nullptr)
+    {
+        return;
+    }
+    if (connection->quicConnection_ == nullptr)
     {
         return;
     }
@@ -774,6 +809,10 @@ NTSTATUS Http3Connection::AddStream(quic::QuicStream *stream, Http3ConnectionStr
         return streamCount_ >= streams_.Count() ? STATUS_INSUFFICIENT_RESOURCES : STATUS_INVALID_PARAMETER;
     }
     Http3ConnectionStreamState &created = streams_[streamCount_];
+    created.Payload.AllocationSite = rtl::ProtocolAllocationSite::Http3StreamPayload;
+    created.Deferred.AllocationSite = rtl::ProtocolAllocationSite::Http3StreamPayload;
+    created.PendingWrite.AllocationSite = rtl::ProtocolAllocationSite::Http3StreamPayload;
+    created.FieldBytes.AllocationSite = rtl::ProtocolAllocationSite::Http3StreamFieldBytes;
     created.Stream = stream;
     created.StreamId = stream->Id();
     created.Role = role;
@@ -1537,7 +1576,8 @@ NTSTATUS Http3ConnectionCreate(const Http3ConnectionCreateOptions &options, Http
     {
         return STATUS_INVALID_PARAMETER;
     }
-    Http3Connection *created = AllocateNonPagedObject<Http3Connection>();
+    Http3Connection *created =
+        AllocateProtocolNonPagedObject<Http3Connection>(rtl::ProtocolAllocationSite::Http3ConnectionObject);
     if (created == nullptr)
     {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -1545,7 +1585,7 @@ NTSTATUS Http3ConnectionCreate(const Http3ConnectionCreateOptions &options, Http
     NTSTATUS status = created->Initialize(options);
     if (!NT_SUCCESS(status))
     {
-        FreeNonPagedObject(created);
+        FreeProtocolNonPagedObject(rtl::ProtocolAllocationSite::Http3ConnectionObject, created);
         return status;
     }
     *connection = created;
@@ -1555,6 +1595,11 @@ NTSTATUS Http3ConnectionCreate(const Http3ConnectionCreateOptions &options, Http
 NTSTATUS Http3ConnectionBindQuic(Http3Connection *connection, quic::QuicConnection *quicConnection) noexcept
 {
     return connection != nullptr ? connection->BindQuic(quicConnection) : STATUS_INVALID_PARAMETER;
+}
+
+NTSTATUS Http3ConnectionWorkerStart(Http3Connection *connection) noexcept
+{
+    return connection != nullptr ? connection->Start() : STATUS_INVALID_PARAMETER;
 }
 
 const quic::QuicStreamApplicationEventSink *Http3ConnectionApplicationSink(const Http3Connection *connection) noexcept
@@ -1572,7 +1617,7 @@ void Http3ConnectionBeginShutdown(Http3Connection *connection) noexcept
 
 void Http3ConnectionDestroy(Http3Connection *connection) noexcept
 {
-    FreeNonPagedObject(connection);
+    FreeProtocolNonPagedObject(rtl::ProtocolAllocationSite::Http3ConnectionObject, connection);
 }
 
 NTSTATUS Http3ConnectionWorkerOpenRequest(Http3Connection *connection, const Http3RequestOpenOptions &options,

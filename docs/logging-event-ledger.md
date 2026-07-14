@@ -14,6 +14,12 @@
 | Socket I/O | Net | `net.socket.connect.complete`、`net.socket.send.failed`、`net.socket.receive.failed` | 成功细节 Verbose/Max，最终失败 Error | 必须带 conn |
 | Datagram I/O | Net | `net.datagram.opened`、`net.datagram.close_started`、`net.datagram.close_completed`、`net.datagram.send.failed`、`net.datagram.receive.failed` | 生命周期 Info，最终 I/O 失败 Error | 必须带 conn；禁止记录地址正文、地址指针、payload 或 token |
 | QUIC attempt validation | Quic | `quic.retry.accepted/rejected`、`quic.version_negotiation.accepted/rejected` | 接受 Info，拒绝 Warning | 只记录状态、版本与 CID 长度；禁止记录 token、CID 正文、secret、nonce 或 HP sample |
+| QUIC 连接与握手 | Quic | `quic.connection.start/established/closing/closed/failed`、`quic.handshake.start/complete/failed`、`quic.transport_parameters.applied` | 生命周期和成功协商 Info，最终失败 Error | 必须带 conn（可用时）；传输参数只记录数值上限，不记录 opaque 参数正文 |
+| QUIC 恢复与流 | Quic | `quic.loss.detected`、`quic.pto.fired`、`quic.stream.open/reset/complete`、`quic.stream.write_blocked`、`quic.stream.writable` | 丢包/PTO Warning，流生命周期 Info，pacing/阻塞细节 Max | 流事件带 stream；只记录 packet number、计数、deadline、原因枚举和状态 |
+| QUIC 协议解析 | Quic | `quic.frame.parse_failed`、`quic.connection.stateless_reset` | malformed frame 最终导致连接失败时 Error，stateless reset Warning | 只记录 frame type、剩余字节数和状态；禁止记录 frame、packet、CID 或 reset token 正文 |
+| HTTP/3 连接与流 | HTTP3 | `http3.connection.established/goaway/failed`、`http3.stream.open/complete/reset` | 生命周期 Info，GOAWAY Warning，最终失败 Error | 连接带 conn，流事件带 64 位 stream；禁止记录 header/body 正文 |
+| QPACK | HTTP3 | `qpack.decode.failed/blocked/dynamic_table.updated` | 解码失败 Error，blocked Warning/Verbose，表状态 Verbose | 只记录容量、字节数、字段数、stream ID 与 instruction 计数 |
+| Alt-Svc 与协议选择 | Session | `http.altsvc.stored/cleared/expired/rejected/broken`、`http.protocol.select`、`http.connection.retry`、`http.request.failed` | 存储/清理/过期/选择 Info，可恢复拒绝/broken/回落 Warning，最终请求失败 Error | 只记录 candidate index、地址族、计数与 NTSTATUS；禁止记录原始 Alt-Svc、完整 origin/alternative authority、URL query、证书身份或 credential |
 | Transport | Transport | `transport.wsk.created`、`transport.tls.created`、`transport.send.failed`、`transport.closed` | 创建/关闭 Info，I/O 细节 Verbose/Max，失败 Error | 必须带 conn；请求路径带 op |
 | TLS 握手 | TLS | `tls.handshake.start`、`tls.handshake.complete`、`tls.handshake.failed` | 开始/完成 Info，失败 Error | 必须带 conn；请求路径带 op |
 | TLS 1.2 阶段 | TLS | `tls12.client_hello.send_failed`、`tls12.server_hello.parsed`、`tls12.server_finished.verify_failed` | 阶段细节 Verbose/Max，任何最终阶段失败 Error | 必须带 conn（可用时） |

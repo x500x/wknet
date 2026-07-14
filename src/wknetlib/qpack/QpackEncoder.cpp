@@ -3,6 +3,7 @@
 #include "qpack/QpackHuffman.h"
 #include "qpack/QpackInteger.h"
 #include "qpack/QpackStaticTable.h"
+#include "rtl/ProtocolAllocator.h"
 
 namespace wknet::qpack
 {
@@ -220,7 +221,7 @@ void QpackEncoder::Reset() noexcept
         OutstandingSection *next = section->Next;
         const SIZE_T allocationSize = sizeof(OutstandingSection) + section->ReferenceCount * sizeof(ULONGLONG);
         RtlSecureZeroMemory(section, allocationSize);
-        FreeNonPagedPoolBytes(section);
+        FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackEncoderOutstandingSection, section);
         section = next;
     }
     outstandingHead_ = nullptr;
@@ -445,7 +446,8 @@ NTSTATUS QpackEncoder::EncodeFieldSection(ULONGLONG streamId, const QpackFieldVi
         return STATUS_INVALID_PARAMETER;
     }
 
-    UCHAR *fieldLines = static_cast<UCHAR *>(AllocateNonPagedPoolBytes(capacity == 0 ? 1 : capacity));
+    UCHAR *fieldLines = static_cast<UCHAR *>(AllocateProtocolNonPagedPoolBytes(
+        rtl::ProtocolAllocationSite::QpackEncoderFieldLines, capacity == 0 ? 1 : capacity));
     if (fieldLines == nullptr)
     {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -453,11 +455,12 @@ NTSTATUS QpackEncoder::EncodeFieldSection(ULONGLONG streamId, const QpackFieldVi
     ULONGLONG *references = nullptr;
     if (fieldCount != 0)
     {
-        references = static_cast<ULONGLONG *>(AllocateNonPagedPoolBytes(fieldCount * sizeof(ULONGLONG)));
+        references = static_cast<ULONGLONG *>(AllocateProtocolNonPagedPoolBytes(
+            rtl::ProtocolAllocationSite::QpackEncoderReferences, fieldCount * sizeof(ULONGLONG)));
         if (references == nullptr)
         {
             RtlSecureZeroMemory(fieldLines, capacity == 0 ? 1 : capacity);
-            FreeNonPagedPoolBytes(fieldLines);
+            FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackEncoderFieldLines, fieldLines);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
     }
@@ -598,10 +601,10 @@ NTSTATUS QpackEncoder::EncodeFieldSection(ULONGLONG streamId, const QpackFieldVi
     if (references != nullptr)
     {
         RtlSecureZeroMemory(references, fieldCount * sizeof(ULONGLONG));
-        FreeNonPagedPoolBytes(references);
+        FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackEncoderReferences, references);
     }
     RtlSecureZeroMemory(fieldLines, capacity == 0 ? 1 : capacity);
-    FreeNonPagedPoolBytes(fieldLines);
+    FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackEncoderFieldLines, fieldLines);
     if (!NT_SUCCESS(status))
     {
         const ULONGLONG error = applicationError != nullptr ? *applicationError : QpackDecompressionFailed;
@@ -799,7 +802,8 @@ NTSTATUS QpackEncoder::TrackSection(ULONGLONG streamId, ULONGLONG requiredInsert
     }
 
     const SIZE_T allocationSize = sizeof(OutstandingSection) + referenceBytes;
-    OutstandingSection *section = static_cast<OutstandingSection *>(AllocateNonPagedPoolBytes(allocationSize));
+    OutstandingSection *section = static_cast<OutstandingSection *>(
+        AllocateProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackEncoderOutstandingSection, allocationSize));
     if (section == nullptr)
     {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -821,7 +825,7 @@ NTSTATUS QpackEncoder::TrackSection(ULONGLONG streamId, ULONGLONG requiredInsert
                 static_cast<void>(table_.ReleaseReference(storedReferences[rollback]));
             }
             RtlSecureZeroMemory(section, allocationSize);
-            FreeNonPagedPoolBytes(section);
+            FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackEncoderOutstandingSection, section);
             return status;
         }
     }
@@ -852,7 +856,7 @@ void QpackEncoder::ReleaseSection(OutstandingSection *section) noexcept
     outstandingReferenceBytes_ -= referenceBytes;
     --outstandingSectionCount_;
     RtlSecureZeroMemory(section, allocationSize);
-    FreeNonPagedPoolBytes(section);
+    FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackEncoderOutstandingSection, section);
 }
 
 NTSTATUS QpackEncoder::AcknowledgeSection(ULONGLONG streamId) noexcept

@@ -2,6 +2,7 @@
 #include "quic/QuicClock.h"
 #include "quic/QuicCongestion.h"
 #include "quic/QuicTypes.h"
+#include "rtl/ProtocolAllocator.h"
 #include <wknet/WknetLimits.h>
 namespace wknet::quic
 {
@@ -63,7 +64,7 @@ class QuicRecovery final
     ULONGLONG LossDelay100ns() const noexcept;
     void CompactTerminalPackets() noexcept;
 
-    HeapArray<QuicSentPacket> packets_;
+    ProtocolHeapArray<QuicSentPacket, rtl::ProtocolAllocationSite::QuicRecoveryPackets> packets_;
     SIZE_T count_ = 0;
     ULONGLONG latestRtt100ns_ = 0;
     ULONGLONG smoothedRtt100ns_ = 0;

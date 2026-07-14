@@ -2,6 +2,7 @@
 #include "qpack/QpackHuffman.h"
 #include "qpack/QpackInteger.h"
 #include "qpack/QpackStaticTable.h"
+#include "rtl/ProtocolAllocator.h"
 
 namespace wknet::qpack
 {
@@ -75,7 +76,8 @@ NTSTATUS DecodeStringView(const UCHAR *source, SIZE_T length, UCHAR prefixBits, 
     {
         decodedCapacity = WKNET_HARD_MAX_HTTP3_FIELD_SECTION_BYTES;
     }
-    UCHAR *decoded = static_cast<UCHAR *>(AllocateNonPagedPoolBytes(decodedCapacity));
+    UCHAR *decoded = static_cast<UCHAR *>(
+        AllocateProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackDecoderValue, decodedCapacity));
     if (decoded == nullptr)
     {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -86,7 +88,7 @@ NTSTATUS DecodeStringView(const UCHAR *source, SIZE_T length, UCHAR prefixBits, 
     if (!NT_SUCCESS(status))
     {
         RtlSecureZeroMemory(decoded, decodedCapacity);
-        FreeNonPagedPoolBytes(decoded);
+        FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackDecoderValue, decoded);
         return status == STATUS_BUFFER_TOO_SMALL ? STATUS_INVALID_NETWORK_RESPONSE : status;
     }
     value->Data = decoded;
@@ -105,7 +107,7 @@ void FreeDecodedString(UCHAR *value, SIZE_T length) noexcept
     if (value != nullptr)
     {
         RtlSecureZeroMemory(value, length);
-        FreeNonPagedPoolBytes(value);
+        FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackDecoderValue, value);
     }
 }
 
@@ -932,7 +934,8 @@ NTSTATUS QpackDecoder::StoreBlockedSection(ULONGLONG streamId, ULONGLONG require
     }
 
     const SIZE_T allocationSize = sizeof(BlockedSection) + length;
-    BlockedSection *section = static_cast<BlockedSection *>(AllocateNonPagedPoolBytes(allocationSize));
+    BlockedSection *section = static_cast<BlockedSection *>(
+        AllocateProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackDecoderBlockedSection, allocationSize));
     if (section == nullptr)
     {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -978,6 +981,6 @@ void QpackDecoder::FreeBlocked(BlockedSection *section) noexcept
     --blockedStreamCount_;
     blockedBytes_ -= section->Length;
     RtlSecureZeroMemory(section, allocationSize);
-    FreeNonPagedPoolBytes(section);
+    FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackDecoderBlockedSection, section);
 }
 } // namespace wknet::qpack

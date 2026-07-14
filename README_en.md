@@ -59,7 +59,7 @@ These capabilities are implemented but not enabled by default; they are not miss
 | h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode`; plaintext HTTP/2 is off by default |
 | HTTP/2 background PING keepalive | Session `Http2KeepAlive.Enabled=true`; idle, interval, and ACK timeout values are configurable |
 | HTTP/2 per-request priority | `SendOptions.Http2Priority` / `HttpSendOptions.Http2Priority` |
-| HTTP/3 prior knowledge | Set `SessionConfig.Http3.Mode=Http3ConnectMode::Required` to explicitly require H3 for an HTTPS origin; this is for known prior-knowledge/test scenarios. In M6, the default `Auto` still normalizes to `Disabled` and never selects H3 transparently |
+| HTTP/3 / QUIC | The default `Auto` mode sends the first HTTPS request over TCP, learns an exact `h3` Alt-Svc only from a certificate- and policy-verified response, then prefers QUIC v1 + HTTP/3 for later requests. `Disabled` turns off automatic learning/use; `Required` is explicit prior knowledge |
 | WebSocket permessage-deflate | `ConnectConfig.PerMessageDeflate.Enable=true`; compression is not offered by default |
 | TLS 1.2 RSA key exchange / CBC / SHA-1 signatures | `CompatibilityExplicit` policy plus the matching compatibility switches |
 | TLS 1.2 true renegotiation | `CompatibilityExplicit` + `EnableTls12Renegotiation`, limited by `MaxTls12Renegotiations` |
@@ -95,7 +95,7 @@ These capabilities are not provided today. Capabilities that are implemented but
 | Complex local HTTP/2 priority-tree scheduling | Non-goal; no local dependency tree or bandwidth scheduler is maintained |
 | WebSocket extensions other than `permessage-deflate` | Non-goal; no other extensions are negotiated |
 | Online OCSP/CRL fetching | Non-goal; callers provide external trust/certificate/revocation data or cached entries |
-| Transparent HTTP/3 / QUIC Auto | The main path is under construction; `Required` configuration is for explicit prior-knowledge/testing, while `Auto` stays disabled until every gate passes |
+| HTTP/3 non-goals | QUIC v2, 0-RTT application data, active migration, multipath, ECN, DPLPMTUD, WebTransport, QUIC Datagram, and WebSocket over HTTP/3 are outside the current main path |
 
 **Implementation strategy and trust model**:
 
@@ -105,6 +105,8 @@ These capabilities are not provided today. Capabilities that are implemented but
 - The library does not hard-code system CAs; callers explicitly provide trust anchors, CA bundles, revocation cache entries, and pins.
 
 Automatic redirects reject HTTPS-to-HTTP downgrades by default. Cross scheme/host/port redirects strip `Authorization`, `Cookie`, and `Proxy-Authorization`. 301/302 rewrite POST to GET by default, 303 rewrites every method except HEAD to GET, and 307/308 preserve method and body. Reused stale-connection failures are retried fresh only for safe/idempotent requests such as `GET`, `HEAD`, and `OPTIONS`; POST/PUT/PATCH/DELETE are not replayed automatically.
+
+The HTTP/3 `Auto` QUIC probe may fall back to TCP only while the request is definitely unsent; it does not blindly replay after HEADERS submission, body consumption, or response start. Network failures use short candidate- and address-family-specific exponential backoff, while protocol, certificate, and ALPN failures disable that candidate for the current Alt-Svc lifetime. Cancellation and local resource exhaustion do not poison the cache.
 
 Close-delimited HTTP/1.x responses and `101 Switching Protocols` upgrade responses are not returned to the normal HTTP connection pool. Synchronous HTTP, WebSocket, TLS, and certificate validation paths require `PASSIVE_LEVEL`. TLS ALPN results must come from the client's offered list. TLS1.2 selection after a TLS1.3 attempt is allowed only after verified version-negotiation evidence; certificate errors, ALPN mismatch, network timeout, or record decryption failure are not TLS1.2-only evidence. TLS 1.3 0-RTT is off by default; even when enabled, callers must explicitly mark the request as replay-safe, otherwise the connection returns `STATUS_NOT_SUPPORTED` without sending early data.
 For certificate host validation, IP literals match only iPAddress SAN entries and do not fall back to dNSName or CN.
@@ -421,11 +423,13 @@ config.MaxConnsPerHost = 4;
 // Idle timeout (default 30 seconds)
 config.IdleTimeoutMs = 60000;  // 60 seconds
 
-// HTTP/3: the public default is Auto, but M6 still normalizes it to Disabled,
-// so ordinary callers keep their existing behavior. Required is only for a
-// known HTTPS H3 origin or deterministic tests; it rejects plaintext HTTP,
-// h2c, HTTP proxies, non-HTTP ALPN, and HTTP/2 priority.
-config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
+// HTTP/3: Auto is the default. The first request uses TCP; only an exact h3
+// Alt-Svc from an authenticated HTTPS response is cached, and a later request
+// may use QUIC/HTTP3. The alternative endpoint affects network routing only;
+// SNI, certificate identity, and :authority remain bound to the origin.
+// Proxies, plaintext HTTP, h2c, WebSocket, explicit non-HTTP ALPN, and HTTP/2
+// priority never enter H3.
+config.Http3.Mode = wknet::http::Http3ConnectMode::Auto;
 config.Http3.Race = wknet::http::Http3RaceMode::DelayedTcpFallback;
 config.Http3.RaceWindowMs = 250;
 config.Http3.QuicProbeTimeoutMs = 1500;

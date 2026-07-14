@@ -65,6 +65,7 @@ class WskDatagramSocket final
     NTSTATUS CompleteReceiveRecord(NTSTATUS status, SIZE_T information, ULONG remoteAddressLength,
                                    ULONGLONG generation) noexcept;
     NTSTATUS CancelReceiveInternal(bool timeoutCancellation) noexcept;
+    void ReleaseReceiveProtocolResources() noexcept;
     void ReleaseReceiveResources() noexcept;
     NTSTATUS CloseNativeSocket() noexcept;
 #if !defined(WKNET_USER_MODE_TEST)
@@ -97,6 +98,10 @@ class WskDatagramSocket final
     ULONGLONG completedGeneration_ = 0;
     bool timeoutCancellation_ = false;
     bool completionOwnsIoReference_ = false;
+    bool receiveIrpTracked_ = false;
+    bool receiveMdlTracked_ = false;
+    bool receiveDescriptorTracked_ = false;
+    bool completionRecordTracked_ = false;
     WskDatagramReceiveNotification receiveNotification_ = nullptr;
     void *receiveNotificationContext_ = nullptr;
     WSK_BUF receiveBuffer_ = {};

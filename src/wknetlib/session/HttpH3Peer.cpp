@@ -1,13 +1,18 @@
 #include "session/HttpEngineInternal.hpp"
 
 #include "http3/Http3Connection.h"
+#include "quic/QuicClock.h"
 #include "quic/QuicTokenCache.h"
+#include "rtl/ProtocolAllocator.h"
 #include "rtl/WorkspaceScratchAllocator.h"
+#include "session/AltSvcCache.h"
 #include "tls/TlsPolicy.h"
 #include <wknet/crypto/CngProvider.h>
 
 #if defined(WKNET_USER_MODE_TEST)
+#include <chrono>
 #include <mutex>
+#include <thread>
 #endif
 
 namespace wknet::session
@@ -15,6 +20,14 @@ namespace wknet::session
 namespace
 {
 constexpr SIZE_T HttpH3ConnectionIdLength = 8;
+constexpr SIZE_T HttpH3RouteCapacity = WKNET_HARD_MAX_QUIC_LOCAL_BIDI_STREAMS;
+constexpr SIZE_T HttpH3InvalidRouteIndex = static_cast<SIZE_T>(~static_cast<SIZE_T>(0));
+
+struct HttpH3RouteEntry final
+{
+    HttpH3DispatchContext *Dispatch = nullptr;
+    ULONGLONG StreamId = HttpH3UnsetStreamId;
+};
 
 struct HttpH3PeerRouter final
 {
@@ -23,8 +36,7 @@ struct HttpH3PeerRouter final
 #else
     FAST_MUTEX Lock = {};
 #endif
-    HttpH3DispatchContext *ActiveDispatch = nullptr;
-    ULONGLONG ActiveStreamId = HttpH3UnsetStreamId;
+    HttpH3RouteEntry Routes[HttpH3RouteCapacity] = {};
     ConnectionPool *Pool = nullptr;
     PooledConnection *PooledConnectionObject = nullptr;
     http3::Http3Connection *Http3 = nullptr;
@@ -43,6 +55,8 @@ struct HttpH3PeerLease final
     bool Reused = false;
     bool StreamBound = false;
     bool Standalone = false;
+    bool OwnsStandaloneRouter = false;
+    SIZE_T RouteIndex = HttpH3InvalidRouteIndex;
 };
 
 class HttpH3RouterLock final
@@ -145,12 +159,14 @@ HttpH3DispatchContext *GetActiveDispatch(HttpH3PeerRouter *router, ULONGLONG str
         return nullptr;
     }
     HttpH3RouterLock lock(router);
-    if (router->ActiveDispatch == nullptr ||
-        (router->ActiveStreamId != HttpH3UnsetStreamId && router->ActiveStreamId != streamId))
+    for (SIZE_T index = 0; index < HttpH3RouteCapacity; ++index)
     {
-        return nullptr;
+        if (router->Routes[index].Dispatch != nullptr && router->Routes[index].StreamId == streamId)
+        {
+            return router->Routes[index].Dispatch;
+        }
     }
-    return router->ActiveDispatch;
+    return nullptr;
 }
 
 ULONG ParseStatusCode(const qpack::QpackFieldView *fields, SIZE_T fieldCount) noexcept
@@ -282,31 +298,33 @@ void OnHttp3Goaway(void *callbackContext, ULONGLONG streamId) noexcept
         ConnectionPoolSetHttp3GoAway(router->Pool, router->PooledConnectionObject, streamId);
     }
 
-    HttpH3DispatchContext *dispatch = nullptr;
+    for (SIZE_T index = 0; index < HttpH3RouteCapacity; ++index)
     {
-        HttpH3RouterLock lock(router);
-        dispatch = router->ActiveDispatch;
-    }
-    if (dispatch == nullptr)
-    {
-        return;
-    }
-
-    HttpH3GoawayResult result = HttpH3GoawayResult::NoActiveStream;
-    const NTSTATUS status = HttpH3DispatchProcessGoaway(dispatch, streamId, &result);
-    if (!NT_SUCCESS(status))
-    {
-        FailDispatch(router, dispatch, status);
-        return;
-    }
-    if (result == HttpH3GoawayResult::StreamRejected)
-    {
-        if (router->Http3 != nullptr && dispatch->StreamId != HttpH3UnsetStreamId)
+        HttpH3DispatchContext *dispatch = nullptr;
         {
-            (void)http3::Http3ConnectionWorkerCancelRequest(router->Http3, dispatch->StreamId,
-                                                            http3::H3_REQUEST_CANCELLED);
+            HttpH3RouterLock lock(router);
+            dispatch = router->Routes[index].Dispatch;
         }
-        HttpH3DispatchNotifyComplete(dispatch, STATUS_RETRY, http3::H3_REQUEST_REJECTED);
+        if (dispatch == nullptr)
+        {
+            continue;
+        }
+        HttpH3GoawayResult result = HttpH3GoawayResult::NoActiveStream;
+        const NTSTATUS status = HttpH3DispatchProcessGoaway(dispatch, streamId, &result);
+        if (!NT_SUCCESS(status))
+        {
+            FailDispatch(router, dispatch, status);
+            continue;
+        }
+        if (result == HttpH3GoawayResult::StreamRejected)
+        {
+            if (router->Http3 != nullptr && dispatch->StreamId != HttpH3UnsetStreamId)
+            {
+                (void)http3::Http3ConnectionWorkerCancelRequest(router->Http3, dispatch->StreamId,
+                                                                http3::H3_REQUEST_CANCELLED);
+            }
+            HttpH3DispatchNotifyComplete(dispatch, STATUS_RETRY, http3::H3_REQUEST_REJECTED);
+        }
     }
 }
 
@@ -321,12 +339,15 @@ void OnHttp3ConnectionError(void *callbackContext, NTSTATUS status, ULONGLONG ap
     {
         ConnectionPoolSetQuicDraining(router->Pool, router->PooledConnectionObject);
     }
-    HttpH3DispatchContext *dispatch = nullptr;
+    for (SIZE_T index = 0; index < HttpH3RouteCapacity; ++index)
     {
-        HttpH3RouterLock lock(router);
-        dispatch = router->ActiveDispatch;
+        HttpH3DispatchContext *dispatch = nullptr;
+        {
+            HttpH3RouterLock lock(router);
+            dispatch = router->Routes[index].Dispatch;
+        }
+        HttpH3DispatchNotifyComplete(dispatch, status, applicationError);
     }
-    HttpH3DispatchNotifyComplete(dispatch, status, applicationError);
 }
 
 void DestroyRouter(HttpH3PeerRouter *router) noexcept
@@ -336,11 +357,11 @@ void DestroyRouter(HttpH3PeerRouter *router) noexcept
         return;
     }
     router->TokenCache.Clear();
-    FreeNonPagedObject(router->CertificateScratch);
+    FreeProtocolNonPagedObject(rtl::ProtocolAllocationSite::SessionHttp3CertificateScratch, router->CertificateScratch);
     router->CertificateScratch = nullptr;
     WorkspaceRelease(router->ScratchWorkspace);
     router->ScratchWorkspace = nullptr;
-    FreeNonPagedObject(router);
+    FreeProtocolNonPagedObject(rtl::ProtocolAllocationSite::SessionHttp3PeerRouter, router);
 }
 
 NTSTATUS CreateRouter(HttpH3PeerRouter **router) noexcept
@@ -350,7 +371,8 @@ NTSTATUS CreateRouter(HttpH3PeerRouter **router) noexcept
         return STATUS_INVALID_PARAMETER;
     }
     *router = nullptr;
-    HttpH3PeerRouter *created = AllocateNonPagedObject<HttpH3PeerRouter>();
+    HttpH3PeerRouter *created =
+        AllocateProtocolNonPagedObject<HttpH3PeerRouter>(rtl::ProtocolAllocationSite::SessionHttp3PeerRouter);
     if (created == nullptr)
     {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -363,8 +385,9 @@ NTSTATUS CreateRouter(HttpH3PeerRouter **router) noexcept
     NTSTATUS status = WorkspaceCreate(&workspaceOptions, &created->ScratchWorkspace);
     if (NT_SUCCESS(status))
     {
-        created->CertificateScratch = AllocateNonPagedObject<rtl::WorkspaceScratchAllocator>(
-            *created->ScratchWorkspace, rtl::WorkspaceScratchAllocator::BufferKind::Certificate);
+        created->CertificateScratch = AllocateProtocolNonPagedObject<rtl::WorkspaceScratchAllocator>(
+            rtl::ProtocolAllocationSite::SessionHttp3CertificateScratch, *created->ScratchWorkspace,
+            rtl::WorkspaceScratchAllocator::BufferKind::Certificate);
         status = created->CertificateScratch != nullptr ? STATUS_SUCCESS : STATUS_INSUFFICIENT_RESOURCES;
     }
     if (NT_SUCCESS(status))
@@ -413,6 +436,64 @@ void CloseQuic(HttpH3PeerRouter *router, quic::QuicConnection *connection) noexc
     quic::QuicConnectionDestroy(connection);
 }
 
+NTSTATUS CheckPeerSettings(void *context, quic::QuicConnection *connection) noexcept
+{
+    UNREFERENCED_PARAMETER(connection);
+    const http3::Http3Connection *http3Connection = static_cast<const http3::Http3Connection *>(context);
+    return http3::Http3ConnectionPeerSettingsReceived(http3Connection) ? STATUS_SUCCESS : STATUS_RETRY;
+}
+
+NTSTATUS WaitForPeerSettings(quic::QuicConnection *connection, http3::Http3Connection *http3Connection,
+                             ULONG timeoutMilliseconds) noexcept
+{
+    if (connection == nullptr || http3Connection == nullptr || timeoutMilliseconds == 0)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    const ULONGLONG now = quic::QuicClockNow100ns();
+    const ULONGLONG duration = static_cast<ULONGLONG>(timeoutMilliseconds) * 10000ULL;
+    const ULONGLONG deadline = now > ~0ULL - duration ? ~0ULL : now + duration;
+
+    for (;;)
+    {
+        HeapObject<quic::QuicOperation> operation;
+        if (!operation.IsValid())
+        {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        quic::QuicOperationInitialize(operation.Get());
+        NTSTATUS status = quic::QuicConnectionExecuteApplication(connection, CheckPeerSettings, http3Connection,
+                                                                  operation.Get());
+        if (NT_SUCCESS(status))
+        {
+            status = quic::QuicOperationWait(operation.Get(), timeoutMilliseconds);
+        }
+        if (NT_SUCCESS(status))
+        {
+            return STATUS_SUCCESS;
+        }
+        if (status != STATUS_RETRY)
+        {
+            return status;
+        }
+        if (quic::QuicClockNow100ns() >= deadline)
+        {
+            return STATUS_IO_TIMEOUT;
+        }
+#if defined(WKNET_USER_MODE_TEST)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#else
+        LARGE_INTEGER delay = {};
+        delay.QuadPart = -10000LL;
+        const NTSTATUS delayStatus = KeDelayExecutionThread(KernelMode, FALSE, &delay);
+        if (!NT_SUCCESS(delayStatus))
+        {
+            return delayStatus;
+        }
+#endif
+    }
+}
+
 void PooledCloseRoutine(void *context, ConnectionPool *pool, PooledConnection *pooledConnection,
                         quic::QuicConnection *quicConnection, http3::Http3Connection *http3Connection) noexcept
 {
@@ -434,7 +515,8 @@ void PooledCloseRoutine(void *context, ConnectionPool *pool, PooledConnection *p
     ConnectionPoolCompleteQuicClose(pool, pooledConnection);
 }
 
-NTSTATUS BuildQuicPoolKey(const Request &request, ConnectionPoolKey *key) noexcept
+NTSTATUS BuildQuicPoolKey(const Request &request, const AltSvcCandidateSnapshot *alternative,
+                          ConnectionPoolKey *key) noexcept
 {
     ProxyOptions noProxy = {};
     NTSTATUS status = BuildPoolKey(request, noProxy, Http2CleartextMode::Disabled, key);
@@ -448,19 +530,23 @@ NTSTATUS BuildQuicPoolKey(const Request &request, ConnectionPoolKey *key) noexce
     key->Alpn[1] = '3';
     key->Alpn[2] = '\0';
     key->AlpnLength = 2;
-    key->AlternativePort = request.Port;
+    const char *alternativeHost = alternative != nullptr ? alternative->Host : request.Host;
+    const SIZE_T alternativeHostLength = alternative != nullptr ? alternative->HostLength : request.HostLength;
+    key->AlternativePort = alternative != nullptr ? alternative->Port : request.Port;
     key->QuicVersion = quic::QuicVersion1;
-    if (request.HostLength > sizeof(key->AlternativeHost) - 1)
+    if (alternativeHost == nullptr || alternativeHostLength == 0 ||
+        alternativeHostLength > sizeof(key->AlternativeHost) - 1)
     {
         return STATUS_INVALID_PARAMETER;
     }
-    RtlCopyMemory(key->AlternativeHost, request.Host, request.HostLength);
-    key->AlternativeHost[request.HostLength] = '\0';
-    key->AlternativeHostLength = request.HostLength;
+    RtlCopyMemory(key->AlternativeHost, alternativeHost, alternativeHostLength);
+    key->AlternativeHost[alternativeHostLength] = '\0';
+    key->AlternativeHostLength = alternativeHostLength;
     return STATUS_SUCCESS;
 }
 
-NTSTATUS ConnectQuic(SessionHandle session, const Request &request, HttpH3PeerRouter *router,
+NTSTATUS ConnectQuic(SessionHandle session, const Request &request, const AltSvcCandidateSnapshot *alternative,
+                     ULONG probeTimeoutMilliseconds, HttpH3PeerRouter *router,
                      quic::QuicConnection **connection) noexcept
 {
     if (connection == nullptr)
@@ -481,7 +567,19 @@ NTSTATUS ConnectQuic(SessionHandle session, const Request &request, HttpH3PeerRo
         return STATUS_NOT_SUPPORTED;
     }
 
-    HeapArray<wchar_t> host(request.HostLength + 1);
+    const char *endpointHost = alternative != nullptr ? alternative->Host : request.Host;
+    const SIZE_T endpointHostLength = alternative != nullptr ? alternative->HostLength : request.HostLength;
+    const USHORT endpointPort = alternative != nullptr ? alternative->Port : request.Port;
+    if (endpointHost == nullptr || endpointHostLength == 0 || endpointPort == 0)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (probeTimeoutMilliseconds == 0)
+    {
+        probeTimeoutMilliseconds = session->Options.Http3.QuicProbeTimeoutMilliseconds;
+    }
+
+    HeapArray<wchar_t> host(endpointHostLength + 1);
     HeapArray<wchar_t> service(6);
     HeapArray<SOCKADDR_STORAGE> addresses(net::WskMaxResolvedAddresses);
     HeapArray<UCHAR> destinationConnectionId(HttpH3ConnectionIdLength);
@@ -492,10 +590,10 @@ NTSTATUS ConnectQuic(SessionHandle session, const Request &request, HttpH3PeerRo
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    NTSTATUS status = CopyAsciiToWide(request.Host, request.HostLength, host.Get(), host.Count());
+    NTSTATUS status = CopyAsciiToWide(endpointHost, endpointHostLength, host.Get(), host.Count());
     if (NT_SUCCESS(status))
     {
-        status = FormatServiceName(request.Port, service.Get(), service.Count());
+        status = FormatServiceName(endpointPort, service.Get(), service.Count());
     }
     SIZE_T addressCount = 0;
     if (NT_SUCCESS(status))
@@ -552,7 +650,7 @@ NTSTATUS ConnectQuic(SessionHandle session, const Request &request, HttpH3PeerRo
             if (NT_SUCCESS(status))
             {
                 status =
-                    quic::QuicOperationWait(&connectOperation, session->Options.Http3.QuicProbeTimeoutMilliseconds);
+                    quic::QuicOperationWait(&connectOperation, probeTimeoutMilliseconds);
             }
         }
         if (NT_SUCCESS(status))
@@ -563,12 +661,32 @@ NTSTATUS ConnectQuic(SessionHandle session, const Request &request, HttpH3PeerRo
             if (NT_SUCCESS(status))
             {
                 status =
-                    quic::QuicOperationWait(&establishedOperation, session->Options.Http3.QuicProbeTimeoutMilliseconds);
+                    quic::QuicOperationWait(&establishedOperation, probeTimeoutMilliseconds);
             }
         }
         if (NT_SUCCESS(status))
         {
             status = http3::Http3ConnectionBindQuic(router->Http3, candidate);
+        }
+        if (NT_SUCCESS(status))
+        {
+            quic::QuicOperation startOperation = {};
+            quic::QuicOperationInitialize(&startOperation);
+            status = quic::QuicConnectionExecuteApplication(
+                candidate,
+                [](void *context, quic::QuicConnection *workerConnection) noexcept -> NTSTATUS {
+                    UNREFERENCED_PARAMETER(workerConnection);
+                    return http3::Http3ConnectionWorkerStart(static_cast<http3::Http3Connection *>(context));
+                },
+                router->Http3, &startOperation);
+            if (NT_SUCCESS(status))
+            {
+                status = quic::QuicOperationWait(&startOperation, probeTimeoutMilliseconds);
+            }
+        }
+        if (NT_SUCCESS(status))
+        {
+            status = WaitForPeerSettings(candidate, router->Http3, probeTimeoutMilliseconds);
         }
         if (NT_SUCCESS(status))
         {
@@ -594,14 +712,18 @@ NTSTATUS AttachRequest(void *context, HttpH3DispatchContext *dispatch) noexcept
         return STATUS_INVALID_PARAMETER;
     }
     HttpH3RouterLock lock(lease->Router);
-    if (lease->Router->ActiveDispatch != nullptr)
+    for (SIZE_T index = 0; index < HttpH3RouteCapacity; ++index)
     {
-        return STATUS_DEVICE_BUSY;
+        if (lease->Router->Routes[index].Dispatch == nullptr)
+        {
+            lease->Router->Routes[index].Dispatch = dispatch;
+            lease->Router->Routes[index].StreamId = HttpH3UnsetStreamId;
+            lease->RouteIndex = index;
+            lease->Dispatch = dispatch;
+            return STATUS_SUCCESS;
+        }
     }
-    lease->Router->ActiveDispatch = dispatch;
-    lease->Router->ActiveStreamId = HttpH3UnsetStreamId;
-    lease->Dispatch = dispatch;
-    return STATUS_SUCCESS;
+    return STATUS_INSUFFICIENT_RESOURCES;
 }
 
 NTSTATUS BindStream(void *context, HttpH3DispatchContext *dispatch, ULONGLONG streamId) noexcept
@@ -613,11 +735,12 @@ NTSTATUS BindStream(void *context, HttpH3DispatchContext *dispatch, ULONGLONG st
     }
     {
         HttpH3RouterLock lock(lease->Router);
-        if (lease->Router->ActiveDispatch != dispatch)
+        if (lease->RouteIndex >= HttpH3RouteCapacity ||
+            lease->Router->Routes[lease->RouteIndex].Dispatch != dispatch)
         {
             return STATUS_INVALID_DEVICE_STATE;
         }
-        lease->Router->ActiveStreamId = streamId;
+        lease->Router->Routes[lease->RouteIndex].StreamId = streamId;
     }
 
     const ULONG peerMaximum = WKNET_HARD_MAX_QUIC_LOCAL_BIDI_STREAMS;
@@ -646,13 +769,13 @@ void ReleasePeer(void *context) noexcept
     {
         return;
     }
-    if (lease->Router != nullptr)
+    if (lease->Router != nullptr && lease->RouteIndex < HttpH3RouteCapacity)
     {
         HttpH3RouterLock lock(lease->Router);
-        if (lease->Router->ActiveDispatch == lease->Dispatch)
+        HttpH3RouteEntry &route = lease->Router->Routes[lease->RouteIndex];
+        if (route.Dispatch == lease->Dispatch)
         {
-            lease->Router->ActiveDispatch = nullptr;
-            lease->Router->ActiveStreamId = HttpH3UnsetStreamId;
+            route = {};
         }
     }
 
@@ -665,24 +788,28 @@ void ReleasePeer(void *context) noexcept
     }
     if (lease->Standalone)
     {
-        if (lease->Router != nullptr && lease->Router->Http3 != nullptr)
+        if (lease->OwnsStandaloneRouter && lease->Router != nullptr && lease->Router->Http3 != nullptr)
         {
             http3::Http3ConnectionBeginShutdown(lease->Router->Http3);
         }
-        CloseQuic(lease->Router, lease->Dispatch != nullptr ? lease->Dispatch->Peer.Quic : nullptr);
-        if (lease->Router != nullptr && lease->Router->Http3 != nullptr)
+        if (lease->OwnsStandaloneRouter)
         {
-            http3::Http3ConnectionDestroy(lease->Router->Http3);
-            lease->Router->Http3 = nullptr;
+            CloseQuic(lease->Router, lease->Dispatch != nullptr ? lease->Dispatch->Peer.Quic : nullptr);
+            if (lease->Router != nullptr && lease->Router->Http3 != nullptr)
+            {
+                http3::Http3ConnectionDestroy(lease->Router->Http3);
+                lease->Router->Http3 = nullptr;
+            }
+            DestroyRouter(lease->Router);
+            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Verbose,
+                        "http3.peer.standalone_close.complete");
         }
-        DestroyRouter(lease->Router);
-        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Verbose, "http3.peer.standalone_close.complete");
     }
     else
     {
         ConnectionPoolReleaseHttp3StreamLease(lease->Pool, lease->PooledConnectionObject, reusable);
     }
-    FreeNonPagedObject(lease);
+    FreeProtocolNonPagedObject(rtl::ProtocolAllocationSite::SessionHttp3PeerLease, lease);
 }
 
 NTSTATUS CreateProductionPeer(void *context, const HttpH3PeerCreateOptions *options, HttpH3Peer *peer) noexcept
@@ -703,7 +830,7 @@ NTSTATUS CreateProductionPeer(void *context, const HttpH3PeerCreateOptions *opti
     {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
-    NTSTATUS status = BuildQuicPoolKey(*options->RequestObject, key.Get());
+    NTSTATUS status = BuildQuicPoolKey(*options->RequestObject, options->Alternative, key.Get());
     if (!NT_SUCCESS(status))
     {
         return status;
@@ -739,7 +866,8 @@ NTSTATUS CreateProductionPeer(void *context, const HttpH3PeerCreateOptions *opti
         {
             router->Pool = &session->ConnectionPool;
             router->PooledConnectionObject = pooledConnection;
-            status = ConnectQuic(session, *options->RequestObject, router, &quicConnection);
+            status = ConnectQuic(session, *options->RequestObject, options->Alternative,
+                                 options->ProbeTimeoutMilliseconds, router, &quicConnection);
         }
         if (NT_SUCCESS(status))
         {
@@ -765,7 +893,8 @@ NTSTATUS CreateProductionPeer(void *context, const HttpH3PeerCreateOptions *opti
         }
     }
 
-    HttpH3PeerLease *lease = AllocateNonPagedObject<HttpH3PeerLease>();
+    HttpH3PeerLease *lease =
+        AllocateProtocolNonPagedObject<HttpH3PeerLease>(rtl::ProtocolAllocationSite::SessionHttp3PeerLease);
     if (lease == nullptr)
     {
         ConnectionPoolReleaseHttp3StreamLease(&session->ConnectionPool, pooledConnection, false);
@@ -855,7 +984,8 @@ NTSTATUS HttpH3TestCreateInMemoryPeer(const HttpH3PeerCreateOptions *options, Ht
         return status;
     }
 
-    HttpH3PeerLease *lease = AllocateNonPagedObject<HttpH3PeerLease>();
+    HttpH3PeerLease *lease =
+        AllocateProtocolNonPagedObject<HttpH3PeerLease>(rtl::ProtocolAllocationSite::SessionHttp3PeerLease);
     if (lease == nullptr)
     {
         http3::Http3ConnectionBeginShutdown(router->Http3);
@@ -867,6 +997,7 @@ NTSTATUS HttpH3TestCreateInMemoryPeer(const HttpH3PeerCreateOptions *options, Ht
     }
     lease->Router = router;
     lease->Standalone = true;
+    lease->OwnsStandaloneRouter = true;
 
     peer->Context = lease;
     peer->Quic = connection;
@@ -875,6 +1006,74 @@ NTSTATUS HttpH3TestCreateInMemoryPeer(const HttpH3PeerCreateOptions *options, Ht
     peer->BindStream = BindStream;
     peer->Destroy = ReleasePeer;
     return STATUS_SUCCESS;
+}
+
+NTSTATUS HttpH3TestCreateSiblingPeer(const HttpH3Peer *existingPeer, HttpH3Peer *peer) noexcept
+{
+    if (peer != nullptr)
+    {
+        *peer = {};
+    }
+    if (existingPeer == nullptr || existingPeer->Context == nullptr || existingPeer->Quic == nullptr ||
+        existingPeer->Http3 == nullptr || peer == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    const HttpH3PeerLease *existingLease = static_cast<const HttpH3PeerLease *>(existingPeer->Context);
+    if (existingLease->Router == nullptr)
+    {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    HttpH3PeerLease *lease =
+        AllocateProtocolNonPagedObject<HttpH3PeerLease>(rtl::ProtocolAllocationSite::SessionHttp3PeerLease);
+    if (lease == nullptr)
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    lease->Router = existingLease->Router;
+    lease->Standalone = true;
+
+    peer->Context = lease;
+    peer->Quic = existingPeer->Quic;
+    peer->Http3 = existingPeer->Http3;
+    peer->AttachRequest = AttachRequest;
+    peer->BindStream = BindStream;
+    peer->Destroy = ReleasePeer;
+    return STATUS_SUCCESS;
+}
+
+void HttpH3TestPeerInjectData(const HttpH3Peer *peer, ULONGLONG streamId, const UCHAR *data,
+                              SIZE_T dataLength) noexcept
+{
+    if (peer == nullptr || peer->Context == nullptr)
+    {
+        return;
+    }
+    const HttpH3PeerLease *lease = static_cast<const HttpH3PeerLease *>(peer->Context);
+    OnHttp3Data(lease->Router, streamId, data, dataLength);
+}
+
+void HttpH3TestPeerInjectGoaway(const HttpH3Peer *peer, ULONGLONG streamId) noexcept
+{
+    if (peer == nullptr || peer->Context == nullptr)
+    {
+        return;
+    }
+    const HttpH3PeerLease *lease = static_cast<const HttpH3PeerLease *>(peer->Context);
+    OnHttp3Goaway(lease->Router, streamId);
+}
+
+void HttpH3TestPeerInjectConnectionError(const HttpH3Peer *peer, NTSTATUS status,
+                                          ULONGLONG applicationError) noexcept
+{
+    if (peer == nullptr || peer->Context == nullptr)
+    {
+        return;
+    }
+    const HttpH3PeerLease *lease = static_cast<const HttpH3PeerLease *>(peer->Context);
+    OnHttp3ConnectionError(lease->Router, status, applicationError);
 }
 #endif
 } // namespace wknet::session

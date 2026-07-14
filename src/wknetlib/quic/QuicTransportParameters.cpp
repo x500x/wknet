@@ -1,5 +1,6 @@
 #include "quic/QuicTransportParameters.h"
 #include "quic/QuicVarInt.h"
+#include "rtl/ProtocolAllocator.h"
 
 namespace wknet::quic
 {
@@ -238,7 +239,7 @@ NTSTATUS QuicEncodeClientTransportParametersWithLimits(const QuicClientTransport
         return STATUS_INVALID_PARAMETER;
     }
 
-    HeapArray<UCHAR> encoded(8);
+    ProtocolHeapArray<UCHAR, rtl::ProtocolAllocationSite::QuicTransportParameterBytes> encoded(8);
     if (!encoded.IsValid())
     {
         return STATUS_INSUFFICIENT_RESOURCES;

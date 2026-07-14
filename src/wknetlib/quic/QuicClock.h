@@ -4,6 +4,7 @@ namespace wknet::quic
 {
 ULONGLONG QuicClockNow100ns() noexcept;
 #if defined(WKNET_USER_MODE_TEST)
+void QuicTestClockUseSystem(bool enabled) noexcept;
 void QuicTestClockSet(ULONGLONG now100ns) noexcept;
 void QuicTestClockAdvance(ULONGLONG delta100ns) noexcept;
 #endif

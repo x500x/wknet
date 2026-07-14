@@ -6,7 +6,7 @@
 - 补全协议能力时继续遵循内核自实现路线：传输层优先 WSK，密码学优先内核态 CNG/BCrypt，不把 WinHTTP、WinINet、SChannel 作为内核主路径。
 - 新增协议路径必须配套用户态协议测试、相关集成测试和 Debug 构建验证；禁止只做烟测。
 - QUIC v1、HTTP/3 与 QPACK 已纳入客户端主路径完整性账本；只有 RFC 8999/9000/9001/9002/9114/9204 对应主路径条目全部具备实现和测试后，才能从“待补全”迁移为“已实现/已验证”。
-- HTTP/3 透明 `Auto` 是最终能力门禁，不是开发期回退手段；M1–M8 期间仅允许明确的 `Required` 测试路径，且不得重复发送请求或放宽安全重放规则。
+- HTTP/3 透明 `Auto` 已通过 M9 主路径门禁；后续修改必须保持只从已认证 Alt-Svc 学习、origin identity 与 alternative endpoint 分离、请求唯一发送以及现有安全重放规则，不能把回退路径当作兼容架构。
 - 协议能力账本中的实现路径必须指向当前分层文件；不得继续引用已删除的聚合引擎文件、旧 client 类或旧命名空间。
 - EXI 的完整支持范围是 W3C EXI 1.0 Second Edition 中不依赖外部 Schema 的流：无 Options 流按 schema-less 处理，支持内建 XML Schema 类型、四种 alignment、Options 与保真项；依赖外部 Schema/strict grammar 的流明确安全拒绝，不扩张公开 Schema API。
 - Pack200 的完整支持范围是 Java 5–8 已发布稳定格式 `150.7`、`160.1`、`170.1`、`171.0`，包括裸/gzip、多 segment、完整 class/file/attribute/bytecode 解码与 JAR 重建；不把只解析 header/band 后返回不支持视为完成。

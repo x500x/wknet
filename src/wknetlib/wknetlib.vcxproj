@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="WknetConfig.cpp" />
+    <ClCompile Include="rtl\ProtocolFailureInjection.cpp" />
     <ClCompile Include="rtl\Trace.cpp" />
     <ClCompile Include="rtl\Text.cpp" />
     <ClCompile Include="codec\Codec.cpp" />
@@ -46,6 +47,8 @@
     <ClCompile Include="session\HttpSend.cpp" />
     <ClCompile Include="session\HttpTransportDispatch.cpp" />
     <ClCompile Include="session\HttpCache.cpp" />
+    <ClCompile Include="session\AltSvcCache.cpp" />
+    <ClCompile Include="session\AltSvcClock.cpp" />
     <ClCompile Include="rtl\UrlParser.cpp" />
     <ClCompile Include="session\WsAsyncApi.cpp" />
     <ClCompile Include="session\WsClose.cpp" />
@@ -117,6 +120,7 @@
     <ClCompile Include="http3\Http3Frame.cpp" />
     <ClCompile Include="http3\Http3Request.cpp" />
     <ClCompile Include="net\WskClient.cpp" />
+    <ClCompile Include="net\NetworkChangeMonitor.cpp" />
     <ClCompile Include="net\WskDatagramSocket.cpp" />
     <ClCompile Include="net\WskSocket.cpp" />
     <ClCompile Include="qpack\QpackDecoder.cpp" />
@@ -218,6 +222,7 @@
     <ClInclude Include="transport\Transport.h" />
     <ClInclude Include="transport\TransportPrivate.hpp" />
     <ClInclude Include="net\WskClientPrivate.hpp" />
+    <ClInclude Include="net\NetworkChangeMonitor.h" />
     <ClInclude Include="net\WskDatagramSocket.h" />
     <ClInclude Include="net\WskDatagramSocketPrivate.hpp" />
     <ClInclude Include="net\WskSocketPrivate.hpp" />
@@ -253,6 +258,8 @@
     <ClInclude Include="qpack\QpackTypes.h" />
     <ClInclude Include="http2\Http2ConnectionPrivate.hpp" />
     <ClInclude Include="tls\TlsConnectionPrivate.hpp" />
+    <ClInclude Include="session\AltSvcCache.h" />
+    <ClInclude Include="session\AltSvcClock.h" />
     <ClInclude Include="session\HttpEngineInternal.hpp" />
     <ClInclude Include="session\Http2RequestBuilder.h" />
     <ClInclude Include="session\WsEngineInternal.hpp" />
@@ -283,6 +290,8 @@
     <ClInclude Include="codec\Pack200Decoder.h" />
     <ClInclude Include="codec\Pack200JarWriter.h" />
     <ClInclude Include="codec\XmlWriter.h" />
+    <ClInclude Include="rtl\ProtocolAllocator.h" />
+    <ClInclude Include="rtl\ProtocolFailureInjection.h" />
     <ClInclude Include="rtl\Text.h" />
     <ClInclude Include="rtl\TraceInternal.h" />
     <ClInclude Include="..\..\include\wknet\WknetConfig.h" />

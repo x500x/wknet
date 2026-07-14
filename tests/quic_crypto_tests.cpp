@@ -9,55 +9,56 @@
 #include <string.h>
 namespace
 {
-bool failed = false;
-void E(bool c, const char *m)
-{
-    if (!c)
+    bool failed = false;
+    void E(bool c, const char* m)
     {
-        failed = true;
-        printf("FAIL: %s\n", m);
+        if (!c)
+        {
+            failed = true;
+            printf("FAIL: %s\n", m);
+        }
     }
-}
-UCHAR H(char c)
-{
-    return static_cast<UCHAR>(c >= '0' && c <= '9' ? c - '0' : (c >= 'a' && c <= 'f' ? c - 'a' + 10 : c - 'A' + 10));
-}
-SIZE_T Hex(const char *s, UCHAR *out, SIZE_T cap)
-{
-    SIZE_T n = strlen(s) / 2;
-    if (n > cap)
-        return 0;
-    for (SIZE_T i = 0; i < n; ++i)
-        out[i] = static_cast<UCHAR>((H(s[i * 2]) << 4) | H(s[i * 2 + 1]));
-    return n;
-}
-bool Eq(const UCHAR *a, const char *hex, SIZE_T n)
-{
-    UCHAR e[64] = {};
-    return Hex(hex, e, sizeof(e)) == n && memcmp(a, e, n) == 0;
-}
-void RoundTripSuite(wknet::quic::QuicCipherSuite suite, SIZE_T secretLength, const char *message)
-{
-    UCHAR secret[48] = {};
-    for (SIZE_T i = 0; i < secretLength; ++i)
-        secret[i] = static_cast<UCHAR>(i + 1);
-    wknet::quic::QuicPacketKeySet keys = {};
-    E(NT_SUCCESS(wknet::quic::QuicInstallWriteSecret(suite, secret, secretLength, &keys)), message);
-    UCHAR packet[128] = {0x41, 1, 2, 3, 4, 0x12, 0x34};
-    for (SIZE_T i = 0; i < 40; ++i)
-        packet[7 + i] = static_cast<UCHAR>(0xa0 + i);
-    UCHAR original[40] = {};
-    RtlCopyMemory(original, packet + 7, 40);
-    SIZE_T packetLength = 0;
-    E(NT_SUCCESS(wknet::quic::QuicProtectPacket(keys, packet, sizeof(packet), 5, 2, 0x1234, 40, &packetLength)),
-      "suite protects");
-    ULONGLONG pn = 0;
-    SIZE_T plain = 0;
-    E(NT_SUCCESS(wknet::quic::QuicUnprotectPacket(keys, packet, packetLength, 5, 0x1234, &pn, &plain)),
-      "suite unprotects");
-    E(pn == 0x1234 && plain == 40 && memcmp(packet + 7, original, 40) == 0, "suite round-trips");
-    wknet::quic::QuicClearPacketKeySet(&keys);
-}
+    UCHAR H(char c)
+    {
+        return static_cast<UCHAR>(c >= '0' && c <= '9' ? c - '0'
+                                                       : (c >= 'a' && c <= 'f' ? c - 'a' + 10 : c - 'A' + 10));
+    }
+    SIZE_T Hex(const char* s, UCHAR* out, SIZE_T cap)
+    {
+        SIZE_T n = strlen(s) / 2;
+        if (n > cap)
+            return 0;
+        for (SIZE_T i = 0; i < n; ++i)
+            out[i] = static_cast<UCHAR>((H(s[i * 2]) << 4) | H(s[i * 2 + 1]));
+        return n;
+    }
+    bool Eq(const UCHAR* a, const char* hex, SIZE_T n)
+    {
+        UCHAR e[64] = {};
+        return Hex(hex, e, sizeof(e)) == n && memcmp(a, e, n) == 0;
+    }
+    void RoundTripSuite(wknet::quic::QuicCipherSuite suite, SIZE_T secretLength, const char* message)
+    {
+        UCHAR secret[48] = {};
+        for (SIZE_T i = 0; i < secretLength; ++i)
+            secret[i] = static_cast<UCHAR>(i + 1);
+        wknet::quic::QuicPacketKeySet keys = {};
+        E(NT_SUCCESS(wknet::quic::QuicInstallWriteSecret(suite, secret, secretLength, &keys)), message);
+        UCHAR packet[128] = {0x41, 1, 2, 3, 4, 0x12, 0x34};
+        for (SIZE_T i = 0; i < 40; ++i)
+            packet[7 + i] = static_cast<UCHAR>(0xa0 + i);
+        UCHAR original[40] = {};
+        RtlCopyMemory(original, packet + 7, 40);
+        SIZE_T packetLength = 0;
+        E(NT_SUCCESS(wknet::quic::QuicProtectPacket(keys, packet, sizeof(packet), 5, 2, 0x1234, 40, &packetLength)),
+          "suite protects");
+        ULONGLONG pn = 0;
+        SIZE_T plain = 0;
+        E(NT_SUCCESS(wknet::quic::QuicUnprotectPacket(keys, packet, packetLength, 5, 0x1234, &pn, &plain)),
+          "suite unprotects");
+        E(pn == 0x1234 && plain == 40 && memcmp(packet + 7, original, 40) == 0, "suite round-trips");
+        wknet::quic::QuicClearPacketKeySet(&keys);
+    }
 } // namespace
 int main()
 {
@@ -80,6 +81,11 @@ int main()
     E(memcmp(nextClient.Secret, client.Secret, client.SecretLength) != 0 &&
           memcmp(nextClient.Secret, repeatedNextClient.Secret, nextClient.SecretLength) == 0,
       "QUIC key update is deterministic and advances the traffic secret");
+    E(Eq(nextClient.Secret, "4428ffa195ad665b9ebf9456945b99e8ff848512cab93d0426436409047d666c", 32),
+      "QUIC key update matches the RFC HKDF label result");
+    E(nextClient.HeaderProtectionKeyLength == client.HeaderProtectionKeyLength &&
+          memcmp(nextClient.HeaderProtectionKey, client.HeaderProtectionKey, client.HeaderProtectionKeyLength) == 0,
+      "QUIC key update retains the header protection key");
     wknet::quic::QuicClearPacketKeySet(&nextClient);
     wknet::quic::QuicClearPacketKeySet(&repeatedNextClient);
     UCHAR sample[16] = {};
@@ -136,6 +142,13 @@ int main()
     E(NT_SUCCESS(wknet::quic::QuicProtectPacket(client, protectedPacket, sizeof(protectedPacket), 5, 2, 0x1234, 40,
                                                 &protectedLength)),
       "packet protects in place");
+    UCHAR inspectedFirstByte = 0;
+    ULONGLONG inspectedPacketNumber = 0;
+    E(NT_SUCCESS(wknet::quic::QuicInspectProtectedPacketHeader(client, protectedPacket, protectedLength, 5, 0x1234,
+                                                               &inspectedFirstByte, &inspectedPacketNumber)),
+      "protected short header inspects without AEAD trial");
+    E((inspectedFirstByte & 0x04U) == 0 && inspectedPacketNumber == 0x1234,
+      "protected short header exposes key phase and packet number");
     ULONGLONG fullPn = 0;
     SIZE_T plainLength = 0;
     E(NT_SUCCESS(

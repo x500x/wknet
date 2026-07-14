@@ -1,6 +1,7 @@
 #pragma once
 
 #include "net/WskClient.h"
+#include "net/NetworkChangeMonitor.h"
 
 namespace wknet::net {
     class WskClient final
@@ -27,6 +28,11 @@ namespace wknet::net {
             SIZE_T addressCapacity,
             SIZE_T* addressCount,
             WskAddressFamily addressFamily = WskAddressFamily::Any) noexcept;
+        NTSTATUS SubscribeNetworkChanges(NetworkChangeSubscriber callback, void *context) noexcept;
+        void UnsubscribeNetworkChanges(NetworkChangeSubscriber callback, void *context) noexcept;
+#if defined(WKNET_USER_MODE_TEST)
+        void TestNotifyNetworkChange() noexcept;
+#endif
 
     private:
         WSK_CLIENT_NPI clientNpi_ = {};
@@ -34,5 +40,6 @@ namespace wknet::net {
         WSK_PROVIDER_NPI providerNpi_ = {};
         bool registered_ = false;
         bool providerCaptured_ = false;
+        NetworkChangeMonitor networkChangeMonitor_;
     };
 }

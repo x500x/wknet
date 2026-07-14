@@ -82,6 +82,7 @@ namespace wknet
 {
 namespace net
 {
+    using NetworkChangeSubscriber = void (*)(void *context) noexcept;
     constexpr SIZE_T WskMaxResolvedAddresses = 8;
 
     enum class WskAddressFamily : ULONG
@@ -127,5 +128,14 @@ namespace net
         SIZE_T addressCapacity,
         _Out_ SIZE_T* addressCount,
         WskAddressFamily addressFamily = WskAddressFamily::Any) noexcept;
+    NTSTATUS WskClientSubscribeNetworkChanges(_Inout_ WskClient *client,
+                                              NetworkChangeSubscriber callback,
+                                              void *context) noexcept;
+    void WskClientUnsubscribeNetworkChanges(_Inout_opt_ WskClient *client,
+                                            NetworkChangeSubscriber callback,
+                                            void *context) noexcept;
+#if defined(WKNET_USER_MODE_TEST)
+    void WskTestNotifyNetworkChange(_Inout_opt_ WskClient *client) noexcept;
+#endif
 }
 }

@@ -98,6 +98,9 @@
     <ClCompile Include="rtl\Trace.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="rtl\ProtocolFailureInjection.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="rtl\Text.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -204,6 +207,12 @@
       <Filter>Source Files\engine</Filter>
     </ClCompile>
     <ClCompile Include="session\HttpCache.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\AltSvcCache.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
+    <ClCompile Include="session\AltSvcClock.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
     <ClCompile Include="rtl\UrlParser.cpp">
@@ -401,6 +410,9 @@
     <ClCompile Include="net\WskClient.cpp">
       <Filter>Source Files\net</Filter>
     </ClCompile>
+    <ClCompile Include="net\NetworkChangeMonitor.cpp">
+      <Filter>Source Files\net</Filter>
+    </ClCompile>
     <ClCompile Include="net\WskDatagramSocket.cpp">
       <Filter>Source Files\net</Filter>
     </ClCompile>
@@ -562,6 +574,9 @@
     <ClInclude Include="net\WskClientPrivate.hpp">
       <Filter>Header Files\net</Filter>
     </ClInclude>
+    <ClInclude Include="net\NetworkChangeMonitor.h">
+      <Filter>Header Files\net</Filter>
+    </ClInclude>
     <ClInclude Include="net\WskDatagramSocket.h">
       <Filter>Header Files\net</Filter>
     </ClInclude>
@@ -631,6 +646,12 @@
     <ClInclude Include="tls\TlsConnectionPrivate.hpp">
       <Filter>Header Files\tls</Filter>
     </ClInclude>
+    <ClInclude Include="session\AltSvcCache.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
+    <ClInclude Include="session\AltSvcClock.h">
+      <Filter>Header Files\engine</Filter>
+    </ClInclude>
     <ClInclude Include="session\HttpEngineInternal.hpp">
       <Filter>Header Files\engine</Filter>
     </ClInclude>
@@ -696,6 +717,12 @@
     </ClInclude>
     <ClInclude Include="codec\XmlWriter.h">
       <Filter>Header Files\codec</Filter>
+    </ClInclude>
+    <ClInclude Include="rtl\ProtocolAllocator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rtl\ProtocolFailureInjection.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="rtl\Text.h">
       <Filter>Header Files</Filter>

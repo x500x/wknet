@@ -3,12 +3,15 @@
 #endif
 
 #include "http2/Http2Connection.h"
+#include "http3/Http3Types.h"
 #include "net/WskSocket.h"
 #include "quic/QuicTypes.h"
 #include "rtl/Lookaside.h"
+#include "rtl/ProtocolFailureInjection.h"
 #include "session/Async.h"
 #include "session/ConnectionPool.h"
 #include "session/HandleTypes.h"
+#include "session/HttpH3TestHooks.h"
 #include "session/Workspace.h"
 #include "session/detail/HttpHandles.h"
 #include "transport/Transport.h"
@@ -781,6 +784,84 @@ namespace
         capture->TotalBytes += dataLength;
         capture->FinalChunk = finalChunk;
         return STATUS_SUCCESS;
+    }
+
+    NTSTATUS CreateHttp3RouterTestPeer(
+        void*,
+        const wknet::session::HttpH3PeerCreateOptions* options,
+        wknet::session::HttpH3Peer* peer) noexcept
+    {
+        return wknet::session::HttpH3TestCreateInMemoryPeer(options, peer);
+    }
+
+    bool InitializeHttp3RouterDispatch(
+        wknet::session::HttpH3DispatchContext* dispatch,
+        wknet::session::Request* request,
+        wknet::session::HttpSendOptions* sendOptions,
+        ULONGLONG attemptGeneration) noexcept
+    {
+        wknet::session::HttpH3PeerFactory factory = {};
+        factory.Create = CreateHttp3RouterTestPeer;
+
+        wknet::session::HttpH3DispatchStartOptions options = {};
+        options.RequestObject = request;
+        options.SendOptions = sendOptions;
+        options.PeerFactory = &factory;
+        options.AttemptGeneration = attemptGeneration;
+        options.DirectCallbacks = true;
+        return NT_SUCCESS(wknet::session::HttpH3DispatchInitialize(dispatch, &options));
+    }
+
+    bool AttachHttp3RouterDispatchPair(
+        wknet::session::HttpH3DispatchContext* first,
+        wknet::session::HttpH3DispatchContext* second) noexcept
+    {
+        wknet::session::HttpH3PeerCreateOptions createOptions = {};
+        createOptions.Dispatch = first;
+        NTSTATUS status = wknet::session::HttpH3TestCreateInMemoryPeer(&createOptions, &first->Peer);
+        if (!NT_SUCCESS(status))
+        {
+            return false;
+        }
+        first->PeerCreated = true;
+
+        status = wknet::session::HttpH3TestCreateSiblingPeer(&first->Peer, &second->Peer);
+        if (!NT_SUCCESS(status))
+        {
+            return false;
+        }
+        second->PeerCreated = true;
+
+        status = first->Peer.AttachRequest(first->Peer.Context, first);
+        if (NT_SUCCESS(status))
+        {
+            status = second->Peer.AttachRequest(second->Peer.Context, second);
+        }
+        if (NT_SUCCESS(status))
+        {
+            status = first->Peer.BindStream(first->Peer.Context, first, 0);
+        }
+        if (NT_SUCCESS(status))
+        {
+            status = second->Peer.BindStream(second->Peer.Context, second, 4);
+        }
+        if (NT_SUCCESS(status))
+        {
+            status = wknet::session::HttpH3DispatchAdvanceState(
+                first,
+                wknet::session::HttpH3RequestState::StreamCreated,
+                0,
+                STATUS_PENDING);
+        }
+        if (NT_SUCCESS(status))
+        {
+            status = wknet::session::HttpH3DispatchAdvanceState(
+                second,
+                wknet::session::HttpH3RequestState::StreamCreated,
+                4,
+                STATUS_PENDING);
+        }
+        return NT_SUCCESS(status);
     }
 
     NTSTATUS LongUrlTransport(
@@ -1617,6 +1698,83 @@ namespace
         wknet::http::RequestRelease(request);
         wknet::http::SessionClose(session);
         wknet::http::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestSessionTlsServerNameSurvivesUrlAssignment() noexcept
+    {
+        static const char ExplicitServerName[] = "localhost";
+        wknet::session::SessionOptions explicitOptions = {};
+        explicitOptions.Tls.ServerName = ExplicitServerName;
+        explicitOptions.Tls.ServerNameLength = sizeof(ExplicitServerName) - 1;
+
+        wknet::session::SessionHandle explicitSession = nullptr;
+        NTSTATUS status = wknet::session::SessionCreate(
+            reinterpret_cast<wknet::net::WskClient*>(0x1),
+            &explicitOptions,
+            &explicitSession);
+        Expect(NT_SUCCESS(status), "engine SessionCreate accepts an explicit TLS server name");
+
+        wknet::session::RequestHandle explicitRequest = nullptr;
+        if (NT_SUCCESS(status))
+        {
+            status = wknet::session::HttpRequestCreate(explicitSession, &explicitRequest);
+        }
+        Expect(NT_SUCCESS(status), "engine RequestCreate inherits an explicit TLS server name");
+
+        static const char NumericUrl[] = "https://127.0.0.1/server-name";
+        if (NT_SUCCESS(status))
+        {
+            status = wknet::session::HttpRequestSetUrl(
+                explicitRequest,
+                NumericUrl,
+                sizeof(NumericUrl) - 1);
+        }
+        Expect(NT_SUCCESS(status), "HTTPS numeric URL is accepted with an explicit TLS server name");
+        if (explicitRequest != nullptr)
+        {
+            Expect(
+                explicitRequest->Tls.ServerNameLength == sizeof(ExplicitServerName) - 1 &&
+                    memcmp(
+                        explicitRequest->Tls.ServerName,
+                        ExplicitServerName,
+                        sizeof(ExplicitServerName) - 1) == 0,
+                "URL assignment preserves the session-level explicit TLS server name");
+            Expect(
+                explicitRequest->Tls.ServerName != explicitRequest->Host,
+                "explicit TLS identity remains distinct from the numeric URL host");
+        }
+        wknet::session::HttpRequestRelease(explicitRequest);
+        wknet::session::SessionClose(explicitSession);
+
+        wknet::session::SessionHandle derivedSession = nullptr;
+        status = wknet::session::SessionCreate(
+            reinterpret_cast<wknet::net::WskClient*>(0x1),
+            nullptr,
+            &derivedSession);
+        Expect(NT_SUCCESS(status), "engine SessionCreate accepts default TLS identity derivation");
+
+        wknet::session::RequestHandle derivedRequest = nullptr;
+        if (NT_SUCCESS(status))
+        {
+            status = wknet::session::HttpRequestCreate(derivedSession, &derivedRequest);
+        }
+        if (NT_SUCCESS(status))
+        {
+            status = wknet::session::HttpRequestSetUrl(
+                derivedRequest,
+                NumericUrl,
+                sizeof(NumericUrl) - 1);
+        }
+        Expect(NT_SUCCESS(status), "HTTPS numeric URL derives the default TLS identity");
+        if (derivedRequest != nullptr)
+        {
+            Expect(
+                derivedRequest->Tls.ServerName == derivedRequest->Host &&
+                    derivedRequest->Tls.ServerNameLength == Length("127.0.0.1"),
+                "default TLS identity continues to derive from the HTTPS URL host");
+        }
+        wknet::session::HttpRequestRelease(derivedRequest);
+        wknet::session::SessionClose(derivedSession);
     }
 
     void TestAcceptEncodingQValueOptions() noexcept
@@ -6233,11 +6391,12 @@ namespace
 
         wknet::session::SessionOptions engineDefaults = {};
         Expect(engineDefaults.Http3.Mode == wknet::session::Http3ConnectMode::Disabled,
-               "M6 internal HTTP/3 default is normalized Disabled");
+               "internal HTTP/3 default remains explicit Disabled");
         wknet::session::Http3Options internalAuto = engineDefaults.Http3;
         internalAuto.Mode = wknet::session::Http3ConnectMode::Auto;
         const wknet::session::Http3Options normalized = wknet::session::NormalizeHttp3Options(internalAuto);
-        Expect(normalized.Mode == wknet::session::Http3ConnectMode::Disabled, "M6 normalization maps Auto to Disabled");
+        Expect(normalized.Mode == wknet::session::Http3ConnectMode::Auto,
+               "M9 normalization preserves enabled Auto mode");
 
         config.Http3.Race = wknet::http::Http3RaceMode::SequentialPreferHttp3;
         config.Http3.RaceWindowMs = 333;
@@ -6246,15 +6405,15 @@ namespace
         config.Http3.AltSvcMaxAgeSec = 86400;
         wknet::http::Session *session = nullptr;
         NTSTATUS status = wknet::http::SessionCreate(&config, &session);
-        Expect(NT_SUCCESS(status), "public Auto HTTP/3 session config is accepted while capability-gated");
+        Expect(NT_SUCCESS(status), "public Auto HTTP/3 session config is accepted");
         Expect(session != nullptr && session->Engine != nullptr &&
-                   session->Engine->Options.Http3.Mode == wknet::session::Http3ConnectMode::Disabled &&
+                   session->Engine->Options.Http3.Mode == wknet::session::Http3ConnectMode::Auto &&
                    session->Engine->Options.Http3.Race == wknet::session::Http3RaceMode::SequentialPreferHttp3 &&
                    session->Engine->Options.Http3.RaceWindowMilliseconds == 333 &&
                    session->Engine->Options.Http3.QuicProbeTimeoutMilliseconds == 1777 &&
                    session->Engine->Options.Http3.AltSvcMaxEntries == 7 &&
                    session->Engine->Options.Http3.AltSvcMaxAgeSeconds == 86400,
-               "public HTTP/3 config maps to internal options and Auto remains Disabled in M6");
+               "public HTTP/3 config maps to enabled internal Auto options");
         wknet::http::SessionClose(session);
 
         config = wknet::http::DefaultSessionConfig();
@@ -6344,7 +6503,7 @@ namespace
         send.Http2Priority = &priority;
         status = wknet::session::ResolveHttp3ConnectMode(autoMode, tls, true, &send, false, false, &effective);
         Expect(NT_SUCCESS(status) && effective == wknet::session::Http3ConnectMode::Disabled,
-               "M6 Auto remains TCP-compatible even when Required-only conflicts are present");
+               "Auto remains TCP-compatible when H3 conflicts are present");
 
         wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
         config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
@@ -6360,6 +6519,19 @@ namespace
         status = wknet::http::SessionCreate(&config, &session);
         Expect(status == STATUS_INVALID_PARAMETER && session == nullptr,
                "public Required session rejects explicit non-HTTP ALPN with STATUS_INVALID_PARAMETER");
+    }
+
+    void TestHttp3PoolFailureInjection() noexcept
+    {
+        wknet::rtl::ProtocolFailureInjectionReset();
+        wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::SessionPoolEntries, 1);
+        wknet::session::ConnectionPool pool = {};
+        Expect(wknet::session::ConnectionPoolInitialize(&pool, 2, 1, 30000) == STATUS_INSUFFICIENT_RESOURCES,
+               "HTTP/3 pool entry failpoint is propagated");
+        Expect(pool.Entries == nullptr && wknet::rtl::ProtocolFailureInjectionLiveCount(
+                                              wknet::rtl::ProtocolAllocationSite::SessionPoolEntries) == 0,
+               "failed pool initialization has no live entry table");
+        wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::SessionPoolEntries, 0);
     }
 
     struct Http3PoolCloseCapture final
@@ -6418,7 +6590,39 @@ namespace
         Expect(NT_SUCCESS(status), "HTTP/3 pool adopts one strict QUIC/H3 holder");
         status = wknet::session::ConnectionPoolPromoteHttp3StreamLease(&pool, connection, 0, 8, 8);
         Expect(NT_SUCCESS(status), "new HTTP/3 request promotes its reserved stream lease");
+        Expect(
+            wknet::session::PooledConnectionQuicStreamLeaseCount(connection) == 1 &&
+                wknet::session::PooledConnectionQuicActiveRequest(connection),
+            "first HTTP/3 stream lease marks the pooled connection active");
+
+        wknet::session::PooledConnection *concurrent = nullptr;
+        reused = false;
+        status = wknet::session::ConnectionPoolAcquire(
+            &pool,
+            key,
+            wknet::session::ConnectionPolicy::ReuseOrCreate,
+            &concurrent,
+            &reused);
+        Expect(
+            NT_SUCCESS(status) && concurrent == connection && reused,
+            "active HTTP/3 pooled connection accepts a concurrent stream lease");
+        status = wknet::session::ConnectionPoolBindHttp3StreamLease(&pool, concurrent, 4, 8, 8);
+        Expect(NT_SUCCESS(status), "concurrent HTTP/3 stream lease binds independently");
+        Expect(
+            wknet::session::PooledConnectionQuicStreamLeaseCount(connection) == 2 &&
+                wknet::session::PooledConnectionQuicActiveRequest(connection),
+            "two HTTP/3 stream leases keep the pooled connection active");
+
         wknet::session::ConnectionPoolReleaseHttp3StreamLease(&pool, connection, true);
+        Expect(
+            wknet::session::PooledConnectionQuicStreamLeaseCount(concurrent) == 1 &&
+                wknet::session::PooledConnectionQuicActiveRequest(concurrent),
+            "releasing one HTTP/3 stream keeps the remaining request active");
+        wknet::session::ConnectionPoolReleaseHttp3StreamLease(&pool, concurrent, true);
+        Expect(
+            wknet::session::PooledConnectionQuicStreamLeaseCount(connection) == 0 &&
+                !wknet::session::PooledConnectionQuicActiveRequest(connection),
+            "releasing the final HTTP/3 stream returns the connection to idle");
 
         connection = nullptr;
         reused = false;
@@ -6439,6 +6643,103 @@ namespace
         Expect(NT_SUCCESS(status) && !reused, "GOAWAY-drained HTTP/3 entry cannot be reused");
         wknet::session::ConnectionPoolAbandonQuicAcquire(&pool, connection);
         wknet::session::ConnectionPoolShutdown(&pool);
+    }
+
+    void TestHttp3RouterRoutesConcurrentDispatches() noexcept
+    {
+        wknet::session::Request firstRequest = {};
+        wknet::session::Request secondRequest = {};
+        BodyCallbackCapture firstBody = {};
+        BodyCallbackCapture secondBody = {};
+        wknet::session::HttpSendOptions firstSend = {};
+        firstSend.BodyCallback = CountingBodyCallback;
+        firstSend.CallbackContext = &firstBody;
+        wknet::session::HttpSendOptions secondSend = {};
+        secondSend.BodyCallback = CountingBodyCallback;
+        secondSend.CallbackContext = &secondBody;
+
+        wknet::session::HttpH3DispatchContext first = {};
+        wknet::session::HttpH3DispatchContext second = {};
+        const bool firstInitialized = InitializeHttp3RouterDispatch(&first, &firstRequest, &firstSend, 1);
+        const bool secondInitialized = InitializeHttp3RouterDispatch(&second, &secondRequest, &secondSend, 2);
+        Expect(firstInitialized && secondInitialized, "HTTP/3 router dispatch contexts initialize");
+
+        bool attached = false;
+        if (firstInitialized && secondInitialized)
+        {
+            attached = AttachHttp3RouterDispatchPair(&first, &second);
+        }
+        Expect(attached, "HTTP/3 router attaches two dispatches to one connection");
+        if (attached)
+        {
+            static const UCHAR FirstData[] = {1, 2};
+            static const UCHAR SecondData[] = {3, 4, 5};
+            wknet::session::HttpH3TestPeerInjectData(&first.Peer, 0, FirstData, sizeof(FirstData));
+            wknet::session::HttpH3TestPeerInjectData(&first.Peer, 4, SecondData, sizeof(SecondData));
+            Expect(
+                firstBody.CallCount == 1 && firstBody.TotalBytes == sizeof(FirstData),
+                "HTTP/3 router sends stream 0 data only to its dispatch");
+            Expect(
+                secondBody.CallCount == 1 && secondBody.TotalBytes == sizeof(SecondData),
+                "HTTP/3 router sends stream 4 data only to its dispatch");
+
+            wknet::session::HttpH3TestPeerInjectGoaway(&first.Peer, 4);
+            Expect(
+                first.GoawayReceived &&
+                    first.GoawayResult == wknet::session::HttpH3GoawayResult::StreamMayHaveBeenProcessed,
+                "HTTP/3 GOAWAY notifies the lower active stream without rejecting it");
+            Expect(
+                second.GoawayReceived &&
+                    second.GoawayResult == wknet::session::HttpH3GoawayResult::StreamRejected &&
+                    second.CompletionDelivered && second.TerminalStatus == STATUS_RETRY,
+                "HTTP/3 GOAWAY notifies and rejects the boundary stream");
+        }
+        if (secondInitialized)
+        {
+            wknet::session::HttpH3DispatchRelease(&second);
+        }
+        if (firstInitialized)
+        {
+            wknet::session::HttpH3DispatchRelease(&first);
+        }
+
+        firstBody = {};
+        secondBody = {};
+        first = {};
+        second = {};
+        const bool errorFirstInitialized = InitializeHttp3RouterDispatch(&first, &firstRequest, &firstSend, 3);
+        const bool errorSecondInitialized = InitializeHttp3RouterDispatch(&second, &secondRequest, &secondSend, 4);
+        Expect(
+            errorFirstInitialized && errorSecondInitialized,
+            "HTTP/3 connection-error dispatch contexts initialize");
+
+        attached = false;
+        if (errorFirstInitialized && errorSecondInitialized)
+        {
+            attached = AttachHttp3RouterDispatchPair(&first, &second);
+        }
+        Expect(attached, "HTTP/3 router attaches two dispatches for connection-error fanout");
+        if (attached)
+        {
+            wknet::session::HttpH3TestPeerInjectConnectionError(
+                &first.Peer,
+                STATUS_CONNECTION_DISCONNECTED,
+                wknet::http3::H3_INTERNAL_ERROR);
+            Expect(
+                first.CompletionDelivered && first.TerminalStatus == STATUS_CONNECTION_DISCONNECTED,
+                "HTTP/3 connection error completes the first active dispatch");
+            Expect(
+                second.CompletionDelivered && second.TerminalStatus == STATUS_CONNECTION_DISCONNECTED,
+                "HTTP/3 connection error completes the second active dispatch");
+        }
+        if (errorSecondInitialized)
+        {
+            wknet::session::HttpH3DispatchRelease(&second);
+        }
+        if (errorFirstInitialized)
+        {
+            wknet::session::HttpH3DispatchRelease(&first);
+        }
     }
 
     void TestIrqlCheck() noexcept
@@ -7555,6 +7856,7 @@ int main() noexcept
     TestDestroyIsUnconditionalHighLevelDrain();
     TestSimpleGet();
     TestTls12RenegotiationLimitConfigPropagates();
+    TestSessionTlsServerNameSurvivesUrlAssignment();
     TestAcceptEncodingQValueOptions();
     TestAcceptEncodingRejectsInvalidPreferences();
     TestAcceptEncodingQZeroResponseFailsClosed();
@@ -7641,7 +7943,9 @@ int main() noexcept
     TestHttp2KeepAliveSessionConfigDefaultsAndValidation();
     TestHttp3SessionConfigDefaultsMappingAndValidation();
     TestHttp3RequiredConflictContract();
+    TestHttp3PoolFailureInjection();
     TestConnectionPoolHttp3LeaseAndGoawayLifecycle();
+    TestHttp3RouterRoutesConcurrentDispatches();
     TestIrqlCheck();
     TestWebSocketTransportModeDefaults();
     TestWebSocketRoundTrip();

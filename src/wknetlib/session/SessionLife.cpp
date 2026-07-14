@@ -1,9 +1,24 @@
 #include "session/EnginePrivate.hpp"
+#include "session/AltSvcCache.h"
 
 namespace wknet
 {
 namespace session
 {
+    namespace
+    {
+#if !defined(WKNET_USER_MODE_TEST)
+        void OnSessionNetworkChanged(void *context) noexcept
+        {
+            SessionHandle session = static_cast<SessionHandle>(context);
+            if (session != nullptr && session->AltSvc != nullptr)
+            {
+                AltSvcCacheNetworkChanged(session->AltSvc);
+            }
+        }
+#endif
+    }
+
     NTSTATUS SessionCreate(
         net::WskClient* wskClient,
         const SessionOptions* options,
@@ -84,6 +99,39 @@ namespace session
             return status;
         }
 
+        status = AltSvcCacheCreate(
+            effectiveOptions.Http3.AltSvcMaxEntries,
+            effectiveOptions.Http3.AltSvcMaxAgeSeconds,
+            &newSession->AltSvc);
+        if (!NT_SUCCESS(status)) {
+            newSession->ProviderCache->Shutdown();
+            FreeHandle(newSession->ProviderCache);
+            newSession->ProviderCache = nullptr;
+            WorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
+            newSession->Workspace = nullptr;
+            FreeHandle(newSession);
+            return status;
+        }
+
+#if !defined(WKNET_USER_MODE_TEST)
+        status = net::WskClientSubscribeNetworkChanges(
+            newSession->WskClient,
+            OnSessionNetworkChanged,
+            newSession);
+        if (!NT_SUCCESS(status)) {
+            AltSvcCacheDestroy(newSession->AltSvc);
+            newSession->AltSvc = nullptr;
+            newSession->ProviderCache->Shutdown();
+            FreeHandle(newSession->ProviderCache);
+            newSession->ProviderCache = nullptr;
+            WorkspaceReleaseToLookaside(newSession->Workspace, &newSession->WorkspaceLookaside);
+            newSession->Workspace = nullptr;
+            FreeHandle(newSession);
+            return status;
+        }
+        newSession->NetworkChangeSubscribed = true;
+#endif
+
         status = ConnectionPoolInitialize(
             &newSession->ConnectionPool,
             effectiveOptions.ConnectionPoolCapacity,
@@ -91,6 +139,12 @@ namespace session
             effectiveOptions.IdleTimeoutMilliseconds,
             &effectiveOptions.Http2KeepAlive);
         if (!NT_SUCCESS(status)) {
+#if !defined(WKNET_USER_MODE_TEST)
+            net::WskClientUnsubscribeNetworkChanges(newSession->WskClient, OnSessionNetworkChanged, newSession);
+            newSession->NetworkChangeSubscribed = false;
+#endif
+            AltSvcCacheDestroy(newSession->AltSvc);
+            newSession->AltSvc = nullptr;
             newSession->ProviderCache->Shutdown();
             FreeHandle(newSession->ProviderCache);
             newSession->ProviderCache = nullptr;
@@ -103,6 +157,12 @@ namespace session
         status = ConnectionPoolStartHttp2KeepAlive(&newSession->ConnectionPool);
         if (!NT_SUCCESS(status)) {
             ConnectionPoolShutdown(&newSession->ConnectionPool);
+#if !defined(WKNET_USER_MODE_TEST)
+            net::WskClientUnsubscribeNetworkChanges(newSession->WskClient, OnSessionNetworkChanged, newSession);
+            newSession->NetworkChangeSubscribed = false;
+#endif
+            AltSvcCacheDestroy(newSession->AltSvc);
+            newSession->AltSvc = nullptr;
             newSession->ProviderCache->Shutdown();
             FreeHandle(newSession->ProviderCache);
             newSession->ProviderCache = nullptr;
@@ -115,6 +175,12 @@ namespace session
         status = RegisterActiveSessionHandle(newSession);
         if (!NT_SUCCESS(status)) {
             ConnectionPoolShutdown(&newSession->ConnectionPool);
+#if !defined(WKNET_USER_MODE_TEST)
+            net::WskClientUnsubscribeNetworkChanges(newSession->WskClient, OnSessionNetworkChanged, newSession);
+            newSession->NetworkChangeSubscribed = false;
+#endif
+            AltSvcCacheDestroy(newSession->AltSvc);
+            newSession->AltSvc = nullptr;
             newSession->ProviderCache->Shutdown();
             FreeHandle(newSession->ProviderCache);
             newSession->ProviderCache = nullptr;
@@ -150,8 +216,16 @@ namespace session
             ::wknet::TraceLevel::Info,
             "session.close.start");
 
+#if !defined(WKNET_USER_MODE_TEST)
+        if (session->NetworkChangeSubscribed) {
+            net::WskClientUnsubscribeNetworkChanges(session->WskClient, OnSessionNetworkChanged, session);
+            session->NetworkChangeSubscribed = false;
+        }
+#endif
         WaitForSessionDrain(session);
         ConnectionPoolShutdown(&session->ConnectionPool);
+        AltSvcCacheDestroy(session->AltSvc);
+        session->AltSvc = nullptr;
         if (session->ProviderCache != nullptr) {
             session->ProviderCache->Shutdown();
             FreeHandle(session->ProviderCache);

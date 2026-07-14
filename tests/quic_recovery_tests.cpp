@@ -4,6 +4,7 @@
 #include "quic/QuicAckTracker.h"
 #include "quic/QuicClock.h"
 #include "quic/QuicRecovery.h"
+#include "rtl/ProtocolFailureInjection.h"
 #include <stdio.h>
 namespace
 {
@@ -19,6 +20,26 @@ void E(bool c, const char *m)
 } // namespace
 int main()
 {
+    wknet::rtl::ProtocolFailureInjectionReset();
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicRecoveryPackets, 1);
+    {
+        wknet::quic::QuicRecovery failedRecovery;
+        E(failedRecovery.Initialize() == STATUS_INSUFFICIENT_RESOURCES,
+          "recovery packet metadata failpoint is propagated");
+    }
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicRecoveryPackets) == 0,
+      "failed recovery allocation has no live metadata");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicRecoveryPackets, 0);
+
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicAckRanges, 1);
+    {
+        wknet::quic::QuicAckTracker failedAckTracker;
+        E(failedAckTracker.Initialize() == STATUS_INSUFFICIENT_RESOURCES, "ACK range failpoint is propagated");
+    }
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicAckRanges) == 0,
+      "failed ACK range allocation has no live table");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicAckRanges, 0);
+
     wknet::quic::QuicTestClockSet(1000000);
     wknet::quic::QuicRecovery r;
     E(NT_SUCCESS(r.Initialize()), "recovery initializes");

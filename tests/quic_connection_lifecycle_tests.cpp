@@ -6,67 +6,104 @@
 #include "quic/QuicConnection.h"
 #include "quic/QuicStream.h"
 #include "quic/QuicTokenCache.h"
+#include "rtl/ProtocolFailureInjection.h"
 #include <stdio.h>
 #include <string.h>
 namespace
 {
-bool f = false;
+    bool f = false;
 
-struct StreamEventState final
-{
-    SIZE_T OpenedCount = 0;
-    ULONGLONG LastOpenedStreamId = 0;
-};
-
-struct ApplicationCommandState final
-{
-    bool Invoked = false;
-    ULONGLONG StreamId = 0;
-};
-
-NTSTATUS RunApplicationCommand(void *context, wknet::quic::QuicConnection *connection) noexcept
-{
-    auto *state = static_cast<ApplicationCommandState *>(context);
-    if (state == nullptr || connection == nullptr)
+    struct StreamEventState final
     {
-        return STATUS_INVALID_PARAMETER;
-    }
-    wknet::quic::QuicStream *stream = nullptr;
-    NTSTATUS status = wknet::quic::QuicConnectionWorkerOpenBidirectionalStream(connection, &stream);
-    if (NT_SUCCESS(status))
-    {
-        state->Invoked = true;
-        state->StreamId = stream->Id();
-    }
-    return status;
-}
+        SIZE_T OpenedCount = 0;
+        ULONGLONG LastOpenedStreamId = 0;
+    };
 
-void OnStreamOpened(void *context, wknet::quic::QuicStream *stream) noexcept
-{
-    auto *state = static_cast<StreamEventState *>(context);
-    if (state != nullptr && stream != nullptr)
+    struct ApplicationCommandState final
     {
-        ++state->OpenedCount;
-        state->LastOpenedStreamId = stream->Id();
-    }
-}
+        bool Invoked = false;
+        ULONGLONG StreamId = 0;
+    };
 
-void E(bool c, const char *m)
-{
-    if (!c)
+    NTSTATUS RunApplicationCommand(void* context, wknet::quic::QuicConnection* connection) noexcept
     {
-        f = true;
-        printf("FAIL: %s\n", m);
+        auto* state = static_cast<ApplicationCommandState*>(context);
+        if (state == nullptr || connection == nullptr)
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+        wknet::quic::QuicStream* stream = nullptr;
+        NTSTATUS status = wknet::quic::QuicConnectionWorkerOpenBidirectionalStream(connection, &stream);
+        if (NT_SUCCESS(status))
+        {
+            state->Invoked = true;
+            state->StreamId = stream->Id();
+        }
+        return status;
     }
-}
+
+    void OnStreamOpened(void* context, wknet::quic::QuicStream* stream) noexcept
+    {
+        auto* state = static_cast<StreamEventState*>(context);
+        if (state != nullptr && stream != nullptr)
+        {
+            ++state->OpenedCount;
+            state->LastOpenedStreamId = stream->Id();
+        }
+    }
+
+    void E(bool c, const char* m)
+    {
+        if (!c)
+        {
+            f = true;
+            printf("FAIL: %s\n", m);
+        }
+    }
 } // namespace
 int main()
 {
+    wknet::rtl::ProtocolFailureInjectionReset();
+    constexpr wknet::rtl::ProtocolAllocationSite connectionCreateSites[] = {
+        wknet::rtl::ProtocolAllocationSite::QuicConnectionObject, wknet::rtl::ProtocolAllocationSite::QuicCommandQueue,
+        wknet::rtl::ProtocolAllocationSite::QuicStreamTable,
+        wknet::rtl::ProtocolAllocationSite::QuicLocalConnectionIdTable,
+        wknet::rtl::ProtocolAllocationSite::QuicPeerConnectionIdTable};
+    for (const auto site : connectionCreateSites)
+    {
+        wknet::rtl::ProtocolFailureInjectionSetFailOnNth(site, 1);
+        wknet::quic::QuicConnection* failedConnection = nullptr;
+        wknet::quic::QuicConnectionCreateOptions failedOptions = {};
+        E(wknet::quic::QuicConnectionCreate(failedOptions, &failedConnection) == STATUS_INSUFFICIENT_RESOURCES &&
+              failedConnection == nullptr,
+          "connection allocation failpoint is propagated");
+        E(wknet::rtl::ProtocolFailureInjectionLiveCount(site) == 0 &&
+              wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicConnectionObject) ==
+                  0,
+          "partial connection creation releases every tracked allocation");
+        wknet::rtl::ProtocolFailureInjectionSetFailOnNth(site, 0);
+    }
+
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicTokenCacheEntries, 1);
+    {
+        wknet::quic::QuicTokenCache failedTokenCache;
+        E(failedTokenCache.Initialize(2) == STATUS_INSUFFICIENT_RESOURCES, "token cache entry failpoint is propagated");
+    }
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicTokenCacheEntries) == 0,
+      "failed token cache has no live entry table");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicTokenCacheEntries, 0);
+
     wknet::quic::QuicTokenCache tokenCache;
     E(NT_SUCCESS(tokenCache.Initialize(2)), "NEW_TOKEN cache initializes");
     const UCHAR firstToken[] = {1, 2, 3};
     const UCHAR secondToken[] = {4, 5};
     const UCHAR thirdToken[] = {6};
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicTokenBytes, 1);
+    E(tokenCache.Store({firstToken, sizeof(firstToken)}) == STATUS_INSUFFICIENT_RESOURCES,
+      "token byte failpoint is propagated");
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicTokenBytes) == 0,
+      "failed token copy has no live byte buffer");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicTokenBytes, 0);
     E(NT_SUCCESS(tokenCache.Store({firstToken, sizeof(firstToken)})) &&
           NT_SUCCESS(tokenCache.Store({secondToken, sizeof(secondToken)})),
       "NEW_TOKEN cache stores bounded opaque tokens");
@@ -77,7 +114,7 @@ int main()
       "NEW_TOKEN cache returns the newest token");
 
     wknet::quic::QuicConnectionTestSetWorkerStartFailure(true);
-    wknet::quic::QuicConnection *c = nullptr;
+    wknet::quic::QuicConnection* c = nullptr;
     wknet::quic::QuicConnectionCreateOptions o = {};
     E(wknet::quic::QuicConnectionCreate(o, &c) == STATUS_INSUFFICIENT_RESOURCES && c == nullptr,
       "worker start failure propagates");
@@ -90,6 +127,14 @@ int main()
     o.CommandCapacity = 2;
     o.StartWorkerSuspended = true;
     E(NT_SUCCESS(wknet::quic::QuicConnectionCreate(o, &c)), "connection and suspended worker create");
+    wknet::quic::QuicOperation failedCommand = {};
+    wknet::quic::QuicOperationInitialize(&failedCommand);
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicCommandObject, 1);
+    E(wknet::quic::QuicConnectionTestEnqueueNoop(c, &failedCommand) == STATUS_INSUFFICIENT_RESOURCES,
+      "command object failpoint is propagated");
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicCommandObject) == 0,
+      "failed command allocation has no live object");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicCommandObject, 0);
     wknet::quic::QuicOperation a = {}, duplicateConnect = {}, b = {}, overflow = {};
     wknet::quic::QuicOperationInitialize(&a);
     wknet::quic::QuicOperationInitialize(&duplicateConnect);
@@ -140,6 +185,15 @@ int main()
           !wknet::quic::QuicConnectionTestSendKeyPhase(c),
       "ACK confirmation releases the previous send key and permits the next phase");
     wknet::quic::QuicClearPacketKeySet(&applicationKey);
+    wknet::quic::QuicOperation failedOpen = {};
+    wknet::quic::QuicOperationInitialize(&failedOpen);
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicStreamObject, 1);
+    E(NT_SUCCESS(wknet::quic::QuicConnectionOpenStream(c, &failedOpen)) &&
+          wknet::quic::QuicOperationWait(&failedOpen, 1000) == STATUS_INSUFFICIENT_RESOURCES,
+      "stream object failpoint is propagated through the worker");
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicStreamObject) == 0,
+      "failed stream creation has no live object");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicStreamObject, 0);
     wknet::quic::QuicOperation open = {};
     wknet::quic::QuicOperationInitialize(&open);
     E(NT_SUCCESS(wknet::quic::QuicConnectionOpenStream(c, &open)), "OpenStream enqueues");
@@ -165,6 +219,15 @@ int main()
           applicationState.StreamId == 4,
       "application command executes worker-only stream services with a terminal fence");
     const UCHAR requestBytes[] = {1, 2, 3};
+    wknet::quic::QuicOperation failedWrite = {};
+    wknet::quic::QuicOperationInitialize(&failedWrite);
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicCommandData, 1);
+    E(wknet::quic::QuicConnectionWriteStream(c, open.StreamId, requestBytes, sizeof(requestBytes), false,
+                                             &failedWrite) == STATUS_INSUFFICIENT_RESOURCES,
+      "command data failpoint is propagated");
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicCommandData) == 0,
+      "failed command data copy has no live buffer");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicCommandData, 0);
     wknet::quic::QuicOperation write = {};
     wknet::quic::QuicOperationInitialize(&write);
     E(NT_SUCCESS(wknet::quic::QuicConnectionWriteStream(c, open.StreamId, requestBytes, sizeof(requestBytes), false,
@@ -202,6 +265,14 @@ int main()
     newConnectionId.Sequence = 1;
     newConnectionId.ConnectionId = {peerConnectionId, sizeof(peerConnectionId)};
     newConnectionId.StatelessResetToken = {peerResetToken, sizeof(peerResetToken)};
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicCommandAuxiliaryData, 1);
+    E(wknet::quic::QuicConnectionTestInjectFrame(c, wknet::quic::QuicEncryptionLevel::Application,
+                                                 wknet::quic::QuicPacketNumberSpace::Application,
+                                                 newConnectionId) == STATUS_INSUFFICIENT_RESOURCES,
+      "command auxiliary data failpoint is propagated");
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicCommandAuxiliaryData) == 0,
+      "failed auxiliary data copy has no live buffer");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicCommandAuxiliaryData, 0);
     E(NT_SUCCESS(wknet::quic::QuicConnectionTestInjectFrame(c, wknet::quic::QuicEncryptionLevel::Application,
                                                             wknet::quic::QuicPacketNumberSpace::Application,
                                                             newConnectionId)),
@@ -236,7 +307,7 @@ int main()
       "Closed rejects new unidirectional stream");
     wknet::quic::QuicConnectionDestroy(c);
 
-    wknet::quic::QuicConnection *pendingConnection = nullptr;
+    wknet::quic::QuicConnection* pendingConnection = nullptr;
     o.CommandCapacity = 1;
     o.StartWorkerSuspended = true;
     E(NT_SUCCESS(wknet::quic::QuicConnectionCreate(o, &pendingConnection)), "pending-command drain connection creates");
@@ -250,12 +321,12 @@ int main()
 
     wknet::net::test::ResetProvider();
     wknet::net::test::SetCancelCompletesImmediately(true);
-    wknet::net::WskClient *datagramClient = nullptr;
+    wknet::net::WskClient* datagramClient = nullptr;
     E(NT_SUCCESS(wknet::net::WskClientCreate(&datagramClient)) &&
           NT_SUCCESS(wknet::net::WskClientInitialize(datagramClient)),
       "network connection WSK client initializes");
     SOCKADDR_STORAGE remote = {};
-    SOCKADDR_IN *remoteIpv4 = reinterpret_cast<SOCKADDR_IN *>(&remote);
+    SOCKADDR_IN* remoteIpv4 = reinterpret_cast<SOCKADDR_IN*>(&remote);
     remoteIpv4->sin_family = AF_INET;
     remoteIpv4->sin_port = 443;
     remoteIpv4->sin_addr = 0x0100007fUL;
@@ -263,14 +334,36 @@ int main()
     const UCHAR sourceConnectionId[] = {9, 10, 11, 12, 13, 14, 15, 16};
     wknet::quic::QuicConnectionCreateOptions networkOptions = {};
     networkOptions.DatagramClient = datagramClient;
-    networkOptions.RemoteAddress = reinterpret_cast<const SOCKADDR *>(&remote);
+    networkOptions.RemoteAddress = reinterpret_cast<const SOCKADDR*>(&remote);
     networkOptions.RemoteAddressLength = sizeof(SOCKADDR_IN);
     networkOptions.ServerName = "example.com";
     networkOptions.ServerNameLength = 11;
     networkOptions.InitialDestinationConnectionId = {destinationConnectionId, sizeof(destinationConnectionId)};
     networkOptions.InitialSourceConnectionId = {sourceConnectionId, sizeof(sourceConnectionId)};
     networkOptions.VerifyCertificate = false;
-    wknet::quic::QuicConnection *networkConnection = nullptr;
+    constexpr wknet::rtl::ProtocolAllocationSite networkCreateSites[] = {
+        wknet::rtl::ProtocolAllocationSite::QuicServerName,
+        wknet::rtl::ProtocolAllocationSite::QuicReceiveBuffer,
+        wknet::rtl::ProtocolAllocationSite::QuicPacketBuffer,
+        wknet::rtl::ProtocolAllocationSite::QuicPacketScratch,
+        wknet::rtl::ProtocolAllocationSite::QuicDecryptBuffer,
+        wknet::rtl::ProtocolAllocationSite::QuicFrameBuffer,
+        wknet::rtl::ProtocolAllocationSite::QuicFrameScratch,
+        wknet::rtl::ProtocolAllocationSite::QuicClientHelloBuffer,
+        wknet::rtl::ProtocolAllocationSite::QuicAckRangeScratch};
+    for (const auto site : networkCreateSites)
+    {
+        wknet::rtl::ProtocolFailureInjectionSetFailOnNth(site, 1);
+        wknet::quic::QuicConnection* failedNetworkConnection = nullptr;
+        E(wknet::quic::QuicConnectionCreate(networkOptions, &failedNetworkConnection) ==
+                  STATUS_INSUFFICIENT_RESOURCES &&
+              failedNetworkConnection == nullptr,
+          "network connection scratch failpoint is propagated");
+        E(wknet::rtl::ProtocolFailureInjectionLiveCount(site) == 0,
+          "partial network connection creation releases scratch allocation");
+        wknet::rtl::ProtocolFailureInjectionSetFailOnNth(site, 0);
+    }
+    wknet::quic::QuicConnection* networkConnection = nullptr;
     E(NT_SUCCESS(wknet::quic::QuicConnectionCreate(networkOptions, &networkConnection)),
       "network QUIC connection creates");
     wknet::quic::QuicOperation networkConnect = {};

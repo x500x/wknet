@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DriverEntry.cpp" />
+    <ClCompile Include="Driver.cpp" />
     <ClCompile Include="wknettestLog.cpp" />
     <ClCompile Include="samples\AdvancedScenarioSamples.cpp" />
     <ClCompile Include="samples\ExternalTrustStore.cpp" />
@@ -27,6 +28,7 @@
     <ClCompile Include="samples\HttpApiSamples.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="tests\Http3KernelTestProtocol.h" />
     <ClInclude Include="..\..\include\wknet\Wknet.h" />
     <ClInclude Include="..\..\include\wknettest\SampleStatus.h" />
     <ClInclude Include="WknetTestLog.h" />

@@ -1048,6 +1048,7 @@ namespace session
     };
 
     struct HttpH3DispatchContext;
+    struct AltSvcCandidateSnapshot;
 
     using HttpH3PeerDestroy = void (*)(void *context) noexcept;
     using HttpH3PeerAttachRequest = NTSTATUS (*)(void *context, _Inout_ HttpH3DispatchContext *dispatch) noexcept;
@@ -1070,6 +1071,8 @@ namespace session
         const Request *RequestObject = nullptr;
         const HttpSendOptions *SendOptions = nullptr;
         HttpH3DispatchContext *Dispatch = nullptr;
+        const AltSvcCandidateSnapshot *Alternative = nullptr;
+        ULONG ProbeTimeoutMilliseconds = 0;
         ULONGLONG AttemptGeneration = 0;
     };
 
@@ -1096,6 +1099,8 @@ namespace session
         SIZE_T ResponseTrailerCapacity = 0;
         SIZE_T *RawResponseLength = nullptr;
         AsyncOperationHandle CancellationOperation = nullptr;
+        const AltSvcCandidateSnapshot *Alternative = nullptr;
+        ULONG ProbeTimeoutMilliseconds = 0;
         ULONGLONG AttemptGeneration = 0;
         bool DirectCallbacks = false;
     };

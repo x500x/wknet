@@ -122,6 +122,10 @@ $clArgs = @(
     "/Fo:$objDir\"
 ) + @($testCpp) + $libSources + $sampleSources + $thirdPartyObjects
 
+if ($Test -eq 'http3_interop_tests') {
+    $clArgs = @('/Zi', '/DEBUG') + $clArgs
+}
+
 & cl.exe @clArgs
 if ($LASTEXITCODE -ne 0) {
     throw "cl.exe failed with exit code $LASTEXITCODE"

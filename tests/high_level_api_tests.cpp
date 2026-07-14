@@ -11,9 +11,11 @@
 #include <wknettest/SampleStatus.h>
 
 #include "http3/Http3Types.h"
+#include "rtl/ProtocolFailureInjection.h"
 #include "samples/AdvancedScenarioSamples.h"
 #include "samples/ExternalTrustStore.h"
 #include "samples/HighLevelApiSamples.h"
+#include "session/AltSvcCache.h"
 #include "session/HttpH3TestHooks.h"
 
 #include <chrono>
@@ -45,6 +47,10 @@ namespace
         std::condition_variable Event;
         wknet::session::HttpH3DispatchContext *Dispatch = nullptr;
         ULONG CreateCount = 0;
+        NTSTATUS CreateStatus = STATUS_SUCCESS;
+        char AlternativeHost[wknet::WKNET_HARD_MAX_ALT_SVC_HOST_BYTES + 1] = {};
+        SIZE_T AlternativeHostLength = 0;
+        USHORT AlternativePort = 0;
     };
 
     NTSTATUS CreateRequiredHttp3Peer(void *context, const wknet::session::HttpH3PeerCreateOptions *options,
@@ -57,8 +63,19 @@ namespace
                 std::lock_guard<std::mutex> lock(capture->Lock);
                 capture->Dispatch = options->Dispatch;
                 ++capture->CreateCount;
+                if (options->Alternative != nullptr)
+                {
+                    capture->AlternativeHostLength = options->Alternative->HostLength;
+                    memcpy(capture->AlternativeHost, options->Alternative->Host,
+                           options->Alternative->HostLength);
+                    capture->AlternativePort = options->Alternative->Port;
+                }
             }
             capture->Event.notify_all();
+            if (!NT_SUCCESS(capture->CreateStatus))
+            {
+                return capture->CreateStatus;
+            }
         }
         return wknet::session::HttpH3TestCreateInMemoryPeer(options, peer);
     }
@@ -105,6 +122,98 @@ namespace
             }
         }
         return false;
+    }
+
+    struct AutoHttp3TransportCapture final
+    {
+        ULONG Calls = 0;
+        ULONG AdvertiseOnCall = 1;
+    };
+
+    NTSTATUS AutoHttp3Transport(
+        void *context,
+        const wknet::http::test::HttpTransportRequest *,
+        wknet::http::test::HttpTransportResponse *response) noexcept
+    {
+        AutoHttp3TransportCapture *capture = static_cast<AutoHttp3TransportCapture *>(context);
+        if (capture == nullptr || response == nullptr)
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+        ++capture->Calls;
+        static const char advertised[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Alt-Svc: h3=\"alt.example:443\"; ma=60\r\n"
+            "Content-Length: 4\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "seed";
+        static const char ordinary[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 8\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "fallback";
+        response->RawResponse = capture->Calls == capture->AdvertiseOnCall ? advertised : ordinary;
+        response->RawResponseLength = capture->Calls == capture->AdvertiseOnCall
+                                          ? sizeof(advertised) - 1
+                                          : sizeof(ordinary) - 1;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
+    }
+
+    struct AutoHttp3RedirectTransportCapture final
+    {
+        ULONG Calls = 0;
+        ULONG OriginCalls = 0;
+        ULONG RedirectCalls = 0;
+    };
+
+    NTSTATUS AutoHttp3RedirectTransport(
+        void *context,
+        const wknet::http::test::HttpTransportRequest *request,
+        wknet::http::test::HttpTransportResponse *response) noexcept
+    {
+        AutoHttp3RedirectTransportCapture *capture =
+            static_cast<AutoHttp3RedirectTransportCapture *>(context);
+        if (capture == nullptr || request == nullptr || response == nullptr)
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        ++capture->Calls;
+        static const char redirect[] =
+            "HTTP/1.1 302 Found\r\n"
+            "Location: https://redirect.example/final\r\n"
+            "Alt-Svc: h3=\"origin-alt.example:443\"; ma=60\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+        static const char success[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "ok";
+
+        const bool origin = request->HostLength == strlen("origin.example") &&
+                            memcmp(request->Host, "origin.example", request->HostLength) == 0;
+        const bool redirected = request->HostLength == strlen("redirect.example") &&
+                                memcmp(request->Host, "redirect.example", request->HostLength) == 0;
+        if (origin)
+        {
+            ++capture->OriginCalls;
+        }
+        if (redirected)
+        {
+            ++capture->RedirectCalls;
+        }
+        response->RawResponse = origin && capture->OriginCalls == 1 ? redirect : success;
+        response->RawResponseLength = origin && capture->OriginCalls == 1
+                                          ? sizeof(redirect) - 1
+                                          : sizeof(success) - 1;
+        response->ConnectionReusable = false;
+        return STATUS_SUCCESS;
     }
 
     struct SampleCapture final
@@ -1525,6 +1634,206 @@ namespace
         wknet::http::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);
     }
 
+    void TestAutoHttp3LearnsAlternativeAndFallsBackSafely() noexcept
+    {
+        wknet::session::HttpH3TestReset();
+        AutoHttp3TransportCapture transport = {};
+        wknet::http::test::SetHttpTransport(AutoHttp3Transport, &transport);
+
+        RequiredHttp3Capture h3 = {};
+        wknet::session::HttpH3PeerFactory factory = {};
+        factory.Context = &h3;
+        factory.Create = CreateRequiredHttp3Peer;
+        wknet::session::HttpH3TestSetPeerFactory(&factory);
+
+        wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Auto;
+        config.Http3.RaceWindowMs = 50;
+        wknet::http::Session *session = nullptr;
+        NTSTATUS status = wknet::http::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "Auto H3 session creation succeeds");
+
+        constexpr char url[] = "https://origin.example/auto";
+        wknet::http::Response *response = nullptr;
+        status = wknet::http::Get(session, url, sizeof(url) - 1, &response);
+        Expect(NT_SUCCESS(status) && response != nullptr && transport.Calls == 1 && h3.CreateCount == 0,
+               "first Auto request uses TCP and learns authenticated Alt-Svc");
+        wknet::http::ResponseRelease(response);
+
+        response = nullptr;
+        NTSTATUS sendStatus = STATUS_PENDING;
+        std::thread sender([&]() noexcept {
+            sendStatus = wknet::http::Get(session, url, sizeof(url) - 1, &response);
+        });
+
+        wknet::session::HttpH3DispatchContext *dispatch = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(h3.Lock);
+            (void)h3.Event.wait_for(lock, std::chrono::seconds(2), [&h3]() noexcept {
+                return h3.CreateCount >= 1;
+            });
+            dispatch = h3.Dispatch;
+        }
+        Expect(dispatch != nullptr, "second Auto request creates one H3 dispatch");
+        Expect(h3.AlternativeHostLength == strlen("alt.example") &&
+                   memcmp(h3.AlternativeHost, "alt.example", h3.AlternativeHostLength) == 0 &&
+                   h3.AlternativePort == 443,
+               "Auto H3 uses the alternative endpoint only for QUIC connection routing");
+        Expect(dispatch != nullptr && dispatch->RequestObject != nullptr &&
+                   dispatch->RequestObject->HostLength == strlen("origin.example") &&
+                   memcmp(dispatch->RequestObject->Host, "origin.example",
+                          dispatch->RequestObject->HostLength) == 0,
+               "Auto H3 preserves the original HTTP authority and TLS identity");
+
+        wknet::session::HttpH3TestSnapshot autoSnapshot = {};
+        for (ULONG attempt = 0; attempt < 1000; ++attempt)
+        {
+            wknet::session::HttpH3TestGetSnapshot(&autoSnapshot);
+            if (autoSnapshot.StreamId != wknet::session::HttpH3UnsetStreamId &&
+                autoSnapshot.RequestState >= wknet::session::HttpH3RequestState::RequestFullySent)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        Expect(autoSnapshot.StreamId == 0,
+               "Auto H3 request reaches its bound stream before response delivery");
+
+        if (dispatch != nullptr)
+        {
+            wknet::session::HttpH3TestInjectResponseStarted(dispatch, 200);
+            const UCHAR body[] = {'a', 'u', 't', 'o'};
+            status = wknet::session::HttpH3TestInjectBody(dispatch, body, sizeof(body), true);
+            Expect(NT_SUCCESS(status), "Auto H3 response body is accepted");
+            wknet::session::HttpH3TestInjectCompletion(
+                dispatch,
+                STATUS_SUCCESS,
+                wknet::http3::H3_NO_ERROR);
+        }
+        sender.join();
+        Expect(NT_SUCCESS(sendStatus) && response != nullptr && transport.Calls == 1,
+               "learned Alt-Svc sends the next request only once through H3");
+        wknet::http::ResponseRelease(response);
+
+        {
+            std::lock_guard<std::mutex> lock(h3.Lock);
+            h3.CreateStatus = STATUS_IO_TIMEOUT;
+            h3.Dispatch = nullptr;
+        }
+        response = nullptr;
+        status = wknet::http::Get(session, url, sizeof(url) - 1, &response);
+        Expect(NT_SUCCESS(status) && response != nullptr && transport.Calls == 2 &&
+                   wknet::http::ResponseBodyLength(response) == 8 &&
+                   memcmp(wknet::http::ResponseBody(response), "fallback", 8) == 0,
+               "unsent failed H3 probe safely falls back to one TCP request");
+        wknet::http::ResponseRelease(response);
+        wknet::http::SessionClose(session);
+
+        transport = {};
+        h3.CreateStatus = STATUS_SUCCESS;
+        h3.CreateCount = 0;
+        h3.Dispatch = nullptr;
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Auto;
+        config.Tls.Certificate = wknet::http::CertPolicy::NoVerify;
+        session = nullptr;
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "NoVerify Auto session creation succeeds");
+        response = nullptr;
+        status = wknet::http::Get(session, url, sizeof(url) - 1, &response);
+        wknet::http::ResponseRelease(response);
+        response = nullptr;
+        status = NT_SUCCESS(status) ? wknet::http::Get(session, url, sizeof(url) - 1, &response) : status;
+        Expect(NT_SUCCESS(status) && transport.Calls == 2 && h3.CreateCount == 0,
+               "NoVerify responses neither learn nor automatically use Alt-Svc");
+        wknet::http::ResponseRelease(response);
+        wknet::http::SessionClose(session);
+
+        wknet::http::test::SetHttpTransport(nullptr, nullptr);
+        wknet::session::HttpH3TestSetPeerFactory(nullptr);
+        wknet::session::HttpH3TestReset();
+    }
+
+    void TestAutoHttp3RedirectSourceAndProxyIsolation() noexcept
+    {
+        wknet::session::HttpH3TestReset();
+        AutoHttp3RedirectTransportCapture redirectTransport = {};
+        wknet::http::test::SetHttpTransport(AutoHttp3RedirectTransport, &redirectTransport);
+
+        RequiredHttp3Capture h3 = {};
+        h3.CreateStatus = STATUS_IO_TIMEOUT;
+        wknet::session::HttpH3PeerFactory factory = {};
+        factory.Context = &h3;
+        factory.Create = CreateRequiredHttp3Peer;
+        wknet::session::HttpH3TestSetPeerFactory(&factory);
+
+        wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Auto;
+        wknet::http::Session *session = nullptr;
+        NTSTATUS status = wknet::http::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "redirect-source Auto session creation succeeds");
+
+        constexpr char originUrl[] = "https://origin.example/start";
+        constexpr char redirectUrl[] = "https://redirect.example/direct";
+        wknet::http::Response *response = nullptr;
+        status = wknet::http::Get(session, originUrl, sizeof(originUrl) - 1, &response);
+        Expect(NT_SUCCESS(status) && response != nullptr && redirectTransport.Calls == 2 &&
+                   redirectTransport.OriginCalls == 1 && redirectTransport.RedirectCalls == 1 &&
+                   h3.CreateCount == 0,
+               "redirect follows by TCP without applying the source origin Alt-Svc to the target origin");
+        wknet::http::ResponseRelease(response);
+
+        response = nullptr;
+        status = wknet::http::Get(session, redirectUrl, sizeof(redirectUrl) - 1, &response);
+        Expect(NT_SUCCESS(status) && response != nullptr && redirectTransport.RedirectCalls == 2 &&
+                   h3.CreateCount == 0,
+               "direct redirected-origin request still has no borrowed Alt-Svc candidate");
+        wknet::http::ResponseRelease(response);
+
+        response = nullptr;
+        status = wknet::http::Get(session, originUrl, sizeof(originUrl) - 1, &response);
+        Expect(NT_SUCCESS(status) && response != nullptr && h3.CreateCount == 1 &&
+                   h3.AlternativeHostLength == strlen("origin-alt.example") &&
+                   memcmp(h3.AlternativeHost, "origin-alt.example", h3.AlternativeHostLength) == 0,
+               "the authenticated redirect response keeps Alt-Svc bound to its original origin");
+        wknet::http::ResponseRelease(response);
+        wknet::http::SessionClose(session);
+
+        AutoHttp3TransportCapture proxyTransport = {};
+        wknet::http::test::SetHttpTransport(AutoHttp3Transport, &proxyTransport);
+        h3.CreateCount = 0;
+        h3.CreateStatus = STATUS_SUCCESS;
+        h3.Dispatch = nullptr;
+        config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Auto;
+        config.Proxy.Enabled = true;
+        config.Proxy.Host = "proxy.example";
+        config.Proxy.HostLength = strlen("proxy.example");
+        config.Proxy.Port = 8080;
+        config.Proxy.Family = wknet::http::AddressFamily::Ipv4;
+        config.Proxy.Authority = "proxy.example:8080";
+        config.Proxy.AuthorityLength = strlen("proxy.example:8080");
+        session = nullptr;
+        status = wknet::http::SessionCreate(&config, &session);
+        Expect(NT_SUCCESS(status), "proxy Auto session creation succeeds");
+        response = nullptr;
+        status = wknet::http::Get(session, originUrl, sizeof(originUrl) - 1, &response);
+        wknet::http::ResponseRelease(response);
+        response = nullptr;
+        status = NT_SUCCESS(status)
+                     ? wknet::http::Get(session, originUrl, sizeof(originUrl) - 1, &response)
+                     : status;
+        Expect(NT_SUCCESS(status) && response != nullptr && proxyTransport.Calls == 2 &&
+                   h3.CreateCount == 0,
+               "HTTP proxy mode neither learns nor automatically uses Alt-Svc");
+        wknet::http::ResponseRelease(response);
+        wknet::http::SessionClose(session);
+
+        wknet::http::test::SetHttpTransport(nullptr, nullptr);
+        wknet::session::HttpH3TestSetPeerFactory(nullptr);
+        wknet::session::HttpH3TestReset();
+    }
+
     void TestRequiredHttp3UsesSingleH3Dispatch() noexcept
     {
         wknet::session::HttpH3TestReset();
@@ -1593,6 +1902,48 @@ namespace
 
         wknet::http::ResponseRelease(response);
         wknet::http::SessionClose(session);
+        wknet::session::HttpH3TestSetPeerFactory(nullptr);
+        wknet::session::HttpH3TestReset();
+    }
+
+    void TestRequiredHttp3FailureInjection() noexcept
+    {
+        wknet::session::HttpH3TestReset();
+        wknet::rtl::ProtocolFailureInjectionReset();
+        RequiredHttp3Capture capture = {};
+        wknet::session::HttpH3PeerFactory factory = {};
+        factory.Context = &capture;
+        factory.Create = CreateRequiredHttp3Peer;
+        wknet::session::HttpH3TestSetPeerFactory(&factory);
+
+        wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+        config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
+        wknet::http::Session *session = nullptr;
+        Expect(NT_SUCCESS(wknet::http::SessionCreate(&config, &session)),
+               "Required H3 failure-injection session creation succeeds");
+
+        constexpr wknet::rtl::ProtocolAllocationSite sites[] = {
+            wknet::rtl::ProtocolAllocationSite::SessionHttp3CompletionFence,
+            wknet::rtl::ProtocolAllocationSite::SessionHttp3ResponseAccumulator,
+            wknet::rtl::ProtocolAllocationSite::SessionHttp3PeerRouter,
+            wknet::rtl::ProtocolAllocationSite::SessionHttp3CertificateScratch,
+            wknet::rtl::ProtocolAllocationSite::SessionHttp3PeerLease};
+        constexpr char url[] = "https://example.com/failure-injection";
+        for (const auto site : sites)
+        {
+            wknet::rtl::ProtocolFailureInjectionSetFailAlways(site, true);
+            wknet::http::Response *response = nullptr;
+            const NTSTATUS status = wknet::http::Get(session, url, sizeof(url) - 1, &response);
+            Expect(status == STATUS_INSUFFICIENT_RESOURCES && response == nullptr,
+                   "Required H3 allocation failpoint is propagated without fallback");
+            Expect(wknet::rtl::ProtocolFailureInjectionLiveCount(site) == 0,
+                   "failed Required H3 allocation has no live resource");
+            wknet::rtl::ProtocolFailureInjectionSetFailAlways(site, false);
+        }
+
+        wknet::http::SessionClose(session);
+        Expect(wknet::rtl::ProtocolFailureInjectionTotalLiveCount() == 0,
+               "Required H3 failure sweep releases pool and request resources");
         wknet::session::HttpH3TestSetPeerFactory(nullptr);
         wknet::session::HttpH3TestReset();
     }
@@ -1757,7 +2108,10 @@ int main() noexcept
     TestHighLevelTlsVersionFallbackPolicy();
     TestWebSocketReceiveHonorsPerCallMessageLimit();
     TestHighLevelWebSocketPublicValidation();
+    TestAutoHttp3LearnsAlternativeAndFallsBackSafely();
+    TestAutoHttp3RedirectSourceAndProxyIsolation();
     TestRequiredHttp3UsesSingleH3Dispatch();
+    TestRequiredHttp3FailureInjection();
     TestRequiredHttp3RetriesRejectedSafeRequestOnce();
     TestRequiredHttp3CancelResetsActiveStream();
 

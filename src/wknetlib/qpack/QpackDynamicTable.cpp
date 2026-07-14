@@ -1,4 +1,5 @@
 #include "qpack/QpackDynamicTable.h"
+#include "rtl/ProtocolAllocator.h"
 
 namespace wknet::qpack
 {
@@ -40,7 +41,8 @@ NTSTATUS QpackDynamicTable::Initialize(SIZE_T maximumCapacity, SIZE_T initialCap
         return STATUS_SUCCESS;
     }
 
-    data_ = static_cast<UCHAR *>(AllocateNonPagedPoolBytes(maximumCapacity));
+    data_ = static_cast<UCHAR *>(
+        AllocateProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackDynamicTableData, maximumCapacity));
     if (data_ == nullptr)
     {
         Reset();
@@ -58,7 +60,8 @@ NTSTATUS QpackDynamicTable::Initialize(SIZE_T maximumCapacity, SIZE_T initialCap
         return STATUS_INTEGER_OVERFLOW;
     }
 
-    entries_ = static_cast<Entry *>(AllocateNonPagedPoolBytes(entryCapacity_ * sizeof(Entry)));
+    entries_ = static_cast<Entry *>(AllocateProtocolNonPagedPoolBytes(
+        rtl::ProtocolAllocationSite::QpackDynamicTableEntries, entryCapacity_ * sizeof(Entry)));
     if (entries_ == nullptr)
     {
         Reset();
@@ -73,12 +76,12 @@ void QpackDynamicTable::Reset() noexcept
     if (data_ != nullptr)
     {
         RtlSecureZeroMemory(data_, maximumCapacity_);
-        FreeNonPagedPoolBytes(data_);
+        FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackDynamicTableData, data_);
     }
     if (entries_ != nullptr)
     {
         RtlSecureZeroMemory(entries_, entryCapacity_ * sizeof(Entry));
-        FreeNonPagedPoolBytes(entries_);
+        FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackDynamicTableEntries, entries_);
     }
 
     data_ = nullptr;
@@ -216,7 +219,8 @@ NTSTATUS QpackDynamicTable::DuplicateRelative(ULONGLONG relativeIndex, ULONGLONG
     UCHAR *copy = nullptr;
     if (copyLength != 0)
     {
-        copy = static_cast<UCHAR *>(AllocateNonPagedPoolBytes(copyLength));
+        copy = static_cast<UCHAR *>(
+            AllocateProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackDynamicEntryCopy, copyLength));
         if (copy == nullptr)
         {
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -236,7 +240,7 @@ NTSTATUS QpackDynamicTable::DuplicateRelative(ULONGLONG relativeIndex, ULONGLONG
     if (copy != nullptr)
     {
         RtlSecureZeroMemory(copy, copyLength);
-        FreeNonPagedPoolBytes(copy);
+        FreeProtocolNonPagedPoolBytes(rtl::ProtocolAllocationSite::QpackDynamicEntryCopy, copy);
     }
     return status;
 }

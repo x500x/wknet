@@ -1,13 +1,16 @@
 #include "net/WskDatagramSocketPrivate.hpp"
 
-#include <wknet/WknetLimits.h>
+#include "rtl/ProtocolFailureInjection.h"
 #include "rtl/TraceInternal.h"
+#include <wknet/WknetLimits.h>
 
 #if defined(WKNET_USER_MODE_TEST)
 #include "net/WskDatagramSocketTest.h"
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
+#include <limits.h>
 #include <thread>
 #else
 #include "net/WskSync.h"
@@ -38,12 +41,96 @@ void CopyAddress(_Out_ SOCKADDR_STORAGE *destination, _In_ const SOCKADDR *sourc
     RtlCopyMemory(destination, source, length);
 }
 
+bool AcquireProtocolResource(rtl::ProtocolAllocationSite site, bool *tracked) noexcept
+{
+    if (tracked == nullptr || *tracked || rtl::ProtocolFailureInjectionShouldFail(site))
+    {
+        return false;
+    }
+    rtl::ProtocolFailureInjectionRecordAcquire(site);
+    *tracked = true;
+    return true;
+}
+
+void ReleaseProtocolResource(rtl::ProtocolAllocationSite site, bool *tracked) noexcept
+{
+    if (tracked == nullptr || !*tracked)
+    {
+        return;
+    }
+    const bool released = rtl::ProtocolFailureInjectionRecordRelease(site);
+    UNREFERENCED_PARAMETER(released);
+    *tracked = false;
+}
+
 #if defined(WKNET_USER_MODE_TEST)
 constexpr SIZE_T TestCompletionQueueCapacity = 16;
+using NativeModule = void *;
+using NativeProcedure = void *;
+using NativeSocket = uintptr_t;
+
+constexpr NativeSocket InvalidNativeSocket = static_cast<NativeSocket>(~static_cast<uintptr_t>(0));
+constexpr int NativeSocketError = -1;
+constexpr int NativeSocketTypeDatagram = 2;
+constexpr int NativeProtocolUdp = 17;
+constexpr int NativeSocketLevel = 0xffff;
+constexpr int NativeSocketReceiveTimeout = 0x1006;
+constexpr int NativeWsaTimedOut = 10060;
+constexpr int NativeWsaWouldBlock = 10035;
+
+extern "C" __declspec(dllimport) NativeModule __stdcall LoadLibraryA(const char *fileName);
+extern "C" __declspec(dllimport) NativeProcedure __stdcall GetProcAddress(NativeModule module,
+                                                                           const char *procedureName);
+extern "C" __declspec(dllimport) int __stdcall FreeLibrary(NativeModule module);
+
+struct NativeWinsockApi final
+{
+    using StartupFn = int(__stdcall *)(USHORT version, void *data);
+    using CleanupFn = int(__stdcall *)();
+    using GetLastErrorFn = int(__stdcall *)();
+    using SocketFn = NativeSocket(__stdcall *)(int family, int type, int protocol);
+    using CloseSocketFn = int(__stdcall *)(NativeSocket socket);
+    using BindFn = int(__stdcall *)(NativeSocket socket, const SOCKADDR *address, int addressLength);
+    using SendToFn = int(__stdcall *)(NativeSocket socket, const char *data, int length, int flags,
+                                     const SOCKADDR *address, int addressLength);
+    using ReceiveFromFn = int(__stdcall *)(NativeSocket socket, char *data, int length, int flags,
+                                          SOCKADDR *address, int *addressLength);
+    using SetSocketOptionFn = int(__stdcall *)(NativeSocket socket, int level, int option, const char *value,
+                                              int valueLength);
+
+    NativeModule Module = nullptr;
+    StartupFn Startup = nullptr;
+    CleanupFn Cleanup = nullptr;
+    GetLastErrorFn GetLastError = nullptr;
+    SocketFn Socket = nullptr;
+    CloseSocketFn CloseSocket = nullptr;
+    BindFn Bind = nullptr;
+    SendToFn SendTo = nullptr;
+    ReceiveFromFn ReceiveFrom = nullptr;
+    SetSocketOptionFn SetSocketOption = nullptr;
+};
+
+template <typename T> bool LoadNativeProcedure(NativeModule module, const char *name, T *procedure) noexcept
+{
+    if (module == nullptr || name == nullptr || procedure == nullptr)
+    {
+        return false;
+    }
+    *procedure = reinterpret_cast<T>(GetProcAddress(module, name));
+    return *procedure != nullptr;
+}
 
 struct TestProviderState final
 {
     std::mutex Lock;
+    NativeWinsockApi NativeApi = {};
+    NativeSocket NativeSocketHandle = InvalidNativeSocket;
+    std::thread NativeReceiveThread;
+    UCHAR NativeReceiveData[WKNET_HARD_MAX_QUIC_UDP_PAYLOAD_BYTES] = {};
+    SOCKADDR_STORAGE NativeReceiveRemoteAddress = {};
+    bool NativeEnabled = false;
+    bool NativeStarted = false;
+    bool NativeCancelReceive = false;
     test::WskDatagramTestReceiveCompletion Queue[TestCompletionQueueCapacity] = {};
     SIZE_T QueueHead = 0;
     SIZE_T QueueCount = 0;
@@ -51,7 +138,6 @@ struct TestProviderState final
     test::WskDatagramTestReceiveCompletion PendingCompletion = {};
     bool PendingCancelled = false;
     bool CancelCompletesImmediately = false;
-    bool FailAllocation = false;
     NTSTATUS NextOpenStatus = STATUS_SUCCESS;
     NTSTATUS NextBindStatus = STATUS_SUCCESS;
     NTSTATUS NextReceiveStartStatus = STATUS_SUCCESS;
@@ -61,6 +147,89 @@ struct TestProviderState final
 };
 
 TestProviderState g_testProvider = {};
+
+void JoinNativeReceiveThread() noexcept
+{
+    if (g_testProvider.NativeReceiveThread.joinable() &&
+        g_testProvider.NativeReceiveThread.get_id() != std::this_thread::get_id())
+    {
+        g_testProvider.NativeReceiveThread.join();
+    }
+}
+
+NTSTATUS NativeSocketErrorToStatus(int error) noexcept
+{
+    if (error == NativeWsaTimedOut || error == NativeWsaWouldBlock)
+    {
+        return STATUS_IO_TIMEOUT;
+    }
+    return STATUS_UNSUCCESSFUL;
+}
+
+bool NativeProviderEnabled() noexcept
+{
+    std::lock_guard<std::mutex> guard(g_testProvider.Lock);
+    return g_testProvider.NativeEnabled;
+}
+
+void NativeReceiveWorker(WskDatagramSocket *socket) noexcept
+{
+    ULONG remoteAddressLength = 0;
+    NTSTATUS status = STATUS_CANCELLED;
+    SIZE_T dataLength = 0;
+
+    for (;;)
+    {
+        NativeSocket nativeSocket = InvalidNativeSocket;
+        NativeWinsockApi api = {};
+        bool cancelled = false;
+        {
+            std::lock_guard<std::mutex> guard(g_testProvider.Lock);
+            nativeSocket = g_testProvider.NativeSocketHandle;
+            api = g_testProvider.NativeApi;
+            cancelled = g_testProvider.NativeCancelReceive;
+        }
+        if (cancelled || nativeSocket == InvalidNativeSocket)
+        {
+            status = STATUS_CANCELLED;
+            break;
+        }
+
+        int addressLength = static_cast<int>(sizeof(g_testProvider.NativeReceiveRemoteAddress));
+        const int received = api.ReceiveFrom(
+            nativeSocket, reinterpret_cast<char *>(g_testProvider.NativeReceiveData),
+            static_cast<int>(sizeof(g_testProvider.NativeReceiveData)), 0,
+            reinterpret_cast<SOCKADDR *>(&g_testProvider.NativeReceiveRemoteAddress), &addressLength);
+        if (received >= 0)
+        {
+            dataLength = static_cast<SIZE_T>(received);
+            remoteAddressLength = addressLength > 0 ? static_cast<ULONG>(addressLength) : 0;
+            status = STATUS_SUCCESS;
+            break;
+        }
+
+        const int error = api.GetLastError();
+        if (error == NativeWsaTimedOut || error == NativeWsaWouldBlock)
+        {
+            continue;
+        }
+        status = NativeSocketErrorToStatus(error);
+        break;
+    }
+
+    {
+        std::lock_guard<std::mutex> guard(g_testProvider.Lock);
+        if (g_testProvider.PendingSocket != socket)
+        {
+            return;
+        }
+        g_testProvider.PendingSocket = nullptr;
+        g_testProvider.PendingCompletion = {};
+        g_testProvider.PendingCancelled = false;
+    }
+    socket->TestCompleteReceive(g_testProvider.NativeReceiveData, dataLength,
+                                g_testProvider.NativeReceiveRemoteAddress, remoteAddressLength, status, true);
+}
 
 ULONGLONG CurrentTestThreadToken() noexcept
 {
@@ -83,10 +252,35 @@ bool TakeQueuedCompletion(test::WskDatagramTestReceiveCompletion *completion) no
     return true;
 }
 
-NTSTATUS TestOpen(WskDatagramSocket *socket) noexcept
+NTSTATUS TestOpen(WskDatagramSocket *socket, USHORT addressFamily) noexcept
 {
     std::lock_guard<std::mutex> guard(g_testProvider.Lock);
     ++g_testProvider.Statistics.OpenCalls;
+    if (g_testProvider.NativeEnabled)
+    {
+        if (!g_testProvider.NativeStarted || g_testProvider.NativeSocketHandle != InvalidNativeSocket)
+        {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+        const NativeSocket nativeSocket = g_testProvider.NativeApi.Socket(
+            addressFamily, NativeSocketTypeDatagram, NativeProtocolUdp);
+        if (nativeSocket == InvalidNativeSocket)
+        {
+            return NativeSocketErrorToStatus(g_testProvider.NativeApi.GetLastError());
+        }
+        const int receiveTimeoutMilliseconds = 100;
+        if (g_testProvider.NativeApi.SetSocketOption(nativeSocket, NativeSocketLevel, NativeSocketReceiveTimeout,
+                                                     reinterpret_cast<const char *>(&receiveTimeoutMilliseconds),
+                                                     sizeof(receiveTimeoutMilliseconds)) == NativeSocketError)
+        {
+            const NTSTATUS status = NativeSocketErrorToStatus(g_testProvider.NativeApi.GetLastError());
+            (void)g_testProvider.NativeApi.CloseSocket(nativeSocket);
+            return status;
+        }
+        g_testProvider.NativeSocketHandle = nativeSocket;
+        ++g_testProvider.Statistics.OpenSockets;
+        return STATUS_SUCCESS;
+    }
     const NTSTATUS status = g_testProvider.NextOpenStatus;
     g_testProvider.NextOpenStatus = STATUS_SUCCESS;
     if (NT_SUCCESS(status))
@@ -97,10 +291,23 @@ NTSTATUS TestOpen(WskDatagramSocket *socket) noexcept
     return status;
 }
 
-NTSTATUS TestBind() noexcept
+NTSTATUS TestBind(const SOCKADDR *localAddress, ULONG addressLength) noexcept
 {
     std::lock_guard<std::mutex> guard(g_testProvider.Lock);
     ++g_testProvider.Statistics.BindCalls;
+    if (g_testProvider.NativeEnabled)
+    {
+        if (g_testProvider.NativeSocketHandle == InvalidNativeSocket || localAddress == nullptr || addressLength == 0)
+        {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+        if (g_testProvider.NativeApi.Bind(g_testProvider.NativeSocketHandle, localAddress,
+                                          static_cast<int>(addressLength)) == NativeSocketError)
+        {
+            return NativeSocketErrorToStatus(g_testProvider.NativeApi.GetLastError());
+        }
+        return STATUS_SUCCESS;
+    }
     const NTSTATUS status = g_testProvider.NextBindStatus;
     g_testProvider.NextBindStatus = STATUS_SUCCESS;
     return status;
@@ -108,6 +315,24 @@ NTSTATUS TestBind() noexcept
 
 NTSTATUS TestSubmitReceive(WskDatagramSocket *socket) noexcept
 {
+    if (NativeProviderEnabled())
+    {
+        JoinNativeReceiveThread();
+        {
+            std::lock_guard<std::mutex> guard(g_testProvider.Lock);
+            ++g_testProvider.Statistics.ReceiveCalls;
+            ++g_testProvider.Statistics.AllocationAttempts;
+            ++g_testProvider.Statistics.OutstandingReceives;
+            ++g_testProvider.Statistics.BufferReferences;
+            g_testProvider.PendingSocket = socket;
+            g_testProvider.PendingCompletion = {};
+            g_testProvider.PendingCancelled = false;
+            g_testProvider.NativeCancelReceive = false;
+        }
+        g_testProvider.NativeReceiveThread = std::thread(NativeReceiveWorker, socket);
+        return STATUS_PENDING;
+    }
+
     test::WskDatagramTestReceiveCompletion completion = {};
     const bool hasCompletion = TakeQueuedCompletion(&completion);
 
@@ -154,6 +379,12 @@ void TestCancel(WskDatagramSocket *socket) noexcept
         {
             return;
         }
+        if (g_testProvider.NativeEnabled)
+        {
+            g_testProvider.PendingCancelled = true;
+            g_testProvider.NativeCancelReceive = true;
+            return;
+        }
         g_testProvider.PendingCancelled = true;
         if (g_testProvider.CancelCompletesImmediately)
         {
@@ -172,10 +403,31 @@ void TestCancel(WskDatagramSocket *socket) noexcept
     }
 }
 
-NTSTATUS TestSend(SIZE_T length, SIZE_T *bytesSent) noexcept
+NTSTATUS TestSend(const void *data, SIZE_T length, const SOCKADDR *remoteAddress, ULONG addressLength,
+                  SIZE_T *bytesSent) noexcept
 {
     std::lock_guard<std::mutex> guard(g_testProvider.Lock);
     ++g_testProvider.Statistics.SendCalls;
+    if (g_testProvider.NativeEnabled)
+    {
+        if (g_testProvider.NativeSocketHandle == InvalidNativeSocket || data == nullptr || remoteAddress == nullptr ||
+            length > static_cast<SIZE_T>(INT_MAX))
+        {
+            return STATUS_INVALID_PARAMETER;
+        }
+        const int sent = g_testProvider.NativeApi.SendTo(
+            g_testProvider.NativeSocketHandle, static_cast<const char *>(data), static_cast<int>(length), 0,
+            remoteAddress, static_cast<int>(addressLength));
+        if (sent == NativeSocketError)
+        {
+            return NativeSocketErrorToStatus(g_testProvider.NativeApi.GetLastError());
+        }
+        if (bytesSent != nullptr)
+        {
+            *bytesSent = static_cast<SIZE_T>(sent);
+        }
+        return STATUS_SUCCESS;
+    }
     const NTSTATUS status = g_testProvider.NextSendStatus;
     const SIZE_T configuredBytes = g_testProvider.NextSendBytes;
     g_testProvider.NextSendStatus = STATUS_SUCCESS;
@@ -189,15 +441,36 @@ NTSTATUS TestSend(SIZE_T length, SIZE_T *bytesSent) noexcept
 
 void TestClose(WskDatagramSocket *socket) noexcept
 {
+    NativeSocket nativeSocket = InvalidNativeSocket;
+    {
+        std::lock_guard<std::mutex> guard(g_testProvider.Lock);
+        ++g_testProvider.Statistics.CloseCalls;
+        if (g_testProvider.PendingSocket == socket)
+        {
+            g_testProvider.NativeCancelReceive = true;
+        }
+        nativeSocket = g_testProvider.NativeSocketHandle;
+    }
+    JoinNativeReceiveThread();
     std::lock_guard<std::mutex> guard(g_testProvider.Lock);
-    ++g_testProvider.Statistics.CloseCalls;
     if (g_testProvider.PendingSocket == socket)
     {
         g_testProvider.PendingSocket = nullptr;
         g_testProvider.PendingCompletion = {};
         g_testProvider.PendingCancelled = false;
-        --g_testProvider.Statistics.OutstandingReceives;
-        --g_testProvider.Statistics.BufferReferences;
+        if (g_testProvider.Statistics.OutstandingReceives > 0)
+        {
+            --g_testProvider.Statistics.OutstandingReceives;
+        }
+        if (g_testProvider.Statistics.BufferReferences > 0)
+        {
+            --g_testProvider.Statistics.BufferReferences;
+        }
+    }
+    if (g_testProvider.NativeEnabled && nativeSocket != InvalidNativeSocket)
+    {
+        (void)g_testProvider.NativeApi.CloseSocket(nativeSocket);
+        g_testProvider.NativeSocketHandle = InvalidNativeSocket;
     }
     if (g_testProvider.Statistics.OpenSockets > 0)
     {
@@ -220,6 +493,8 @@ namespace test
 {
 void ResetProvider() noexcept
 {
+    DisableNativeUdpProvider();
+    rtl::ProtocolFailureInjectionReset();
     std::lock_guard<std::mutex> guard(g_testProvider.Lock);
     g_testProvider.QueueHead = 0;
     g_testProvider.QueueCount = 0;
@@ -227,13 +502,83 @@ void ResetProvider() noexcept
     g_testProvider.PendingCompletion = {};
     g_testProvider.PendingCancelled = false;
     g_testProvider.CancelCompletesImmediately = false;
-    g_testProvider.FailAllocation = false;
     g_testProvider.NextOpenStatus = STATUS_SUCCESS;
     g_testProvider.NextBindStatus = STATUS_SUCCESS;
     g_testProvider.NextReceiveStartStatus = STATUS_SUCCESS;
     g_testProvider.NextSendStatus = STATUS_SUCCESS;
     g_testProvider.NextSendBytes = static_cast<SIZE_T>(-1);
     g_testProvider.Statistics = {};
+}
+
+bool EnableNativeUdpProvider() noexcept
+{
+    DisableNativeUdpProvider();
+    NativeWinsockApi api = {};
+    api.Module = LoadLibraryA("ws2_32.dll");
+    if (api.Module == nullptr || !LoadNativeProcedure(api.Module, "WSAStartup", &api.Startup) ||
+        !LoadNativeProcedure(api.Module, "WSACleanup", &api.Cleanup) ||
+        !LoadNativeProcedure(api.Module, "WSAGetLastError", &api.GetLastError) ||
+        !LoadNativeProcedure(api.Module, "socket", &api.Socket) ||
+        !LoadNativeProcedure(api.Module, "closesocket", &api.CloseSocket) ||
+        !LoadNativeProcedure(api.Module, "bind", &api.Bind) ||
+        !LoadNativeProcedure(api.Module, "sendto", &api.SendTo) ||
+        !LoadNativeProcedure(api.Module, "recvfrom", &api.ReceiveFrom) ||
+        !LoadNativeProcedure(api.Module, "setsockopt", &api.SetSocketOption))
+    {
+        if (api.Module != nullptr)
+        {
+            (void)FreeLibrary(api.Module);
+        }
+        return false;
+    }
+
+    UCHAR startupData[512] = {};
+    if (api.Startup(0x0202, startupData) != 0)
+    {
+        (void)FreeLibrary(api.Module);
+        return false;
+    }
+
+    std::lock_guard<std::mutex> guard(g_testProvider.Lock);
+    g_testProvider.NativeApi = api;
+    g_testProvider.NativeEnabled = true;
+    g_testProvider.NativeStarted = true;
+    g_testProvider.NativeCancelReceive = false;
+    return true;
+}
+
+void DisableNativeUdpProvider() noexcept
+{
+    {
+        std::lock_guard<std::mutex> guard(g_testProvider.Lock);
+        g_testProvider.NativeCancelReceive = true;
+    }
+    JoinNativeReceiveThread();
+
+    NativeWinsockApi api = {};
+    NativeSocket nativeSocket = InvalidNativeSocket;
+    {
+        std::lock_guard<std::mutex> guard(g_testProvider.Lock);
+        api = g_testProvider.NativeApi;
+        nativeSocket = g_testProvider.NativeSocketHandle;
+        g_testProvider.NativeApi = {};
+        g_testProvider.NativeSocketHandle = InvalidNativeSocket;
+        g_testProvider.NativeEnabled = false;
+        g_testProvider.NativeStarted = false;
+        g_testProvider.NativeCancelReceive = false;
+    }
+    if (nativeSocket != InvalidNativeSocket && api.CloseSocket != nullptr)
+    {
+        (void)api.CloseSocket(nativeSocket);
+    }
+    if (api.Cleanup != nullptr)
+    {
+        (void)api.Cleanup();
+    }
+    if (api.Module != nullptr)
+    {
+        (void)FreeLibrary(api.Module);
+    }
 }
 
 void QueueReceiveCompletion(const WskDatagramTestReceiveCompletion &completion) noexcept
@@ -281,8 +626,7 @@ void SetCancelCompletesImmediately(bool enabled) noexcept
 
 void FailNextAllocation() noexcept
 {
-    std::lock_guard<std::mutex> guard(g_testProvider.Lock);
-    g_testProvider.FailAllocation = true;
+    rtl::ProtocolFailureInjectionSetFailOnNth(rtl::ProtocolAllocationSite::DatagramSocketObject, 1);
 }
 
 bool CompletePendingReceive() noexcept
@@ -354,6 +698,7 @@ WskDatagramSocket::~WskDatagramSocket() noexcept
         receiveIrp_ = nullptr;
     }
 #endif
+    ReleaseProtocolResource(rtl::ProtocolAllocationSite::DatagramReceiveIrp, &receiveIrpTracked_);
 }
 
 bool WskDatagramSocket::IsPassiveLevel() const noexcept
@@ -398,7 +743,7 @@ NTSTATUS WskDatagramSocket::Open(WskClient &client, USHORT addressFamily) noexce
 
     addressFamily_ = addressFamily;
 #if defined(WKNET_USER_MODE_TEST)
-    const NTSTATUS status = TestOpen(this);
+    const NTSTATUS status = TestOpen(this, addressFamily);
     if (!NT_SUCCESS(status))
     {
         addressFamily_ = AF_UNSPEC;
@@ -468,7 +813,7 @@ NTSTATUS WskDatagramSocket::Bind(const SOCKADDR *localAddress) noexcept
     }
 
 #if defined(WKNET_USER_MODE_TEST)
-    const NTSTATUS status = TestBind();
+    const NTSTATUS status = TestBind(localAddress, AddressLength());
     if (!NT_SUCCESS(status))
     {
         return status;
@@ -709,6 +1054,15 @@ NTSTATUS WskDatagramSocket::StartReceive(void *data, SIZE_T length) noexcept
         {
             return STATUS_DEVICE_BUSY;
         }
+        if (!AcquireProtocolResource(rtl::ProtocolAllocationSite::DatagramReceiveMdl, &receiveMdlTracked_) ||
+            !AcquireProtocolResource(rtl::ProtocolAllocationSite::DatagramReceiveIrp, &receiveIrpTracked_) ||
+            !AcquireProtocolResource(rtl::ProtocolAllocationSite::DatagramReceiveDescriptor,
+                                     &receiveDescriptorTracked_) ||
+            !AcquireProtocolResource(rtl::ProtocolAllocationSite::DatagramCompletionRecord, &completionRecordTracked_))
+        {
+            ReleaseReceiveProtocolResources();
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
         receiveData_ = data;
         receiveCapacity_ = length;
         receiveStatus_ = STATUS_PENDING;
@@ -733,6 +1087,7 @@ NTSTATUS WskDatagramSocket::StartReceive(void *data, SIZE_T length) noexcept
         receiveData_ = nullptr;
         receiveCapacity_ = 0;
     }
+    ReleaseReceiveProtocolResources();
     return submitStatus;
 #else
     KIRQL oldIrql = PASSIVE_LEVEL;
@@ -764,6 +1119,12 @@ NTSTATUS WskDatagramSocket::StartReceive(void *data, SIZE_T length) noexcept
     KeClearEvent(&receiveEvent_);
     KeReleaseSpinLock(&stateLock_, oldIrql);
 
+    if (!AcquireProtocolResource(rtl::ProtocolAllocationSite::DatagramCompletionRecord, &completionRecordTracked_) ||
+        !AcquireProtocolResource(rtl::ProtocolAllocationSite::DatagramReceiveMdl, &receiveMdlTracked_))
+    {
+        ReleaseReceiveResources();
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
     receiveMdl_ = IoAllocateMdl(data, static_cast<ULONG>(length), FALSE, FALSE, nullptr);
     if (receiveMdl_ == nullptr)
     {
@@ -774,6 +1135,11 @@ NTSTATUS WskDatagramSocket::StartReceive(void *data, SIZE_T length) noexcept
 
     if (receiveIrp_ == nullptr)
     {
+        if (!AcquireProtocolResource(rtl::ProtocolAllocationSite::DatagramReceiveIrp, &receiveIrpTracked_))
+        {
+            ReleaseReceiveResources();
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
         receiveIrp_ = IoAllocateIrp(1, FALSE);
         if (receiveIrp_ == nullptr)
         {
@@ -794,6 +1160,13 @@ NTSTATUS WskDatagramSocket::StartReceive(void *data, SIZE_T length) noexcept
     completionOwnsIoReference_ = true;
     IoSetCompletionRoutine(receiveIrp_, ReceiveCompletionRoutine, this, TRUE, TRUE, TRUE);
 
+    if (!AcquireProtocolResource(rtl::ProtocolAllocationSite::DatagramReceiveDescriptor, &receiveDescriptorTracked_))
+    {
+        ExReleaseRundownProtection(&ioRundown_);
+        completionOwnsIoReference_ = false;
+        ReleaseReceiveResources();
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
     receiveBuffer_.Mdl = receiveMdl_;
     receiveBuffer_.Offset = 0;
     receiveBuffer_.Length = length;
@@ -833,12 +1206,7 @@ NTSTATUS WskDatagramSocket::StartReceive(void *data, SIZE_T length) noexcept
     {
         ExReleaseRundownProtection(&ioRundown_);
     }
-    if (receiveMdl_ != nullptr)
-    {
-        IoFreeMdl(receiveMdl_);
-        receiveMdl_ = nullptr;
-    }
-    receiveBuffer_ = {};
+    ReleaseReceiveResources();
     return status;
 #endif
 }
@@ -898,6 +1266,16 @@ NTSTATUS WskDatagramSocket::CancelReceive() noexcept
     return CancelReceiveInternal(false);
 }
 
+void WskDatagramSocket::ReleaseReceiveProtocolResources() noexcept
+{
+    ReleaseProtocolResource(rtl::ProtocolAllocationSite::DatagramCompletionRecord, &completionRecordTracked_);
+    ReleaseProtocolResource(rtl::ProtocolAllocationSite::DatagramReceiveDescriptor, &receiveDescriptorTracked_);
+    ReleaseProtocolResource(rtl::ProtocolAllocationSite::DatagramReceiveMdl, &receiveMdlTracked_);
+#if defined(WKNET_USER_MODE_TEST)
+    ReleaseProtocolResource(rtl::ProtocolAllocationSite::DatagramReceiveIrp, &receiveIrpTracked_);
+#endif
+}
+
 void WskDatagramSocket::ReleaseReceiveResources() noexcept
 {
 #if defined(WKNET_USER_MODE_TEST)
@@ -929,6 +1307,7 @@ void WskDatagramSocket::ReleaseReceiveResources() noexcept
     KeReleaseSpinLock(&stateLock_, oldIrql);
     KeClearEvent(&receiveEvent_);
 #endif
+    ReleaseReceiveProtocolResources();
 }
 
 NTSTATUS WskDatagramSocket::CompleteReceive(ULONG timeoutMilliseconds, WskDatagramReceiveResult *result) noexcept
@@ -1114,11 +1493,19 @@ NTSTATUS WskDatagramSocket::SendTo(const void *data, SIZE_T length, const SOCKAD
     }
 
     NTSTATUS status = STATUS_SUCCESS;
+    if (rtl::ProtocolFailureInjectionShouldFail(rtl::ProtocolAllocationSite::DatagramSendOperation))
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    rtl::ProtocolFailureInjectionRecordAcquire(rtl::ProtocolAllocationSite::DatagramSendOperation);
 #if defined(WKNET_USER_MODE_TEST)
-    status = TestSend(length, bytesSent);
+    status = TestSend(data, length, remoteAddress, AddressLength(), bytesSent);
 #else
     if (ExAcquireRundownProtection(&ioRundown_) == FALSE)
     {
+        const bool sendReleased =
+            rtl::ProtocolFailureInjectionRecordRelease(rtl::ProtocolAllocationSite::DatagramSendOperation);
+        UNREFERENCED_PARAMETER(sendReleased);
         return STATUS_DEVICE_NOT_READY;
     }
     status = sendScratch_.EnsureCapacity(WKNET_HARD_MAX_QUIC_UDP_PAYLOAD_BYTES);
@@ -1144,6 +1531,9 @@ NTSTATUS WskDatagramSocket::SendTo(const void *data, SIZE_T length, const SOCKAD
     }
     ExReleaseRundownProtection(&ioRundown_);
 #endif
+    const bool sendReleased =
+        rtl::ProtocolFailureInjectionRecordRelease(rtl::ProtocolAllocationSite::DatagramSendOperation);
+    UNREFERENCED_PARAMETER(sendReleased);
     if (!NT_SUCCESS(status))
     {
         const TraceCorrelation correlation = {0, ConnectionId(), 0};
@@ -1320,15 +1710,14 @@ NTSTATUS WskDatagramSocketCreate(WskClient *client, USHORT addressFamily, WskDat
     {
         return STATUS_INVALID_PARAMETER;
     }
+    if (rtl::ProtocolFailureInjectionShouldFail(rtl::ProtocolAllocationSite::DatagramSocketObject))
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
 #if defined(WKNET_USER_MODE_TEST)
     {
         std::lock_guard<std::mutex> guard(g_testProvider.Lock);
         ++g_testProvider.Statistics.AllocationAttempts;
-        if (g_testProvider.FailAllocation)
-        {
-            g_testProvider.FailAllocation = false;
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
     }
 #endif
     auto *created = AllocateNonPagedObject<WskDatagramSocket>();
@@ -1336,9 +1725,13 @@ NTSTATUS WskDatagramSocketCreate(WskClient *client, USHORT addressFamily, WskDat
     {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
+    rtl::ProtocolFailureInjectionRecordAcquire(rtl::ProtocolAllocationSite::DatagramSocketObject);
     const NTSTATUS status = created->Open(*client, addressFamily);
     if (!NT_SUCCESS(status))
     {
+        const bool socketReleased =
+            rtl::ProtocolFailureInjectionRecordRelease(rtl::ProtocolAllocationSite::DatagramSocketObject);
+        UNREFERENCED_PARAMETER(socketReleased);
         FreeNonPagedObject(created);
         return status;
     }
@@ -1427,6 +1820,9 @@ void WskDatagramSocketDestroy(WskDatagramSocket *socket) noexcept
     {
         const NTSTATUS status = socket->Close();
         UNREFERENCED_PARAMETER(status);
+        const bool socketReleased =
+            rtl::ProtocolFailureInjectionRecordRelease(rtl::ProtocolAllocationSite::DatagramSocketObject);
+        UNREFERENCED_PARAMETER(socketReleased);
         FreeNonPagedObject(socket);
     }
 }

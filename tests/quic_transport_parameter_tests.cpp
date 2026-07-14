@@ -2,27 +2,42 @@
 #define WKNET_USER_MODE_TEST 1
 #endif
 #include "quic/QuicTransportParameters.h"
+#include "rtl/ProtocolFailureInjection.h"
 #include <stdio.h>
 namespace
 {
-bool failed = false;
-void E(bool c, const char *m)
-{
-    if (!c)
+    bool failed = false;
+    void E(bool c, const char* m)
     {
-        failed = true;
-        printf("FAIL: %s\n", m);
+        if (!c)
+        {
+            failed = true;
+            printf("FAIL: %s\n", m);
+        }
     }
-}
 } // namespace
 int main()
 {
+    wknet::rtl::ProtocolFailureInjectionReset();
     UCHAR encoded[128] = {};
     SIZE_T written = 0;
     const UCHAR scid[] = {1, 2, 3, 4};
     E(NT_SUCCESS(
           wknet::quic::QuicEncodeClientTransportParameters({scid, sizeof(scid)}, encoded, sizeof(encoded), &written)),
       "client parameters encode");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicTransportParameterBytes,
+                                                     1);
+    E(wknet::quic::QuicEncodeClientTransportParameters({scid, sizeof(scid)}, encoded, sizeof(encoded), &written) ==
+          STATUS_INSUFFICIENT_RESOURCES,
+      "transport parameter scratch failpoint is propagated");
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicTransportParameterBytes) ==
+          0,
+      "transport parameter scratch failure leaves no live allocation");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicTransportParameterBytes,
+                                                     0);
+    E(NT_SUCCESS(
+          wknet::quic::QuicEncodeClientTransportParameters({scid, sizeof(scid)}, encoded, sizeof(encoded), &written)),
+      "client parameters re-encode after failpoint");
     wknet::quic::QuicTransportParameters p = {};
     E(NT_SUCCESS(wknet::quic::QuicParseTransportParameters(encoded, written,
                                                            wknet::quic::QuicTransportParameterPeerRole::Client, &p)),

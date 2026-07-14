@@ -3,6 +3,7 @@
 #endif
 #include "quic/QuicFlowControl.h"
 #include "quic/QuicStream.h"
+#include "rtl/ProtocolFailureInjection.h"
 #include <stdio.h>
 #include <string.h>
 namespace
@@ -69,6 +70,28 @@ void E(bool c, const char *m)
 } // namespace
 int main()
 {
+    wknet::rtl::ProtocolFailureInjectionReset();
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicStreamChunks, 1);
+    {
+        wknet::quic::QuicStream failedChunks;
+        E(failedChunks.Initialize(0) == STATUS_INSUFFICIENT_RESOURCES, "stream chunk table failpoint is propagated");
+    }
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicStreamChunks) == 0,
+      "failed stream chunk table has no live allocation");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicStreamChunks, 0);
+
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicStreamAffectedScratch, 1);
+    {
+        wknet::quic::QuicStream failedScratch;
+        E(failedScratch.Initialize(0) == STATUS_INSUFFICIENT_RESOURCES,
+          "stream affected scratch failpoint is propagated");
+    }
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicStreamChunks) == 0 &&
+          wknet::rtl::ProtocolFailureInjectionLiveCount(
+              wknet::rtl::ProtocolAllocationSite::QuicStreamAffectedScratch) == 0,
+      "partial stream initialization releases its chunk table");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicStreamAffectedScratch, 0);
+
     E(wknet::quic::QuicStreamIsClientInitiated(0) && wknet::quic::QuicStreamIsBidirectional(0),
       "stream 0 is client bidi");
     E(!wknet::quic::QuicStreamIsClientInitiated(1) && wknet::quic::QuicStreamIsBidirectional(1),
@@ -78,6 +101,13 @@ int main()
     E(NT_SUCCESS(s.Initialize(0, 64, 4)), "stream initializes");
     const UCHAR tail[] = {4, 5, 6};
     const UCHAR head[] = {1, 2, 3, 4};
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicStreamMergeBuffer, 1);
+    E(s.Receive(3, tail, sizeof(tail), true) == STATUS_INSUFFICIENT_RESOURCES,
+      "stream merge buffer failpoint is propagated");
+    E(wknet::rtl::ProtocolFailureInjectionLiveCount(wknet::rtl::ProtocolAllocationSite::QuicStreamMergeBuffer) == 0 &&
+          s.BufferedBytes() == 0,
+      "failed stream merge leaves no live buffer or semantic state");
+    wknet::rtl::ProtocolFailureInjectionSetFailOnNth(wknet::rtl::ProtocolAllocationSite::QuicStreamMergeBuffer, 0);
     E(NT_SUCCESS(s.Receive(3, tail, sizeof(tail), true)), "out-of-order tail accepted");
     E(s.ReceiveFlowControlBytes() == 6, "flow control tracks the highest accepted offset");
     E(NT_SUCCESS(s.Receive(0, head, sizeof(head), false)), "overlapping consistent head merges");
@@ -182,8 +212,10 @@ int main()
       "event stream consumes the readable edge");
     E(NT_SUCCESS(eventStream.Receive(2, nullptr, 0, true)) && eventCapture.Readable == 2,
       "FIN-only receive reports a new readable edge");
+    E(eventCapture.Closed == 0, "receiving FIN does not close the stream before application consumption");
     E(NT_SUCCESS(eventStream.Consume(out, sizeof(out), &consumed, &fin)) && consumed == 0 && fin,
       "FIN-only readable edge can be consumed");
+    E(eventCapture.Closed == 0, "consuming FIN does not close a bidirectional stream with an open send side");
     E(NT_SUCCESS(eventStream.SetSendLimit(1)), "event stream send limit sets");
     E(NT_SUCCESS(eventStream.Write(five, 1, false, &accepted)), "event stream consumes send credit");
     E(eventStream.Write(five, 1, false, &accepted) == STATUS_DEVICE_BUSY, "event stream records a blocked write");
@@ -193,6 +225,13 @@ int main()
       "MAX_STREAM_DATA reports writable after wire blocked state is consumed");
     E(NT_SUCCESS(eventStream.OnMaxStreamData(3)) && eventCapture.Writable == 1,
       "writable is not duplicated without another blocked write");
+    eventStream.MarkApplicationWriteBlocked();
+    eventStream.TryNotifyApplicationWritable();
+    E(eventCapture.Writable == 2, "pacing release reports writable when flow-control credit remains");
+    eventStream.TryNotifyApplicationWritable();
+    E(eventCapture.Writable == 2, "pacing writable notification remains edge-triggered");
+    E(NT_SUCCESS(eventStream.Write(nullptr, 0, true, &accepted)) && eventCapture.Closed == 1,
+      "stream closes only after both receive FIN and send FIN complete");
 
     StreamEventCapture resetCapture = {};
     const wknet::quic::QuicStreamApplicationEventSink resetSink = {

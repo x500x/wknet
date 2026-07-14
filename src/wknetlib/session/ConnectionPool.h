@@ -258,6 +258,8 @@ namespace session
         _In_opt_ http2::Http2Connection* http2Connection) noexcept;
     ULONGLONG PooledConnectionHttp2LastKeepAliveTime(
         _In_opt_ const PooledConnection* connection) noexcept;
+    ULONG PooledConnectionQuicStreamLeaseCount(_In_opt_ const PooledConnection *connection) noexcept;
+    bool PooledConnectionQuicActiveRequest(_In_opt_ const PooledConnection *connection) noexcept;
 #endif
 
     _Must_inspect_result_

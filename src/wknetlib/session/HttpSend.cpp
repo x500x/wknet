@@ -1,4 +1,5 @@
 #include "session/HttpEngineInternal.hpp"
+#include "session/AltSvcCache.h"
 #include "rtl/TraceInternal.h"
 #if defined(WKNET_USER_MODE_TEST)
 #include "session/HttpH3TestHooks.h"
@@ -59,6 +60,7 @@ NTSTATUS SendRequiredHttp3Request(SessionHandle session, const Request &request,
         startOptions.ResponseTrailerCapacity = MaxTrailersPerResponse;
         startOptions.RawResponseLength = rawResponseLength;
         startOptions.CancellationOperation = cancellationOperation;
+        startOptions.ProbeTimeoutMilliseconds = session->Options.Http3.QuicProbeTimeoutMilliseconds;
         startOptions.AttemptGeneration = static_cast<ULONGLONG>(attempt) + 1;
 
         NTSTATUS status = HttpH3DispatchRequired(dispatch.Get(), &startOptions);
@@ -88,6 +90,110 @@ NTSTATUS SendRequiredHttp3Request(SessionHandle session, const Request &request,
         *rawResponseLength = 0;
     }
     return STATUS_UNSUCCESSFUL;
+}
+
+NTSTATUS SendAutoHttp3Request(SessionHandle session, const Request &request, const HttpSendOptions &sendOptions,
+                              const AltSvcCacheKey &cacheKey, const AltSvcCandidateSnapshot &alternative,
+                              Workspace &workspace, ApiHttpHeaderScratch &headerScratch,
+                              http1::HttpResponse *parsed, SIZE_T *rawResponseLength,
+                              AsyncOperationHandle cancellationOperation) noexcept
+{
+    HttpH3PeerFactory factory = {};
+#if defined(WKNET_USER_MODE_TEST)
+    if (!HttpH3TestGetPeerFactory(&factory))
+#endif
+    {
+        HttpH3GetProductionPeerFactory(session, &factory);
+    }
+
+    HeapObject<HttpH3DispatchContext> dispatch;
+    if (!dispatch.IsValid())
+    {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    HttpH3DispatchStartOptions startOptions = {};
+    startOptions.Session = session;
+    startOptions.RequestObject = &request;
+    startOptions.SendOptions = &sendOptions;
+    startOptions.PeerFactory = &factory;
+    startOptions.ResponseWorkspace = &workspace;
+    startOptions.ParsedResponse = parsed;
+    startOptions.ResponseHeaders = headerScratch.ResponseHeaders;
+    startOptions.ResponseHeaderCapacity = session->Options.MaxResponseHeaders;
+    startOptions.ResponseTrailers = headerScratch.ResponseTrailers;
+    startOptions.ResponseTrailerCapacity = MaxTrailersPerResponse;
+    startOptions.RawResponseLength = rawResponseLength;
+    startOptions.CancellationOperation = cancellationOperation;
+    startOptions.Alternative = &alternative;
+    startOptions.ProbeTimeoutMilliseconds =
+        session->Options.Http3.Race == Http3RaceMode::DelayedTcpFallback
+            ? session->Options.Http3.RaceWindowMilliseconds
+            : session->Options.Http3.QuicProbeTimeoutMilliseconds;
+    startOptions.AttemptGeneration = alternative.EntryGeneration;
+
+    NTSTATUS status = HttpH3DispatchRequired(dispatch.Get(), &startOptions);
+    if (status == STATUS_PENDING)
+    {
+        status = HttpH3DispatchWait(dispatch.Get(), cancellationOperation);
+    }
+
+    const bool definitelyUnsent = HttpH3DispatchDefinitelyUnsent(dispatch.Get());
+    if (NT_SUCCESS(status))
+    {
+        AltSvcCacheMarkSuccess(session->AltSvc, cacheKey, alternative);
+    }
+    else
+    {
+        AltSvcCacheMarkFailure(session->AltSvc, cacheKey, alternative, status);
+    }
+
+    const TraceCorrelation correlation = {
+        sendOptions.TraceOperationId,
+        0,
+        dispatch->StreamId == HttpH3UnsetStreamId ? 0 : dispatch->StreamId
+    };
+    HttpH3DispatchRelease(dispatch.Get());
+    if (NT_SUCCESS(status) || status == STATUS_CANCELLED || !definitelyUnsent)
+    {
+        return status;
+    }
+
+    WKNET_TRACE_CORRELATED(::wknet::ComponentSession, ::wknet::TraceLevel::Warning, &correlation,
+                           "http.connection.retry protocol=tcp status=0x%08X",
+                           static_cast<ULONG>(status));
+    return STATUS_RETRY;
+}
+
+void LearnAltSvcFromResponse(SessionHandle session, const Request &request, Http3ConnectMode mode,
+                             const http1::HttpResponse &response) noexcept
+{
+    if (session == nullptr || session->AltSvc == nullptr || mode != Http3ConnectMode::Auto ||
+        request.Tls.CertificatePolicy != CertificatePolicy::Verify || !IsHttpsRequest(request))
+    {
+        return;
+    }
+
+    HeapObject<AltSvcCacheKey> key;
+    if (!key.IsValid())
+    {
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Warning,
+                    "http.altsvc.rejected status=0x%08X", static_cast<ULONG>(STATUS_INSUFFICIENT_RESOURCES));
+        return;
+    }
+    NTSTATUS status = AltSvcBuildKey(request, key.Get());
+    bool updated = false;
+    if (NT_SUCCESS(status))
+    {
+        status = AltSvcCacheStoreResponse(session->AltSvc, *key.Get(), response.Headers,
+                                          response.HeaderCount, &updated);
+    }
+    if (!NT_SUCCESS(status))
+    {
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Warning,
+                    "http.altsvc.rejected status=0x%08X", static_cast<ULONG>(status));
+    }
+    UNREFERENCED_PARAMETER(updated);
 }
 } // namespace
 
@@ -129,12 +235,60 @@ NTSTATUS SendRequiredHttp3Request(SessionHandle session, const Request &request,
         const TraceCorrelation protocolCorrelation = {sendOptions.TraceOperationId, 0, 0};
         WKNET_TRACE_CORRELATED(::wknet::ComponentSession, ::wknet::TraceLevel::Info, &protocolCorrelation,
                                "http.protocol.select protocol=%s required=%u",
-                               http3Mode == Http3ConnectMode::Required ? "h3" : "tcp",
+                               http3Mode == Http3ConnectMode::Required ? "h3" :
+                               http3Mode == Http3ConnectMode::Auto ? "auto" : "tcp",
                                http3Mode == Http3ConnectMode::Required ? 1u : 0u);
         if (http3Mode == Http3ConnectMode::Required)
         {
-            return SendRequiredHttp3Request(session, request, sendOptions, workspace, headerScratch, parsed,
-                                            rawResponseLength, cancellationOperation);
+            status = SendRequiredHttp3Request(session, request, sendOptions, workspace, headerScratch, parsed,
+                                              rawResponseLength, cancellationOperation);
+            return status;
+        }
+
+        if (http3Mode == Http3ConnectMode::Auto && session->AltSvc != nullptr)
+        {
+            HeapObject<AltSvcCacheKey> altSvcKey;
+            HeapObject<AltSvcCandidateSnapshot> alternative;
+            if (!altSvcKey.IsValid() || !alternative.IsValid())
+            {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            status = AltSvcBuildKey(request, altSvcKey.Get());
+            if (!NT_SUCCESS(status))
+            {
+                return status;
+            }
+            status = AltSvcCacheLookup(session->AltSvc, *altSvcKey.Get(), alternative.Get());
+            if (NT_SUCCESS(status))
+            {
+                WKNET_TRACE_CORRELATED(::wknet::ComponentSession, ::wknet::TraceLevel::Info,
+                                       &protocolCorrelation,
+                                       "http.protocol.select protocol=h3 candidate=%u",
+                                       alternative->CandidateIndex);
+                status = SendAutoHttp3Request(session, request, sendOptions, *altSvcKey.Get(),
+                                              *alternative.Get(), workspace, headerScratch, parsed,
+                                              rawResponseLength, cancellationOperation);
+                if (status != STATUS_RETRY)
+                {
+                    if (NT_SUCCESS(status))
+                    {
+                        LearnAltSvcFromResponse(session, request, http3Mode, *parsed);
+                    }
+                    return status;
+                }
+                WorkspaceReset(&workspace);
+                status = PrepareApiHttpHeaderScratch(workspace, &headerScratch);
+                if (!NT_SUCCESS(status))
+                {
+                    return status;
+                }
+                *parsed = {};
+                *rawResponseLength = 0;
+            }
+            else if (status != STATUS_NOT_FOUND)
+            {
+                return status;
+            }
         }
 
         SIZE_T builtRequestLength = 0;
@@ -333,6 +487,10 @@ NTSTATUS SendRequiredHttp3Request(SessionHandle session, const Request &request,
             connectionReusable &&
             request.ConnectionPolicy == ConnectionPolicy::ReuseOrCreate;
         ConnectionPoolRelease(&session->ConnectionPool, pooledConnection, canReturnToPool);
+        if (NT_SUCCESS(status))
+        {
+            LearnAltSvcFromResponse(session, request, http3Mode, *parsed);
+        }
         return status;
     }
 

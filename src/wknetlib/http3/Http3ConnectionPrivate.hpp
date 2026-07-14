@@ -3,6 +3,7 @@
 #include "http3/Http3Connection.h"
 #include "http3/Http3Frame.h"
 #include "qpack/QpackDecoder.h"
+#include "rtl/ProtocolAllocator.h"
 
 namespace wknet::http3
 {
@@ -39,6 +40,7 @@ struct Http3OwnedBuffer final
     UCHAR *Data = nullptr;
     SIZE_T Length = 0;
     SIZE_T Capacity = 0;
+    rtl::ProtocolAllocationSite AllocationSite = rtl::ProtocolAllocationSite::Invalid;
 
     ~Http3OwnedBuffer() noexcept;
     NTSTATUS Reserve(SIZE_T capacity) noexcept;
@@ -61,7 +63,7 @@ struct Http3ConnectionStreamState final
     Http3OwnedBuffer Payload = {};
     Http3OwnedBuffer Deferred = {};
     Http3OwnedBuffer PendingWrite = {};
-    HeapArray<qpack::QpackFieldView> Fields = {};
+    ProtocolHeapArray<qpack::QpackFieldView, rtl::ProtocolAllocationSite::Http3RequestFields> Fields = {};
     Http3OwnedBuffer FieldBytes = {};
     Http3PayloadMode PayloadMode = Http3PayloadMode::None;
     SIZE_T PayloadUsed = 0;
@@ -85,6 +87,7 @@ class Http3Connection final
 
     NTSTATUS Initialize(const Http3ConnectionCreateOptions &options) noexcept;
     NTSTATUS BindQuic(quic::QuicConnection *connection) noexcept;
+    NTSTATUS Start() noexcept;
     const quic::QuicStreamApplicationEventSink *ApplicationSink() const noexcept;
     void BeginShutdown() noexcept;
     bool PeerSettingsReceived() const noexcept;
@@ -150,10 +153,10 @@ class Http3Connection final
     quic::QuicConnection *quicConnection_ = nullptr;
     quic::QuicStreamApplicationEventSink applicationSink_ = {};
     Http3ConnectionCallbacks callbacks_ = {};
-    HeapArray<Http3ConnectionStreamState> streams_ = {};
-    HeapArray<UCHAR> readScratch_ = {};
-    HeapArray<UCHAR> writeScratch_ = {};
-    HeapArray<ULONGLONG> settingIdentifiers_ = {};
+    ProtocolHeapArray<Http3ConnectionStreamState, rtl::ProtocolAllocationSite::Http3TrackedStreams> streams_ = {};
+    ProtocolHeapArray<UCHAR, rtl::ProtocolAllocationSite::Http3ReadScratch> readScratch_ = {};
+    ProtocolHeapArray<UCHAR, rtl::ProtocolAllocationSite::Http3WriteScratch> writeScratch_ = {};
+    ProtocolHeapArray<ULONGLONG, rtl::ProtocolAllocationSite::Http3Settings> settingIdentifiers_ = {};
     qpack::QpackEncoder encoder_ = {};
     qpack::QpackDecoder decoder_ = {};
     quic::QuicStream *localControl_ = nullptr;

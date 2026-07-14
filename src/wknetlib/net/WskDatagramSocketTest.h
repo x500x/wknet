@@ -39,6 +39,8 @@ namespace wknet::net::test {
     };
 
     void ResetProvider() noexcept;
+    bool EnableNativeUdpProvider() noexcept;
+    void DisableNativeUdpProvider() noexcept;
     void QueueReceiveCompletion(const WskDatagramTestReceiveCompletion& completion) noexcept;
     void SetNextSendResult(NTSTATUS status, SIZE_T bytesSent) noexcept;
     void SetNextOpenResult(NTSTATUS status) noexcept;

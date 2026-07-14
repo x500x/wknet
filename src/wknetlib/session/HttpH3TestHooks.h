@@ -46,6 +46,17 @@ void HttpH3TestGetSnapshot(_Out_ HttpH3TestSnapshot *snapshot) noexcept;
 _Must_inspect_result_ NTSTATUS HttpH3TestCreateInMemoryPeer(_In_ const HttpH3PeerCreateOptions *options,
                                                             _Out_ HttpH3Peer *peer) noexcept;
 
+_Must_inspect_result_ NTSTATUS HttpH3TestCreateSiblingPeer(_In_ const HttpH3Peer *existingPeer,
+                                                           _Out_ HttpH3Peer *peer) noexcept;
+
+void HttpH3TestPeerInjectData(_In_ const HttpH3Peer *peer, ULONGLONG streamId,
+                              _In_reads_bytes_opt_(dataLength) const UCHAR *data, SIZE_T dataLength) noexcept;
+
+void HttpH3TestPeerInjectGoaway(_In_ const HttpH3Peer *peer, ULONGLONG streamId) noexcept;
+
+void HttpH3TestPeerInjectConnectionError(_In_ const HttpH3Peer *peer, NTSTATUS status,
+                                          ULONGLONG applicationError) noexcept;
+
 _Must_inspect_result_ NTSTATUS HttpH3TestDispatchRequired(_In_ const Request *request,
                                                           _In_ const HttpSendOptions *sendOptions,
                                                           ULONGLONG attemptGeneration,

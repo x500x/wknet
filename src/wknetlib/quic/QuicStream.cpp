@@ -83,6 +83,21 @@ void QuicStream::NotifyWritable() noexcept
     callback(context, this);
 }
 
+void QuicStream::MarkApplicationWriteBlocked() noexcept
+{
+    applicationWriteBlocked_ = true;
+}
+
+void QuicStream::TryNotifyApplicationWritable() noexcept
+{
+    if (!applicationWriteBlocked_ || sendFin_ || reset_ || sendOffset_ >= sendLimit_)
+    {
+        return;
+    }
+    applicationWriteBlocked_ = false;
+    NotifyWritable();
+}
+
 void QuicStream::NotifyReset(ULONGLONG errorCode, bool peerInitiated) noexcept
 {
     if (applicationSink_.Reset == nullptr)
@@ -146,7 +161,7 @@ void QuicStream::Clear() noexcept
             if (chunks_[i].Data != nullptr)
             {
                 RtlSecureZeroMemory(chunks_[i].Data, chunks_[i].Capacity);
-                FreeNonPagedArray(chunks_[i].Data);
+                FreeProtocolNonPagedArray(rtl::ProtocolAllocationSite::QuicStreamMergeBuffer, chunks_[i].Data);
             }
         }
     }
@@ -296,7 +311,8 @@ NTSTATUS QuicStream::Receive(ULONGLONG offset, const UCHAR *data, SIZE_T length,
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     const SIZE_T unionLength = static_cast<SIZE_T>(unionEnd - unionStart);
-    UCHAR *merged = AllocateNonPagedArray<UCHAR>(unionLength);
+    UCHAR *merged =
+        AllocateProtocolNonPagedArray<UCHAR>(rtl::ProtocolAllocationSite::QuicStreamMergeBuffer, unionLength);
     if (merged == nullptr)
         return STATUS_INSUFFICIENT_RESOURCES;
     for (SIZE_T i = 0; i < chunkCount_; ++i)
@@ -314,7 +330,7 @@ NTSTATUS QuicStream::Receive(ULONGLONG offset, const UCHAR *data, SIZE_T length,
         if (affectedScratch_[i] != 0)
         {
             RtlSecureZeroMemory(chunks_[i].Data, chunks_[i].Capacity);
-            FreeNonPagedArray(chunks_[i].Data);
+            FreeProtocolNonPagedArray(rtl::ProtocolAllocationSite::QuicStreamMergeBuffer, chunks_[i].Data);
         }
         else
         {
@@ -369,7 +385,6 @@ NTSTATUS QuicStream::Consume(UCHAR *output, SIZE_T capacity, SIZE_T *consumed, b
     if (index == chunkCount_)
     {
         *fin = ReceiveFinished();
-        NotifyClosedIfNeeded();
         return receiveReset_ && bufferedBytes_ == 0 ? STATUS_CONNECTION_RESET : STATUS_SUCCESS;
     }
     QuicStreamChunk &c = chunks_[index];
@@ -388,7 +403,7 @@ NTSTATUS QuicStream::Consume(UCHAR *output, SIZE_T capacity, SIZE_T *consumed, b
     if (c.Length == 0)
     {
         RtlSecureZeroMemory(c.Data, c.Capacity);
-        FreeNonPagedArray(c.Data);
+        FreeProtocolNonPagedArray(rtl::ProtocolAllocationSite::QuicStreamMergeBuffer, c.Data);
         for (SIZE_T i = index + 1; i < chunkCount_; ++i)
         {
             chunks_[i - 1] = chunks_[i];
@@ -397,7 +412,6 @@ NTSTATUS QuicStream::Consume(UCHAR *output, SIZE_T capacity, SIZE_T *consumed, b
     }
     *fin = ReceiveFinished();
     RefreshReadableNotification();
-    NotifyClosedIfNeeded();
     return STATUS_SUCCESS;
 }
 NTSTATUS QuicStream::SetReceiveLimit(ULONGLONG maximum) noexcept
@@ -415,13 +429,8 @@ NTSTATUS QuicStream::SetSendLimit(ULONGLONG maximum) noexcept
     {
         return STATUS_INVALID_PARAMETER;
     }
-    const bool becameWritable = applicationWriteBlocked_ && maximum > sendOffset_;
     sendLimit_ = maximum;
-    if (becameWritable)
-    {
-        applicationWriteBlocked_ = false;
-        NotifyWritable();
-    }
+    TryNotifyApplicationWritable();
     return STATUS_SUCCESS;
 }
 NTSTATUS QuicStream::OnMaxStreamData(ULONGLONG maximum) noexcept
@@ -432,14 +441,9 @@ NTSTATUS QuicStream::OnMaxStreamData(ULONGLONG maximum) noexcept
     }
     if (maximum > sendLimit_)
     {
-        const bool becameWritable = applicationWriteBlocked_ && maximum > sendOffset_;
         sendLimit_ = maximum;
         streamDataBlockedPending_ = false;
-        if (becameWritable)
-        {
-            applicationWriteBlocked_ = false;
-            NotifyWritable();
-        }
+        TryNotifyApplicationWritable();
     }
     return STATUS_SUCCESS;
 }

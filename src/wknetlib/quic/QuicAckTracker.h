@@ -1,6 +1,7 @@
 #pragma once
 
 #include "quic/QuicTypes.h"
+#include "rtl/ProtocolAllocator.h"
 #include <wknet/WknetLimits.h>
 
 namespace wknet::quic
@@ -22,7 +23,7 @@ class QuicAckTracker final
     }
 
   private:
-    HeapArray<QuicAckRange> ranges_;
+    ProtocolHeapArray<QuicAckRange, rtl::ProtocolAllocationSite::QuicAckRanges> ranges_;
     SIZE_T rangeCount_ = 0;
     ULONGLONG firstAckElicitingTime100ns_ = 0;
     ULONG ackElicitingSinceLastAck_ = 0;

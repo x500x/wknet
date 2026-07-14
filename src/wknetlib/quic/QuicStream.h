@@ -1,5 +1,6 @@
 #pragma once
 #include "quic/QuicTypes.h"
+#include "rtl/ProtocolAllocator.h"
 #include <wknet/WknetLimits.h>
 namespace wknet::quic
 {
@@ -51,6 +52,8 @@ class QuicStream final
     NTSTATUS OnResetReceived(ULONGLONG errorCode, ULONGLONG finalSize) noexcept;
     NTSTATUS StopSending(ULONGLONG errorCode) noexcept;
     bool TakeStreamDataBlocked(ULONGLONG *limit) noexcept;
+    void MarkApplicationWriteBlocked() noexcept;
+    void TryNotifyApplicationWritable() noexcept;
     ULONGLONG Id() const noexcept
     {
         return streamId_;
@@ -111,8 +114,8 @@ class QuicStream final
     ULONGLONG stopError_ = 0;
     SIZE_T maxReassemblyBytes_ = 0;
     SIZE_T maxGaps_ = 0;
-    HeapArray<QuicStreamChunk> chunks_;
-    HeapArray<UCHAR> affectedScratch_;
+    ProtocolHeapArray<QuicStreamChunk, rtl::ProtocolAllocationSite::QuicStreamChunks> chunks_;
+    ProtocolHeapArray<UCHAR, rtl::ProtocolAllocationSite::QuicStreamAffectedScratch> affectedScratch_;
     QuicStreamApplicationEventSink applicationSink_ = {};
     SIZE_T chunkCount_ = 0;
     bool initialized_ = false;

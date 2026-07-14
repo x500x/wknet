@@ -3,6 +3,7 @@
 #include "http3/Http3Connection.h"
 #include "qpack/QpackEncoder.h"
 #include "quic/QuicConnection.h"
+#include "rtl/ProtocolAllocator.h"
 #if defined(WKNET_USER_MODE_TEST)
 #include "session/HttpH3TestHooks.h"
 #include <chrono>
@@ -145,7 +146,8 @@ NTSTATUS InitializeResponseAccumulator(HttpH3DispatchContext *context,
         return STATUS_INVALID_PARAMETER;
     }
 
-    HttpH3ResponseAccumulator *accumulator = AllocateNonPagedObject<HttpH3ResponseAccumulator>();
+    HttpH3ResponseAccumulator *accumulator = AllocateProtocolNonPagedObject<HttpH3ResponseAccumulator>(
+        rtl::ProtocolAllocationSite::SessionHttp3ResponseAccumulator);
     if (accumulator == nullptr)
     {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -164,7 +166,7 @@ NTSTATUS InitializeResponseAccumulator(HttpH3DispatchContext *context,
     }
     if (!NT_SUCCESS(status))
     {
-        FreeNonPagedObject(accumulator);
+        FreeProtocolNonPagedObject(rtl::ProtocolAllocationSite::SessionHttp3ResponseAccumulator, accumulator);
         return status;
     }
     *options->ParsedResponse = {};
@@ -909,7 +911,8 @@ NTSTATUS HttpH3DispatchInitialize(HttpH3DispatchContext *context, const HttpH3Di
         return STATUS_INVALID_PARAMETER;
     }
     *context = {};
-    HttpH3CompletionFence *fence = AllocateNonPagedObject<HttpH3CompletionFence>();
+    HttpH3CompletionFence *fence =
+        AllocateProtocolNonPagedObject<HttpH3CompletionFence>(rtl::ProtocolAllocationSite::SessionHttp3CompletionFence);
     if (fence == nullptr)
     {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -930,7 +933,7 @@ NTSTATUS HttpH3DispatchInitialize(HttpH3DispatchContext *context, const HttpH3Di
     const NTSTATUS status = InitializeResponseAccumulator(context, options);
     if (!NT_SUCCESS(status))
     {
-        FreeNonPagedObject(fence);
+        FreeProtocolNonPagedObject(rtl::ProtocolAllocationSite::SessionHttp3CompletionFence, fence);
         context->CompletionFence = nullptr;
         return status;
     }
@@ -951,6 +954,8 @@ NTSTATUS HttpH3DispatchRequired(HttpH3DispatchContext *context, const HttpH3Disp
     createOptions.RequestObject = options->RequestObject;
     createOptions.SendOptions = options->SendOptions;
     createOptions.Dispatch = context;
+    createOptions.Alternative = options->Alternative;
+    createOptions.ProbeTimeoutMilliseconds = options->ProbeTimeoutMilliseconds;
     createOptions.AttemptGeneration = options->AttemptGeneration;
     HeapObject<HttpH3Peer> createdPeer;
     if (!createdPeer.IsValid())
@@ -1078,9 +1083,11 @@ void HttpH3DispatchRelease(HttpH3DispatchContext *context) noexcept
     }
     context->Peer = {};
     context->PeerCreated = false;
-    FreeNonPagedObject(static_cast<HttpH3ResponseAccumulator *>(context->ResponseAccumulator));
+    FreeProtocolNonPagedObject(rtl::ProtocolAllocationSite::SessionHttp3ResponseAccumulator,
+                               static_cast<HttpH3ResponseAccumulator *>(context->ResponseAccumulator));
     context->ResponseAccumulator = nullptr;
-    FreeNonPagedObject(static_cast<HttpH3CompletionFence *>(context->CompletionFence));
+    FreeProtocolNonPagedObject(rtl::ProtocolAllocationSite::SessionHttp3CompletionFence,
+                               static_cast<HttpH3CompletionFence *>(context->CompletionFence));
     context->CompletionFence = nullptr;
 }
 

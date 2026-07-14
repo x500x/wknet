@@ -45,6 +45,7 @@ NTSTATUS Http3ConnectionCreate(_In_ const Http3ConnectionCreateOptions &options,
                                _Out_ Http3Connection **connection) noexcept;
 NTSTATUS Http3ConnectionBindQuic(_Inout_ Http3Connection *connection,
                                  _Inout_ quic::QuicConnection *quicConnection) noexcept;
+NTSTATUS Http3ConnectionWorkerStart(_Inout_ Http3Connection *connection) noexcept;
 const quic::QuicStreamApplicationEventSink *Http3ConnectionApplicationSink(
     _In_ const Http3Connection *connection) noexcept;
 void Http3ConnectionBeginShutdown(_Inout_ Http3Connection *connection) noexcept;

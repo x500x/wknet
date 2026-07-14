@@ -283,12 +283,7 @@ namespace session
 
     Http3Options NormalizeHttp3Options(const Http3Options &options) noexcept
     {
-        Http3Options normalized = options;
-        if (normalized.Mode == Http3ConnectMode::Auto)
-        {
-            normalized.Mode = Http3ConnectMode::Disabled;
-        }
-        return normalized;
+        return options;
     }
 
     bool IsValidHttp3Options(const Http3Options &options) noexcept
@@ -345,16 +340,26 @@ namespace session
         {
             return STATUS_SUCCESS;
         }
-        if (!secureHttp || proxyEnabled ||
-            (sendOptions != nullptr && sendOptions->Http2CleartextMode != Http2CleartextMode::Disabled))
+
+        const bool incompatibleTransport = !secureHttp || proxyEnabled ||
+            (sendOptions != nullptr && sendOptions->Http2CleartextMode != Http2CleartextMode::Disabled);
+        const bool incompatibleTls = tls.MaxVersion != TlsVersion::Tls13 || !IsHttp3CompatibleAlpn(tls) ||
+            (sendOptions != nullptr && sendOptions->Http2Priority != nullptr);
+        if (normalized.Mode == Http3ConnectMode::Auto)
+        {
+            if (incompatibleTransport || incompatibleTls || tls.CertificatePolicy == CertificatePolicy::NoVerify)
+            {
+                return STATUS_SUCCESS;
+            }
+            *mode = Http3ConnectMode::Auto;
+            return STATUS_SUCCESS;
+        }
+
+        if (incompatibleTransport)
         {
             return STATUS_NOT_SUPPORTED;
         }
-        if (tls.MaxVersion != TlsVersion::Tls13)
-        {
-            return STATUS_NOT_SUPPORTED;
-        }
-        if (!IsHttp3CompatibleAlpn(tls) || (sendOptions != nullptr && sendOptions->Http2Priority != nullptr))
+        if (incompatibleTls)
         {
             return STATUS_INVALID_PARAMETER;
         }

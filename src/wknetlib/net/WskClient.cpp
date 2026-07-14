@@ -731,6 +731,12 @@ namespace net
         providerCaptured_ = true;
         providerNpi_.Client = reinterpret_cast<PWSK_CLIENT>(this);
         providerNpi_.Dispatch = reinterpret_cast<const WSK_PROVIDER_DISPATCH*>(this);
+        const NTSTATUS monitorStatus = networkChangeMonitor_.Initialize();
+        if (!NT_SUCCESS(monitorStatus))
+        {
+            Shutdown();
+            return monitorStatus;
+        }
         return STATUS_SUCCESS;
 #else
         if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
@@ -767,12 +773,19 @@ namespace net
         }
 
         providerCaptured_ = true;
+        status = networkChangeMonitor_.Initialize();
+        if (!NT_SUCCESS(status))
+        {
+            Shutdown();
+            return status;
+        }
         return STATUS_SUCCESS;
 #endif
     }
 
     void WskClient::Shutdown() noexcept
     {
+        networkChangeMonitor_.Shutdown();
 #if defined(WKNET_USER_MODE_TEST)
         providerCaptured_ = false;
         registered_ = false;
@@ -828,6 +841,23 @@ namespace net
     {
         return IsInitialized() ? providerNpi_.Dispatch : nullptr;
     }
+
+    NTSTATUS WskClient::SubscribeNetworkChanges(NetworkChangeSubscriber callback, void *context) noexcept
+    {
+        return networkChangeMonitor_.Subscribe(callback, context);
+    }
+
+    void WskClient::UnsubscribeNetworkChanges(NetworkChangeSubscriber callback, void *context) noexcept
+    {
+        networkChangeMonitor_.Unsubscribe(callback, context);
+    }
+
+#if defined(WKNET_USER_MODE_TEST)
+    void WskClient::TestNotifyNetworkChange() noexcept
+    {
+        networkChangeMonitor_.Notify();
+    }
+#endif
 
 #if defined(WKNET_USER_MODE_TEST)
     void WskTestSetResolveAll(WskTestResolveAllCallback callback, void* context) noexcept
@@ -1138,5 +1168,30 @@ namespace net
                 nodeName, serviceName, remoteAddresses, addressCapacity, addressCount, addressFamily)
             : STATUS_INVALID_PARAMETER;
     }
+
+    NTSTATUS WskClientSubscribeNetworkChanges(WskClient *client, NetworkChangeSubscriber callback,
+                                              void *context) noexcept
+    {
+        return client != nullptr ? client->SubscribeNetworkChanges(callback, context) : STATUS_INVALID_PARAMETER;
+    }
+
+    void WskClientUnsubscribeNetworkChanges(WskClient *client, NetworkChangeSubscriber callback,
+                                            void *context) noexcept
+    {
+        if (client != nullptr)
+        {
+            client->UnsubscribeNetworkChanges(callback, context);
+        }
+    }
+
+#if defined(WKNET_USER_MODE_TEST)
+    void WskTestNotifyNetworkChange(WskClient *client) noexcept
+    {
+        if (client != nullptr)
+        {
+            client->TestNotifyNetworkChange();
+        }
+    }
+#endif
 }
 }

@@ -80,11 +80,13 @@ NTSTATUS QuicParsePacketHeader(const UCHAR *packet, SIZE_T packetLength,
     header->FirstByte = packet[0];
     header->IsLongHeader = (packet[0] & 0x80U) != 0;
     header->FixedBit = (packet[0] & 0x40U) != 0;
-    if (!header->FixedBit)
-        return STATUS_INVALID_NETWORK_RESPONSE;
 
     if (!header->IsLongHeader)
     {
+        if (!header->FixedBit)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
         if (shortHeaderDestinationConnectionIdLength > QuicMaximumConnectionIdLength ||
             !CanAdvance(1, shortHeaderDestinationConnectionIdLength, packetLength))
         {
@@ -139,6 +141,10 @@ NTSTATUS QuicParsePacketHeader(const UCHAR *packet, SIZE_T packetLength,
         return STATUS_SUCCESS;
     }
 
+    if (!header->FixedBit)
+    {
+        return STATUS_INVALID_NETWORK_RESPONSE;
+    }
     if (header->Version != QuicVersion1)
         return STATUS_NOT_SUPPORTED;
     const UCHAR longType = static_cast<UCHAR>((packet[0] >> 4) & 0x03U);

@@ -98,7 +98,10 @@ namespace session
         request->PathLength = parsed->PathLength;
         request->Port = parsed->Port;
 
-        if (!request->HasTlsOverride && TextEqualsLiteralIgnoreCase(request->Scheme, request->SchemeLength, "https")) {
+        if (!request->HasTlsOverride &&
+            request->Tls.ServerName == nullptr &&
+            request->Tls.ServerNameLength == 0 &&
+            TextEqualsLiteralIgnoreCase(request->Scheme, request->SchemeLength, "https")) {
             request->Tls.ServerName = request->Host;
             request->Tls.ServerNameLength = request->HostLength;
         }

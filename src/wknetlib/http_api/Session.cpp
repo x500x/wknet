@@ -29,9 +29,7 @@ namespace
             config != nullptr ? config->Http2KeepAlive.AckTimeoutMs : DefaultHttp2KeepAliveAckTimeoutMs;
 
         const Http3Config http3 = config != nullptr ? config->Http3 : Http3Config{};
-        apiOptions.Http3.Mode = http3.Mode == Http3ConnectMode::Auto
-                                    ? ::wknet::session::Http3ConnectMode::Disabled
-                                    : static_cast<::wknet::session::Http3ConnectMode>(http3.Mode);
+        apiOptions.Http3.Mode = static_cast<::wknet::session::Http3ConnectMode>(http3.Mode);
         apiOptions.Http3.Race = static_cast<::wknet::session::Http3RaceMode>(http3.Race);
         apiOptions.Http3.RaceWindowMilliseconds = http3.RaceWindowMs;
         apiOptions.Http3.QuicProbeTimeoutMilliseconds = http3.QuicProbeTimeoutMs;
