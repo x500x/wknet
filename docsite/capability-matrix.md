@@ -34,6 +34,13 @@
 
 **HPACK**：整数续字节 ≤5、Huffman（拒绝 >30 bit 码/EOS/非法 padding）、动态表大小更新仅限块首且 ≤协商值、header-list 大小按 `name+value+32` 计；**编码端对 `authorization`/`cookie`/`proxy-authorization` 强制 Never-Indexed**。
 
+**HTTP/3 + QUIC v1 + QPACK（RFC 8999/9000/9001/9002/9114/9204）**
+- WSK Datagram + 内核态 CNG/BCrypt 主路径；QUIC packet/frame、TLS 1.3 over QUIC、ACK/loss/PTO/NewReno、流控、stream、CID、stateless reset、NEW_TOKEN、Key Phase、idle/closing/draining 均有协议测试和本地互操作覆盖。
+- HTTP/3 支持 control/QPACK 关键单向流、SETTINGS、HEADERS/DATA、1xx、HEAD/204/304/CONNECT body 语义、请求/响应 trailer、GOAWAY 与取消；server push 安全拒绝。
+- QPACK 支持 static/dynamic table、blocked field section 与双向 instruction streams；动态表、blocked streams/bytes、field section、字段数和所有对端可控分配均有 NonPaged 硬上限。
+- `Http3ConnectMode::Auto` 为默认：首次 HTTPS 请求走 TCP，只从已认证响应学习精确 `h3` Alt-Svc；alternative host/port 只用于 DNS/UDP，SNI、证书校验和 `:authority` 始终绑定原 origin。`NoVerify`、代理、明文 HTTP、h2c、WebSocket、非 HTTP ALPN 和 HTTP/2 priority 不进入 H3。
+- QUIC probe 失败时仅在请求确定未发送或满足一次安全重放规则时回到 TCP；取消、资源不足不污染 Alt-Svc，网络失败按 candidate+地址族退避，协议/证书/ALPN 失败在 entry 生命周期内禁用 candidate。
+
 **WebSocket（RFC 6455）**
 - ws/wss 握手；`Sec-WebSocket-Accept` **常量时间**比对；`permessage-deflate` 显式 opt-in（默认关闭），未请求/未知/非法扩展拒绝；子协议协商。
 - 支持调用方提供 opening-handshake headers（如 `Origin`、`Authorization`、`Cookie`），拒绝库受控头（`Host`、`Connection`、`Upgrade`、`Sec-WebSocket-*` 等）和非法头文本。
@@ -106,7 +113,7 @@
 | HTTP/2 复杂本地 priority tree 调度 | 非目标；不维护本地依赖树，不实现带宽调度器 |
 | 除 `permessage-deflate` 外的 WebSocket extensions | 非目标；不协商其它扩展 |
 | 在线 OCSP/CRL 抓取 | 非目标；调用方通过外部 trust/cert/revocation 数据或已缓存条目驱动强撤销判定 |
-| HTTP/3 / QUIC | 规划中；QUIC v1/HTTP/3/QPACK 正按 M0–M9 实施，当前 `Auto` 仍关闭，不能视为已提供能力 |
+| HTTP/3 扩展能力 | QUIC v2、0-RTT application data、主动迁移、多路径、ECN、DPLPMTUD、WebTransport、QUIC Datagram、WebSocket over H3 为明确非目标 |
 
 ### 实现策略和信任模型
 

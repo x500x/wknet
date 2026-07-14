@@ -19,13 +19,13 @@
 - 在线撤销抓取（OCSP/CRL 网络拉取）——内核态刻意省略，支持静态撤销条目
 
 **其它**
-- QUIC v2、WebTransport、QUIC Datagram、WebSocket over HTTP/3
+- QUIC v2、0-RTT application data、主动迁移、多路径、ECN、DPLPMTUD、WebTransport、QUIC Datagram、WebSocket over HTTP/3
 
-### 正在实施但尚未公开启用
+### 已完成的 HTTP/3 主路径
 
-- QUIC v1 + HTTP/3 + QPACK 正按 `docs/plans/2026-07-13-http3-quic-design.md` 的 M0–M9 门禁实施。
-- 当前公开 `Send*` 行为不变；透明 `Http3ConnectMode::Auto` 在协议账本、互操作、WSK 内核集成和完整回归全部通过前保持关闭。
-- 开发期只允许明确的强制 H3 测试路径，不把未完成路径作为正式回退架构。
+- QUIC v1 + HTTP/3 + QPACK 已接入公开 `Send*` 路径，默认 `Http3ConnectMode::Auto` 从已认证 Alt-Svc 学习并在后续请求使用 H3。
+- `Required` 保留给明确 prior-knowledge；`Disabled` 可完全关闭自动学习与使用。
+- 后续方向只做已立项的性能、互操作和审计增强，不以回退兼容层替代协议设计。
 
 ### 默认关闭、可显式开启
 

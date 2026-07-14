@@ -82,6 +82,7 @@ plugins:
             能力边界: Capability Matrix
             架构: Architecture
             HTTP/2 与 HPACK: HTTP/2 & HPACK
+            HTTP/3 与 QUIC: HTTP/3 & QUIC
             TLS 与证书: TLS & Certificates
             密码学: Cryptography
             产品 API: Product API
@@ -128,6 +129,7 @@ nav:
       - 架构: architecture.md
       - HTTP/1.1: http1.md
       - HTTP/2 与 HPACK: http2.md
+      - HTTP/3 与 QUIC: http3-quic.md
       - WebSocket: websocket.md
       - TLS 与证书: tls-and-certificates.md
       - 密码学: cryptography.md
