@@ -40,27 +40,27 @@ wknet::http::Send* / Get* / Post*
   → transport → WSK or TLS (H3 is QUIC over Datagram)
 ```
 
-- **Default HTTPS path**: HTTP/1.1 or ALPN `h2` over TCP TLS. With default `Http3ConnectMode::Auto`, exact `h3` Alt-Svc learned from authenticated responses can prefer HTTP/3 on later requests.
-- **WebSocket**: orchestrated by session; `wss` may use RFC 8441 (HTTP/2 extended CONNECT) or HTTP/1.1 Upgrade, sharing TLS, connection, and cancellation models.
-- **Cleartext HTTP / h2c / proxy / WebSocket / non-HTTP ALPN** never select HTTP/3.
+- **HTTPS**: defaults to HTTP/1.1 or ALPN-negotiated `h2` over TCP TLS. With `Http3ConnectMode::Auto`, later requests may prefer HTTP/3 after an exact `h3` Alt-Svc is learned from a response that already passed certificate and policy checks.
+- **WebSocket**: orchestrated by `session`. `wss` may use RFC 8441 (HTTP/2 extended CONNECT) or HTTP/1.1 Upgrade, sharing TLS, connection, and cancellation with HTTP.
+- **HTTP/3 scope**: HTTPS without a proxy. Cleartext HTTP, h2c, WebSocket, and non-HTTP ALPN stay on the existing TCP paths.
 
 ## Ownership and buffers
 
 - Pool fields are written only by the session pool module; pooled connections carry socket, transport, TLS, and optional H2/H3 state.
 - Protocol and Workspace buffers are heap-backed; hot buffers are retained and reused.
 - Synchronous HTTP / WebSocket / TLS / certificate paths require **`PASSIVE_LEVEL`**; otherwise the library returns `STATUS_INVALID_DEVICE_REQUEST` or `STATUS_INVALID_DEVICE_STATE`.
-- Before unload: if async APIs were used, call `wknet::http::Destroy()` first to drain in-flight work.
+- After async APIs, call `wknet::http::Destroy()` on the driver unload path and wait for async work to finish before releasing resources.
 
-## Hard constraints (caller contract)
+## Caller conventions at a glance
 
-| Constraint | Meaning |
-|------------|---------|
-| Client only | No inbound request parser / server role |
-| WSK + CNG | Transport and crypto main paths; no WinHTTP / SChannel |
-| Caller trust anchors | The library never hard-codes system CAs |
-| Hostname matching | IP literals match iPAddress SAN only; DNS names **never fall back to CN** |
-| Redirects | HTTPS→HTTP is rejected by default; `MaxRedirects` defaults to 10 and exhausted hops return the current 3xx without error |
-| TRACE | Off by default; requires `SendFlagAllowTrace` |
-| H3 Auto | Learns Alt-Svc only from **authenticated** HTTPS responses; SNI, certificate identity, and `:authority` stay bound to the origin |
+| Point | Behavior |
+|-------|----------|
+| Role | Client only; no inbound parser / server |
+| Main path | WSK transport, CNG crypto; WinHTTP / SChannel are not used |
+| Trust | Caller-supplied anchors, CA bundles, pins, and revocation evidence; no built-in system CA store |
+| Hostnames | IPs match iPAddress SAN only; DNS names do not fall back to CN |
+| Redirects | HTTPS→HTTP refused by default; `MaxRedirects` defaults to 10 and exhausted hops return the current 3xx |
+| TRACE | Off by default; enable with `SendFlagAllowTrace` |
+| H3 Auto | Learns Alt-Svc only from HTTPS responses that already passed validation; SNI, certificate identity, and `:authority` remain bound to the origin |
 
-Capability classes (implemented / default-off / security refusal / non-goal) live in the [Capability Matrix](capability-matrix.en.md).
+Support scope and limits are documented in the [Capability Matrix](capability-matrix.en.md).

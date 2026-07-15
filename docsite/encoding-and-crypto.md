@@ -48,7 +48,7 @@
 - 范围：W3C EXI 1.0 Second Edition **无外部 Schema** 流。  
 - 支持：四种 alignment、Options、保真项、内建 XML Schema 类型、`xsi:type` / `xsi:nil`。  
 - 输出：Infoset 等价 XML。  
-- **非目标 / 拒绝**：外部 Schema、strict grammar → `STATUS_NOT_SUPPORTED`。
+- **不支持 / 拒绝**：外部 Schema、strict grammar → `STATUS_NOT_SUPPORTED`。
 
 ### Pack200 边界
 
@@ -99,7 +99,7 @@ HTTP 层等价类型为 `ContentCoding` / `AcceptCoding` / `CodingDecodeMaterial
 - `KeyExchange`：密钥对与共享密钥（`KeyExchange.h`）  
 - `Ed25519Verify` / `Ed448Verify`  
 - `CngProviderCache`：会话级预打开 BCrypt 算法句柄；**软件路径不使用缓存**  
-- `TlsClientCredential`：mTLS 签名回调，**私钥不进入库**
+- `TlsClientCredential`：mTLS 签名回调；私钥留在调用方
 
 硬化惯例：密钥与中间量 `RtlSecureZeroMemory`；FFDHE 拒绝非法 `y`；SPKI/导入路径强制 RSA 下限。
 
@@ -108,4 +108,4 @@ HTTP 层等价类型为 `ContentCoding` / `AcceptCoding` / `CodingDecodeMaterial
 - HTTP 响应 CE 失败 → 请求失败（fail-closed），不会静默当 identity 用。  
 - TLS 记录层与证书路径使用同一 crypto 原语；信任锚与 pin 由调用方提供（见 TLS 文档）。  
 - 不把 WinHTTP / WinINet / SChannel 作为内核主路径。  
-- 能力分类措辞以 [能力账本](capability-matrix.md) 为准。
+- 支持范围见 [能力边界](capability-matrix.md)。

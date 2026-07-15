@@ -35,7 +35,7 @@ HTTP/1.1 是 `wknet::http` 在 TCP 上的基线协议。请求 framing 由库生
 2. 收到 final / `417` → 不发 body  
 3. 等待超时（`ExpectContinueTimeoutMs`，默认 1000 ms）→ 按 RFC 时序发送 body  
 
-带 body 或 Expect 的请求不进入 HTTP/1.1 pipeline。
+带 body 或 Expect 的请求不会参与 HTTP/1.1 pipeline。
 
 ## Pipeline（默认关）
 
@@ -45,9 +45,9 @@ HTTP/1.1 是 `wknet::http` 在 TCP 上的基线协议。请求 framing 由库生
 | `Http11PipelineMaxDepth` | 4（硬上限 64） |
 | `Http11PipelineMethodMask` | `GET` / `HEAD` / `OPTIONS` |
 
-开启后同源 keep-alive 连接按发送顺序分配 sequence，**FIFO** 绑定响应。解析或传输失败关闭该 pipeline 连接并传播给后续排队请求。
+开启后，同源 keep-alive 连接按发送顺序分配 sequence，并以 **FIFO** 绑定响应。解析或传输失败会关闭该 pipeline 连接，并传播给后续排队请求。
 
-**不进入 pipeline**：带请求体、`Expect: 100-continue`、会触发 redirect 重放、`NoPool`/`ForceNew`、非 mask 方法。避免响应重排与非幂等重放。
+下列请求不参与 pipeline：带请求体、带 `Expect: 100-continue`、会触发 redirect 重放、`NoPool` / `ForceNew`，以及不在 method mask 中的方法。这样可避免响应重排与非幂等重放。
 
 ## 代理
 
@@ -85,4 +85,4 @@ HTTP/1.1 是 `wknet::http` 在 TCP 上的基线协议。请求 framing 由库生
 
 - 安全方法在连接关闭族 / `STATUS_RETRY` / 超时且 `ReuseOrCreate` 时，可以 `ForceNew` **恰好重试一次**（`GET`/`HEAD`/`OPTIONS`）。
 - Content-Encoding 解码、解压炸弹与 TE 规则见 [编码与密码学](encoding-and-crypto.md)。
-- 能力分类措辞以 [能力账本](capability-matrix.md) 为准。
+- 支持范围见 [能力边界](capability-matrix.md)。

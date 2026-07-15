@@ -35,7 +35,7 @@ Callers must not hand-write `Host`/`Content-Length`/`Connection`/`Transfer-Encod
 2. Receive final / `417` → do not send the body  
 3. Wait timeout (`ExpectContinueTimeoutMs`, default 1000 ms) → send the body per RFC timing  
 
-Requests with a body or Expect never enter the HTTP/1.1 pipeline.
+Requests with a body or Expect do not participate in HTTP/1.1 pipelining.
 
 ## Pipelining (off by default)
 
@@ -47,7 +47,7 @@ Requests with a body or Expect never enter the HTTP/1.1 pipeline.
 
 When enabled, same-origin keep-alive connections assign sequences in send order and bind responses **FIFO**. Parse or transport failure closes that pipeline connection and propagates to queued requests.
 
-**Excluded from the pipeline**: request body, `Expect: 100-continue`, redirect replay, `NoPool`/`ForceNew`, methods outside the mask. This avoids response reordering and non-idempotent replay.
+These requests do not participate in the pipeline: request body, `Expect: 100-continue`, redirect replay, `NoPool` / `ForceNew`, and methods outside the mask. That avoids response reordering and non-idempotent replay.
 
 ## Proxy
 
@@ -85,4 +85,4 @@ A full header block (`\r\n\r\n`) is required, else `STATUS_MORE_PROCESSING_REQUI
 
 - Safe methods may **retry exactly once** with `ForceNew` on connection-close families / `STATUS_RETRY` / timeout under `ReuseOrCreate` (`GET`/`HEAD`/`OPTIONS`).
 - Content-Encoding decode, bomb guards, and TE rules: [Encoding & crypto](encoding-and-crypto.md).
-- Capability wording follows the [Capability matrix](capability-matrix.md).
+- See the [capability matrix](capability-matrix.md) for support scope.

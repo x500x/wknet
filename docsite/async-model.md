@@ -44,16 +44,16 @@ wknet::http::AsyncRelease(op);
 
 `AsyncOptions.OnComplete`（及测试路径下的完成回调）在操作进入 `Completed` 时调用。回调内不要做重活或再次同步等待同一 op；适合投递上层队列。
 
-## 卸载约束
+## 驱动卸载
 
-用过异步 API 后，驱动卸载前**必须**先：
+使用过异步 API 时，在卸载路径调用 `Destroy`，等待异步操作完成后再释放 WSK 与其它句柄：
 
 ```cpp
-wknet::http::Destroy();  // 排空在飞异步操作与 worker
+wknet::http::Destroy();
 // 再释放 WSK / 关闭 session 与其它句柄
 ```
 
-同步-only 路径可不调用，但可无条件调用。每个 session/相关句柄用在飞计数与 drain 事件防止“操作仍在使用时释放句柄”。
+未使用异步 API 时可不调用；调用也无害。Session 等句柄通过引用计数与等待，避免操作仍在进行时被释放。
 
 ## 与同步 API 的关系
 

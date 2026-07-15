@@ -69,7 +69,7 @@ wknet::websocket::ConnectEx(session, &cfg, &ws);
 - H1 Upgrade 与 RFC 8441 共用同一 offer/校验路径；调用方不得手写 `Sec-WebSocket-Extensions`。
 - 发送：仅压缩 Text/Binary **首片**设 RSV1；Continuation / 控制帧不设 RSV1。
 - 接收：未协商、控制帧、Continuation 上的 RSV1 → 协议错误关闭。
-- 解压受 `MaxMessageBytes`、输出容量与膨胀比限制；其它 WebSocket 扩展为**非目标**。
+- 解压受 `MaxMessageBytes`、输出容量与膨胀比限制；不协商 permessage-deflate 以外的 WebSocket 扩展。
 
 ## 控制帧与 Close
 
@@ -92,5 +92,5 @@ wknet::websocket::ConnectEx(session, &cfg, &ws);
 ## 边界
 
 - 无默认压缩；无默认握手 redirect / 401/407 跟随。  
-- 不支持 WebSocket over HTTP/3（见 [HTTP/3](http3-quic.md) 非目标）。  
-- 能力分类措辞以 [能力账本](capability-matrix.md) 为准。
+- 不支持 WebSocket over HTTP/3（见 [HTTP/3](http3-quic.md)）。  
+- 支持范围见 [能力边界](capability-matrix.md)。

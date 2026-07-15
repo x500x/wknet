@@ -18,7 +18,7 @@ HTTPS verifies certificates by default (`CertPolicy::Verify`). The library **doe
 | `ModernDefault` (default) | Modern ciphers/groups/signatures; accidental compatibility flags → `STATUS_INVALID_PARAMETER` |
 | `CompatibilityExplicit` | Allows RSA-kx, CBC, SHA-1 signatures, and true renegotiation individually |
 
-Default-off opt-ins: TLS 1.2 RSA-kx / CBC / SHA-1 / renegotiation, TLS 1.3 0-RTT, post-handshake client auth, and `RequireRevocationCheck`. See the [Capability Matrix](capability-matrix.en.md).
+Default-off opt-ins: TLS 1.2 RSA-kx / CBC / SHA-1 / renegotiation, post-handshake client auth, and `RequireRevocationCheck`. How to enable: [Capability matrix · Default-off](capability-matrix.en.md#2-default-off).
 
 TLS 1.2 hard requirements: Extended Master Secret and secure renegotiation indication; CBC requires Encrypt-then-MAC.
 
@@ -46,12 +46,12 @@ Never use `CertPolicy::NoVerify` in production (skips chain and hostname checks)
 
 ## mTLS
 
-`TlsClientCredential` carries the certificate chain and a `Sign` callback. **Private keys never enter the library** — signatures complete only through the callback.
+`TlsClientCredential` carries the certificate chain and a `Sign` callback. Private keys remain with the caller; the library only completes signatures through the callback.
 
-## Resumption and 0-RTT
+## Session resumption
 
 - Resumption tickets bind policy identity, SNI, ALPN, cipher, and version (per-version cache caps apply).
-- TLS 1.3 0-RTT is off by default: requires `EnableEarlyData`, caller-declared `EarlyDataReplaySafe`, and a ticket advertising `max_early_data_size`; otherwise `STATUS_NOT_SUPPORTED` and no early data is sent.
+- TLS 1.3 0-RTT early data exists only on internal connection options and is **not** exposed on `wknet::http::TlsConfig` / `SendOptions`; the product HTTP path cannot enable it through public fields.
 
 ## Boundary with HTTP
 

@@ -33,8 +33,8 @@ Match keys include scheme, host, port, address family, TLS version/policy/certif
 | `NoPool` | Bypass the pool; **never displaces active connections**; close on release |
 
 - HTTP/2: same-origin connections may share multiple stream leases up to local/peer concurrency limits.
-- HTTP/3: the pool never merges across origins; alternative endpoints affect DNS/UDP only while identity stays bound to the origin.
-- **Never returned to the pool**: close-delimited bodies, status **101**, `Connection: close`, unread bytes, non-keep-alive HTTP/1.0, and H2/H3 connections the protocol marks non-reusable.
+- HTTP/3: the pool does not merge across origins. Alternatives are used for DNS/UDP only; SNI, certificates, and `:authority` remain bound to the origin.
+- These responses are not returned to the pool: close-delimited bodies, status **101**, `Connection: close`, unread bytes, non-keep-alive HTTP/1.0, and H2/H3 connections the protocol marks non-reusable.
 - Idle eviction runs lazily at acquire when `IdleTimeoutMs ≠ 0` (no background timer).
 
 ## Safe retry and redirects
@@ -62,14 +62,14 @@ Match keys include scheme, host, port, address family, TLS version/policy/certif
 - HTTPS: HTTP/1.1 **CONNECT** tunnel, then TLS
 - Cleartext HTTP over proxy: absolute-form request-target, no CONNECT
 - `Proxy-Authorization` comes only from the explicit opaque configured value
-- With proxy enabled, HTTP/3 Auto is not selected
+- When a proxy is enabled, HTTP/3 Auto does not select H3
 
 ## HTTP/3 and the pool
 
 Default `Http3ConnectMode::Auto`:
 
-1. First HTTPS requests without prior knowledge use TCP TLS
-2. Exact `h3` Alt-Svc is learned only from responses that already completed certificate and TLS-policy validation
-3. Later requests with the same security identity may prefer H3; on probe failure, TCP fallback is allowed only while the request is unsent or satisfies the one-replay safety rules
+1. Without prior knowledge, the first HTTPS request uses TCP TLS
+2. Only an exact `h3` Alt-Svc from a response that already passed certificate and TLS-policy checks is cached
+3. Later requests with the same security identity may prefer H3; on probe failure, TCP fallback is allowed only while the request is still unsent or the one-replay safety rules apply
 
-`Disabled` turns learning/use off; `Required` is prior-knowledge (no Alt-Svc read, no automatic TCP fallback). Details: [HTTP/3 & QUIC](http3-quic.en.md).
+`Disabled` turns learning and use off; `Required` is prior-knowledge (no Alt-Svc read, no automatic TCP fallback). Details: [HTTP/3 & QUIC](http3-quic.en.md).

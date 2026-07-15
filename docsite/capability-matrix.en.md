@@ -1,13 +1,13 @@
-# Capability Matrix
+# Capability matrix
 
-Capabilities are booked in four classes. Keep them separate when you read:
+This page describes what wknet supports today, what is enabled by default, and which behaviors are rejected. Sections are grouped by status for integration review.
 
-1. **Implemented** — available by default, or as the documented default  
-2. **Default-off** — present in code; must be turned on explicitly  
-3. **Security refusal** — blocked on purpose by policy  
-4. **Non-goal** — not offered, and not planned as a compatibility shim  
+1. **Implemented** — available now; usable under default configuration unless noted  
+2. **Default-off** — implemented, but must be enabled explicitly  
+3. **Policy rejection** — requests or responses rejected by protocol or security policy  
+4. **Not supported** — not provided in the current release  
 
-Hard constraints: client only; WSK + CNG; no WinHTTP/SChannel; no separate client layer; caller-supplied trust anchors; `PASSIVE_LEVEL` on synchronous paths.
+Scope: HTTP/HTTPS/WebSocket client. Transport main path is WSK; cryptography main path is CNG/BCrypt. WinHTTP, WinINet, and SChannel are not used. Trust anchors, CA bundles, pins, and revocation evidence are caller-supplied. Synchronous paths require `PASSIVE_LEVEL`.
 
 ---
 
@@ -15,7 +15,7 @@ Hard constraints: client only; WSK + CNG; no WinHTTP/SChannel; no separate clien
 
 ### HTTP/1.1 (RFC 9110/9112)
 
-- Request bodies: `Content-Length`, library-generated chunked, streaming `BodyCreateStream` / `RequestSetBodySource`; caller-supplied `Transfer-Encoding`/`TE` is a **security refusal**.
+- Request bodies: `Content-Length`, library-generated chunked, streaming `BodyCreateStream` / `RequestSetBodySource`; caller-supplied `Transfer-Encoding`/`TE` is rejected.
 - Request trailers: chunked path only; forbidden fields and CRLF injection rejected.
 - Responses: status line HTTP/1.0/1.1 only; bounded header line/block/count; **obs-fold rejected**; multiple `Content-Length` or `TE`+`CL` conflict → `STATUS_INVALID_NETWORK_RESPONSE`.
 - Body framing: CL / chunked / close-delimited; no body for 1xx, 204, 205, 304, HEAD.
@@ -35,10 +35,10 @@ Hard constraints: client only; WSK + CNG; no WinHTTP/SChannel; no separate clien
 ### HTTP/3 + QUIC v1 + QPACK
 
 - WSK Datagram + kernel CNG main path; QUIC v1 packets/frames, TLS 1.3 over QUIC, ACK/loss/PTO, flow control, CIDs, close state machine.
-- HTTP/3: critical control/QPACK unidirectional streams, SETTINGS, HEADERS/DATA, 1xx, trailers, GOAWAY/cancel; **server push is a security refusal**.
-- **Default `Http3ConnectMode::Auto`**: first HTTPS uses TCP; exact `h3` Alt-Svc learned only from **authenticated** responses; alternatives affect DNS/UDP only while SNI/cert/`authority` stay origin-bound.
-- Never selects H3: `NoVerify`, proxy, cleartext HTTP, h2c, WebSocket, non-HTTP ALPN, HTTP/2 priority.
-- TCP fallback only while the request is unsent or satisfies the **one-replay** safety rules.
+- HTTP/3: critical control/QPACK unidirectional streams, SETTINGS, HEADERS/DATA, 1xx, trailers, GOAWAY/cancel; server push is rejected.
+- Default `Http3ConnectMode::Auto`: first HTTPS uses TCP; only an exact `h3` Alt-Svc from a response that already passed certificate and TLS-policy checks is cached. DNS/UDP may target the alternative; SNI, certificate checks, and `:authority` remain bound to the origin.
+- HTTP/3 is not used for `CertPolicy::NoVerify`, HTTP proxies, cleartext HTTP, h2c, WebSocket, non-HTTP ALPN, or requests with `Http2Priority`.
+- TCP fallback is allowed only while the request is still unsent, or when the one-replay safety rules apply.
 
 ### WebSocket (RFC 6455)
 
@@ -50,7 +50,7 @@ Hard constraints: client only; WSK + CNG; no WinHTTP/SChannel; no separate clien
 ### TLS / certificates / crypto
 
 - TLS 1.2/1.3 single-version path; no in-handshake automatic downgrade; EMS + secure renegotiation indication; CBC requires EtM.
-- Certificates: bounded chains, hostnames (IP → iPAddress SAN only; **DNS never falls back to CN**), offline revocation evidence, SPKI pins, mTLS callback signatures (private keys never enter the library).
+- Certificates: bounded chains, hostnames (IP → iPAddress SAN only; DNS names do not fall back to CN), offline revocation evidence, SPKI pins, mTLS callback signatures (private keys remain with the caller).
 - Crypto: CNG first; ChaCha20-Poly1305, X25519, and similar filled by in-kernel software; minimum RSA 2048.
 
 ### Session behavior (key defaults)
@@ -66,26 +66,83 @@ Hard constraints: client only; WSK + CNG; no WinHTTP/SChannel; no separate clien
 
 ---
 
-## 2. Default-off (explicit opt-in)
+## 2. Default-off
 
-| Capability | How to enable |
-|------------|---------------|
-| `Expect: 100-continue` | `SendFlagExpectContinue` |
-| HTTP/1.1 pipelining | `EnableHttp11Pipeline=true` (default methods GET/HEAD/OPTIONS) |
-| h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode` |
-| HTTP/2 PING keepalive | `Http2KeepAlive.Enabled=true` |
-| HTTP/2 per-request priority | `SendOptions.Http2Priority` |
-| WebSocket permessage-deflate | `PerMessageDeflate.Enable=true` |
-| TLS 1.2 RSA-kx / CBC / SHA-1 / renegotiation | `CompatibilityExplicit` + matching switches |
-| TLS 1.3 0-RTT | `EnableEarlyData` + `EarlyDataReplaySafe` |
-| TLS 1.3 post-handshake client auth | `EnablePostHandshakeClientAuth` |
-| Hard revocation requirement | `RequireRevocationCheck` |
-| TRACE method | `SendFlagAllowTrace` |
-| RFC 9111 in-memory cache | Caller creates and attaches `SessionConfig.Cache` / send options |
+Features that are implemented but disabled by default, with the fields that enable them. Headers: `Types.h`, `Cache.h`, `websocket/WebSocket.h`.
+
+| Capability | Object | Fields / usage |
+|------------|--------|----------------|
+| `Expect: 100-continue` | `SendOptions` | `Flags \|= SendFlagExpectContinue`; optional `ExpectContinueTimeoutMs` (default 1000) |
+| TRACE | `SendOptions` | `Flags \|= SendFlagAllowTrace` (body / trailers / sensitive headers still rejected) |
+| HTTP/1.1 pipeline | `SessionConfig` | `EnableHttp11Pipeline = true`; `Http11PipelineMaxDepth` (default 4, cap 64); `Http11PipelineMethodMask` (default GET\|HEAD\|OPTIONS) |
+| h2c | `SendOptions` | `Http2CleartextMode = PriorKnowledge` or `Upgrade` |
+| HTTP/2 PING keepalive | `SessionConfig` | `Http2KeepAlive.Enabled = true`; `IdleMs` / `IntervalMs` / `AckTimeoutMs` (defaults 30000 / 30000 / 5000) |
+| HTTP/2 priority | `SendOptions` | `Http2Priority` → `Http2Priority{ StreamDependency, Weight(1..256), Exclusive }` |
+| permessage-deflate | `ConnectConfig` | `PerMessageDeflate.Enable = true`; optional `Client/ServerNoContextTakeover`, `Client/ServerMaxWindowBits` (8..15) |
+| TLS 1.2 compatibility / renegotiation | `TlsConfig.Policy` | `Profile = CompatibilityExplicit`, then `EnableTls12RsaKeyExchange` / `EnableTls12Cbc` / `EnableTls12Sha1Signatures` / `EnableTls12Renegotiation`; `TlsConfig.MaxTls12Renegotiations` (default 1, cap 4) |
+| post-handshake client auth | `TlsConfig.Policy` | `EnablePostHandshakeClientAuth = true`, plus `TlsConfig.ClientCredential` |
+| Hard revocation | `TlsConfig.Policy` | `RequireRevocationCheck = true`; caller supplies verifiable OCSP/CRL evidence |
+| In-memory cache | `SessionConfig` / `SendOptions` | `CacheCreate` → `SessionConfig.Cache`; per-send `SendFlagBypassCache` / `NoCacheStore` / `OnlyIfCached` or `SendOptions.Cache` |
+
+Examples:
+
+```cpp
+// Per send
+wknet::http::SendOptions* options = nullptr;
+wknet::http::SendOptionsCreate(&options);
+options->Flags |= wknet::http::SendFlagExpectContinue;
+options->ExpectContinueTimeoutMs = 1000;
+options->Flags |= wknet::http::SendFlagAllowTrace;
+options->Http2CleartextMode = wknet::http::Http2CleartextMode::PriorKnowledge;
+
+wknet::http::Http2Priority priority = {};
+priority.Weight = 16;
+options->Http2Priority = &priority;
+
+wknet::http::SendEx(session, wknet::http::Method::Get,
+    url, urlLen, nullptr, nullptr, options, &response);
+wknet::http::SendOptionsRelease(options);
+
+// Session
+wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+config.EnableHttp11Pipeline = true;
+config.Http11PipelineMaxDepth = 4;
+config.Http11PipelineMethodMask =
+    wknet::http::Http11PipelineMethodGet |
+    wknet::http::Http11PipelineMethodHead |
+    wknet::http::Http11PipelineMethodOptions;
+config.Http2KeepAlive.Enabled = true;
+config.Tls.Policy.Profile = wknet::http::TlsSecurityProfile::CompatibilityExplicit;
+config.Tls.Policy.EnableTls12Cbc = true;
+config.Tls.Policy.RequireRevocationCheck = true;
+
+wknet::http::Cache* cache = nullptr;
+wknet::http::CacheOptions cacheOptions = {};
+cacheOptions.MaxBytes = 16 * 1024 * 1024;
+cacheOptions.MaxEntries = 256;
+cacheOptions.Mode = wknet::http::CacheMode::Private;
+wknet::http::CacheCreate(&cacheOptions, &cache);
+config.Cache = cache;
+
+wknet::http::Session* session = nullptr;
+wknet::http::SessionCreate(&config, &session);
+
+// WebSocket
+wknet::websocket::ConnectConfig cfg = wknet::websocket::DefaultConnectConfig();
+cfg.Url = "wss://example.com/ws";
+cfg.UrlLength = 18;
+cfg.PerMessageDeflate.Enable = true;
+wknet::websocket::WebSocket* ws = nullptr;
+wknet::websocket::ConnectEx(session, &cfg, &ws);
+```
+
+TLS 1.3 0-RTT (`EnableEarlyData` / `EarlyDataReplaySafe`) exists only on internal TLS connection options and is not mapped to `TlsConfig` / `SendOptions`, so the product HTTP API cannot enable it. HTTP/3 application-data 0-RTT is listed under “Not supported”.
 
 ---
 
-## 3. Security refusals / policy constraints
+## 3. Policy rejection
+
+The following behaviors are rejected by design. Rejection here is policy, not a missing implementation.
 
 | Behavior | Handling |
 |----------|----------|
@@ -101,18 +158,18 @@ Hard constraints: client only; WSK + CNG; no WinHTTP/SChannel; no separate clien
 
 ---
 
-## 4. Explicit non-goals
+## 4. Not supported
 
-| Capability | Conclusion |
-|------------|------------|
-| HTTP server / inbound request parser | Non-goal (client only) |
-| On-disk persistent HTTP cache | Non-goal (in-memory NonPaged cache objects only) |
-| Local HTTP/2 priority-tree bandwidth scheduling | Non-goal |
-| WebSocket extensions other than permessage-deflate | Non-goal |
-| Online revocation fetching | Non-goal |
-| QUIC v2, H3 0-RTT application data, active migration, multipath, ECN, DPLPMTUD, WebTransport, QUIC Datagram, WebSocket over H3 | Non-goal |
-| WinHTTP / WinINet / SChannel as kernel main path | Non-goal |
-| Separate client layer / second connection lifecycle | Non-goal |
+| Capability | Notes |
+|------------|-------|
+| HTTP server / inbound request parser | Client library; no server role |
+| On-disk persistent HTTP cache | In-memory NonPaged cache objects only |
+| Local HTTP/2 priority-tree bandwidth scheduling | Not implemented |
+| WebSocket extensions other than permessage-deflate | Not negotiated |
+| Online revocation fetching | Library does not initiate OCSP/CRL network fetch |
+| QUIC v2, H3 0-RTT application data, active migration, multipath, ECN, DPLPMTUD, WebTransport, QUIC Datagram, WebSocket over H3 | Not supported |
+| WinHTTP / WinINet / SChannel as kernel main path | Not used |
+| Separate client layer / second connection lifecycle | Not provided |
 
 ---
 

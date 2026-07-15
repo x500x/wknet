@@ -33,8 +33,8 @@
 | `NoPool` | 绕过池；**从不挤掉活跃连接**；release 时关闭 |
 
 - HTTP/2：同源连接可按本地/peer 并发上限共享多个 stream 租约。
-- HTTP/3：连接池不跨 origin 合并；alternative endpoint 只影响 DNS/UDP，身份仍绑定原 origin。
-- **永不回池**：close-delimited body、状态 **101**、`Connection: close`、未读完字节、非 keep-alive 的 HTTP/1.0，以及协议判定不可复用的 H2/H3 连接。
+- HTTP/3：连接池不跨 origin 合并。alternative 仅用于 DNS/UDP；SNI、证书与 `:authority` 仍绑定原 origin。
+- 下列响应不回池：close-delimited body、状态 **101**、`Connection: close`、未读完的字节、非 keep-alive 的 HTTP/1.0，以及协议判定不可复用的 H2/H3 连接。
 - 空闲驱逐仅在 `IdleTimeoutMs ≠ 0` 时于 acquire 惰性判断（无后台定时器）。
 
 ## 安全重试与重定向
@@ -62,14 +62,14 @@
 - HTTPS：HTTP/1.1 **CONNECT** 隧道后再 TLS
 - 明文 HTTP over proxy：absolute-form request-target，不建 CONNECT
 - `Proxy-Authorization` 只来自显式配置的 opaque 值
-- 启用代理时不进入 HTTP/3 Auto 路径
+- 启用代理时，HTTP/3 Auto 不会选用 H3
 
 ## HTTP/3 与池的关系
 
 默认 `Http3ConnectMode::Auto`：
 
-1. 无先验时首次 HTTPS 走 TCP TLS
-2. 仅从**已完成证书与 TLS 策略验证**的响应学习精确 `h3` Alt-Svc
-3. 后续同安全身份请求可优先 H3；probe 失败仅在请求未发送或满足一次安全重放规则时回落 TCP
+1. 没有先验时，首次 HTTPS 使用 TCP TLS
+2. 只有通过证书与 TLS 策略校验的响应中的精确 `h3` Alt-Svc 会被缓存
+3. 同一安全身份的后续请求可以优先 H3；probe 失败时，仅当请求尚未发送或满足一次安全重放规则才回落 TCP
 
-`Disabled` 关闭学习与使用；`Required` 为 prior-knowledge，不读 Alt-Svc、不自动回落。细节见 [HTTP/3 与 QUIC](http3-quic.md)。
+`Disabled` 关闭学习与使用；`Required` 表示 prior-knowledge，不读取 Alt-Svc，也不自动回落。细节见 [HTTP/3 与 QUIC](http3-quic.md)。

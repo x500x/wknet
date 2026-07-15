@@ -119,9 +119,8 @@ void Destroy() noexcept;
 
 ### Notes
 
-- Drains async workers/queues for driver unload.
-- Required before unload if any `Async*` path was used.
-- Sync-only paths may skip; unconditional call is fine.
+- Call on the driver unload path; waits for async workers and queues to finish before resources are released.
+- Call when `Async*` was used; sync-only paths may omit it.
 - Do not submit new async work after `Destroy`.
 
 ## See also

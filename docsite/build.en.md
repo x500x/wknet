@@ -57,5 +57,5 @@ Example: `src/wknetlib/x64/Release/wknetlib.lib`.
 ## Next
 
 - [First request](first-request.md) — minimal GET / POST
-- [Integration checklist](integration-checklist.md) — IRQL, lifetime, unload
+- [Integration notes](integration-checklist.md) — IRQL, lifetime, unload
 - Contributor test matrix: [Build & test](build-and-test.md)

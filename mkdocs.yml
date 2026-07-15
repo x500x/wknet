@@ -78,7 +78,7 @@ plugins:
             开始使用: Get Started
             构建: Build
             第一个请求: First Request
-            集成清单: Integration Checklist
+            集成要点: Integration Notes
             Cookbook: Cookbook
             概念与行为: Concepts
             架构: Architecture
@@ -87,7 +87,6 @@ plugins:
             TLS 与信任: TLS & Trust
             能力边界: Capability Matrix
             错误码与 FAQ: Errors & FAQ
-            术语: Glossary
             协议指南: Protocols
             HTTP/1.1: HTTP/1.1
             HTTP/2: HTTP/2
@@ -130,7 +129,7 @@ nav:
   - 开始使用:
       - 构建: build.md
       - 第一个请求: first-request.md
-      - 集成清单: integration-checklist.md
+      - 集成要点: integration-checklist.md
       - Cookbook: cookbook.md
   - 概念与行为:
       - 架构: architecture.md
@@ -139,7 +138,6 @@ nav:
       - TLS 与信任: tls-and-trust.md
       - 能力边界: capability-matrix.md
       - 错误码与 FAQ: errors-and-faq.md
-      - 术语: glossary.md
   - 协议指南:
       - HTTP/1.1: http1.md
       - HTTP/2: http2.md

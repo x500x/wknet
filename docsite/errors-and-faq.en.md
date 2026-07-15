@@ -53,9 +53,6 @@ if (!NT_SUCCESS(s)) {
 
 ## FAQ
 
-**Q: Why not WinHTTP / WinINet / SChannel?**  
-A: This is a kernel-usable pure kernel protocol stack. Transport is WSK; crypto is CNG/BCrypt; TLS/HTTP are self-implemented.
-
 **Q: Required IRQL?**  
 A: Synchronous HTTP / WebSocket / TLS / certificate paths must run at **`PASSIVE_LEVEL`**. RAII destructors require the same (they call Release/Close).
 
@@ -63,10 +60,10 @@ A: Synchronous HTTP / WebSocket / TLS / certificate paths must run at **`PASSIVE
 A: No. Client only; no inbound request parser.
 
 **Q: How is proxy configured?**  
-A: `SessionConfig.Proxy`: `Host`/`Port`/`Family`/`Authority`/`AuthHeader`. HTTPS uses CONNECT; cleartext HTTP sends absolute-form. Proxy disables H3 Auto.
+A: Configure `SessionConfig.Proxy` with `Host` / `Port` / `Family` / `Authority` / `AuthHeader`. HTTPS uses a CONNECT tunnel; cleartext HTTP uses absolute-form. HTTP/3 Auto is not selected when a proxy is enabled.
 
 **Q: Is HTTP/3 on by default?**  
-A: Default `Http3ConnectMode::Auto`: first hop TCP; later requests may prefer H3 after learning **authenticated** Alt-Svc. `Disabled` turns it off; `Required` is prior-knowledge.
+A: Default is `Http3ConnectMode::Auto`. The first HTTPS request uses TCP; after validated Alt-Svc is learned, later requests may prefer H3. `Disabled` turns it off; `Required` is prior-knowledge.
 
 **Q: Are POSTs auto-retried?**  
 A: No. Stale retry is **GET/HEAD/OPTIONS** only, once. POST/PUT/PATCH/DELETE are never auto-replayed.
@@ -77,14 +74,14 @@ A: Default **10** hops; exhaustion is **not an error** — the current 3xx is re
 **Q: Can certificate checks be disabled?**  
 A: `CertPolicy::NoVerify` exists but is forbidden in production. No system CAs are bundled; supply trust anchors. IP literals match iPAddress SAN only; DNS names never fall back to CN.
 
-**Q: Why does 0-RTT fail?**  
-A: Off by default; requires early data plus explicit `EarlyDataReplaySafe`, else `STATUS_NOT_SUPPORTED`.
+**Q: Can the product API enable TLS 1.3 0-RTT?**  
+A: No. `EnableEarlyData` / `EarlyDataReplaySafe` are internal TLS connection options and are not mapped onto `TlsConfig` / `SendOptions`. HTTP/3 application-data 0-RTT is also unsupported.
 
 **Q: WebSocket namespace?**  
 A: `wknet::websocket` (`Connect`/`SendText`/`Receive`/`Close`); sessions remain `wknet::http::Session`. `wss` may use RFC 8441 or HTTP/1.1 Upgrade.
 
-**Q: Async unload rules?**  
-A: After `Async*`, call `wknet::http::Destroy()` before unload to drain workers, then release WSK/handles. After cancel, still `AsyncWait` + `AsyncRelease`.
+**Q: How do I unload a driver that used async APIs?**  
+A: On the unload path call `wknet::http::Destroy()`, then release WSK and handles. After `AsyncCancel`, still call `AsyncWait` + `AsyncRelease`.
 
 **Q: Are close-delimited responses pooled?**  
 A: No. close-delimited bodies and **101** never return to the pool.

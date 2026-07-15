@@ -69,7 +69,7 @@ Text still uses cross-fragment UTF-8 validation; a bad final fragment closes wit
 - H1 Upgrade and RFC 8441 share the same offer/validation path; callers must not hand-write `Sec-WebSocket-Extensions`.
 - Send sets RSV1 only on the first compressed Text/Binary fragment; continuations and control frames never set RSV1.
 - Receive treats RSV1 on unnegotiated links, control frames, or continuations as a protocol error and closes.
-- Inflate is bounded by `MaxMessageBytes`, output capacity, and expansion ratio. Other WebSocket extensions are **non-goals**.
+- Inflate is bounded by `MaxMessageBytes`, output capacity, and expansion ratio. WebSocket extensions other than permessage-deflate are not negotiated.
 
 ## Control frames and Close
 
@@ -92,5 +92,5 @@ Valid inbound close codes: 1000–1014 (except 1004/1005/1006) or 3000–4999; a
 ## Boundaries
 
 - No compression by default; no default handshake redirect / 401/407 following.  
-- WebSocket over HTTP/3 is unsupported (see [HTTP/3](http3-quic.md) non-goals).  
-- Capability wording follows the [Capability matrix](capability-matrix.md).
+- WebSocket over HTTP/3 is not supported (see [HTTP/3](http3-quic.md)).  
+- See the [capability matrix](capability-matrix.md) for support scope.

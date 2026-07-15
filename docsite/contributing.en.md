@@ -33,9 +33,9 @@ test:     tests
 chore:    build/tooling
 ```
 
-**docsite rules:**
+**docsite commits:**
 
-1. Split docsite changes from code changes into **two commits**
+1. Split docsite changes from code changes into two commits
 2. Prefix docsite commits with `docsite:` (triggers one-way Wiki sync)
 3. Plan docs under `docs/plans/*` are committed only when the user asks
 
@@ -45,6 +45,7 @@ Fork → feature branch → commit → push → PR. Requirements: style match, n
 
 ## Documentation
 
-- Public docs SSOT is `docsite/`; capability SSOT is the [capability matrix](capability-matrix.md)
-- Fields and signatures follow `include/wknet` — never copy structs from stale markdown
+- Public docs live under `docsite/`; capability classification is in the [capability matrix](capability-matrix.md)
+- Fields and signatures follow `include/wknet`; do not copy structs from stale markdown
+- Ship Chinese and English together; no English placeholder stubs
 - Ship Chinese and English together; no English stubs

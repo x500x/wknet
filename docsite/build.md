@@ -57,5 +57,5 @@ src/wknetlib/<Platform>/<Configuration>/wknetlib.lib
 ## 下一步
 
 - [第一个请求](first-request.md) — 最小 GET / POST
-- [集成清单](integration-checklist.md) — IRQL、生命周期、卸载
+- [集成要点](integration-checklist.md) — IRQL、生命周期、卸载
 - 贡献者测试矩阵见 [构建与测试](build-and-test.md)

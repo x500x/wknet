@@ -40,27 +40,27 @@ wknet::http::Send* / Get* / Post*
   → transport → WSK 或 TLS（H3 为 QUIC over Datagram）
 ```
 
-- **HTTPS 默认路径**：TCP TLS 上 HTTP/1.1 或 ALPN `h2`；`Http3ConnectMode::Auto`（默认）在已认证响应学习精确 `h3` Alt-Svc 后，后续请求可优先 HTTP/3。
-- **WebSocket**：`session` 统一编排；`wss` 默认可选 RFC 8441（HTTP/2 extended CONNECT）或 HTTP/1.1 Upgrade，共享 TLS、连接与取消模型。
-- **明文 HTTP / h2c / 代理 / WebSocket / 非 HTTP ALPN** 不进入 HTTP/3。
+- **HTTPS**：默认在 TCP TLS 上使用 HTTP/1.1 或 ALPN 协商的 `h2`。`Http3ConnectMode::Auto` 时，若已从通过证书与策略校验的响应中学到精确 `h3` Alt-Svc，后续请求可以优先走 HTTP/3。
+- **WebSocket**：由 `session` 编排。`wss` 可使用 RFC 8441（HTTP/2 extended CONNECT）或 HTTP/1.1 Upgrade，与 HTTP 共用 TLS、连接与取消模型。
+- **HTTP/3 适用范围**：仅 HTTPS 且未启用代理。明文 HTTP、h2c、WebSocket，以及非 HTTP 的 ALPN，均使用既有 TCP 路径。
 
 ## 所有权与缓冲
 
 - 连接池字段由 session 池模块独占写入；池化连接携带 socket / transport / TLS / 可选 H2 或 H3 状态。
 - 协议与 Workspace 缓冲使用堆内存；热路径缓冲常驻并复用。
 - 同步 HTTP / WebSocket / TLS / 证书路径要求 **`PASSIVE_LEVEL`**，否则返回 `STATUS_INVALID_DEVICE_REQUEST` 或 `STATUS_INVALID_DEVICE_STATE`。
-- 卸载前：若用过异步 API，必须先 `wknet::http::Destroy()` 排空在飞操作。
+- 用过异步 API 时，在驱动卸载路径调用 `wknet::http::Destroy()`，等待异步操作结束后再释放资源。
 
-## 硬约束（调用方契约）
+## 调用约定一览
 
-| 约束 | 含义 |
-|------|------|
-| 客户端 only | 无入站 request parser / server role |
-| WSK + CNG | 传输与密码学主路径；无 WinHTTP / SChannel |
-| 信任锚调用方 | 库不硬编码系统 CA |
-| 主机名 | IP literal 只匹配 iPAddress SAN；域名**不回退 CN** |
-| 重定向 | HTTPS→HTTP 默认拒绝；`MaxRedirects` 默认 10，用尽返回当前 3xx 不报错 |
-| TRACE | 默认关，需 `SendFlagAllowTrace` |
-| H3 Auto | 仅从**已认证** HTTPS 响应学习 Alt-Svc；SNI / 证书 / `:authority` 绑定原 origin |
+| 点 | 行为 |
+|----|------|
+| 角色 | 客户端；无入站 parser / server |
+| 主路径 | 传输 WSK，密码学 CNG；不使用 WinHTTP / SChannel |
+| 信任 | 信任锚、CA 包、pin、撤销证据由调用方提供；库不内置系统 CA |
+| 主机名 | IP 仅匹配 iPAddress SAN；域名不回退 CN |
+| 重定向 | 默认拒绝 HTTPS→HTTP；`MaxRedirects` 默认 10，用尽时返回当前 3xx |
+| TRACE | 默认关闭；需要时设置 `SendFlagAllowTrace` |
+| H3 Auto | 仅从通过校验的 HTTPS 响应学习 Alt-Svc；SNI、证书与 `:authority` 仍绑定原 origin |
 
-能力分类（已实现 / 默认关 / 安全拒绝 / 非目标）见 [能力账本](capability-matrix.md)。
+支持范围与限制的分类见 [能力边界](capability-matrix.md)。

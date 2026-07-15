@@ -2,7 +2,7 @@
 
 HTTP/3 is a **main-path candidate** for HTTPS (default `Auto`): WSK Datagram + QUIC v1 + TLS 1.3 over QUIC + HTTP/3 + QPACK, with no MsQuic / SChannel / WinHTTP / WinINet dependency. Public request entry points remain `wknet::http::Send*`.
 
-Configuration: [Session config](api/session-config.md). Capability wording: [Capability matrix](capability-matrix.md).
+Configuration: [Session config](api/session-config.md). Support scope: [capability matrix](capability-matrix.md).
 
 ## Summary
 
@@ -13,7 +13,7 @@ Configuration: [Session config](api/session-config.md). Capability wording: [Cap
 | `Required` | Prior-knowledge H3; does not consume Alt-Svc; **no** automatic TCP fallback |
 | Identity boundary | Alternative changes DNS/UDP only; SNI / cert / `:authority` stay on the origin |
 | Race / fallback | Move to TCP only if unsent or one safe-replay rule holds; **never** dual-submit |
-| Non-goals | v2, 0-RTT app data, migration, multipath, ECN, DPLPMTUD, WebTransport, Datagram, WS over H3 |
+| Not supported | QUIC v2, 0-RTT application data, migration, multipath, ECN, DPLPMTUD, WebTransport, Datagram, WS over H3 |
 
 ```cpp
 wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
@@ -27,16 +27,11 @@ config.Http3.AltSvcMaxAgeSec = 604800;
 
 ## When H3 is selected
 
-**May enter** (mode and prior knowledge permitting)
+## Selection
 
-- HTTPS origins
-- `Auto` with a cache hit for the same security identity’s `h3` Alt-Svc, or `Required` forcing H3
+HTTP/3 is used only for HTTPS origins. Under `Auto`, a cached `h3` Alt-Svc for the same security identity is required; `Required` uses H3 as prior knowledge.
 
-**Never enters**
-
-- Plaintext HTTP, h2c, HTTP proxies, WebSocket
-- Explicit non-HTTP ALPN, `SendOptions.Http2Priority`
-- Responses under `CertPolicy::NoVerify`: Alt-Svc is **not learned and not used automatically**
+The following stay on HTTP/1.1 or HTTP/2 over TCP: cleartext HTTP, h2c, HTTP proxies, WebSocket, explicit non-HTTP ALPN, and requests with `SendOptions.Http2Priority`. Responses under `CertPolicy::NoVerify` neither learn nor automatically use Alt-Svc.
 
 ## Alt-Svc and identity
 
@@ -86,8 +81,8 @@ The request is **never** submitted to both H3 and TCP.
 
 Logs do not expose raw packet/header/body bytes, URL queries, keys/IVs/nonces, tickets, Retry/NEW_TOKEN values, reset tokens, full CIDs, full origin/alternative authorities, certificate bytes, or credentials.
 
-## Current non-goals
+## Not supported
 
-QUIC **v2**, **0-RTT application data**, active **migration**, **multipath**, **ECN**, **DPLPMTUD**, **WebTransport**, QUIC **Datagram**, Extended CONNECT over H3, and **WebSocket over HTTP/3**.
+The current implementation does not include QUIC **v2**, **0-RTT application data**, active **migration**, **multipath**, **ECN**, **DPLPMTUD**, **WebTransport**, QUIC **Datagram**, Extended CONNECT over H3, or **WebSocket over HTTP/3**.
 
-These are not on the main path; do not assume they will turn on by default later. A separate TLS 1.3 0-RTT opt-in is not HTTP/3 application-data 0-RTT.
+A separate TLS 1.3 0-RTT opt-in is not the same as HTTP/3 application-data 0-RTT.

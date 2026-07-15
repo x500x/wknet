@@ -34,9 +34,9 @@
 
 ## 测试钩子
 
-用户态测试通过 `WKNET_USER_MODE_TEST` 下的窄接口注入传输、IRQL 或调度。测试钩子不进入 `Wknet.h` 正常产品路径。
+用户态测试通过 `WKNET_USER_MODE_TEST` 下的窄接口注入传输、IRQL 或调度。测试钩子不包含在 `Wknet.h` 的产品路径中。
 
-## 内存与实现纪律
+## 内存与实现
 
 - 库内禁止栈缓冲；堆对象 + Workspace 常驻高频缓冲
 - 无异常、无 RTTI；函数 `noexcept`；SAL 注解

@@ -1,13 +1,13 @@
-# 能力账本
+# 能力边界
 
-能力按四类记账，读的时候别混在一起：
+本文说明 wknet 当前支持什么、默认开启什么、以及哪些行为会被拒绝。章节按状态分组，便于对照集成需求。
 
-1. **已实现** — 默认可用，或文档写明的默认行为  
-2. **默认关** — 代码已有，须显式打开  
-3. **安全拒绝** — 策略上故意挡掉  
-4. **非目标** — 当前不做，也不打算用兼容层补齐  
+1. **已实现** — 当前可用；除非另有说明，按默认配置即可使用  
+2. **默认关闭** — 已实现，但需显式开启  
+3. **策略拒绝** — 出于协议或安全策略会拒绝的请求/响应  
+4. **当前不支持** — 现阶段未提供  
 
-硬约束：客户端 only；WSK + CNG；无 WinHTTP/SChannel；无独立 client 层；信任锚调用方提供；`PASSIVE_LEVEL` 同步路径。
+定位：HTTP/HTTPS/WebSocket 客户端。传输主路径为 WSK，密码学主路径为 CNG/BCrypt；不使用 WinHTTP、WinINet 或 SChannel。信任锚、CA 包、pin 与撤销证据由调用方提供。同步路径要求 `PASSIVE_LEVEL`。
 
 ---
 
@@ -15,7 +15,7 @@
 
 ### HTTP/1.1（RFC 9110/9112）
 
-- 请求体：`Content-Length`、库生成 chunked、流式 `BodyCreateStream` / `RequestSetBodySource`；用户手设 `Transfer-Encoding`/`TE` **安全拒绝**。
+- 请求体：`Content-Length`、库生成 chunked、流式 `BodyCreateStream` / `RequestSetBodySource`；用户手设 `Transfer-Encoding`/`TE` 会被拒绝。
 - 请求 trailer：仅 chunked 路径；禁止字段与 CRLF 注入拒绝。
 - 响应：状态行仅 HTTP/1.0/1.1；头行/头段/头数有界；**拒绝 obs-fold**；多 `Content-Length` 或 `TE`+`CL` 冲突 → `STATUS_INVALID_NETWORK_RESPONSE`。
 - Body 框定：CL / chunked / close-delimited；无 body：1xx、204、205、304、HEAD。
@@ -35,10 +35,10 @@
 ### HTTP/3 + QUIC v1 + QPACK
 
 - WSK Datagram + 内核 CNG 主路径；QUIC v1 包/帧、TLS 1.3 over QUIC、ACK/loss/PTO、流控、CID、关闭状态机。
-- HTTP/3：控制/QPACK 关键单向流、SETTINGS、HEADERS/DATA、1xx、trailer、GOAWAY/取消；**server push 安全拒绝**。
-- **默认 `Http3ConnectMode::Auto`**：首次 HTTPS 走 TCP；仅从**已认证**响应学习精确 `h3` Alt-Svc；alternative 只影响 DNS/UDP，SNI/证书/`authority` 绑定 origin。
-- 不进入 H3：`NoVerify`、代理、明文 HTTP、h2c、WebSocket、非 HTTP ALPN、HTTP/2 priority。
-- 回落 TCP：仅请求未发送或满足**一次**安全重放规则。
+- HTTP/3：控制/QPACK 关键单向流、SETTINGS、HEADERS/DATA、1xx、trailer、GOAWAY/取消；server push 会被拒绝。
+- 默认 `Http3ConnectMode::Auto`：首次 HTTPS 使用 TCP；只有通过证书与 TLS 策略校验的响应中的精确 `h3` Alt-Svc 会被缓存。DNS/UDP 可指向 alternative，SNI、证书校验与 `:authority` 仍绑定原 origin。
+- 以下情况不使用 HTTP/3：`CertPolicy::NoVerify`、HTTP 代理、明文 HTTP、h2c、WebSocket、非 HTTP ALPN、带 `Http2Priority` 的请求。
+- 回落 TCP 仅在请求尚未发送，或满足一次安全重放规则时允许。
 
 ### WebSocket（RFC 6455）
 
@@ -66,26 +66,83 @@
 
 ---
 
-## 2. 默认关闭（须显式开启）
+## 2. 默认关闭
 
-| 能力 | 开启方式 |
-|------|----------|
-| `Expect: 100-continue` | `SendFlagExpectContinue` |
-| HTTP/1.1 pipeline | `EnableHttp11Pipeline=true`（默认方法 GET/HEAD/OPTIONS） |
-| h2c prior knowledge / Upgrade | `SendOptions.Http2CleartextMode` |
-| HTTP/2 PING 保活 | `Http2KeepAlive.Enabled=true` |
-| HTTP/2 per-request priority | `SendOptions.Http2Priority` |
-| WebSocket permessage-deflate | `PerMessageDeflate.Enable=true` |
-| TLS1.2 RSA-kx / CBC / SHA-1 / 重协商 | `CompatibilityExplicit` + 对应开关 |
-| TLS1.3 0-RTT | `EnableEarlyData` + `EarlyDataReplaySafe` |
-| TLS1.3 post-handshake client auth | `EnablePostHandshakeClientAuth` |
-| 强撤销要求 | `RequireRevocationCheck` |
-| TRACE 方法 | `SendFlagAllowTrace` |
-| RFC 9111 内存 cache | 调用方创建并挂入 `SessionConfig.Cache` / 发送选项 |
+默认关闭的能力，以及对应配置字段。头文件：`Types.h`、`Cache.h`、`websocket/WebSocket.h`。
+
+| 能力 | 配置对象 | 字段 / 用法 |
+|------|----------|-------------|
+| `Expect: 100-continue` | `SendOptions` | `Flags \|= SendFlagExpectContinue`；可选 `ExpectContinueTimeoutMs`（默认 1000） |
+| TRACE | `SendOptions` | `Flags \|= SendFlagAllowTrace`（仍拒绝 body / trailer / 敏感头） |
+| HTTP/1.1 pipeline | `SessionConfig` | `EnableHttp11Pipeline = true`；`Http11PipelineMaxDepth`（默认 4，上限 64）；`Http11PipelineMethodMask`（默认 GET\|HEAD\|OPTIONS） |
+| h2c | `SendOptions` | `Http2CleartextMode = PriorKnowledge` 或 `Upgrade` |
+| HTTP/2 PING 保活 | `SessionConfig` | `Http2KeepAlive.Enabled = true`；`IdleMs` / `IntervalMs` / `AckTimeoutMs`（默认各 30000 / 30000 / 5000） |
+| HTTP/2 priority | `SendOptions` | `Http2Priority` 指向 `Http2Priority{ StreamDependency, Weight(1..256), Exclusive }` |
+| permessage-deflate | `ConnectConfig` | `PerMessageDeflate.Enable = true`；可选 `Client/ServerNoContextTakeover`、`Client/ServerMaxWindowBits`（8..15） |
+| TLS 1.2 兼容套件 / 重协商 | `TlsConfig.Policy` | `Profile = CompatibilityExplicit`，再开 `EnableTls12RsaKeyExchange` / `EnableTls12Cbc` / `EnableTls12Sha1Signatures` / `EnableTls12Renegotiation`；`TlsConfig.MaxTls12Renegotiations`（默认 1，上限 4） |
+| post-handshake client auth | `TlsConfig.Policy` | `EnablePostHandshakeClientAuth = true`，并设置 `TlsConfig.ClientCredential` |
+| 强撤销 | `TlsConfig.Policy` | `RequireRevocationCheck = true`；调用方提供可验证 OCSP/CRL 证据 |
+| 内存 cache | `SessionConfig` / `SendOptions` | `CacheCreate` 后赋给 `SessionConfig.Cache`；单次可用 `SendFlagBypassCache` / `NoCacheStore` / `OnlyIfCached` 或 `SendOptions.Cache` |
+
+示例：
+
+```cpp
+// 单次发送
+wknet::http::SendOptions* options = nullptr;
+wknet::http::SendOptionsCreate(&options);
+options->Flags |= wknet::http::SendFlagExpectContinue;
+options->ExpectContinueTimeoutMs = 1000;
+options->Flags |= wknet::http::SendFlagAllowTrace;
+options->Http2CleartextMode = wknet::http::Http2CleartextMode::PriorKnowledge;
+
+wknet::http::Http2Priority priority = {};
+priority.Weight = 16;
+options->Http2Priority = &priority;
+
+wknet::http::SendEx(session, wknet::http::Method::Get,
+    url, urlLen, nullptr, nullptr, options, &response);
+wknet::http::SendOptionsRelease(options);
+
+// 会话
+wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+config.EnableHttp11Pipeline = true;
+config.Http11PipelineMaxDepth = 4;
+config.Http11PipelineMethodMask =
+    wknet::http::Http11PipelineMethodGet |
+    wknet::http::Http11PipelineMethodHead |
+    wknet::http::Http11PipelineMethodOptions;
+config.Http2KeepAlive.Enabled = true;
+config.Tls.Policy.Profile = wknet::http::TlsSecurityProfile::CompatibilityExplicit;
+config.Tls.Policy.EnableTls12Cbc = true;
+config.Tls.Policy.RequireRevocationCheck = true;
+
+wknet::http::Cache* cache = nullptr;
+wknet::http::CacheOptions cacheOptions = {};
+cacheOptions.MaxBytes = 16 * 1024 * 1024;
+cacheOptions.MaxEntries = 256;
+cacheOptions.Mode = wknet::http::CacheMode::Private;
+wknet::http::CacheCreate(&cacheOptions, &cache);
+config.Cache = cache;
+
+wknet::http::Session* session = nullptr;
+wknet::http::SessionCreate(&config, &session);
+
+// WebSocket
+wknet::websocket::ConnectConfig cfg = wknet::websocket::DefaultConnectConfig();
+cfg.Url = "wss://example.com/ws";
+cfg.UrlLength = 18;
+cfg.PerMessageDeflate.Enable = true;
+wknet::websocket::WebSocket* ws = nullptr;
+wknet::websocket::ConnectEx(session, &cfg, &ws);
+```
+
+TLS 1.3 0-RTT（`EnableEarlyData` / `EarlyDataReplaySafe`）仅存在于内部 TLS 连接选项，未映射到 `TlsConfig` / `SendOptions`，产品 HTTP API 不能开启。HTTP/3 应用数据 0-RTT 见「当前不支持」。
 
 ---
 
-## 3. 安全拒绝 / 策略约束
+## 3. 策略拒绝
+
+下列行为会被拒绝；这是既定策略，不表示实现缺失。
 
 | 行为 | 处理 |
 |------|------|
@@ -101,18 +158,18 @@
 
 ---
 
-## 4. 明确非目标
+## 4. 当前不支持
 
-| 能力 | 结论 |
+| 能力 | 说明 |
 |------|------|
-| HTTP server / 入站 request parser | 非目标（客户端 only） |
-| 磁盘持久化 HTTP cache | 非目标（仅内存 NonPaged cache 对象） |
-| HTTP/2 本地 priority 树带宽调度 | 非目标 |
-| 除 permessage-deflate 外的 WS 扩展 | 非目标 |
-| 在线撤销抓取 | 非目标 |
-| QUIC v2、H3 0-RTT 应用数据、主动迁移、多路径、ECN、DPLPMTUD、WebTransport、QUIC Datagram、WebSocket over H3 | 非目标 |
-| WinHTTP / WinINet / SChannel 内核主路径 | 非目标 |
-| 独立 client 层 / 第二套连接生命周期 | 非目标 |
+| HTTP server / 入站 request parser | 客户端库，不提供服务端 |
+| 磁盘持久化 HTTP cache | 仅有内存 NonPaged cache 对象 |
+| HTTP/2 本地 priority 树带宽调度 | 不实现 |
+| 除 permessage-deflate 外的 WS 扩展 | 不协商其它扩展 |
+| 在线撤销抓取 | 库不发起 OCSP/CRL 网络请求 |
+| QUIC v2、H3 0-RTT 应用数据、主动迁移、多路径、ECN、DPLPMTUD、WebTransport、QUIC Datagram、WebSocket over H3 | 当前不支持 |
+| WinHTTP / WinINet / SChannel 内核主路径 | 不使用 |
+| 独立 client 层 / 第二套连接生命周期 | 不提供 |
 
 ---
 

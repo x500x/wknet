@@ -48,7 +48,7 @@ When the caller supplies no `Accept-Encoding`, the engine injects
 - Scope: W3C EXI 1.0 Second Edition **schema-less** streams.  
 - Supported: all four alignments, Options, fidelity features, built-in XML Schema types, `xsi:type` / `xsi:nil`.  
 - Output: Infoset-equivalent XML.  
-- **Refused / non-goal**: external Schema or strict grammar → `STATUS_NOT_SUPPORTED`.
+- **Unsupported / refused**: external Schema or strict grammar → `STATUS_NOT_SUPPORTED`.
 
 ### Pack200 bounds
 
@@ -99,7 +99,7 @@ Public entry summary:
 - `KeyExchange`: key pairs and shared secrets (`KeyExchange.h`)  
 - `Ed25519Verify` / `Ed448Verify`  
 - `CngProviderCache`: session-scoped pre-opened BCrypt algorithm handles; **software paths do not use the cache**  
-- `TlsClientCredential`: mTLS sign callback; **private keys never enter the library**
+- `TlsClientCredential`: mTLS sign callback; private keys remain with the caller
 
 Hardening habits: `RtlSecureZeroMemory` on keys and intermediates; FFDHE rejects illegal `y`; SPKI/import paths enforce the RSA floor.
 
@@ -108,4 +108,4 @@ Hardening habits: `RtlSecureZeroMemory` on keys and intermediates; FFDHE rejects
 - Failed HTTP response CE → request failure (fail-closed); never silently treated as identity.  
 - The TLS record layer and certificate path use the same crypto primitives; trust anchors and pins are caller-supplied (see TLS docs).  
 - WinHTTP / WinINet / SChannel are not the kernel main path.  
-- Capability wording follows the [Capability matrix](capability-matrix.md).
+- See the [capability matrix](capability-matrix.md) for support scope.

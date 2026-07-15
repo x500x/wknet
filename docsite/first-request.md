@@ -71,15 +71,15 @@ config.Tls.Store = trustStore;  // 调用方构造的 CertificateStore*
 
 字段与构造细节见 [TLS 与信任](tls-and-trust.md) 与 [证书与 TLS 选项](api/tls-options.md)。
 
-## 必须记住的四条
+## 调用约定
 
-1. **句柄都是堆对象**：`Session` / `Response` / `Body` / `Headers` / `AsyncOp` 用 Create，用 Close 或 Release；`Release`/`Close` 接受 `nullptr`。
-2. **检查 `NTSTATUS`**：标记 `_Must_inspect_result_` 的返回值必须检查。
-3. **IRQL**：同步 HTTP / WebSocket / TLS / 证书路径要求 `PASSIVE_LEVEL`。
-4. **用了异步就要 `Destroy`**：卸载前调用 `wknet::http::Destroy()` 排空异步 worker；同步-only 路径可不调，但可无条件调用。
+- `Session` / `Response` / `Body` 等为堆上句柄：Create 取得，Close / Release 释放；Release / Close 接受 `nullptr`，失败路径可无条件调用。
+- 返回 `NTSTATUS`；标有 `_Must_inspect_result_` 的返回值须检查。
+- 同步 HTTP、WebSocket、TLS、证书路径在 `PASSIVE_LEVEL` 调用。
+- 使用过异步 API 时，在驱动卸载路径调用 `wknet::http::Destroy()`，等待异步操作结束后再释放资源；纯同步路径可不调用。
 
 ## 下一步
 
-- [集成清单](integration-checklist.md)
+- [集成要点](integration-checklist.md)
 - [Cookbook](cookbook.md) — 异步、流式、WebSocket、证书
 - [API 总览](api/overview.md)

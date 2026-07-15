@@ -1,46 +1,46 @@
-# Integration checklist
+# Integration notes
 
-Confirm every item before production. A single miss is enough to stay off the release path.
+What to settle when linking the library into a driver: build, calling conventions, lifetime, trust, and protocol choices.
 
 ## Build and link
 
-- [ ] Matching VS 2022 + WDK + SDK
-- [ ] Link `wknetlib.lib`; additional include dir points at `include`
-- [ ] Product code only `#include <wknet/Wknet.h>` (or fine-grained public headers) — never `src/wknetlib` internals
-- [ ] Debug/Release treat warnings as errors
+- Toolchain: VS 2022 with matching WDK / SDK
+- Link `wknetlib.lib`; additional include directory points at `include`
+- Product code includes only `<wknet/Wknet.h>` (or fine-grained public headers), never `src/wknetlib` internals
+- Debug / Release treat warnings as errors
 
 ## Calling conventions
 
-- [ ] Sync HTTP / WebSocket / TLS / certificate paths only at `PASSIVE_LEVEL`
-- [ ] All public handles come from Create and leave via Close / Release; unconditional Release on failure paths (accepts `nullptr`)
-- [ ] Option objects such as `SendOptions` / `AsyncOptions` are heap objects too — matching Create / Release
-- [ ] Every `_Must_inspect_result_` return value is inspected
+- Sync HTTP / WebSocket / TLS / certificate paths run at `PASSIVE_LEVEL`
+- Public handles come from Create and leave via Close / Release; failure paths may Release unconditionally (`nullptr` is fine)
+- `SendOptions` / `AsyncOptions` are heap objects too — matching Create / Release
+- Inspect `_Must_inspect_result_` return values
 
 ## Lifetime and unload
 
-- [ ] Reuse one `Session` for same-host requests so the pool can hit
-- [ ] `Response` lifetime is independent of `Request` / `AsyncOp` — release each
-- [ ] If async APIs were used, call `wknet::http::Destroy()` before unload, then tear down WSK / other subsystems
-- [ ] WebSocket: do not race `Close` with new I/O on the same handle; safest is single-threaded connect → send → receive → close
-- [ ] `wknet::websocket::Receive` `Message.Data` points at an internal buffer valid until the next receive/close
+- Reuse one `Session` for same-host requests so the pool can hit
+- `Response` lifetime is independent of `Request` / `AsyncOp` — release each
+- After async APIs, call `wknet::http::Destroy()` on the unload path, then tear down WSK and other subsystems
+- WebSocket: do not race `Close` with new I/O on the same handle; a common pattern is single-threaded connect → send → receive → close
+- `wknet::websocket::Receive` `Message.Data` points at an internal buffer valid until the next receive / close
 
-## Security defaults
+## Trust and defaults
 
-- [ ] Production uses `CertPolicy::Verify` with a caller-supplied `CertificateStore` (anchors / pins)
-- [ ] `NoVerify` is not left in release configuration
-- [ ] HTTPS→HTTP redirects are refused by default; cross-origin redirects strip sensitive headers
-- [ ] Only `GET` / `HEAD` / `OPTIONS` auto-retry once on stale connection failure; POST and friends are never auto-replayed
-- [ ] Strong revocation uses explicit `RequireRevocationCheck` plus verifiable OCSP/CRL evidence
+- Production uses `CertPolicy::Verify` with a caller-supplied `CertificateStore` (anchors / pins)
+- Do not leave `NoVerify` in release configuration
+- HTTPS→HTTP redirects are refused by default; cross-origin redirects strip sensitive headers
+- On stale connection failure, only `GET` / `HEAD` / `OPTIONS` auto-retry once; POST and similar methods are never auto-replayed
+- Hard revocation: explicit `RequireRevocationCheck` plus verifiable OCSP/CRL evidence
 
-## Observability
+## Diagnostics
 
-- [ ] Product Trace stays at default `Off` (or Info when needed); never log bodies, cookies, secrets, or full URL queries
-- [ ] Prefer component filters over global Max in production
+- Product Trace defaults to `Off` (Info when needed); do not log bodies, cookies, secrets, or full URL queries
+- Prefer component filters; avoid global Max in production
 
-## Protocol choices (as needed)
+## Protocol choices
 
-- [ ] HTTP/3 default `Auto` is acceptable; use `Disabled` or prior-knowledge `Required` deliberately
-- [ ] Opt-in only for h2c / pipeline / 0-RTT / permessage-deflate and other default-off features
-- [ ] Read the [capability matrix](capability-matrix.md); non-goals are not on the dependency path
+- HTTP/3 defaults to `Auto`; use `Disabled` when unwanted, `Required` for prior knowledge
+- h2c, pipelining, 0-RTT, permessage-deflate and other default-off features stay off until explicitly enabled
+- Support scope and limits: [Capability matrix](capability-matrix.md)
 
-After the checklist: day-to-day recipes in [Cookbook](cookbook.md); semantics in [Session & pool](session-and-pool.md) and [Async model](async-model.md).
+Recipes: [Cookbook](cookbook.md). Semantics: [Session & pool](session-and-pool.md), [Async model](async-model.md).

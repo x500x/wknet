@@ -71,15 +71,15 @@ config.Tls.Store = trustStore;  // caller-built CertificateStore*
 
 Details: [TLS & trust](tls-and-trust.md) and [TLS options](api/tls-options.md).
 
-## Four rules
+## Calling conventions
 
-1. **Handles are heap objects**: Create then Close/Release; Release/Close accept `nullptr`.
-2. **Inspect `NTSTATUS`**: values marked `_Must_inspect_result_` must be checked.
-3. **IRQL**: sync HTTP / WebSocket / TLS / certificate paths require `PASSIVE_LEVEL`.
-4. **Async requires `Destroy`**: call `wknet::http::Destroy()` before unload to drain async workers; sync-only paths may skip it, but calling is always safe.
+- Handles such as `Session` / `Response` / `Body` are heap objects: Create to obtain, Close / Release to free. Release / Close accept `nullptr`, so failure paths can call them unconditionally.
+- Returns are `NTSTATUS`; values marked `_Must_inspect_result_` must be checked.
+- Sync HTTP, WebSocket, TLS, and certificate paths require `PASSIVE_LEVEL`.
+- After async APIs, call `wknet::http::Destroy()` on the driver unload path and wait for async work to finish before releasing resources. Sync-only paths may omit it.
 
 ## Next
 
-- [Integration checklist](integration-checklist.md)
+- [Integration notes](integration-checklist.md)
 - [Cookbook](cookbook.md) — async, streaming, WebSocket, certificates
 - [API overview](api/overview.md)

@@ -18,7 +18,7 @@ HTTPS 默认 **校验证书**（`CertPolicy::Verify`）。库**不**内置系统
 | `ModernDefault`（默认） | 现代套件/群/签名；兼容开关若误开 → `STATUS_INVALID_PARAMETER` |
 | `CompatibilityExplicit` | 允许分别打开 RSA-kx、CBC、SHA-1 签名、真重协商 |
 
-默认关闭、需显式开启：TLS 1.2 RSA-kx / CBC / SHA-1 / 重协商、TLS 1.3 0-RTT、post-handshake client auth、`RequireRevocationCheck`。详见 [能力账本](capability-matrix.md)。
+默认关闭、需显式开启：TLS 1.2 RSA-kx / CBC / SHA-1 / 重协商、post-handshake client auth、`RequireRevocationCheck`。开启方式见 [能力边界](capability-matrix.md)。
 
 TLS 1.2 强制：Extended Master Secret、安全重协商指示；CBC 必须 Encrypt-then-MAC。
 
@@ -46,12 +46,12 @@ config.Tls.Certificate = wknet::http::CertPolicy::Verify;
 
 ## mTLS
 
-`TlsClientCredential` 携带证书链与 `Sign` 回调。**私钥永不进入库**——签名仅经回调完成。
+`TlsClientCredential` 携带证书链与 `Sign` 回调。私钥留在调用方，库内只通过回调完成签名。
 
-## 会话恢复与 0-RTT
+## 会话恢复
 
 - 恢复票据绑定 policy 身份、SNI、ALPN、cipher、版本（各版本缓存条数有上限）。
-- TLS 1.3 0-RTT 默认关：须 `EnableEarlyData` 且调用方声明 `EarlyDataReplaySafe`，且 ticket 通告 `max_early_data_size`；否则 `STATUS_NOT_SUPPORTED` 且不发送 early data。
+- TLS 1.3 0-RTT early data 仅存在于内部连接选项，**未**暴露在 `wknet::http::TlsConfig` / `SendOptions`；产品 HTTP 路径不能按公共字段开启。
 
 ## 与 HTTP 层的交界
 

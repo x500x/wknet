@@ -36,7 +36,7 @@ Rules:
 
 User-mode tests inject transport, IRQL, or scheduling through the narrow `WKNET_USER_MODE_TEST` surface. Hooks are not on the normal `Wknet.h` product path.
 
-## Memory and implementation discipline
+## Memory and implementation
 
 - No stack buffers in the library; heap objects plus Workspace-resident hot buffers
 - No exceptions, no RTTI; functions are `noexcept`; SAL annotations required

@@ -59,11 +59,11 @@ The high-level layer performs **one** fresh retry only for **safe methods** (`GE
 | `Upgrade` | HTTP/1.1 Upgrade; **no request body**; reserves stream 1 and replays post-101 residual bytes |
 | Default | `http://` does **not** auto-select h2c |
 
-Mutually exclusive with HTTP/3 selection: explicit non-HTTP ALPN and HTTP/2 priority requests never enter H3 (see [HTTP/3 & QUIC](http3-quic.md)).
+Requests with an explicit non-HTTP ALPN, or with HTTP/2 priority set, do not select HTTP/3 (see [HTTP/3 & QUIC](http3-quic.md)).
 
 ## Priority and PING
 
-- **Priority**: `SendOptions.Http2Priority` attaches weight/dependency/exclusive on the first HEADERS (weight 1..256); self-dependency rejected. Complex local priority-tree scheduling is a non-goal.
+- **Priority**: `SendOptions.Http2Priority` attaches weight/dependency/exclusive on the first HEADERS (weight 1..256); self-dependency rejected. Complex local priority-tree scheduling is not implemented.
 - **Background PING**: enable with `SessionConfig.Http2KeepAlive.Enabled=true`; only idle reusable pooled H2 connections are scanned; ACK timeout or protocol error closes that idle connection. Defaults: idle/interval 30s, ACK timeout 5s.
 
 ## HPACK (behavioral bounds)
@@ -72,7 +72,7 @@ Mutually exclusive with HTTP/3 selection: explicit non-HTTP ALPN and HTTP/2 prio
 - Encoder forces **Never-Indexed** for `authorization` / `cookie` / `proxy-authorization`.
 - Huffman rejects overlong codes / EOS / illegal padding.
 
-## Default-off checklist
+## Default-off features
 
 | Capability | How to enable |
 |------------|----------------|
@@ -80,4 +80,4 @@ Mutually exclusive with HTTP/3 selection: explicit non-HTTP ALPN and HTTP/2 prio
 | Background PING | `Http2KeepAlive.Enabled=true` |
 | Per-request priority | `SendOptions.Http2Priority` |
 
-Capability wording follows the [Capability matrix](capability-matrix.md).
+See the [capability matrix](capability-matrix.md) for support scope.

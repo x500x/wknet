@@ -59,11 +59,11 @@ HTTP/2 在 TLS 上经 ALPN `h2` 作为默认安全多路复用路径；同源连
 | `Upgrade` | HTTP/1.1 Upgrade；**禁止请求体**；保留 stream 1，重放 101 后残留字节 |
 | 默认 | `http://` **不**自动 h2c |
 
-与 HTTP/3 路径互斥：显式非 HTTP ALPN、HTTP/2 priority 请求不进入 H3（见 [HTTP/3 与 QUIC](http3-quic.md)）。
+显式非 HTTP ALPN，或设置了 HTTP/2 priority 的请求，不会选用 HTTP/3（见 [HTTP/3 与 QUIC](http3-quic.md)）。
 
 ## Priority 与 PING
 
-- **Priority**：`SendOptions.Http2Priority` 在首个 HEADERS 携带 weight/dependency/exclusive（权重 1..256）；拒绝自依赖。不实现复杂本地 priority tree 或带宽调度（非目标）。
+- **Priority**：`SendOptions.Http2Priority` 在首个 HEADERS 携带 weight/dependency/exclusive（权重 1..256）；拒绝自依赖。不实现复杂本地 priority tree 或带宽调度。
 - **后台 PING**：`SessionConfig.Http2KeepAlive.Enabled=true` 显式开启；只扫描 idle 且可复用的池化 H2 连接；ACK 超时或协议错误关闭该 idle 连接。默认 idle/interval 30s，ACK 超时 5s。
 
 ## HPACK（行为边界）
@@ -80,4 +80,4 @@ HTTP/2 在 TLS 上经 ALPN `h2` 作为默认安全多路复用路径；同源连
 | 后台 PING | `Http2KeepAlive.Enabled=true` |
 | per-request priority | `SendOptions.Http2Priority` |
 
-能力分类措辞以 [能力账本](capability-matrix.md) 为准。
+支持范围见 [能力边界](capability-matrix.md)。

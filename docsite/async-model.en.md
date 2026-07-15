@@ -44,16 +44,16 @@ wknet::http::AsyncRelease(op);
 
 `AsyncOptions.OnComplete` (and test-path completion callbacks) run when the op becomes `Completed`. Do not do heavy work or synchronously wait on the same op inside the callback; post to an upper queue instead.
 
-## Unload rules
+## Driver unload
 
-After using async APIs, **before** driver unload:
+When async APIs were used, call `Destroy` on the unload path and wait for async work to finish before releasing WSK and other handles:
 
 ```cpp
-wknet::http::Destroy();  // drain in-flight async work and workers
+wknet::http::Destroy();
 // then release WSK / close sessions and other handles
 ```
 
-Synchronous-only paths need not call it, but may call it unconditionally. Sessions and related handles use in-flight counters and drain events so handles are not freed while operations still use them.
+Sync-only paths may skip it; calling is always safe. Sessions and related handles use reference counts and waits so a handle is not freed while an operation still uses it.
 
 ## Relation to sync APIs
 

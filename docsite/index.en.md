@@ -1,28 +1,26 @@
 # wknet
 
-A pure kernel-mode HTTP/HTTPS/WebSocket client for Windows drivers.
+A pure kernel-mode HTTP/HTTPS/WebSocket client library for Windows drivers.
 
-Transport is WSK; cryptography is kernel CNG/BCrypt. No WinHTTP, WinINet, or SChannel. Public API is four namespaces: `wknet::http`, `wknet::websocket`, `wknet::crypto`, `wknet::codec`.
+Transport main path is WSK; cryptography main path is kernel CNG/BCrypt. No WinHTTP, WinINet, or SChannel. Public API is four namespaces: `wknet::http`, `wknet::websocket`, `wknet::crypto`, `wknet::codec`.
 
-## Fit / not a fit
+## Scope
 
-| Fit | Not a fit |
-|-----|-----------|
-| Outbound HTTP(S) / WebSocket from a kernel driver | HTTP server / inbound request parser |
-| Explicit security defaults and capability bounds | Automatic trust of the system CA store |
-| One product API across HTTP/1.1 · HTTP/2 · HTTP/3 | QUIC migration / WebTransport and other non-goals |
+wknet is a kernel-mode HTTP/HTTPS/WebSocket **client**. It is for drivers that issue requests and want explicit security defaults, with one product API across HTTP/1.1, HTTP/2, and HTTP/3.
 
-## Hard constraints
+It does not provide an HTTP server or inbound request parser, and it does not ship a system CA store. Features such as QUIC migration and WebTransport are not supported today; see the [capability matrix](capability-matrix.md).
 
-1. Sync paths require `PASSIVE_LEVEL`; handles are heap objects with paired Create / Close·Release.
-2. Trust anchors, CA bundles, pins, and revocation evidence are **caller-supplied**; hostname checks never fall back to CN.
-3. Trace defaults to `Off`; HTTP/3 defaults to `Auto` (learn from authenticated Alt-Svc).
+## Integration notes
+
+- Call sync paths at `PASSIVE_LEVEL`. Public handles are heap objects; pair Create with Close / Release.
+- Trust anchors, CA bundles, pins, and revocation evidence are caller-supplied. Hostname verification does not fall back to CN.
+- Trace defaults to `Off`. HTTP/3 defaults to `Auto` and learns from authenticated Alt-Svc.
 
 ## Start here
 
 1. [Build](build.md) — produce `wknetlib.lib`
 2. [First request](first-request.md) — minimal GET / POST
-3. [Integration checklist](integration-checklist.md) — pre-flight
-4. [Capability matrix](capability-matrix.md) — implemented / opt-in / refused / non-goals
+3. [Integration notes](integration-checklist.md) — link, lifetime, trust
+4. [Capability matrix](capability-matrix.md) — support scope and limits
 
-Task recipes: [Cookbook](cookbook.md). Signatures: [API overview](api/overview.md).
+Recipes: [Cookbook](cookbook.md). Signatures: [API overview](api/overview.md).
