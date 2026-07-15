@@ -3,9 +3,7 @@
 Namespace: `wknet::http` (credential types aliased from `wknet::crypto`)  
 Headers: `wknet/http/Types.h` · `wknet/http/Certificate.h` · `wknet/crypto/TlsCredential.h`
 
-## Role
-
-Session / per-send TLS policy, certificate store, pins, revocation, and mTLS client credentials.
+`TlsConfig`, `CertificateStore`, pins, revocation, and mTLS client credentials.
 
 ## TlsVersion / CertPolicy
 

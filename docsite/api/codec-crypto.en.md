@@ -4,9 +4,7 @@ Namespaces: `wknet::codec` · `wknet::crypto`
 Headers: `wknet/codec/Codec.h` · `wknet/crypto/Aead.h`  
 (both included by `Wknet.h`)
 
-## Role
-
-Public content-coding / EXI / Pack200 decode and AEAD encrypt/decrypt. Product HTTP usually reaches codec via `SendOptions` Accept-Encoding / coding materials; TLS record protection uses crypto internally.
+Content-coding / EXI / Pack200 decode, and AEAD encrypt/decrypt. HTTP sends can use codec through `SendOptions` Accept-Encoding / coding materials.
 
 ---
 

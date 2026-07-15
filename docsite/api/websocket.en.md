@@ -3,9 +3,7 @@
 Namespace: `wknet::websocket`  
 Headers: `wknet/websocket/WebSocket.h` · config types in `wknet/http/Types.h` (`namespace wknet::websocket`)
 
-## Role
-
-Open a WebSocket on an existing `http::Session`, send/receive frames, and close.
+`Connect` / send / receive / close on an existing `http::Session`.
 
 ## ConnectConfig
 

@@ -3,8 +3,6 @@
 命名空间：`wknet::http`  
 头文件：`HttpAsync.h` · `AsyncOp.h` · `Options.h` · `Lifecycle.h` · `Types.h`
 
-## 职责
-
 非阻塞发送、`AsyncOp` 等待/取消/取结果，以及驱动卸载路径上的 `Destroy`。
 
 ## AsyncOptions
@@ -28,7 +26,7 @@ struct AsyncOptions final {
 
 `SendOptions` 字段见 [同步 HTTP](http-sync.md)。
 
-## AsyncSend / 方法便捷函数
+## AsyncSend / 按方法异步发送
 
 ### 签名
 
@@ -55,11 +53,11 @@ NTSTATUS AsyncSendEx(
 
 另有首参 `Request*` 的 `AsyncSend` / `AsyncSendEx`。
 
-| 简写（Session / Request） | Ex |
-|---------------------------|----|
+| 方法（Session / Request） | `*Ex` |
+|---------------------------|------|
 | `AsyncGet` / `AsyncHead` / `AsyncDelete` / `AsyncTrace` | `*Ex(..., headers, options, operation)` |
 | `AsyncPost` / `AsyncPut` / `AsyncPatch` | `*Ex(..., headers, body, options, operation)` |
-| `AsyncOptionsRequest` | `AsyncOptionsRequestEx`（避免与 `AsyncOptions` 类型名冲突） |
+| `AsyncOptionsRequest` | `AsyncOptionsRequestEx`（避免与类型 `AsyncOptions` 冲突） |
 
 ### 参数
 

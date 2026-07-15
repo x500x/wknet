@@ -3,9 +3,7 @@
 命名空间：`wknet::http`（凭据类型别名自 `wknet::crypto`）  
 头文件：`wknet/http/Types.h` · `wknet/http/Certificate.h` · `wknet/crypto/TlsCredential.h`
 
-## 职责
-
-会话 / 单次发送 TLS 策略、证书存储、pin、撤销与 mTLS 客户端凭据。
+`TlsConfig`、`CertificateStore`、pin、撤销与 mTLS 客户端凭据。
 
 ## TlsVersion / CertPolicy
 

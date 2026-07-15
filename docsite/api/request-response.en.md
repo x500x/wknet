@@ -3,9 +3,7 @@
 Namespace: `wknet::http`  
 Headers: `Request.h` · `Headers.h` · `Body.h` · `Response.h` · `Types.h`
 
-## Role
-
-Build request-side `Request` / `Headers` / `Body` and read-only `Response`. Send entry points: [Sync HTTP](http-sync.en.md) / [Async HTTP](http-async.en.md).
+`Request` / `Headers` / `Body` and read-only `Response`. Send entry points: [Sync HTTP](http-sync.md) / [Async HTTP](http-async.md).
 
 ## Request
 
@@ -29,9 +27,8 @@ void RequestRelease(_In_opt_ Request* request) noexcept;
 
 ### Notes
 
-- Product path usually uses `Send(session, method, url, headers, body, options, &response)` without holding `Request`.
-- `Send` / `AsyncSend` overloads taking `Request*` reuse a handle or serve test paths.
-- Under `WKNET_USER_MODE_TEST`, setters such as `RequestSetUrl` / `RequestSetBody*` exist; **they are not exposed in production headers**.
+- Typical usage is `Send(session, method, url, headers, body, options, &response)` without holding a `Request`.
+- `Send` / `AsyncSend` overloads that take `Request*` are also available.
 
 ## Headers
 

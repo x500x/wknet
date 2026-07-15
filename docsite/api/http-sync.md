@@ -3,9 +3,7 @@
 命名空间：`wknet::http`  
 头文件：`wknet/http/Http.h` · `wknet/http/Options.h` · `wknet/http/Types.h`
 
-## 职责
-
-阻塞发送 HTTP 请求：通用 `Send` / `SendEx`、方法便捷函数，以及完整 `SendOptions` 字段。
+阻塞 HTTP 发送：`Send` / `SendEx`、按方法发送接口、`SendOptions`。
 
 ## Send / SendEx
 
@@ -59,16 +57,16 @@ NTSTATUS SendEx(
 
 HTTP 状态码经 `ResponseStatusCode` 读取，不映射为 `NTSTATUS` 失败（除非库在传输层失败）。
 
-## 方法便捷函数
+## 按方法发送
 
-对每个方法提供 `Session*` 与 `Request*` 两套：
+`Get` / `Post` 等为固定方法的 `Send` 重载，均提供 `Session*` 与 `Request*` 形式：
 
-| 简写 | Ex 变体 | body |
-|------|---------|------|
+| 方法 | `*Ex` | 请求体 |
+|------|-------|--------|
 | `Get` / `Head` / `Options` / `Trace` / `Delete` | `*Ex(..., headers, options, response)` | 无 |
 | `Post` / `Put` / `Patch` | `*Ex(..., headers, body, options, response)` | 有 |
 
-另有长度 URL 重载（无 `Headers`/`SendOptions`），例如：
+另有按 URL 长度的重载（无 `Headers` / `SendOptions`），例如：
 
 ```cpp
 NTSTATUS Get(_In_ Session* session,
@@ -78,10 +76,10 @@ NTSTATUS Post(_In_ Session* session,
     _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength,
     _In_reads_bytes_opt_(bodyLength) const UCHAR* body, SIZE_T bodyLength,
     _Out_ Response** response) noexcept;
-// Put / Patch / Delete / Head / Options / Trace 同类
+// Put / Patch / Delete / Head / Options / Trace 同理
 ```
 
-`Trace` 需 `SendFlagAllowTrace` 才放行（经 `*Ex` 传入 options）。
+`Trace` 需通过 `*Ex` 的 `options` 设置 `SendFlagAllowTrace`。
 
 ## SendOptionsCreate / Release
 
@@ -114,7 +112,6 @@ struct SendOptions final {
     const CodingDecodeMaterials* ContentCodingMaterials;
     const Http2Priority* Http2Priority;
     Cache* Cache;
-    // WKNET_USER_MODE_TEST: OnComplete, CompletionContext
 };
 ```
 

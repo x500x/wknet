@@ -3,9 +3,7 @@
 命名空间：`wknet::websocket`  
 头文件：`wknet/websocket/WebSocket.h` · 配置类型在 `wknet/http/Types.h`（`namespace wknet::websocket`）
 
-## 职责
-
-在已有 `http::Session` 上建立 WebSocket，收发帧，关闭连接。
+`Connect` / 收发 / 关闭。依赖已有 `http::Session`。
 
 ## ConnectConfig
 

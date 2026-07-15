@@ -3,9 +3,7 @@
 Namespace: `wknet::http`  
 Headers: `wknet/http/Session.h` · `wknet/http/Types.h` · `wknet/http/Cache.h`
 
-## Role
-
-Create/close `Session` and document session-level `SessionConfig` (including `Http3`, proxy, TLS summary, pool, and cache pointer).
+`Session` lifetime and `SessionConfig` (including `Http3`, proxy, TLS, pool, and cache).
 
 ## SessionCreate / SessionClose
 

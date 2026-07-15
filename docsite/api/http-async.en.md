@@ -3,9 +3,7 @@
 Namespace: `wknet::http`  
 Headers: `HttpAsync.h` · `AsyncOp.h` · `Options.h` · `Lifecycle.h` · `Types.h`
 
-## Role
-
-Non-blocking send, `AsyncOp` wait/cancel/result, and pre-unload `Destroy` drain.
+Non-blocking send, `AsyncOp` wait/cancel/result, and `Destroy` on the driver unload path.
 
 ## AsyncOptions
 
@@ -28,7 +26,7 @@ struct AsyncOptions final {
 
 `SendOptions` fields: [Sync HTTP](http-sync.en.md).
 
-## AsyncSend / method helpers
+## AsyncSend / method-specific async send
 
 ### Signatures
 
@@ -55,8 +53,8 @@ NTSTATUS AsyncSendEx(
 
 Also `Request*`-leading `AsyncSend` / `AsyncSendEx`.
 
-| Short (Session / Request) | Ex |
-|---------------------------|----|
+| Methods (Session / Request) | `*Ex` |
+|-----------------------------|------|
 | `AsyncGet` / `AsyncHead` / `AsyncDelete` / `AsyncTrace` | `*Ex(..., headers, options, operation)` |
 | `AsyncPost` / `AsyncPut` / `AsyncPatch` | `*Ex(..., headers, body, options, operation)` |
 | `AsyncOptionsRequest` | `AsyncOptionsRequestEx` (avoids clash with type `AsyncOptions`) |

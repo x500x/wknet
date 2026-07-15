@@ -4,9 +4,7 @@
 头文件：`wknet/codec/Codec.h` · `wknet/crypto/Aead.h`  
 （`Wknet.h` 已包含二者）
 
-## 职责
-
-公开 content-coding / EXI / Pack200 解码与 AEAD 加解密入口。产品 HTTP 路径通常经 `SendOptions` 的 Accept-Encoding / coding materials 间接使用 codec；TLS 记录层间接使用 crypto。
+content-coding / EXI / Pack200 解码，以及 AEAD 加解密。HTTP 发送可通过 `SendOptions` 的 Accept-Encoding / coding materials 使用 codec。
 
 ---
 

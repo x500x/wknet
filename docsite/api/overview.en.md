@@ -1,24 +1,21 @@
-# API Overview
+# API overview
 
-Namespaces: `wknet::http` · `wknet::websocket` · `wknet::codec` · `wknet::crypto`  
-Umbrella header: `<wknet/Wknet.h>`
+`#include <wknet/Wknet.h>`
 
-## Role
+Namespaces: `wknet::http` · `wknet::websocket` · `wknet::codec` · `wknet::crypto`
 
-Handle table, calling conventions, and header map for the public high-level API. Signatures and fields are taken from the headers; task recipes live in the [Cookbook](../cookbook.en.md).
+## Conventions
 
-## Calling conventions
-
-| Item | Rule |
-|------|------|
-| IRQL | High-level HTTP / WebSocket / certificate / async entry points require `PASSIVE_LEVEL` |
-| Returns | Mostly `NTSTATUS`; `_Must_inspect_result_` must be checked; success via `NT_SUCCESS` |
-| Handles | Opaque heap objects; obtain via `Create` / send results; free via `Close` / `Release` |
+| Item | Notes |
+|------|-------|
+| IRQL | HTTP / WebSocket / certificate / async entry points at `PASSIVE_LEVEL` |
+| Returns | Mostly `NTSTATUS`; check `_Must_inspect_result_`; success via `NT_SUCCESS` |
+| Handles | Opaque heap objects; `Create` to obtain, `Close` / `Release` to free |
 | Options | `SendOptions` / `AsyncOptions` via `*Create` / `*Release` |
 | Null | `Close` / `Release` accept `nullptr` |
-| Errors | No C++ exceptions; failures return `NTSTATUS` and usually clear out-params |
+| Exceptions | No C++ exceptions |
 
-## Opaque handles
+## Handles
 
 | Type | Namespace | Create / obtain | Free | Header |
 |------|-----------|-----------------|------|--------|
@@ -32,80 +29,53 @@ Handle table, calling conventions, and header map for the public high-level API.
 | `CertificateStore` | `wknet::http` | `CertificateStoreCreate` | `CertificateStoreClose` | `http/Certificate.h` |
 | `WebSocket` | `wknet::websocket` | `Connect*` | `Close` / `CloseEx` | `websocket/WebSocket.h` |
 
-`SendOptions` / `AsyncOptions` are heap objects too (Create / Release). See [Sync HTTP](http-sync.en.md) / [Async HTTP](http-async.en.md).
+`SendOptions` / `AsyncOptions`: [Sync HTTP](http-sync.md) / [Async HTTP](http-async.md).
 
-## What `<wknet/Wknet.h>` includes
-
-`Wknet.h` aggregates **only** the public high-level headers. It does **not** pull in the low-level engine or transport internals:
-
-```cpp
-#include <wknet/WknetConfig.h>
-#include <wknet/Trace.h>
-#include <wknet/http/AsyncOp.h>
-#include <wknet/http/Body.h>
-#include <wknet/http/Cache.h>
-#include <wknet/http/Certificate.h>
-#include <wknet/http/Headers.h>
-#include <wknet/http/Http.h>
-#include <wknet/http/HttpAsync.h>
-#include <wknet/http/Lifecycle.h>
-#include <wknet/http/Options.h>
-#include <wknet/http/Request.h>
-#include <wknet/http/Response.h>
-#include <wknet/http/Session.h>
-#include <wknet/http/Types.h>
-#include <wknet/websocket/WebSocket.h>
-#include <wknet/crypto/Aead.h>
-#include <wknet/codec/Codec.h>
-```
-
-Product code usually includes only `<wknet/Wknet.h>`. Use the map below for finer-grained includes.
-
-## Header map
+## Headers
 
 | Header | Contents |
 |--------|----------|
-| `wknet/Wknet.h` | High-level umbrella (above) |
+| `wknet/Wknet.h` | Public API umbrella |
 | `wknet/http/Types.h` | Enums, config structs, callbacks, defaults |
 | `wknet/http/Session.h` | `SessionCreate` / `SessionClose` |
-| `wknet/http/Request.h` | `RequestCreate` / `RequestRelease` (some setters under test macro) |
-| `wknet/http/Headers.h` | Request header handle |
-| `wknet/http/Body.h` | Request body handle |
+| `wknet/http/Request.h` | `RequestCreate` / `RequestRelease` |
+| `wknet/http/Headers.h` | Request headers |
+| `wknet/http/Body.h` | Request body |
 | `wknet/http/Options.h` | `SendOptionsCreate` / `AsyncOptionsCreate` |
 | `wknet/http/Http.h` | Sync `Send` / `Get` / `Post` … |
 | `wknet/http/HttpAsync.h` | Async `AsyncSend` / `AsyncGet` … |
-| `wknet/http/AsyncOp.h` | Wait, cancel, take `Response`, release |
-| `wknet/http/Response.h` | Status / body / header / trailer read-only |
-| `wknet/http/Lifecycle.h` | `Destroy` async drain |
-| `wknet/http/Certificate.h` | `CertificateStore*`, pin / mTLS types |
-| `wknet/http/Cache.h` | RFC 9111 in-memory cache |
+| `wknet/http/AsyncOp.h` | Wait, cancel, take `Response` |
+| `wknet/http/Response.h` | Status / body / headers / trailers |
+| `wknet/http/Lifecycle.h` | `Destroy` |
+| `wknet/http/Certificate.h` | `CertificateStore`, pins, mTLS types |
+| `wknet/http/Cache.h` | In-memory cache |
 | `wknet/websocket/WebSocket.h` | WebSocket connect and I/O |
-| `wknet/codec/Codec.h` | Content-coding / EXI / Pack200 decode |
-| `wknet/crypto/Aead.h` | AEAD encrypt/decrypt |
+| `wknet/codec/Codec.h` | Content-coding / EXI / Pack200 |
+| `wknet/crypto/Aead.h` | AEAD |
 | `wknet/crypto/TlsCredential.h` | `TlsClientCredential` (via `Certificate.h`) |
-| `wknet/Trace.h` | Diagnostics (not required for request path) |
+| `wknet/Trace.h` | Diagnostics |
 
-Low-level `session::` and WSK transport are **outside** the `Wknet.h` public aggregate; see [Internals](../internals.md).
+`Wknet.h` includes the public headers above (`TlsCredential.h` via `Certificate.h`). Fine-grained includes may take only the headers needed.
 
-## Default factories
+## Defaults
 
-| Function | Returns | Header |
-|----------|---------|--------|
-| `DefaultSessionConfig()` | `SessionConfig{}` | `Types.h` |
-| `DefaultTlsConfig()` | `TlsConfig{}` | `Types.h` |
-| `DefaultSendOptions()` | value-semantic default `SendOptions` | `Types.h` |
-| `DefaultConnectConfig()` | `websocket::ConnectConfig` | `Types.h` |
+| Function | Returns |
+|----------|---------|
+| `DefaultSessionConfig()` | `SessionConfig` |
+| `DefaultTlsConfig()` | `TlsConfig` |
+| `DefaultSendOptions()` | `SendOptions` value |
+| `DefaultConnectConfig()` | `websocket::ConnectConfig` |
 
-Create heap options with `SendOptionsCreate` / `AsyncOptionsCreate`. Constructors of `SendOptions` / `AsyncOptions` are private.
+Use `SendOptionsCreate` / `AsyncOptionsCreate` when passing `SendOptions` / `AsyncOptions` to APIs (constructors are private).
 
-## See also
+## Pages
 
-- [Session & Config](session-config.en.md)
-- [Request & Response](request-response.en.md)
-- [Sync HTTP](http-sync.en.md)
-- [Async HTTP](http-async.en.md)
-- [WebSocket](websocket.en.md)
-- [TLS options](tls-options.en.md)
-- [Codec & Crypto](codec-crypto.en.md)
-- [First request](../first-request.en.md)
-- [Cookbook](../cookbook.en.md)
+| Page | Contents |
+|------|----------|
+| [Session & config](session-config.md) | `Session`, `SessionConfig`, `Http3`, proxy, pool, cache |
+| [Request & response](request-response.md) | `Request`, `Headers`, `Body`, `Response` |
+| [Sync HTTP](http-sync.md) | `Send` / method-specific send, `SendOptions` |
+| [Async HTTP](http-async.md) | `AsyncSend`, `AsyncOp`, `Destroy` |
+| [WebSocket](websocket.md) | `Connect` / send / receive / close |
+| [TLS options](tls-options.md) | `TlsConfig`, `CertificateStore`, mTLS |
+| [Codec & crypto](codec-crypto.md) | Decode and AEAD |

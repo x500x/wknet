@@ -3,9 +3,7 @@
 Namespace: `wknet::http`  
 Headers: `wknet/http/Http.h` · `wknet/http/Options.h` · `wknet/http/Types.h`
 
-## Role
-
-Blocking HTTP send: general `Send` / `SendEx`, method helpers, and full `SendOptions` fields.
+Blocking HTTP send: `Send` / `SendEx`, method-specific send APIs, and `SendOptions`.
 
 ## Send / SendEx
 
@@ -59,16 +57,16 @@ Same shape with leading `Request*` overloads of `Send` / `SendEx`.
 
 HTTP status codes are read via `ResponseStatusCode`; they are not mapped to `NTSTATUS` failure unless the transport fails.
 
-## Method helpers
+## Method-specific send
 
-Each method has `Session*` and `Request*` forms:
+`Get` / `Post` and related APIs are method-fixed `Send` overloads. Each has `Session*` and `Request*` forms:
 
-| Short | Ex form | Body |
-|-------|---------|------|
+| Methods | `*Ex` | Body |
+|---------|-------|------|
 | `Get` / `Head` / `Options` / `Trace` / `Delete` | `*Ex(..., headers, options, response)` | No |
 | `Post` / `Put` / `Patch` | `*Ex(..., headers, body, options, response)` | Yes |
 
-Length-based URL overloads (no `Headers`/`SendOptions`), e.g.:
+Length-based URL overloads (no `Headers` / `SendOptions`) also exist, for example:
 
 ```cpp
 NTSTATUS Get(_In_ Session* session,
@@ -81,7 +79,7 @@ NTSTATUS Post(_In_ Session* session,
 // Put / Patch / Delete / Head / Options / Trace similarly
 ```
 
-`Trace` requires `SendFlagAllowTrace` (via `*Ex` options).
+`Trace` requires `SendFlagAllowTrace` on the `*Ex` options.
 
 ## SendOptionsCreate / Release
 
@@ -114,7 +112,6 @@ struct SendOptions final {
     const CodingDecodeMaterials* ContentCodingMaterials;
     const Http2Priority* Http2Priority;
     Cache* Cache;
-    // WKNET_USER_MODE_TEST: OnComplete, CompletionContext
 };
 ```
 

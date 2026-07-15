@@ -3,9 +3,7 @@
 命名空间：`wknet::http`  
 头文件：`Request.h` · `Headers.h` · `Body.h` · `Response.h` · `Types.h`
 
-## 职责
-
-构建请求侧 `Request` / `Headers` / `Body`，读取只读 `Response`。同步 / 异步发送入口见 [同步 HTTP](http-sync.md) / [异步 HTTP](http-async.md)。
+`Request` / `Headers` / `Body` 与只读 `Response`。发送入口见 [同步 HTTP](http-sync.md) / [异步 HTTP](http-async.md)。
 
 ## Request
 
@@ -29,9 +27,8 @@ void RequestRelease(_In_opt_ Request* request) noexcept;
 
 ### 备注
 
-- 产品路径通常用 `Send(session, method, url, headers, body, options, &response)`，不必持有 `Request`。
-- 绑定 `Request*` 的 `Send` / `AsyncSend` 重载用于复用句柄或测试路径。
-- 在 `WKNET_USER_MODE_TEST` 下另有 `RequestSetUrl` / `RequestSetMethod` / `RequestSetBody*` 等 setter；**生产头文件不暴露这些符号**。
+- 常见用法是 `Send(session, method, url, headers, body, options, &response)`，无需单独持有 `Request`。
+- 也提供以 `Request*` 为首参的 `Send` / `AsyncSend` 重载。
 
 ## Headers
 

@@ -3,9 +3,7 @@
 命名空间：`wknet::http`  
 头文件：`wknet/http/Session.h` · `wknet/http/Types.h` · `wknet/http/Cache.h`
 
-## 职责
-
-创建 / 关闭 `Session`，并描述会话级 `SessionConfig`（含 `Http3`、代理、TLS 摘要、连接池与缓存指针）。
+`Session` 生命周期与 `SessionConfig`（含 `Http3`、代理、TLS、连接池、cache）。
 
 ## SessionCreate / SessionClose
 
