@@ -24,9 +24,6 @@
     <ClCompile Include="DriverEntry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Driver.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="wknettestLog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -39,14 +36,14 @@
     <ClCompile Include="samples\HighLevelApiSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
+    <ClCompile Include="samples\Http3ApiSamples.cpp">
+      <Filter>Source Files\samples</Filter>
+    </ClCompile>
     <ClCompile Include="samples\HttpApiSamples.cpp">
       <Filter>Source Files\samples</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="tests\Http3KernelTestProtocol.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\wknet\Wknet.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -63,6 +60,9 @@
       <Filter>Header Files\samples</Filter>
     </ClInclude>
     <ClInclude Include="samples\HighLevelApiSamples.h">
+      <Filter>Header Files\samples</Filter>
+    </ClInclude>
+    <ClInclude Include="samples\Http3ApiSamples.h">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
     <ClInclude Include="samples\HttpApiSamples.h">

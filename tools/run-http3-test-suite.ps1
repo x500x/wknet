@@ -2,13 +2,22 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('QuicCore', 'H3Session', 'Protocol', 'Regression', 'AllFirstParty')]
-    [string]$Group
+    [ValidateSet('QuicCore', 'H3Session', 'Protocol', 'Regression', 'AllFirstParty', 'KernelVm')]
+    [string]$Group,
+    [ValidateSet('Debug', 'Release')]
+    [string]$Configuration = 'Debug',
+    [ValidateSet('x64', 'ARM64')]
+    [string]$Platform = 'x64',
+    [ValidateRange(1, 1800)]
+    [int]$TimeoutSeconds = 180,
+    [switch]$EnableVerifier,
+    [switch]$SkipDriverBuild
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildTests = Join-Path $PSScriptRoot 'build-tests.ps1'
+$kernelVmTests = Join-Path $repoRoot 'tests\integration\http3_kernel.ps1'
 
 $groups = @{
     QuicCore = @(
@@ -68,6 +77,38 @@ if ($Group -eq 'AllFirstParty')
     {
         throw "Failed to discover first-party test targets."
     }
+}
+
+if ($Group -eq 'KernelVm')
+{
+    Write-Host "[http3-suite] group=KernelVm configuration=$Configuration platform=$Platform"
+    $kernelArgs = @(
+        '-NoLogo',
+        '-NoProfile',
+        '-File',
+        $kernelVmTests,
+        '-Configuration',
+        $Configuration,
+        '-Platform',
+        $Platform,
+        '-TimeoutSeconds',
+        "$TimeoutSeconds"
+    )
+    if ($EnableVerifier)
+    {
+        $kernelArgs += '-EnableVerifier'
+    }
+    if ($SkipDriverBuild)
+    {
+        $kernelArgs += '-SkipDriverBuild'
+    }
+    & pwsh @kernelArgs
+    if ($LASTEXITCODE -ne 0)
+    {
+        exit $LASTEXITCODE
+    }
+    Write-Host "[http3-suite] group=KernelVm passed"
+    exit 0
 }
 
 Write-Host "[http3-suite] group=$Group count=$($groups[$Group].Count)"

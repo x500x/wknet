@@ -4,12 +4,6 @@
 #include "WknetTestLog.h"
 #include "samples/HttpApiSamples.h"
 
-namespace wknettest::http3
-{
-    NTSTATUS Initialize(_In_ PDRIVER_OBJECT driverObject, _In_ wknet::net::WskClient* client) noexcept;
-    void Shutdown() noexcept;
-}
-
 extern "C" NTSYSAPI NTSTATUS NTAPI ZwWaitForSingleObject(
     _In_ HANDLE Handle,
     _In_ BOOLEAN Alertable,
@@ -497,8 +491,6 @@ namespace wknet
     {
         UNREFERENCED_PARAMETER(driverObject);
 
-        wknettest::http3::Shutdown();
-
         if (g_wskClient != nullptr) {
             WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "驱动卸载开始\r\n");
             WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "驱动卸载: 开始等待异步 HTTP worker 结束\r\n");
@@ -557,19 +549,49 @@ DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
         return status;
     }
 
-    status = wknettest::http3::Initialize(driverObject, wknet::g_wskClient);
+    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "WSK 已初始化，开始运行 wknettest 全量场景示例\r\n");
+
+    wknet::LoadHttpSamplesThreadContext sampleThreadContext = {
+        STATUS_UNSUCCESSFUL,
+        wknet::g_certificateBundlePath[0] != '\0' ? wknet::g_certificateBundlePath : nullptr
+    };
+    OBJECT_ATTRIBUTES objectAttributes = {};
+    InitializeObjectAttributes(&objectAttributes, nullptr, OBJ_KERNEL_HANDLE, nullptr, nullptr);
+
+    HANDLE sampleThreadHandle = nullptr;
+    status = PsCreateSystemThread(
+        &sampleThreadHandle,
+        THREAD_ALL_ACCESS,
+        &objectAttributes,
+        nullptr,
+        nullptr,
+        wknet::LoadHttpSamplesThread,
+        &sampleThreadContext);
     if (!NT_SUCCESS(status)) {
-        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
-            "HTTP/3 内核测试控制面初始化失败: 0x%08X\r\n", static_cast<ULONG>(status));
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "创建加载期示例线程失败: 0x%08X\r\n", static_cast<ULONG>(status));
         wknet::ReleaseWskClient();
         wknet::testlog::Shutdown();
         return status;
     }
 
+    status = ZwWaitForSingleObject(sampleThreadHandle, FALSE, nullptr);
+    ZwClose(sampleThreadHandle);
+    if (!NT_SUCCESS(status)) {
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "等待加载期示例线程失败: 0x%08X\r\n", static_cast<ULONG>(status));
+        wknet::ReleaseWskClient();
+        wknet::testlog::Shutdown();
+        return status;
+    }
+
+    const NTSTATUS sampleStatus = sampleThreadContext.Status;
+    if (!NT_SUCCESS(sampleStatus)) {
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
+            "加载期示例存在失败项，DriverEntry 继续完成: 0x%08X\r\n",
+            static_cast<ULONG>(sampleStatus));
+    }
+
     status = STATUS_SUCCESS;
-    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info,
-        "DriverEntry 完成，加载期示例由独立用户态测试触发: 0x%08X\r\n",
-        static_cast<ULONG>(status));
+    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "DriverEntry 完成: 0x%08X\r\n", static_cast<ULONG>(status));
 
     return status;
 }

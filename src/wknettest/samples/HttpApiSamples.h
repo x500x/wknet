@@ -2,6 +2,7 @@
 
 #include "samples/AdvancedScenarioSamples.h"
 #include "samples/HighLevelApiSamples.h"
+#include "samples/Http3ApiSamples.h"
 
 namespace wknet::http {
     struct Session;
@@ -15,6 +16,7 @@ namespace samples
     {
         HighLevelApiSampleResults HighLevel = {};
         AdvancedScenarioSampleResults Advanced = {};
+        Http3ApiSampleResults Http3 = {};
     };
 
     _Must_inspect_result_
