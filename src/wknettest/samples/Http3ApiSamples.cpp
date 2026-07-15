@@ -6,6 +6,7 @@
 #include <wknettest/SampleStatus.h>
 
 #include "WknetTestLog.h"
+#include "samples/ExternalTrustStore.h"
 
 namespace wknet
 {
@@ -13,8 +14,8 @@ namespace samples
 {
 namespace
 {
-    constexpr const char* Http3LoopbackUrl = "https://127.0.0.1:58443/";
-    constexpr const char* Http3LoopbackServerName = "localhost";
+    constexpr const char* Http3ExternalUrl = "https://cloudflare-quic.com/";
+    constexpr const char* Http3ExternalServerName = "cloudflare-quic.com";
     constexpr SIZE_T Http3MaxResponseBytes = 64 * 1024;
     constexpr ULONG Http3ProbeTimeoutMs = 15000;
 
@@ -41,7 +42,9 @@ namespace
         result.BodyLength = bodyLength;
     }
 
-    NTSTATUS RunRequiredLoopbackGet(_Out_ HighLevelApiSampleResult& result) noexcept
+    NTSTATUS RunRequiredExternalGet(
+        _In_ const wknet::http::CertificateStore* trustStore,
+        _Out_ HighLevelApiSampleResult& result) noexcept
     {
         wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
         config.MaxResponseBytes = Http3MaxResponseBytes;
@@ -50,29 +53,30 @@ namespace
         config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
         config.Http3.Race = wknet::http::Http3RaceMode::SequentialPreferHttp3;
         config.Http3.QuicProbeTimeoutMs = Http3ProbeTimeoutMs;
-        config.Tls.Certificate = wknet::http::CertPolicy::NoVerify;
+        config.Tls.Certificate = wknet::http::CertPolicy::Verify;
+        config.Tls.Store = trustStore;
         config.Tls.MinVersion = wknet::http::TlsVersion::Tls13;
         config.Tls.MaxVersion = wknet::http::TlsVersion::Tls13;
-        config.Tls.ServerName = Http3LoopbackServerName;
-        config.Tls.ServerNameLength = LiteralLength(Http3LoopbackServerName);
+        config.Tls.ServerName = Http3ExternalServerName;
+        config.Tls.ServerNameLength = LiteralLength(Http3ExternalServerName);
         config.Tls.PreferHttp2 = false;
 
         WKNET_SAMPLE_LOG(
-            "[HTTP/3] 示例=HTTP/3 Required Loopback URL=%s 模式=Required TLS=NoVerify TLS版本=TLS1.3 端口=58443\r\n",
-            Http3LoopbackUrl);
+            "[HTTP/3] 示例=HTTP/3 Required External URL=%s 模式=Required TLS=Verify TLS版本=TLS1.3\r\n",
+            Http3ExternalUrl);
 
         wknet::http::Session* session = nullptr;
         NTSTATUS status = wknet::http::SessionCreate(&config, &session);
         if (!NT_SUCCESS(status)) {
             CaptureStatus(result, status, 0, 0);
             WKNET_SAMPLE_LOG(
-                "[HTTP/3] 示例=HTTP/3 Required Loopback SessionCreate 失败 NTSTATUS=0x%08X\r\n",
+                "[HTTP/3] 示例=HTTP/3 Required External SessionCreate 失败 NTSTATUS=0x%08X\r\n",
                 static_cast<ULONG>(status));
             return status;
         }
 
         wknet::http::Response* response = nullptr;
-        status = wknet::http::Get(session, Http3LoopbackUrl, &response);
+        status = wknet::http::Get(session, Http3ExternalUrl, &response);
 
         ULONG statusCode = response != nullptr ? wknet::http::ResponseStatusCode(response) : 0;
         SIZE_T bodyLength = response != nullptr ? wknet::http::ResponseBodyLength(response) : 0;
@@ -82,12 +86,12 @@ namespace
 
         CaptureStatus(result, status, statusCode, bodyLength);
         WKNET_SAMPLE_LOG(
-            "[HTTP/3] 示例=HTTP/3 Required Loopback NTSTATUS=0x%08X 状态码=%lu 响应体长度=%Iu\r\n",
+            "[HTTP/3] 示例=HTTP/3 Required External NTSTATUS=0x%08X 状态码=%lu 响应体长度=%Iu\r\n",
             static_cast<ULONG>(status),
             statusCode,
             bodyLength);
         if (NT_SUCCESS(status)) {
-            WKNET_SAMPLE_LOG("[HTTP/3] 示例=HTTP/3 Required Loopback 通过\r\n");
+            WKNET_SAMPLE_LOG("[HTTP/3] 示例=HTTP/3 Required External 通过\r\n");
         }
 
         wknet::http::ResponseRelease(response);
@@ -96,7 +100,10 @@ namespace
     }
 }
 
-NTSTATUS RunHttp3ApiSamples(net::WskClient* wskClient, Http3ApiSampleResults* results) noexcept
+NTSTATUS RunHttp3ApiSamples(
+    net::WskClient* wskClient,
+    const char* certificateBundlePath,
+    Http3ApiSampleResults* results) noexcept
 {
     if (wskClient == nullptr || results == nullptr) {
         return STATUS_INVALID_PARAMETER;
@@ -105,11 +112,19 @@ NTSTATUS RunHttp3ApiSamples(net::WskClient* wskClient, Http3ApiSampleResults* re
     *results = {};
     NTSTATUS aggregate = STATUS_SUCCESS;
 
-    NTSTATUS status = RunRequiredLoopbackGet(results->Http3RequiredLoopback);
+    ExternalTrustStore trustStore = {};
+    NTSTATUS status = InitializeExternalTrustStore(
+        trustStore,
+        certificateBundlePath != nullptr ? certificateBundlePath : ExternalTrustStoreDefaultBundlePath);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = RunRequiredExternalGet(trustStore.Store, results->Http3RequiredExternal);
     if (!NT_SUCCESS(status)) {
         if (IsPublicEndpointDiagnosticStatus(status)) {
             WKNET_SAMPLE_LOG(
-                "[HTTP/3] 示例=HTTP/3 Required Loopback 本地 fixture 或网络环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                "[HTTP/3] 示例=HTTP/3 Required External 外部端点或网络环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
                 static_cast<ULONG>(status));
         }
         else {
@@ -117,6 +132,7 @@ NTSTATUS RunHttp3ApiSamples(net::WskClient* wskClient, Http3ApiSampleResults* re
         }
     }
 
+    ResetExternalTrustStore(trustStore);
     return aggregate;
 }
 }

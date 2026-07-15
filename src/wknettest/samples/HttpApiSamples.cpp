@@ -34,7 +34,7 @@ NTSTATUS RunDriverSamples(
     status = RunAdvancedScenarioSamples(wskClient, certificateBundlePath, &results->Advanced);
     MergeSampleStatus(aggregate, status);
 
-    status = RunHttp3ApiSamples(wskClient, &results->Http3);
+    status = RunHttp3ApiSamples(wskClient, certificateBundlePath, &results->Http3);
     MergeSampleStatus(aggregate, status);
 
     return aggregate;

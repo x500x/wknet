@@ -20,14 +20,6 @@ $driverCertificate = Join-Path $driverRoot 'wknettest.cer'
 $driverLog = Join-Path $driverRoot 'wknettest.log'
 $certificateBundleSource = Join-Path $repoRoot 'certs\cacert.pem'
 $certificateBundleTarget = Join-Path $driverRoot 'cacert.pem'
-$peerRoot = Join-Path $repoRoot 'tests\out\http3-peers'
-$fixtureRoot = Join-Path $repoRoot 'tests\fixtures\http3'
-$requirements = Join-Path $fixtureRoot 'aioquic-requirements.txt'
-$peerPython = Join-Path $peerRoot 'aioquic-venv\Scripts\python.exe'
-$peerScript = Join-Path $fixtureRoot 'aioquic_peer.py'
-$certificate = Join-Path $repoRoot 'tests\testdata\localhost.cert.pem'
-$privateKey = Join-Path $repoRoot 'tests\testdata\localhost.key.pem'
-$loopbackPort = 58443
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -57,73 +49,6 @@ function Ensure-TestSigning {
     }
 }
 
-function Ensure-AioquicPeerDependencies {
-    New-Item -ItemType Directory -Force -Path $peerRoot | Out-Null
-    if (-not (Test-Path -LiteralPath $peerPython)) {
-        python -m venv (Join-Path $peerRoot 'aioquic-venv')
-        if ($LASTEXITCODE -ne 0) {
-            throw "python venv creation failed with exit code $LASTEXITCODE"
-        }
-    }
-
-    & $peerPython -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes -r $requirements
-    if ($LASTEXITCODE -ne 0) {
-        throw "aioquic dependency installation failed with exit code $LASTEXITCODE"
-    }
-}
-
-function Start-AioquicPeer {
-    $readyFile = Join-Path $peerRoot "kernel-load-handshake-$loopbackPort.ready"
-    $logFile = Join-Path $peerRoot "kernel-load-handshake-$loopbackPort.log"
-    $stderrFile = Join-Path $peerRoot "kernel-load-handshake-$loopbackPort.stderr.log"
-    Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue
-
-    $arguments = @(
-        $peerScript,
-        '-Scenario', 'handshake',
-        '-Port', "$loopbackPort",
-        '-Certificate', $certificate,
-        '-Key', $privateKey,
-        '-ReadyFile', $readyFile,
-        '-LogFile', $logFile,
-        '-Host', '127.0.0.1'
-    )
-    $process = Start-Process -FilePath $peerPython -ArgumentList $arguments -PassThru -WindowStyle Hidden -RedirectStandardError $stderrFile
-    $deadline = [DateTime]::UtcNow.AddSeconds(30)
-    while (-not (Test-Path -LiteralPath $readyFile) -and
-           -not $process.HasExited -and
-           [DateTime]::UtcNow -lt $deadline) {
-        Start-Sleep -Milliseconds 100
-    }
-    if (-not (Test-Path -LiteralPath $readyFile)) {
-        if (-not $process.HasExited) {
-            Stop-Process -Id $process.Id -Force
-        }
-        $peerError = if (Test-Path -LiteralPath $stderrFile) { Get-Content -Raw -LiteralPath $stderrFile } else { '' }
-        throw "aioquic peer 未就绪，端口=$loopbackPort，日志=$logFile，stderr=$peerError"
-    }
-    return [pscustomobject]@{
-        Process = $process
-        ReadyFile = $readyFile
-        LogFile = $logFile
-        StderrFile = $stderrFile
-    }
-}
-
-function Stop-AioquicPeer {
-    param(
-        [Parameter(Mandatory = $true)]
-        [pscustomobject]$Peer
-    )
-
-    if (-not $Peer.Process.HasExited) {
-        Stop-Process -Id $Peer.Process.Id -Force
-    }
-    $Peer.Process.WaitForExit()
-    Remove-Item -LiteralPath $Peer.ReadyFile -Force -ErrorAction SilentlyContinue
-}
-
 function Remove-DriverService {
     & sc.exe stop $driverServiceName | Out-Null
     & sc.exe delete $driverServiceName | Out-Null
@@ -150,9 +75,9 @@ function Assert-DriverLog {
     }
 
     $log = Get-Content -Raw -LiteralPath $driverLog
-    if ($log -notmatch '\[HTTP/3\].*HTTP/3 Required Loopback 通过') {
+    if ($log -notmatch '\[HTTP/3\].*HTTP/3 Required External 通过') {
         $tail = ($log -split "`r?`n" | Select-Object -Last 80) -join "`n"
-        throw "wknettest.sys 未在加载期跑通 HTTP/3 Required Loopback。日志尾部：`n$tail"
+        throw "wknettest.sys 未在加载期跑通外部 HTTP/3 Required 示例。日志尾部：`n$tail"
     }
     if ($log -notmatch 'wknettest 全量示例') {
         $tail = ($log -split "`r?`n" | Select-Object -Last 80) -join "`n"
@@ -164,14 +89,6 @@ if (-not (Test-IsAdministrator)) {
     throw 'http3_kernel.ps1 必须在管理员 pwsh 中运行。'
 }
 Ensure-TestSigning
-Ensure-AioquicPeerDependencies
-
-if (-not (Test-Path -LiteralPath $peerScript) -or
-    -not (Test-Path -LiteralPath $certificate) -or
-    -not (Test-Path -LiteralPath $privateKey) -or
-    -not (Test-Path -LiteralPath $requirements)) {
-    throw 'aioquic peer 或固定测试证书缺失。'
-}
 
 if (-not $SkipDriverBuild) {
     & msbuild.exe (Join-Path $repoRoot 'wknet.sln') /t:wknettest "/p:Configuration=$Configuration" "/p:Platform=$Platform" /m
@@ -200,7 +117,6 @@ $existingCertificate = Get-ChildItem -Path $certificateStorePath |
 $certificateAdded = $false
 $verifierChanged = $false
 $originalVerifier = $null
-$peer = $null
 
 try {
     if ($null -eq $existingCertificate) {
@@ -226,17 +142,13 @@ try {
         }
     }
 
-    $peer = Start-AioquicPeer
     Install-DriverService
     Invoke-Checked -FilePath 'sc.exe' -ArgumentList @('start', $driverServiceName)
     Assert-DriverLog
-    Write-Host "内核 HTTP/3 加载期集成测试通过 ($Configuration/$Platform)。"
+    Write-Host "内核 HTTP/3 外部站点加载期集成测试通过 ($Configuration/$Platform)。"
 }
 finally {
     Remove-DriverService
-    if ($null -ne $peer) {
-        Stop-AioquicPeer -Peer $peer
-    }
     if ($verifierChanged) {
         & verifier.exe /volatile /reset | Out-Null
     }
