@@ -65,6 +65,18 @@ NTSTATUS WriteTruncatedPacketNumber(ULONGLONG packetNumber, SIZE_T packetNumberL
     *offset += packetNumberLength;
     return STATUS_SUCCESS;
 }
+
+bool IsAllZero(const UCHAR *data, SIZE_T length) noexcept
+{
+    for (SIZE_T index = 0; index < length; ++index)
+    {
+        if (data[index] != 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
 } // namespace
 
 NTSTATUS QuicParsePacketHeader(const UCHAR *packet, SIZE_T packetLength,
@@ -288,6 +300,11 @@ NTSTATUS QuicPacketIteratorNext(QuicPacketIterator *iterator, QuicPacketHeader *
         return STATUS_INVALID_NETWORK_RESPONSE;
     const UCHAR *current = iterator->Datagram + iterator->Offset;
     const SIZE_T remaining = iterator->DatagramLength - iterator->Offset;
+    if (IsAllZero(current, remaining))
+    {
+        iterator->Offset = iterator->DatagramLength;
+        return STATUS_NOT_FOUND;
+    }
     NTSTATUS status =
         QuicParsePacketHeader(current, remaining, iterator->ShortHeaderDestinationConnectionIdLength, header);
     if (!NT_SUCCESS(status))

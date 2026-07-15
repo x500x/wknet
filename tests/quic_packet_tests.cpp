@@ -176,6 +176,25 @@ int main()
     Expect(wknet::quic::QuicPacketIteratorNext(&iterator, &header, &view) == STATUS_NOT_FOUND,
            "coalesced iterator terminates exactly");
 
+    UCHAR padded[128] = {};
+    const SIZE_T paddedPacketLength = BuildInitial(padded, sizeof(padded), 64);
+    wknet::quic::QuicPacketIteratorInitialize(&iterator, padded, paddedPacketLength + 16, 0);
+    Expect(NT_SUCCESS(wknet::quic::QuicPacketIteratorNext(&iterator, &header, &view)) &&
+               view.Length == paddedPacketLength,
+           "iterator returns packet before zero datagram padding");
+    Expect(wknet::quic::QuicPacketIteratorNext(&iterator, &header, &view) == STATUS_NOT_FOUND,
+           "iterator ignores all-zero datagram padding");
+
+    UCHAR nonZeroTail[128] = {};
+    const SIZE_T nonZeroPacketLength = BuildInitial(nonZeroTail, sizeof(nonZeroTail), 96);
+    nonZeroTail[nonZeroPacketLength + 2] = 1;
+    wknet::quic::QuicPacketIteratorInitialize(&iterator, nonZeroTail, nonZeroPacketLength + 4, 0);
+    Expect(NT_SUCCESS(wknet::quic::QuicPacketIteratorNext(&iterator, &header, &view)) &&
+               view.Length == nonZeroPacketLength,
+           "iterator returns packet before malformed datagram tail");
+    const NTSTATUS tailStatus = wknet::quic::QuicPacketIteratorNext(&iterator, &header, &view);
+    Expect(!NT_SUCCESS(tailStatus) && tailStatus != STATUS_NOT_FOUND, "iterator rejects non-zero datagram tail");
+
     Expect(wknet::quic::QuicValidateInitialDatagramLength(1199) == STATUS_INVALID_PARAMETER,
            "client Initial datagram below 1200 is rejected");
     Expect(NT_SUCCESS(wknet::quic::QuicValidateInitialDatagramLength(1200)), "1200-byte Initial datagram is accepted");
