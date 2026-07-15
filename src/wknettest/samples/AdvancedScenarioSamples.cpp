@@ -42,14 +42,16 @@ namespace samples
 {
     namespace
     {
-        constexpr const char* RedirectUrl = "https://httpbin.dev/redirect/1";
-        constexpr const char* NotFoundUrl = "https://httpbin.dev/status/404";
-        constexpr const char* ServerErrorUrl = "https://httpbin.dev/status/500";
-        constexpr const char* LargeResponseUrl = "https://httpbin.dev/encoding/utf8";
-        constexpr const char* LargePostUrl = "https://httpbin.dev/post";
-        constexpr const char* DelayUrl = "https://httpbin.dev/delay/5";
-        constexpr const char* TrustFailureUrl = "https://httpbin.dev/status/204";
-        constexpr const char* HttpsGetUrl = "https://httpbin.dev/get";
+        // Keep request-target paths stable for user-mode sample mocks, but host the
+        // live driver samples on postman-echo (dual-stack, more reliable than httpbin.dev).
+        constexpr const char* RedirectUrl = "https://postman-echo.com/redirect-to?url=/get";
+        constexpr const char* NotFoundUrl = "https://postman-echo.com/status/404";
+        constexpr const char* ServerErrorUrl = "https://postman-echo.com/status/500";
+        constexpr const char* LargeResponseUrl = "https://postman-echo.com/encoding/utf8";
+        constexpr const char* LargePostUrl = "https://postman-echo.com/post";
+        constexpr const char* DelayUrl = "https://postman-echo.com/delay/5";
+        constexpr const char* TrustFailureUrl = "https://postman-echo.com/status/204";
+        constexpr const char* HttpsGetUrl = "https://postman-echo.com/get";
         constexpr const char* WebSocketUrl = "wss://websocket-echo.com";
         constexpr const char* WebSocketText = "kernel-http advanced websocket";
         constexpr SIZE_T LargeBodyBytes = 64 * 1024;
@@ -285,9 +287,9 @@ namespace samples
         {
             constexpr SIZE_T OperationCount = 3;
             const char* urls[OperationCount] = {
-                "https://httpbin.dev/get?sample=concurrent-1",
-                "https://httpbin.dev/get?sample=concurrent-2",
-                "https://httpbin.dev/get?sample=concurrent-3"
+                "https://postman-echo.com/get?sample=concurrent-1",
+                "https://postman-echo.com/get?sample=concurrent-2",
+                "https://postman-echo.com/get?sample=concurrent-3"
             };
             wknet::http::AsyncOp* operations[OperationCount] = {};
 

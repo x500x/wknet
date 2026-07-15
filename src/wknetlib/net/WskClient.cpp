@@ -226,6 +226,20 @@ namespace net
             WskAddressFamily addressFamily) noexcept;
 
         _Must_inspect_result_
+        const char* AddressFamilyName(WskAddressFamily addressFamily) noexcept;
+
+        void CopyWideAsciiForTrace(
+            _In_z_ const wchar_t* text,
+            _Out_writes_z_(capacity) char* buffer,
+            SIZE_T capacity) noexcept;
+
+        void CountResolvedAddressFamilies(
+            _In_reads_(addressCount) const SOCKADDR_STORAGE* remoteAddresses,
+            SIZE_T addressCount,
+            _Out_ SIZE_T* ipv4Count,
+            _Out_ SIZE_T* ipv6Count) noexcept;
+
+        _Must_inspect_result_
         bool IsNoAddressResolveStatus(NTSTATUS status) noexcept
         {
             return status == STATUS_NO_MATCH || status == STATUS_NOT_FOUND;
@@ -253,6 +267,17 @@ namespace net
             _Out_ SIZE_T* addressCount) noexcept
         {
             *addressCount = 0;
+
+            char nodeTrace[128] = {};
+            char serviceTrace[16] = {};
+            CopyWideAsciiForTrace(nodeName, nodeTrace, sizeof(nodeTrace));
+            CopyWideAsciiForTrace(serviceName, serviceTrace, sizeof(serviceTrace));
+            WKNET_TRACE(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Warning,
+                "net.resolve.explicit_families.start host=%s service=%s",
+                nodeTrace,
+                serviceTrace);
 
             SIZE_T ipv4Count = 0;
             NTSTATUS ipv4Status = client.ResolveAll(
@@ -282,6 +307,18 @@ namespace net
             }
 
             if (*addressCount != 0) {
+                WKNET_TRACE(
+                    ::wknet::ComponentNet,
+                    ::wknet::TraceLevel::Info,
+                    "net.resolve.explicit_families.complete host=%s service=%s status=0x%08X total=%Iu ipv4_status=0x%08X ipv4=%Iu ipv6_status=0x%08X ipv6=%Iu",
+                    nodeTrace,
+                    serviceTrace,
+                    static_cast<ULONG>(STATUS_SUCCESS),
+                    *addressCount,
+                    static_cast<ULONG>(ipv4Status),
+                    ipv4Count,
+                    static_cast<ULONG>(ipv6Status),
+                    ipv6Count);
                 StoreResolveCache(
                     nodeName,
                     serviceName,
@@ -291,7 +328,19 @@ namespace net
                 return STATUS_SUCCESS;
             }
 
-            return SelectResolveFailureStatus(ipv4Status, ipv6Status);
+            const NTSTATUS failureStatus = SelectResolveFailureStatus(ipv4Status, ipv6Status);
+            WKNET_TRACE(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Error,
+                "net.resolve.explicit_families.failed host=%s service=%s status=0x%08X ipv4_status=0x%08X ipv4=%Iu ipv6_status=0x%08X ipv6=%Iu",
+                nodeTrace,
+                serviceTrace,
+                static_cast<ULONG>(failureStatus),
+                static_cast<ULONG>(ipv4Status),
+                ipv4Count,
+                static_cast<ULONG>(ipv6Status),
+                ipv6Count);
+            return failureStatus;
         }
 
         _Must_inspect_result_
@@ -515,6 +564,84 @@ namespace net
                 return AF_INET6;
             default:
                 return -1;
+            }
+        }
+
+        _Must_inspect_result_
+        const char* AddressFamilyName(WskAddressFamily addressFamily) noexcept
+        {
+            switch (addressFamily) {
+            case WskAddressFamily::Any:
+                return "any";
+            case WskAddressFamily::Ipv4:
+                return "ipv4";
+            case WskAddressFamily::Ipv6:
+                return "ipv6";
+            default:
+                return "unknown";
+            }
+        }
+
+        // DNS host/service names are ASCII; keep a short printable copy for traces.
+        void CopyWideAsciiForTrace(
+            _In_z_ const wchar_t* text,
+            _Out_writes_z_(capacity) char* buffer,
+            SIZE_T capacity) noexcept
+        {
+            if (buffer == nullptr || capacity == 0) {
+                return;
+            }
+
+            buffer[0] = '\0';
+            if (text == nullptr || capacity == 1) {
+                return;
+            }
+
+            SIZE_T written = 0;
+            while (text[written] != L'\0' && written + 1 < capacity) {
+                const wchar_t ch = text[written];
+                if (ch >= 0x20 && ch <= 0x7e) {
+                    buffer[written] = static_cast<char>(ch);
+                }
+                else {
+                    buffer[written] = '?';
+                }
+                ++written;
+            }
+            buffer[written] = '\0';
+        }
+
+        void CountResolvedAddressFamilies(
+            _In_reads_(addressCount) const SOCKADDR_STORAGE* remoteAddresses,
+            SIZE_T addressCount,
+            _Out_ SIZE_T* ipv4Count,
+            _Out_ SIZE_T* ipv6Count) noexcept
+        {
+            if (ipv4Count != nullptr) {
+                *ipv4Count = 0;
+            }
+            if (ipv6Count != nullptr) {
+                *ipv6Count = 0;
+            }
+            if (remoteAddresses == nullptr || addressCount == 0) {
+                return;
+            }
+
+            SIZE_T localIpv4 = 0;
+            SIZE_T localIpv6 = 0;
+            for (SIZE_T index = 0; index < addressCount; ++index) {
+                if (remoteAddresses[index].ss_family == AF_INET) {
+                    ++localIpv4;
+                }
+                else if (remoteAddresses[index].ss_family == AF_INET6) {
+                    ++localIpv6;
+                }
+            }
+            if (ipv4Count != nullptr) {
+                *ipv4Count = localIpv4;
+            }
+            if (ipv6Count != nullptr) {
+                *ipv6Count = localIpv6;
             }
         }
 
@@ -944,6 +1071,12 @@ namespace net
             return STATUS_INVALID_PARAMETER;
         }
 
+        char nodeTrace[128] = {};
+        char serviceTrace[16] = {};
+        CopyWideAsciiForTrace(nodeName, nodeTrace, sizeof(nodeTrace));
+        CopyWideAsciiForTrace(serviceName, serviceTrace, sizeof(serviceTrace));
+        const char* familyName = AddressFamilyName(addressFamily);
+
 #if defined(WKNET_USER_MODE_TEST)
         UNREFERENCED_PARAMETER(port);
         UNREFERENCED_PARAMETER(socketAddressFamily);
@@ -956,8 +1089,31 @@ namespace net
             addressCapacity,
             addressCount,
             addressFamily)) {
+            SIZE_T cachedIpv4 = 0;
+            SIZE_T cachedIpv6 = 0;
+            CountResolvedAddressFamilies(remoteAddresses, *addressCount, &cachedIpv4, &cachedIpv6);
+            WKNET_TRACE(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Info,
+                "net.resolve.cache_hit host=%s service=%s family=%s total=%Iu ipv4=%Iu ipv6=%Iu",
+                nodeTrace,
+                serviceTrace,
+                familyName,
+                *addressCount,
+                cachedIpv4,
+                cachedIpv6);
             return STATUS_SUCCESS;
         }
+
+        WKNET_TRACE(
+            ::wknet::ComponentNet,
+            ::wknet::TraceLevel::Info,
+            "net.resolve.start host=%s service=%s family=%s ai_family=%d capacity=%Iu",
+            nodeTrace,
+            serviceTrace,
+            familyName,
+            socketAddressFamily,
+            addressCapacity);
 
 #if defined(WKNET_USER_MODE_TEST)
         if (g_testResolveAll == nullptr) {
@@ -975,6 +1131,14 @@ namespace net
         if (!NT_SUCCESS(status) &&
             addressFamily == WskAddressFamily::Any &&
             IsNoAddressResolveStatus(status)) {
+            WKNET_TRACE(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Warning,
+                "net.resolve.unspec_no_match host=%s service=%s family=%s status=0x%08X retry=explicit_families",
+                nodeTrace,
+                serviceTrace,
+                familyName,
+                static_cast<ULONG>(status));
             return ResolveAllExplicitAddressFamilies(
                 *this,
                 nodeName,
@@ -984,12 +1148,35 @@ namespace net
                 addressCount);
         }
         if (NT_SUCCESS(status) && *addressCount != 0) {
+            SIZE_T resolvedIpv4 = 0;
+            SIZE_T resolvedIpv6 = 0;
+            CountResolvedAddressFamilies(remoteAddresses, *addressCount, &resolvedIpv4, &resolvedIpv6);
+            WKNET_TRACE(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Info,
+                "net.resolve.complete host=%s service=%s family=%s total=%Iu ipv4=%Iu ipv6=%Iu",
+                nodeTrace,
+                serviceTrace,
+                familyName,
+                *addressCount,
+                resolvedIpv4,
+                resolvedIpv6);
             StoreResolveCache(
                 nodeName,
                 serviceName,
                 remoteAddresses,
                 *addressCount,
                 addressFamily);
+        }
+        else if (!NT_SUCCESS(status)) {
+            WKNET_TRACE(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Error,
+                "net.resolve.failed host=%s service=%s family=%s status=0x%08X",
+                nodeTrace,
+                serviceTrace,
+                familyName,
+                static_cast<ULONG>(status));
         }
         return status;
 #else
@@ -1040,7 +1227,14 @@ namespace net
 
         if (!NT_SUCCESS(status)) {
             if (addressFamily == WskAddressFamily::Any && IsNoAddressResolveStatus(status)) {
-                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Warning, "net.resolve.unspec_no_match retry=explicit_families");
+                WKNET_TRACE(
+                    ::wknet::ComponentNet,
+                    ::wknet::TraceLevel::Warning,
+                    "net.resolve.unspec_no_match host=%s service=%s family=%s status=0x%08X retry=explicit_families",
+                    nodeTrace,
+                    serviceTrace,
+                    familyName,
+                    static_cast<ULONG>(status));
                 WskSyncReleaseContext(context);
                 return ResolveAllExplicitAddressFamilies(
                     *this,
@@ -1050,14 +1244,27 @@ namespace net
                     addressCapacity,
                     addressCount);
             }
-            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "net.resolve.failed status=0x%08X", static_cast<ULONG>(status));
+            WKNET_TRACE(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Error,
+                "net.resolve.failed host=%s service=%s family=%s status=0x%08X source=wsk",
+                nodeTrace,
+                serviceTrace,
+                familyName,
+                static_cast<ULONG>(status));
             WskSyncReleaseContext(context);
             return status;
         }
 
         if (request->Result == nullptr) {
             if (addressFamily == WskAddressFamily::Any) {
-                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Warning, "net.resolve.unspec_empty retry=explicit_families");
+                WKNET_TRACE(
+                    ::wknet::ComponentNet,
+                    ::wknet::TraceLevel::Warning,
+                    "net.resolve.unspec_empty host=%s service=%s family=%s retry=explicit_families",
+                    nodeTrace,
+                    serviceTrace,
+                    familyName);
                 WskSyncReleaseContext(context);
                 return ResolveAllExplicitAddressFamilies(
                     *this,
@@ -1067,9 +1274,32 @@ namespace net
                     addressCapacity,
                     addressCount);
             }
-            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "net.resolve.empty_result");
+            WKNET_TRACE(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Error,
+                "net.resolve.empty_result host=%s service=%s family=%s",
+                nodeTrace,
+                serviceTrace,
+                familyName);
             WskSyncReleaseContext(context);
             return STATUS_NO_MATCH;
+        }
+
+        SIZE_T rawResultCount = 0;
+        SIZE_T rawIpv4Count = 0;
+        SIZE_T rawIpv6Count = 0;
+        SIZE_T rawOtherCount = 0;
+        for (const ADDRINFOEXW* current = request->Result; current != nullptr; current = current->ai_next) {
+            ++rawResultCount;
+            if (current->ai_family == AF_INET) {
+                ++rawIpv4Count;
+            }
+            else if (current->ai_family == AF_INET6) {
+                ++rawIpv6Count;
+            }
+            else {
+                ++rawOtherCount;
+            }
         }
 
         status = STATUS_NOT_FOUND;
@@ -1087,7 +1317,17 @@ namespace net
         request->Result = nullptr;
         if (!NT_SUCCESS(status)) {
             if (addressFamily == WskAddressFamily::Any && IsNoAddressResolveStatus(status)) {
-                WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Warning, "net.resolve.unspec_unusable retry=explicit_families");
+                WKNET_TRACE(
+                    ::wknet::ComponentNet,
+                    ::wknet::TraceLevel::Warning,
+                    "net.resolve.unspec_unusable host=%s service=%s family=%s raw_total=%Iu raw_ipv4=%Iu raw_ipv6=%Iu raw_other=%Iu retry=explicit_families",
+                    nodeTrace,
+                    serviceTrace,
+                    familyName,
+                    rawResultCount,
+                    rawIpv4Count,
+                    rawIpv6Count,
+                    rawOtherCount);
                 WskSyncReleaseContext(context);
                 return ResolveAllExplicitAddressFamilies(
                     *this,
@@ -1097,10 +1337,37 @@ namespace net
                     addressCapacity,
                     addressCount);
             }
-            WKNET_TRACE(::wknet::ComponentNet, ::wknet::TraceLevel::Error, "net.resolve.no_supported_address status=0x%08X",
-                static_cast<ULONG>(status));
+            WKNET_TRACE(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Error,
+                "net.resolve.no_supported_address host=%s service=%s family=%s status=0x%08X raw_total=%Iu raw_ipv4=%Iu raw_ipv6=%Iu raw_other=%Iu",
+                nodeTrace,
+                serviceTrace,
+                familyName,
+                static_cast<ULONG>(status),
+                rawResultCount,
+                rawIpv4Count,
+                rawIpv6Count,
+                rawOtherCount);
         }
         else {
+            SIZE_T resolvedIpv4 = 0;
+            SIZE_T resolvedIpv6 = 0;
+            CountResolvedAddressFamilies(remoteAddresses, *addressCount, &resolvedIpv4, &resolvedIpv6);
+            WKNET_TRACE(
+                ::wknet::ComponentNet,
+                ::wknet::TraceLevel::Info,
+                "net.resolve.complete host=%s service=%s family=%s total=%Iu ipv4=%Iu ipv6=%Iu raw_total=%Iu raw_ipv4=%Iu raw_ipv6=%Iu raw_other=%Iu",
+                nodeTrace,
+                serviceTrace,
+                familyName,
+                *addressCount,
+                resolvedIpv4,
+                resolvedIpv6,
+                rawResultCount,
+                rawIpv4Count,
+                rawIpv6Count,
+                rawOtherCount);
             StoreResolveCache(
                 nodeName,
                 serviceName,

@@ -40,16 +40,18 @@ namespace
     constexpr ULONG AsyncWaitTimeoutMs = 60000;
     constexpr ULONG AsyncWaitForeverMs = 0xffffffffUL;
 
-    constexpr const char* HttpGetUrl = "http://httpbun.com/get";
-    constexpr const char* HttpAddressFamilyGetUrl = "http://nghttp2.org/httpbin/get";
-    constexpr const char* HttpPostUrl = "http://httpbun.com/post";
-    constexpr const char* HttpPutUrl = "http://httpbun.com/put";
-    constexpr const char* HttpPatchUrl = "http://httpbun.com/patch";
-    constexpr const char* HttpDeleteUrl = "http://httpbun.com/delete";
-    constexpr const char* HttpHeadUrl = "http://nghttp2.org/httpbin/get";
-    constexpr const char* HttpOptionsUrl = "http://nghttp2.org/httpbin/";
-    constexpr const char* HttpsGetUrl = "https://httpbin.dev/get";
-    constexpr const char* HttpsBuilderUrl = "https://httpbin.dev/anything";
+    // Prefer dual-stack, Cloudflare-fronted public endpoints. httpbun/nghttp2/httpbin.dev
+    // frequently fail from kernel WSK DNS or stall after connect in real-network runs.
+    constexpr const char* HttpGetUrl = "http://postman-echo.com/get";
+    constexpr const char* HttpAddressFamilyGetUrl = "http://postman-echo.com/get";
+    constexpr const char* HttpPostUrl = "http://postman-echo.com/post";
+    constexpr const char* HttpPutUrl = "http://postman-echo.com/put";
+    constexpr const char* HttpPatchUrl = "http://postman-echo.com/patch";
+    constexpr const char* HttpDeleteUrl = "http://postman-echo.com/delete";
+    constexpr const char* HttpHeadUrl = "http://postman-echo.com/get";
+    constexpr const char* HttpOptionsUrl = "http://postman-echo.com/get";
+    constexpr const char* HttpsGetUrl = "https://postman-echo.com/get";
+    constexpr const char* HttpsBuilderUrl = "https://postman-echo.com/post";
     constexpr const char* WebSocketSecureEchoUrl = "wss://websocket-echo.com";
     constexpr const char* WebSocketBinaryEchoUrl = "wss://websocket-echo.com";
     constexpr const char* AlpnHttp11 = "http/1.1";

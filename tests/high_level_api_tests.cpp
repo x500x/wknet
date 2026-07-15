@@ -430,7 +430,8 @@ namespace
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             "cccccccccccccccccccccccccccccccc";
 
-        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /redirect/1 ")) {
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /redirect-to?url=/get ") ||
+            BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "GET /redirect/1 ")) {
             response->RawResponse = redirectResponse;
             response->RawResponseLength = sizeof(redirectResponse) - 1;
             response->ConnectionReusable = false;
@@ -493,7 +494,7 @@ namespace
 
     // The decoded body is far larger than the 16 KiB initial workspace DecodedBody buffer,
     // so chunked transfer-decoding exercises the same DecodedBody grow-retry path that a
-    // gzip/deflate response over HTTP/1.1 hits on the public httpbin endpoint.
+    // gzip/deflate response over HTTP/1.1 hits on the public echo endpoint.
     constexpr SIZE_T ChunkedLargeBodyLength = 32 * 1024;
     constexpr SIZE_T CloseDelimitedLargeBodyLength = 32 * 1024;
 
@@ -1263,7 +1264,7 @@ namespace
         wknet::http::test::SetAsyncAutoRun(true);
         wknet::http::test::SetHttpTransport(LargePostHttpTransport, nullptr);
 
-        static const char url[] = "https://httpbin.dev/post";
+        static const char url[] = "https://postman-echo.com/post";
         static const UCHAR requestBody[] = { 'x' };
 
         wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
@@ -1314,7 +1315,7 @@ namespace
         wknet::http::test::SetAsyncAutoRun(true);
         wknet::http::test::SetHttpTransport(ChunkedLargeResponseHttpTransport, nullptr);
 
-        static const char url[] = "https://httpbin.dev/get";
+        static const char url[] = "https://postman-echo.com/get";
 
         wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
         config.MaxResponseBytes = 0;
