@@ -16,7 +16,6 @@ namespace
 {
     constexpr const char* Http3ExternalUrl = "https://cloudflare-quic.com/";
     constexpr const char* Http3ExternalServerName = "cloudflare-quic.com";
-    constexpr SIZE_T Http3MaxResponseBytes = 64 * 1024;
     constexpr ULONG Http3ProbeTimeoutMs = 15000;
 
     SIZE_T LiteralLength(_In_opt_z_ const char* text) noexcept
@@ -47,7 +46,7 @@ namespace
         _Out_ HighLevelApiSampleResult& result) noexcept
     {
         wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
-        config.MaxResponseBytes = Http3MaxResponseBytes;
+        config.MaxResponseBytes = 0;
         config.PoolCapacity = 2;
         config.MaxConnsPerHost = 1;
         config.Http3.Mode = wknet::http::Http3ConnectMode::Required;
