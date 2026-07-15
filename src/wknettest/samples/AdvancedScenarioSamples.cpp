@@ -52,9 +52,13 @@ namespace samples
         constexpr const char* DelayUrl = "https://postman-echo.com/delay/5";
         constexpr const char* TrustFailureUrl = "https://postman-echo.com/status/204";
         constexpr const char* HttpsGetUrl = "https://postman-echo.com/get";
-        // websocket-echo.com is intermittently unresolvable via WSK; postman raw echo is dual-usable and true echo.
-        constexpr const char* WebSocketUrl = "wss://ws.postman-echo.com/raw";
+        // Prefer Cloudflare-fronted dual-stack WSS with modern TLS (TLS1.3 + SHA-256 signatures).
+        // ws.postman-echo.com only speaks TLS1.2 and signs ServerKeyExchange with rsa_pkcs1_sha1,
+        // which ModernDefault correctly rejects; websocket-echo.com is intermittently unresolvable via WSK.
+        constexpr const char* WebSocketUrl = "wss://ws.ifelse.io/";
         constexpr const char* WebSocketText = "kernel-http advanced websocket";
+        // ws.ifelse.io / echo.websocket.org push a greeting text frame before the echo.
+        constexpr ULONG MaxWebSocketEchoReceiveFrames = 4;
         constexpr SIZE_T LargeBodyBytes = 64 * 1024;
         constexpr ULONG AsyncWaitImmediateMs = 0;
         constexpr ULONG AsyncWaitForeverMs = 0xffffffffUL;
@@ -501,15 +505,36 @@ namespace samples
 
             wknet::websocket::Message message = {};
             if (NT_SUCCESS(status)) {
-                status = wknet::websocket::Receive(websocket, &message);
-            }
-            if (NT_SUCCESS(status)) {
                 const SIZE_T messageLength = LiteralLength(WebSocketText);
-                if (message.Type != wknet::websocket::MsgType::Text ||
-                    !message.FinalFragment ||
-                    message.DataLength != messageLength ||
-                    message.Data == nullptr ||
-                    RtlCompareMemory(message.Data, WebSocketText, messageLength) != messageLength) {
+                bool matched = false;
+                for (ULONG frameIndex = 0; frameIndex < MaxWebSocketEchoReceiveFrames; ++frameIndex) {
+                    status = wknet::websocket::Receive(websocket, &message);
+                    if (!NT_SUCCESS(status)) {
+                        break;
+                    }
+
+                    if (message.Type == wknet::websocket::MsgType::Text &&
+                        message.FinalFragment &&
+                        message.DataLength == messageLength &&
+                        message.Data != nullptr &&
+                        RtlCompareMemory(message.Data, WebSocketText, messageLength) == messageLength) {
+                        matched = true;
+                        break;
+                    }
+
+                    WKNET_SAMPLE_LOG(
+                        "[高级场景] WebSocket FragmentSend 跳过非目标Echo帧 序号=%lu 类型=%lu 长度=%Iu\r\n",
+                        frameIndex,
+                        static_cast<ULONG>(message.Type),
+                        message.DataLength);
+
+                    if (message.Type == wknet::websocket::MsgType::Close) {
+                        status = STATUS_INVALID_NETWORK_RESPONSE;
+                        break;
+                    }
+                }
+
+                if (NT_SUCCESS(status) && !matched) {
                     status = STATUS_INVALID_NETWORK_RESPONSE;
                 }
             }

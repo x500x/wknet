@@ -56,9 +56,11 @@ namespace
     constexpr const char* HttpOptionsUrl = "http://postman-echo.com/get";
     constexpr const char* HttpsGetUrl = "https://postman-echo.com/get";
     constexpr const char* HttpsBuilderUrl = "https://postman-echo.com/post";
-    // websocket-echo.com is intermittently unresolvable via WSK; postman /raw is a true echo.
-    constexpr const char* WebSocketSecureEchoUrl = "wss://ws.postman-echo.com/raw";
-    constexpr const char* WebSocketBinaryEchoUrl = "wss://ws.postman-echo.com/raw";
+    // Prefer Cloudflare-fronted dual-stack WSS with modern TLS (TLS1.3 + SHA-256 signatures).
+    // ws.postman-echo.com only speaks TLS1.2 and signs ServerKeyExchange with rsa_pkcs1_sha1,
+    // which ModernDefault correctly rejects; websocket-echo.com is intermittently unresolvable via WSK.
+    constexpr const char* WebSocketSecureEchoUrl = "wss://ws.ifelse.io/";
+    constexpr const char* WebSocketBinaryEchoUrl = "wss://ws.ifelse.io/";
     constexpr const char* AlpnHttp11 = "http/1.1";
     constexpr const char* AlpnH2 = "h2";
 

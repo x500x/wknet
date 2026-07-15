@@ -3300,7 +3300,7 @@ namespace
 
         WsConnectionOptions options = MakeConnectOptions();
         options.ServiceName = L"443";
-        options.TlsServerName = "ws.postman-echo.com";
+        options.TlsServerName = "ws.ifelse.io";
         options.TlsServerNameLength = strlen(options.TlsServerName);
         options.UseTls = true;
         options.VerifyCertificate = false;
