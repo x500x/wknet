@@ -93,10 +93,10 @@ namespace
                 return;
             }
 #if defined(WKNET_USER_MODE_TEST)
-            while (cache_->Lock != 0)
+            while (InterlockedCompareExchange(&cache_->Lock, 1, 0) != 0)
             {
+                YieldProcessor();
             }
-            cache_->Lock = 1;
 #else
             ExAcquireFastMutex(&cache_->Lock);
 #endif
@@ -109,7 +109,7 @@ namespace
                 return;
             }
 #if defined(WKNET_USER_MODE_TEST)
-            cache_->Lock = 0;
+            InterlockedExchange(&cache_->Lock, 0);
 #else
             ExReleaseFastMutex(&cache_->Lock);
 #endif

@@ -59,6 +59,7 @@ $groups = @{
         'http2_frame_tests',
         'http2_client_tests',
         'http_api_tests',
+        'http_stress_tests',
         'high_level_api_tests',
         'websocket_frame_tests',
         'websocket_client_tests',

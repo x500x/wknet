@@ -101,7 +101,10 @@ namespace session
         ULONG IdleTimeoutMilliseconds = 0;
         Http2KeepAliveOptions Http2KeepAlive = {};
         volatile LONG QuicCloseOutstanding = 0;
-#if !defined(WKNET_USER_MODE_TEST)
+#if defined(WKNET_USER_MODE_TEST)
+        // User-mode tests previously left the pool unlocked; concurrent Get races.
+        volatile LONG Lock = 0;
+#else
         FAST_MUTEX Lock = {};
         KEVENT Http2KeepAliveStopEvent = {};
         KEVENT QuicCloseCompleteEvent = {};

@@ -58,29 +58,38 @@ namespace
 
     void InitializePoolLock(_Inout_ ConnectionPool* pool) noexcept
     {
-#if !defined(WKNET_USER_MODE_TEST)
+#if defined(WKNET_USER_MODE_TEST)
+        if (pool != nullptr) {
+            InterlockedExchange(&pool->Lock, 0);
+        }
+#else
         ExInitializeFastMutex(&pool->Lock);
         KeInitializeEvent(&pool->QuicCloseCompleteEvent, NotificationEvent, TRUE);
-#else
-        UNREFERENCED_PARAMETER(pool);
 #endif
     }
 
     void LockPool(_Inout_ ConnectionPool* pool) noexcept
     {
-#if !defined(WKNET_USER_MODE_TEST)
-        ExAcquireFastMutex(&pool->Lock);
+#if defined(WKNET_USER_MODE_TEST)
+        if (pool == nullptr) {
+            return;
+        }
+        while (InterlockedCompareExchange(&pool->Lock, 1, 0) != 0) {
+            YieldProcessor();
+        }
 #else
-        UNREFERENCED_PARAMETER(pool);
+        ExAcquireFastMutex(&pool->Lock);
 #endif
     }
 
     void UnlockPool(_Inout_ ConnectionPool* pool) noexcept
     {
-#if !defined(WKNET_USER_MODE_TEST)
-        ExReleaseFastMutex(&pool->Lock);
+#if defined(WKNET_USER_MODE_TEST)
+        if (pool != nullptr) {
+            InterlockedExchange(&pool->Lock, 0);
+        }
 #else
-        UNREFERENCED_PARAMETER(pool);
+        ExReleaseFastMutex(&pool->Lock);
 #endif
     }
 
@@ -172,9 +181,8 @@ namespace
     ULONGLONG QueryPoolTime() noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
-        static ULONGLONG time100ns = 0;
-        time100ns += 10000;
-        return time100ns;
+        static volatile LONGLONG time100ns = 0;
+        return static_cast<ULONGLONG>(InterlockedAdd64(&time100ns, 10000));
 #else
         return KeQueryInterruptTime();
 #endif

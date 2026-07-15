@@ -28,10 +28,10 @@ namespace
         explicit MonitorLock(NetworkChangeMonitor *monitor) noexcept : monitor_(monitor)
         {
 #if defined(WKNET_USER_MODE_TEST)
-            while (monitor_->Lock != 0)
+            while (InterlockedCompareExchange(&monitor_->Lock, 1, 0) != 0)
             {
+                YieldProcessor();
             }
-            monitor_->Lock = 1;
 #else
             ExAcquireFastMutex(&monitor_->Lock);
 #endif
@@ -40,7 +40,7 @@ namespace
         ~MonitorLock() noexcept
         {
 #if defined(WKNET_USER_MODE_TEST)
-            monitor_->Lock = 0;
+            InterlockedExchange(&monitor_->Lock, 0);
 #else
             ExReleaseFastMutex(&monitor_->Lock);
 #endif

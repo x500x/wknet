@@ -76,9 +76,10 @@ namespace session
     void AcquireActiveHandleTableLock() noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
-        while (g_activeHandleTableLock != 0) {
+        // Must be atomic: plain load/store races allow two threads into the critical section.
+        while (InterlockedCompareExchange(&g_activeHandleTableLock, 1, 0) != 0) {
+            YieldProcessor();
         }
-        g_activeHandleTableLock = 1;
 #else
         EnsureActiveHandleTableLockInitialized();
         ExAcquireFastMutex(&g_activeHandleTableLock);
@@ -88,7 +89,7 @@ namespace session
     void ReleaseActiveHandleTableLock() noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
-        g_activeHandleTableLock = 0;
+        InterlockedExchange(&g_activeHandleTableLock, 0);
 #else
         ExReleaseFastMutex(&g_activeHandleTableLock);
 #endif
@@ -270,10 +271,8 @@ namespace session
             }
 
             if (inFlight != nullptr) {
-#if defined(WKNET_USER_MODE_TEST)
-                ++(*inFlight);
-#else
                 InterlockedIncrement(inFlight);
+#if !defined(WKNET_USER_MODE_TEST)
                 KeClearEvent(drainEvent);
 #endif
                 active = true;
@@ -297,15 +296,13 @@ namespace session
             return;
         }
 
-#if defined(WKNET_USER_MODE_TEST)
-        if (*inFlight > 0) {
-            --(*inFlight);
-        }
-#else
         const LONG remaining = InterlockedDecrement(inFlight);
+#if !defined(WKNET_USER_MODE_TEST)
         if (remaining == 0 && drainEvent != nullptr) {
             KeSetEvent(drainEvent, IO_NO_INCREMENT, FALSE);
         }
+#else
+        UNREFERENCED_PARAMETER(remaining);
 #endif
     }
 
@@ -322,7 +319,9 @@ namespace session
         }
 
 #if defined(WKNET_USER_MODE_TEST)
-        UNREFERENCED_PARAMETER(inFlight);
+        while (InterlockedCompareExchange(inFlight, 0, 0) != 0) {
+            YieldProcessor();
+        }
 #else
         LARGE_INTEGER timeout = {};
         timeout.QuadPart = -static_cast<LONGLONG>(WskOperationTimeoutMilliseconds) * 10000LL;

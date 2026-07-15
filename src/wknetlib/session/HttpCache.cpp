@@ -68,9 +68,9 @@ namespace
     void AcquireCacheLock(HttpCacheHandle cache) noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
-        while (cache->Lock != 0) {
+        while (InterlockedCompareExchange(&cache->Lock, 1, 0) != 0) {
+            YieldProcessor();
         }
-        cache->Lock = 1;
 #else
         EnsureLockInitialized(cache);
         ExAcquireFastMutex(&cache->Lock);
@@ -80,7 +80,7 @@ namespace
     void ReleaseCacheLock(HttpCacheHandle cache) noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
-        cache->Lock = 0;
+        InterlockedExchange(&cache->Lock, 0);
 #else
         ExReleaseFastMutex(&cache->Lock);
 #endif

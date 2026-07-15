@@ -217,3 +217,82 @@ using LONGLONG = int64_t;
 #ifndef UNREFERENCED_PARAMETER
 #define UNREFERENCED_PARAMETER(P) (void)(P)
 #endif
+
+// Kernel-style atomic helpers for user-mode protocol tests (MSVC).
+#if defined(__cplusplus)
+#include <intrin.h>
+#include <thread>
+
+inline LONG InterlockedCompareExchange(volatile LONG* destination, LONG exchange, LONG comperand) noexcept
+{
+    return _InterlockedCompareExchange(
+        reinterpret_cast<volatile long*>(destination),
+        static_cast<long>(exchange),
+        static_cast<long>(comperand));
+}
+
+inline LONG InterlockedExchange(volatile LONG* destination, LONG value) noexcept
+{
+    return _InterlockedExchange(
+        reinterpret_cast<volatile long*>(destination),
+        static_cast<long>(value));
+}
+
+inline LONG InterlockedIncrement(volatile LONG* addend) noexcept
+{
+    return _InterlockedIncrement(reinterpret_cast<volatile long*>(addend));
+}
+
+inline LONG InterlockedDecrement(volatile LONG* addend) noexcept
+{
+    return _InterlockedDecrement(reinterpret_cast<volatile long*>(addend));
+}
+
+inline LONGLONG InterlockedAdd64(volatile LONGLONG* addend, LONGLONG value) noexcept
+{
+    return _InterlockedExchangeAdd64(
+        reinterpret_cast<volatile long long*>(addend),
+        static_cast<long long>(value)) + value;
+}
+
+inline LONGLONG InterlockedCompareExchange64(
+    volatile LONGLONG* destination,
+    LONGLONG exchange,
+    LONGLONG comperand) noexcept
+{
+    return _InterlockedCompareExchange64(
+        reinterpret_cast<volatile long long*>(destination),
+        static_cast<long long>(exchange),
+        static_cast<long long>(comperand));
+}
+
+inline LONGLONG InterlockedExchange64(volatile LONGLONG* destination, LONGLONG value) noexcept
+{
+    return _InterlockedExchange64(
+        reinterpret_cast<volatile long long*>(destination),
+        static_cast<long long>(value));
+}
+
+inline LONGLONG InterlockedIncrement64(volatile LONGLONG* addend) noexcept
+{
+    return _InterlockedIncrement64(reinterpret_cast<volatile long long*>(addend));
+}
+
+inline void* InterlockedCompareExchangePointer(
+    void* volatile* destination,
+    void* exchange,
+    void* comperand) noexcept
+{
+    return _InterlockedCompareExchangePointer(destination, exchange, comperand);
+}
+
+inline void* InterlockedExchangePointer(void* volatile* destination, void* value) noexcept
+{
+    return _InterlockedExchangePointer(destination, value);
+}
+
+inline void YieldProcessor() noexcept
+{
+    _mm_pause();
+}
+#endif
