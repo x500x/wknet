@@ -21,6 +21,10 @@
   <ItemGroup>
     <ClCompile Include="DriverEntry.cpp" />
     <ClCompile Include="wknettestLog.cpp" />
+    <ClCompile Include="harness\KernelTestHarness.cpp" />
+    <ClCompile Include="harness\KernelFunctionalSuite.cpp" />
+    <ClCompile Include="harness\KernelStressSuite.cpp" />
+    <ClCompile Include="harness\KernelConcurrencySuite.cpp" />
     <ClCompile Include="samples\AdvancedScenarioSamples.cpp" />
     <ClCompile Include="samples\ExternalTrustStore.cpp" />
     <ClCompile Include="samples\HighLevelApiSamples.cpp" />
@@ -31,6 +35,11 @@
     <ClInclude Include="..\..\include\wknet\Wknet.h" />
     <ClInclude Include="..\..\include\wknettest\SampleStatus.h" />
     <ClInclude Include="WknetTestLog.h" />
+    <ClInclude Include="harness\KernelTestTypes.h" />
+    <ClInclude Include="harness\KernelTestHarness.h" />
+    <ClInclude Include="harness\KernelFunctionalSuite.h" />
+    <ClInclude Include="harness\KernelStressSuite.h" />
+    <ClInclude Include="harness\KernelConcurrencySuite.h" />
     <ClInclude Include="samples\AdvancedScenarioSamples.h" />
     <ClInclude Include="samples\ExternalTrustStore.h" />
     <ClInclude Include="samples\HighLevelApiSamples.h" />

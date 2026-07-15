@@ -19,6 +19,12 @@
     <Filter Include="Header Files\samples">
       <UniqueIdentifier>{92BC7FE4-D4E4-4266-86B2-A80B9EC98525}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\harness">
+      <UniqueIdentifier>{B2C0E8A1-4F3D-4A91-9C2E-1D5F6A7B8C9D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\harness">
+      <UniqueIdentifier>{C3D1F9B2-5E4E-4B02-AD3F-2E6G7B8C9D0E}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DriverEntry.cpp">
@@ -26,6 +32,18 @@
     </ClCompile>
     <ClCompile Include="wknettestLog.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\KernelTestHarness.cpp">
+      <Filter>Source Files\harness</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\KernelFunctionalSuite.cpp">
+      <Filter>Source Files\harness</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\KernelStressSuite.cpp">
+      <Filter>Source Files\harness</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\KernelConcurrencySuite.cpp">
+      <Filter>Source Files\harness</Filter>
     </ClCompile>
     <ClCompile Include="samples\AdvancedScenarioSamples.cpp">
       <Filter>Source Files\samples</Filter>
@@ -52,6 +70,21 @@
     </ClInclude>
     <ClInclude Include="WknetTestLog.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="harness\KernelTestTypes.h">
+      <Filter>Header Files\harness</Filter>
+    </ClInclude>
+    <ClInclude Include="harness\KernelTestHarness.h">
+      <Filter>Header Files\harness</Filter>
+    </ClInclude>
+    <ClInclude Include="harness\KernelFunctionalSuite.h">
+      <Filter>Header Files\harness</Filter>
+    </ClInclude>
+    <ClInclude Include="harness\KernelStressSuite.h">
+      <Filter>Header Files\harness</Filter>
+    </ClInclude>
+    <ClInclude Include="harness\KernelConcurrencySuite.h">
+      <Filter>Header Files\harness</Filter>
     </ClInclude>
     <ClInclude Include="samples\AdvancedScenarioSamples.h">
       <Filter>Header Files\samples</Filter>

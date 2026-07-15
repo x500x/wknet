@@ -2,7 +2,7 @@
 #include "session/EngineInternal.h"
 
 #include "WknetTestLog.h"
-#include "samples/HttpApiSamples.h"
+#include "harness/KernelTestHarness.h"
 
 extern "C" NTSYSAPI NTSTATUS NTAPI ZwWaitForSingleObject(
     _In_ HANDLE Handle,
@@ -20,13 +20,14 @@ namespace wknet
         char g_certificateBundlePath[MaxDriverPathChars] = {};
         char g_testLogPath[MaxDriverPathChars] = {};
 
-        struct LoadHttpSamplesThreadContext
+        struct LoadKernelMatrixThreadContext
         {
             NTSTATUS Status;
             const char* CertificateBundlePath;
+            ktest::MatrixReport* Report;
         };
 
-        void LoadHttpSamplesThread(_In_ PVOID startContext) noexcept;
+        void LoadKernelMatrixThread(_In_ PVOID startContext) noexcept;
 
         SIZE_T TextLength(_In_z_ const char* text) noexcept
         {
@@ -450,39 +451,57 @@ namespace wknet
 
     }
 
-    NTSTATUS RunLoadHttpSamples(_In_opt_z_ const char* certificateBundlePath) noexcept
+    NTSTATUS RunLoadKernelMatrix(
+        _In_opt_z_ const char* certificateBundlePath,
+        _Out_ ktest::MatrixReport* report) noexcept
     {
-        NTSTATUS finalStatus = STATUS_SUCCESS;
-
+        if (report == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
         if (!net::WskClientIsInitialized(g_wskClient)) {
             return STATUS_DEVICE_NOT_READY;
         }
 
-        samples::DriverSampleResults sampleResults = {};
-        NTSTATUS sampleStatus = samples::RunDriverSamples(
+        // Full Module×Property matrix: Functional (legacy samples) + Stress + Concurrency.
+        const NTSTATUS matrixStatus = ktest::RunKernelFullMatrix(
             g_wskClient,
             certificateBundlePath,
-            &sampleResults);
-        if (!NT_SUCCESS(sampleStatus)) {
-            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "wknettest 全量示例完成，但存在失败项: 0x%08X\r\n", static_cast<ULONG>(sampleStatus));
-            finalStatus = sampleStatus;
+            report);
+
+        if (!NT_SUCCESS(matrixStatus)) {
+            WKNET_TRACE(
+                ::wknet::ComponentSession,
+                ::wknet::TraceLevel::Error,
+                "wknettest 全库矩阵存在硬失败: 0x%08X (pass=%lu fail=%lu env=%lu)\r\n",
+                static_cast<ULONG>(matrixStatus),
+                static_cast<ULONG>(report->PassCount),
+                static_cast<ULONG>(report->FailCount),
+                static_cast<ULONG>(report->EnvSkipCount));
         }
         else {
-            WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "wknettest 全量示例全部完成\r\n");
+            WKNET_TRACE(
+                ::wknet::ComponentSession,
+                ::wknet::TraceLevel::Info,
+                "wknettest 全库矩阵完成: pass=%lu fail=%lu env=%lu skip=%lu\r\n",
+                static_cast<ULONG>(report->PassCount),
+                static_cast<ULONG>(report->FailCount),
+                static_cast<ULONG>(report->EnvSkipCount),
+                static_cast<ULONG>(report->NotRunCount));
         }
 
-        return finalStatus;
+        return matrixStatus;
     }
 
-    void LoadHttpSamplesThread(_In_ PVOID startContext) noexcept
+    void LoadKernelMatrixThread(_In_ PVOID startContext) noexcept
     {
-        LoadHttpSamplesThreadContext* context = static_cast<LoadHttpSamplesThreadContext*>(startContext);
-        if (context == nullptr) {
+        LoadKernelMatrixThreadContext* context =
+            static_cast<LoadKernelMatrixThreadContext*>(startContext);
+        if (context == nullptr || context->Report == nullptr) {
             PsTerminateSystemThread(STATUS_INVALID_PARAMETER);
             return;
         }
 
-        context->Status = RunLoadHttpSamples(context->CertificateBundlePath);
+        context->Status = RunLoadKernelMatrix(context->CertificateBundlePath, context->Report);
         PsTerminateSystemThread(context->Status);
     }
 
@@ -549,49 +568,69 @@ DriverEntry(PDRIVER_OBJECT driverObject, PUNICODE_STRING registryPath)
         return status;
     }
 
-    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "WSK 已初始化，开始运行 wknettest 全量场景示例\r\n");
+    WKNET_TRACE(
+        ::wknet::ComponentSession,
+        ::wknet::TraceLevel::Info,
+        "WSK 已初始化，开始运行 wknettest 全库全方位矩阵 (Functional+Stress+Concurrency)\r\n");
 
-    wknet::LoadHttpSamplesThreadContext sampleThreadContext = {
+    wknet::ktest::MatrixReport matrixReport = {};
+    wknet::LoadKernelMatrixThreadContext matrixThreadContext = {
         STATUS_UNSUCCESSFUL,
-        wknet::g_certificateBundlePath[0] != '\0' ? wknet::g_certificateBundlePath : nullptr
+        wknet::g_certificateBundlePath[0] != '\0' ? wknet::g_certificateBundlePath : nullptr,
+        &matrixReport
     };
     OBJECT_ATTRIBUTES objectAttributes = {};
     InitializeObjectAttributes(&objectAttributes, nullptr, OBJ_KERNEL_HANDLE, nullptr, nullptr);
 
-    HANDLE sampleThreadHandle = nullptr;
+    HANDLE matrixThreadHandle = nullptr;
     status = PsCreateSystemThread(
-        &sampleThreadHandle,
+        &matrixThreadHandle,
         THREAD_ALL_ACCESS,
         &objectAttributes,
         nullptr,
         nullptr,
-        wknet::LoadHttpSamplesThread,
-        &sampleThreadContext);
+        wknet::LoadKernelMatrixThread,
+        &matrixThreadContext);
     if (!NT_SUCCESS(status)) {
-        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "创建加载期示例线程失败: 0x%08X\r\n", static_cast<ULONG>(status));
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "创建全库矩阵线程失败: 0x%08X\r\n", static_cast<ULONG>(status));
         wknet::ReleaseWskClient();
         wknet::testlog::Shutdown();
         return status;
     }
 
-    status = ZwWaitForSingleObject(sampleThreadHandle, FALSE, nullptr);
-    ZwClose(sampleThreadHandle);
+    status = ZwWaitForSingleObject(matrixThreadHandle, FALSE, nullptr);
+    ZwClose(matrixThreadHandle);
     if (!NT_SUCCESS(status)) {
-        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "等待加载期示例线程失败: 0x%08X\r\n", static_cast<ULONG>(status));
+        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error, "等待全库矩阵线程失败: 0x%08X\r\n", static_cast<ULONG>(status));
         wknet::ReleaseWskClient();
         wknet::testlog::Shutdown();
         return status;
     }
 
-    const NTSTATUS sampleStatus = sampleThreadContext.Status;
-    if (!NT_SUCCESS(sampleStatus)) {
-        WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Error,
-            "加载期示例存在失败项，DriverEntry 继续完成: 0x%08X\r\n",
-            static_cast<ULONG>(sampleStatus));
+    const NTSTATUS matrixStatus = matrixThreadContext.Status;
+    if (!NT_SUCCESS(matrixStatus)) {
+        WKNET_TRACE(
+            ::wknet::ComponentSession,
+            ::wknet::TraceLevel::Error,
+            "全库矩阵存在硬失败，DriverEntry 继续完成 (驱动保持加载便于取日志): 0x%08X pass=%lu fail=%lu env=%lu\r\n",
+            static_cast<ULONG>(matrixStatus),
+            static_cast<ULONG>(matrixReport.PassCount),
+            static_cast<ULONG>(matrixReport.FailCount),
+            static_cast<ULONG>(matrixReport.EnvSkipCount));
     }
 
+    // Keep DriverEntry successful so the test driver remains loaded for log collection.
+    // Hard failures are recorded in matrixReport / wknettest.log ([ktest] FAIL lines).
     status = STATUS_SUCCESS;
-    WKNET_TRACE(::wknet::ComponentSession, ::wknet::TraceLevel::Info, "DriverEntry 完成: 0x%08X\r\n", static_cast<ULONG>(status));
+    WKNET_TRACE(
+        ::wknet::ComponentSession,
+        ::wknet::TraceLevel::Info,
+        "DriverEntry 完成: 0x%08X matrix=0x%08X pass=%lu fail=%lu env=%lu\r\n",
+        static_cast<ULONG>(status),
+        static_cast<ULONG>(matrixStatus),
+        static_cast<ULONG>(matrixReport.PassCount),
+        static_cast<ULONG>(matrixReport.FailCount),
+        static_cast<ULONG>(matrixReport.EnvSkipCount));
 
     return status;
 }
