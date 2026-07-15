@@ -1,21 +1,28 @@
 # wknet
 
-**An HTTP/HTTPS/WebSocket client library for Windows kernel drivers**
+A pure kernel-mode HTTP/HTTPS/WebSocket client for Windows drivers.
 
-wknet uses WSK as its kernel transport path and CNG/BCrypt for cryptography. It implements HTTP/1.1, HTTP/2, WebSocket, TLS 1.2/1.3, certificate validation, and content codecs.
+Transport is WSK; cryptography is kernel CNG/BCrypt. No WinHTTP, WinINet, or SChannel. Public API is four namespaces: `wknet::http`, `wknet::websocket`, `wknet::crypto`, `wknet::codec`.
 
-- Public APIs: `wknet::http`, `wknet::websocket`, `wknet::crypto`, `wknet::codec`
-- Internal layers: `rtl`, `net`, `tls`, `http1`, `http2`, `ws`, `transport`, `session`
-- Tracing defaults to Off; tests and wknettest select Max
-- Public headers live only under `include/wknet`; implementation headers remain source-local
-- There is no parallel client-class or compatibility API
+## Fit / not a fit
 
-## Navigation
+| Fit | Not a fit |
+|-----|-----------|
+| Outbound HTTP(S) / WebSocket from a kernel driver | HTTP server / inbound request parser |
+| Explicit security defaults and capability bounds | Automatic trust of the system CA store |
+| One product API across HTTP/1.1 · HTTP/2 · HTTP/3 | QUIC migration / WebTransport and other non-goals |
 
-- [Getting started](getting-started.md) · [Build and test](build-and-test.md)
-- [Capability matrix](capability-matrix.md) · [Architecture](architecture.md)
-- [HTTP/1.1](http1.md) · [HTTP/2](http2.md) · [WebSocket](websocket.md)
-- [TLS and certificates](tls-and-certificates.md) · [Cryptography](cryptography.md)
-- [Product API](high-level-api.md) · [Internal interface boundaries](low-level-api.md)
-- [Module boundaries](client-classes.md) · [Transport](transport-layer.md)
-- [Connection pool](connection-pool.md) · [Async model](async-model.md) · [Memory model](memory-model.md)
+## Hard constraints
+
+1. Sync paths require `PASSIVE_LEVEL`; handles are heap objects with paired Create / Close·Release.
+2. Trust anchors, CA bundles, pins, and revocation evidence are **caller-supplied**; hostname checks never fall back to CN.
+3. Trace defaults to `Off`; HTTP/3 defaults to `Auto` (learn from authenticated Alt-Svc).
+
+## Start here
+
+1. [Build](build.md) — produce `wknetlib.lib`
+2. [First request](first-request.md) — minimal GET / POST
+3. [Integration checklist](integration-checklist.md) — pre-flight
+4. [Capability matrix](capability-matrix.md) — implemented / opt-in / refused / non-goals
+
+Task recipes: [Cookbook](cookbook.md). Signatures: [API overview](api/overview.md).

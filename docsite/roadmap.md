@@ -1,50 +1,26 @@
-# 路线图与非目标
+# 路线图
 
-明确划清边界有助于正确使用。以下为**有意不做**、**安全拒绝**或**需显式开启**的能力，以及未来改进方向。
+这里只记方向。已实现 / 默认关 / 安全拒绝 / 非目标的完整分类在 [能力账本](capability-matrix.md)，本页不复述。
 
-### 明确的非目标
+## 当前主路径（已落地）
 
-**HTTP/1.1**
-- 入站 request parser / server role
-- `obs-fold` 折行（安全拒绝而非规范化）
-- 调用方手写 `Transfer-Encoding` / `TE`（安全拒绝，framing 由库生成）
+- 内核客户端：HTTP/1.1、HTTP/2、**HTTP/3（QUIC v1 + QPACK）**、WebSocket（含 RFC 8441 可选路径）。
+- 传输 WSK + 密码学 CNG；TLS 1.2/1.3 自实现；信任锚调用方提供。
+- H3 默认 `Auto`：从**已认证** Alt-Svc 学习后可优先 QUIC；代理/明文/WS/`NoVerify` 等不进入 H3。
+- Session 拥有池、重定向（默认 10 跳）、安全方法 stale 重试一次、异步 4 线程队列。
 
-**HTTP/2**
-- server push（客户端 `ENABLE_PUSH=0`，收到 `PUSH_PROMISE` 安全拒绝）
+## 刻意边界
 
-**WebSocket**（注：分片发送 `wknet::websocket::SendContinuation` 与显式接收分片 `ReceiveOptions.DeliverFragments=true` **已支持**）
-- 握手 redirect / 401 / 407 跟随（当前安全拒绝为 `STATUS_NOT_SUPPORTED`；未来若做必须显式 opt-in）
+- **客户端 only**；无 server / 入站 parser。
+- 无 WinHTTP / SChannel 主路径；无独立 client 层。
+- 在线 OCSP/CRL 抓取、磁盘 HTTP cache、H2 本地 priority 调度、WS 其它扩展、QUIC v2 / 迁移 / 多路径 / WebTransport / WS-over-H3 等为**非目标**（详见账本 §4）。
+- 默认关的能力（pipeline、h2c、0-RTT、兼容 TLS、PING 保活等）见账本「默认关闭」一节；代码已有，只是默认不打开。
 
-**TLS**
-- 在线撤销抓取（OCSP/CRL 网络拉取）——内核态刻意省略，支持静态撤销条目
+## 后续方向（摘要）
 
-**其它**
-- QUIC v2、0-RTT application data、主动迁移、多路径、ECN、DPLPMTUD、WebTransport、QUIC Datagram、WebSocket over HTTP/3
+- 继续收紧超时、取消、帧/控制信令与恶意输入的有界防护；普通 buffered 响应默认不设过低的库级总量硬顶。
+- 热路径减少重复分配（Workspace / lookaside / 连接常驻缓冲）。
+- 代理路径：保持明文 absolute-form 与 HTTPS CONNECT 分离，审计 opaque 鉴权透传边界。
+- H3/QUIC：互操作、性能与诊断增强；不以回退兼容层替代协议设计。
 
-### 已完成的 HTTP/3 主路径
-
-- QUIC v1 + HTTP/3 + QPACK 已接入公开 `Send*` 路径，默认 `Http3ConnectMode::Auto` 从已认证 Alt-Svc 学习并在后续请求使用 H3。
-- `Required` 保留给明确 prior-knowledge；`Disabled` 可完全关闭自动学习与使用。
-- 后续方向只做已立项的性能、互操作和审计增强，不以回退兼容层替代协议设计。
-
-### 默认关闭、可显式开启
-
-- TLS 1.2 RSA key exchange / CBC / SHA-1 签名（需 `TlsPolicy` + `CompatibilityExplicit`）
-- TLS 1.2 真重协商（服务器 `HelloRequest` 或低层客户端主动发起；需 `CompatibilityExplicit` + `EnableTls12Renegotiation`，次数由 `MaxTls12Renegotiations` 限制）
-- Post-handshake client auth
-- 强制撤销检查
-- TLS 1.3 0-RTT
-- `Expect: 100-continue`（`SendFlagExpectContinue` + `ExpectContinueTimeoutMs`）
-- HTTP/1.1 pipeline（session `EnableHttp11Pipeline=true`，默认仅 `GET`/`HEAD`/`OPTIONS`，深度和方法 mask 可配置）
-- 高层 h2c prior knowledge / Upgrade（`SendOptions.Http2CleartextMode`）
-- HTTP/2 后台 PING 保活（session `Http2KeepAlive.Enabled=true`，默认关闭）
-- HTTP/2 per-request priority（`SendOptions.Http2Priority`）
-- WebSocket permessage-deflate（`ConnectConfig.PerMessageDeflate.Enable=true`，默认关闭）
-
-### 未来改进方向（持续）
-
-- 继续扩展协议安全边界上的有界账本，例如更细的超时、取消、帧/控制信令与恶意输入防护；普通 buffered response 默认不设置低位库级总量硬顶。
-- 继续减少热路径重复分配，优先复用 Workspace / lookaside / 连接生命周期常驻缓冲。
-- 保持明文 HTTP over proxy 的 absolute-form 路径与 HTTPS CONNECT 隧道路径分离，继续审计代理鉴权 opaque 透传边界。
-
-> 这些是对**当前公开行为**的描述，便于评估适用性；不代表内部审计细节。能力现状见 [能力账本](capability-matrix.md)。
+评估集成适用性时：先读 [架构](architecture.md)、[会话与连接池](session-and-pool.md)、[TLS 与信任](tls-and-trust.md)，再以 [能力账本](capability-matrix.md) 核对边界。

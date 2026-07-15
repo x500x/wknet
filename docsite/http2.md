@@ -1,88 +1,83 @@
-# HTTP/2 与 HPACK
+# HTTP/2 协议指南
 
-### 帧与常量
+HTTP/2 在 TLS 上经 ALPN `h2` 作为默认安全多路复用路径；同源连接池以 stream 租约复用。无 server push；h2c、后台 PING 与 per-request priority 均为显式能力。
 
-```cpp
-enum class Http2FrameType : UCHAR {
-    Data=0x0, Headers=0x1, Priority=0x2, RstStream=0x3, Settings=0x4,
-    PushPromise=0x5, Ping=0x6, GoAway=0x7, WindowUpdate=0x8, Continuation=0x9
-};
-```
-帧头 9 字节、默认最大帧 16384、最大允许帧 2^24-1、初始窗口 65535、最大窗口 0x7fffffff、前导 `"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"`（24 字节）。
+公开入口见 [HTTP 同步](api/http-sync.md) / [会话配置](api/session-config.md)。WebSocket 隧道见 [WebSocket](websocket.md)。
 
-### 连接建立与 SETTINGS
+## 结论
 
-- 发前导 + 客户端 7 项 SETTINGS（`EnablePush=0`、`MaxConcurrentStreams=100`、`InitialWindowSize=65535`、`MaxFrameSize=32768`、`HeaderTableSize=4096`、`MaxHeaderListSize=头块容量`、`EnableConnectProtocol=0`）。
-- **立即发 ACK，不阻塞等服务端 ACK**（服务端常延迟到有请求才 ACK）。
-- 校验对端 SETTINGS：payload 须 6 的倍数（否则 `FRAME_SIZE_ERROR`）、`ENABLE_PUSH != 0` → `PROTOCOL_ERROR`、`ENABLE_CONNECT_PROTOCOL > 1` → `PROTOCOL_ERROR`、`InitialWindowSize > 0x7fffffff` → `FLOW_CONTROL_ERROR`、`MaxFrameSize` 越界 → `PROTOCOL_ERROR`。
-- 首帧必须是 stream 0 上的非 ACK SETTINGS，否则 GOAWAY。
-- **SETTINGS 超时**：无独立计时器——后续读到 `STATUS_IO_TIMEOUT` 且尚未收到对端 ACK → GOAWAY `SETTINGS_TIMEOUT`。
+| 主题 | 行为 |
+|------|------|
+| 默认路径 | TLS ALPN `h2`（`PreferHttp2` 默认 true） |
+| h2c | **opt-in**：`SendOptions.Http2CleartextMode` = `PriorKnowledge` 或 `Upgrade` |
+| 多流复用 | 同源 H2 连接承载多个活动请求；受本地与 peer `MAX_CONCURRENT_STREAMS` 限制 |
+| Server push | **不支持**；任何 `PUSH_PROMISE` → 协议错误 |
+| Extended CONNECT | RFC 8441；`wss` 默认使用（见 WebSocket） |
+| GOAWAY / RST | 未处理 stream 可映射 `STATUS_RETRY`；仅安全方法 fresh retry 一次 |
+| 后台 PING | session `Http2KeepAlive.Enabled` 默认 **关** |
+| Priority | `SendOptions.Http2Priority` **显式**；不维护本地依赖树调度 |
 
-### HEADERS / CONTINUATION
+## 连接与 SETTINGS
 
-- 累计头块超头块容量（默认 32 KiB，最大 64 KiB）→ GOAWAY `ENHANCE_YOUR_CALM` + `STATUS_BUFFER_TOO_SMALL`。
-- CONTINUATION 序列严格校验；**洪泛防护**：`Http2MaxContinuationFrames=64`、`Http2MaxEmptyContinuationFrames=4`，超限 GOAWAY `PROTOCOL_ERROR`（CVE-2024-27316 类）。
-- HPACK 解码失败映射：`STATUS_BUFFER_TOO_SMALL`→`ENHANCE_YOUR_CALM`；压缩失败→`COMPRESSION_ERROR`。
+- 客户端发送 preface 与 SETTINGS；`ENABLE_PUSH=0`；立即 ACK，不阻塞等待对端 ACK。
+- 对端 `ENABLE_PUSH != 0`、非法窗口/帧大小、非法 `ENABLE_CONNECT_PROTOCOL` → 协议/流控错误。
+- 缺 ACK 且后续读超时 → GOAWAY `SETTINGS_TIMEOUT`。
+- CONTINUATION 洪泛防护：≤64 帧、≤4 空帧（CVE-2024-27316 类）。
+- 头块累计超容量 → `ENHANCE_YOUR_CALM` / `STATUS_BUFFER_TOO_SMALL`。
+- 连接专属头（`connection`/`transfer-encoding`/`upgrade` 等）禁止；`te` 仅允许 `trailers`。
 
-### 头校验
+## 多流与 body
 
-- 字段名拒绝大写、控制字符、空格、内嵌 `:`；值拒绝 `\0\r\n`。
-- 伪头仅 `:status`，须先于普通头、不重复、trailer 中不得出现；缺 `:status`（非 trailer）→ 非法。
-- 连接专属头禁止：`connection`/`keep-alive`/`proxy-connection`/`transfer-encoding`/`upgrade`；`te` 仅允许值 `trailers`。
-- 1xx interim：`:status 101` 或 interim+END_STREAM → RST_STREAM `PROTOCOL_ERROR`；其余 interim 重置块续读最终响应。
+- 连接池对同源 H2 做 stream 租约；帧循环按 stream id 分发 HEADERS/DATA/WINDOW_UPDATE/RST。
+- 请求 body 由 body source 驱动，按 `min(连接发送窗口, 流远端窗口, peer MaxFrameSize)` 切 DATA。
+- 请求 trailers：body 结束后以 trailing HEADERS + END_STREAM 发送（HTTP/2 头块，有别于 HTTP/1.1 chunked trailer）；拒绝 trailer 伪头；禁止字段规则与 HTTP/1.1 对齐。
+- 流控：连接级 + per-stream；`InitialWindowSize` 更新同步到活动流；越界 → `FLOW_CONTROL_ERROR`。
+- 1xx interim：拒绝 `:status 101` 与 interim+END_STREAM；其余 interim 重置后继续读最终响应。
 
-### 流控
+## RFC 8441 extended CONNECT
 
-- DATA 在 headers 前、或 body 被禁（HEAD/1xx/204/304）→ RST_STREAM `PROTOCOL_ERROR`。
-- 连接级窗口越界 → GOAWAY `FLOW_CONTROL_ERROR`；**WINDOW_UPDATE 阈值 = 初始窗口一半（32767）**，达阈值补发。
-- 每个活动 stream 单独维护远端窗口；对端调整 `InitialWindowSize` 时，同步 delta 到所有活动 stream，窗口越界按流控错误处理。
-- 出站请求体受 `min(连接发送窗口, 流远端窗口, peer MaxFrameSize)` 限制；body source 按窗口切 DATA，窗口耗尽则刷缓冲并处理对端 WINDOW_UPDATE。
+- 形态：`:method: CONNECT` + `:protocol: websocket`。
+- 发送前要求 peer `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`，否则 `STATUS_NOT_SUPPORTED` 且不分配 stream。
+- 收到 `2xx` 后双向 DATA 作为隧道 payload。
+- 这是 HTTP/2 隧道原语；`wknet::websocket` 在 `wss` 默认自动选择，可用 `Http11Only` 强制 HTTP/1.1 Upgrade。
 
-### 多活动流基础
+## GOAWAY / RST 与重试
 
-- `Http2Connection` 维护活动 stream 表（默认容量 16，并受对端 `MAX_CONCURRENT_STREAMS` 限制）。
-- `BeginRequest(...)` 只发送 HEADERS/DATA 并返回 stream id；`ReceiveResponse(streamId)` 再收该流响应，帧循环会把其它活动流的 HEADERS/DATA/WINDOW_UPDATE/RST_STREAM 暂存到对应 stream state。
-- 同步 `SendRequest` 复用两阶段路径；`wknet::http` 连接池通过 stream 租约复用同源 H2 连接。
+| 条件 | 高层语义 |
+|------|----------|
+| clean GOAWAY 且活动流 id > lastStreamId | stream **未处理** → `STATUS_RETRY` |
+| `REFUSED_STREAM` 且可证明未处理 | `STATUS_RETRY` |
+| GOAWAY 错误码非 0 / 其它 RST | 连接断开类失败 |
 
-### 请求 body source 与 trailers
+高层仅对 **安全方法**（`GET`/`HEAD`/`OPTIONS`）做 **一次** fresh retry；带 body 的非幂等方法不自动重放。连接级错误广播给活动流。
 
-- `Http2RequestBody.Source` / 高层 body source 驱动请求 DATA，不要求完整 body 一次性驻留内存。
-- 请求 trailers 不使用 HTTP/1.1 chunked；body 结束后发送 trailing HEADERS + END_STREAM。
-- trailer 复用 HTTP/1.1 禁止字段规则，并额外拒绝任何 trailer 伪头。
+## h2c（默认关）
 
-### PRIORITY
+| 模式 | 要点 |
+|------|------|
+| `PriorKnowledge` | 明文直接 HTTP/2 preface + SETTINGS |
+| `Upgrade` | HTTP/1.1 Upgrade；**禁止请求体**；保留 stream 1，重放 101 后残留字节 |
+| 默认 | `http://` **不**自动 h2c |
 
-- `Http2Priority` 使用 RFC 权重范围 1..256，支持 stream dependency 与 exclusive 标志；拒绝自依赖和非法权重。
-- 单次请求可通过 `wknet::http::SendOptions.Http2Priority` 显式设置。
-- 首个 HEADERS 帧携带 priority 字段；底层也提供独立 PRIORITY frame 编解码。收到 peer PRIORITY 会校验长度和自依赖，不改变本地安全边界或调度策略。
+与 HTTP/3 路径互斥：显式非 HTTP ALPN、HTTP/2 priority 请求不进入 H3（见 [HTTP/3 与 QUIC](http3-quic.md)）。
 
-### RFC 8441 extended CONNECT
+## Priority 与 PING
 
-- 请求头构造支持 `Method=CONNECT` + `ConnectProtocol="websocket"`，编码为 `:method: CONNECT` 与 `:protocol: websocket`。
-- 发送前校验对端 `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`，否则返回 `STATUS_NOT_SUPPORTED` 且不分配 stream。
-- tunnel stream 收到 `2xx` 响应头后，可用 `SendStreamData` / `ReceiveStreamData` 双向传输 DATA payload（例如 WebSocket frame bytes）。
-- 这是内部 HTTP/2 tunnel primitive；`wknet::websocket` 在 `wss` 默认自动选择 RFC 8441，`Http11Only` 强制 HTTP/1.1 Upgrade。
+- **Priority**：`SendOptions.Http2Priority` 在首个 HEADERS 携带 weight/dependency/exclusive（权重 1..256）；拒绝自依赖。不实现复杂本地 priority tree 或带宽调度（非目标）。
+- **后台 PING**：`SessionConfig.Http2KeepAlive.Enabled=true` 显式开启；只扫描 idle 且可复用的池化 H2 连接；ACK 超时或协议错误关闭该 idle 连接。默认 idle/interval 30s，ACK 超时 5s。
 
-### GOAWAY / RST_STREAM / PUSH_PROMISE
+## HPACK（行为边界）
 
-- GOAWAY：错误码非 0 → `STATUS_CONNECTION_DISCONNECTED`；错误码 0 但活动流 id > lastStreamId → **`STATUS_RETRY`**（该流未处理，可重试）。
-- RST_STREAM：`NoError` 且已收终态响应 → 成功；否则 `STATUS_CONNECTION_DISCONNECTED`。
-- 客户端 `EnablePush=0`，**任何 PUSH_PROMISE → GOAWAY `PROTOCOL_ERROR`**；错位控制帧亦然。
+- 动态表大小更新仅限块首且 ≤协商值；header-list 按 `name+value+32` 计。
+- 编码端对 `authorization` / `cookie` / `proxy-authorization` **强制 Never-Indexed**。
+- Huffman 拒绝过长码 / EOS / 非法 padding。
 
-### h2c 模式
+## 默认关闭一览
 
-- **prior knowledge**：直接 `Initialize` + `SendRequest`。
-- **Upgrade**：`session::HttpH2Dispatch` 保留 stream 1 给升级请求，重放 101 后残留字节；`SendOptions.Http2CleartextMode=Upgrade` 禁止请求体。
-- `wknet::http` 默认不对 `http://` 使用 h2c；只有单次发送显式设置 `PriorKnowledge` 或 `Upgrade` 才进入 h2c。
+| 能力 | 开启方式 |
+|------|----------|
+| h2c | `SendOptions.Http2CleartextMode` |
+| 后台 PING | `Http2KeepAlive.Enabled=true` |
+| per-request priority | `SendOptions.Http2Priority` |
 
-### HPACK
-
-- 整数：续字节 ≤5、移位/累加溢出 → `STATUS_INTEGER_OVERFLOW`。
-- Huffman：>30 bit 码 / EOS / 非全 1 padding → `STATUS_INVALID_NETWORK_RESPONSE`。
-- 动态表：大小更新仅限块首且 ≤协商 `HeaderTableSize`；表项大于 max 清空全表；FIFO 驱逐。
-- header-list 大小按 `name+value+32`（`HpackEntryOverhead`）计，超 `MaxHeaderListSize` → 非法。
-- 静态表 61 项；**编码端对 `authorization`/`cookie`/`proxy-authorization` 强制 Never-Indexed**，不入动态表。
-
-### 边界
-
-`wknet::http` 已接入同源 H2 多活动流复用；`wknet::websocket` 对 `wss` 默认自动选择 RFC 8441。PRIORITY 与后台 PING 保活均为显式能力；不支持 server push；h2c 默认关闭。
+能力分类措辞以 [能力账本](capability-matrix.md) 为准。

@@ -1,3 +1,0 @@
-# Connection Pool
-
-Each session owns a `FAST_MUTEX`-guarded fixed-capacity pool (default 8, max 1024, 2/host, 30 s idle). The reuse key matches scheme/host/port/family/TLS versions/certificate identity/policy/SNI/**ALPN** plus proxy identity. Acquire can share an active same-origin HTTP/2 connection while its stream lease count is below the negotiated/local limit. Return-to-pool requires success, reusability, and `ReuseOrCreate`; close-delimited and 101 responses are never pooled. Idle eviction is lazy. A stale reused connection is retried exactly once only for safe methods; non-idempotent requests are never replayed. Policies: `ReuseOrCreate`, `ForceNew`, and `NoPool`.

@@ -1,7 +1,67 @@
 # Async Model
 
-The implementation lives in `session/Async.cpp`. Kinds are HTTP send and WebSocket connect; states move from Pending to Running to Completed. Public operations are created through `wknet::http::Async*` or `wknet::websocket::ConnectAsync`, awaited or canceled through the opaque `AsyncOp`, and finally released.
+Async APIs move synchronous `Send*` / WebSocket connect work onto a **fixed 4-thread** worker pool. Callers hold an opaque `AsyncOp` and finish with wait, poll, or cancel. Synchronous paths do not depend on the async runtime.
 
-Reference counting: the user handle holds one reference; an internal worker holds another, keeping the object alive after the user marks it closed so it can still observe cancellation. `AsyncCancel` completes a pending op immediately and signals a running HTTP/WS worker, which forwards the flag into WSK transport waits to cancel the active IRP where supported — cancellation is cooperative, so still `AsyncWait` then `AsyncRelease`.
+## Runtime
 
-**After using async APIs, call `wknet::http::Destroy()` before driver unload** (then release WSK / close handles). Synchronous-only paths do not require it, but may call it unconditionally. Each handle carries a `volatile LONG InFlight` counter and a `KEVENT DrainEvent` so handles are not freed while operations still use them.
+| Item | Value |
+|------|-------|
+| Workers | Fixed **4** (`AsyncWorkerCount`) |
+| Queue | FIFO, max depth **256** |
+| Queue full | `STATUS_INSUFFICIENT_RESOURCES` |
+| Startup | CAS lazy init |
+
+Kinds: `HttpSend`, `WebSocketConnect`. States: `Pending → Running → Completed`.
+
+## Lifecycle
+
+1. **Create**: `AsyncGet` / `AsyncPost` / `AsyncSend` or `wknet::websocket::ConnectAsync` → `AsyncOp*`, initially `STATUS_PENDING`, refcount 1.
+2. **Enqueue**: a worker runs the op; if already canceled before run, it completes immediately with `STATUS_CANCELLED`.
+3. **Wait**: `AsyncWait(op, timeoutMs)`, or poll `AsyncGetStatus` / `AsyncIsCompleted`.
+4. **Take result**: HTTP via `AsyncGetResponse`; WebSocket via `wknet::websocket::AsyncGetWebSocket`.
+5. **Release**: `AsyncRelease` (cleanup when the refcount hits zero).
+
+```cpp
+wknet::http::AsyncOp* op = nullptr;
+NTSTATUS s = wknet::http::AsyncGetEx(session, url, urlLen, nullptr, nullptr, &op);
+if (NT_SUCCESS(s) && wknet::http::AsyncWait(op, 30000) == STATUS_SUCCESS) {
+    wknet::http::Response* r = nullptr;
+    if (NT_SUCCESS(wknet::http::AsyncGetResponse(op, &r))) {
+        // use r
+        wknet::http::ResponseRelease(r);
+    }
+}
+wknet::http::AsyncRelease(op);
+```
+
+## Reference counting and cancellation
+
+- The user handle holds one reference; the worker holds another so the object can still observe cancellation after the user marks it closed.
+- `AsyncCancel`: completes `Pending` immediately; for `Running`, forwards `Canceled` into transport waits and cancels the active IRP when supported.
+- **Cancellation is cooperative**: after `AsyncCancel`, still `AsyncWait`, then `AsyncRelease`.
+
+## Completion callbacks
+
+`AsyncOptions.OnComplete` (and test-path completion callbacks) run when the op becomes `Completed`. Do not do heavy work or synchronously wait on the same op inside the callback; post to an upper queue instead.
+
+## Unload rules
+
+After using async APIs, **before** driver unload:
+
+```cpp
+wknet::http::Destroy();  // drain in-flight async work and workers
+// then release WSK / close sessions and other handles
+```
+
+Synchronous-only paths need not call it, but may call it unconditionally. Sessions and related handles use in-flight counters and drain events so handles are not freed while operations still use them.
+
+## Relation to sync APIs
+
+| | Sync `Get*` / `Send*` | Async `Async*` |
+|--|----------------------|----------------|
+| Call IRQL | `PASSIVE_LEVEL` | Submit/wait at `PASSIVE_LEVEL` |
+| Blocking point | Calling thread | Worker thread |
+| Cancel | No public mid-flight cancel | `AsyncCancel` |
+| Pool / redirect / H3 | Same session policy | Same session policy |
+
+Async does not change protocol semantics: stale retry, redirect limits, H3 Auto, and certificate rules match the synchronous path.

@@ -1,13 +1,26 @@
-# Roadmap & Non-Goals
+# Roadmap
 
-Explicit boundaries help correct usage. The following are intentionally **out of scope**, **security-rejected**, or **explicit opt-in**, plus ongoing improvement directions.
+Direction only. Full classification (implemented / default-off / security refusal / non-goal) is in the [Capability Matrix](capability-matrix.en.md); this page does not restate it.
 
-**Non-goals / security rejections.** HTTP/1.1: inbound request parser/server role, obs-fold normalization (rejected), caller-supplied `Transfer-Encoding`/`TE` (rejected because the library owns framing). TRACE is available only with explicit `SendFlagAllowTrace`. HTTP/2: server push (`ENABLE_PUSH=0`; `PUSH_PROMISE` is rejected). WebSocket (fragment send + explicit `ReceiveOptions.DeliverFragments` receive-fragment delivery are supported): handshake redirect/401/407 following (currently rejected with `STATUS_NOT_SUPPORTED`; any future support must be explicit opt-in). TLS: online OCSP/CRL fetch (omitted in kernel; static/provider-returned evidence supported). HTTP/3 extensions: QUIC v2, 0-RTT application data, active migration, multipath, ECN, DPLPMTUD, WebTransport, QUIC Datagram, and WebSocket over HTTP/3.
+## Current main path (landed)
 
-**Completed HTTP/3 main path.** QUIC v1 + HTTP/3 + QPACK are integrated into the public `Send*` path. The default `Http3ConnectMode::Auto` learns authenticated Alt-Svc and uses H3 on later requests; `Required` remains explicit prior knowledge and `Disabled` turns automatic learning/use off. Future work is limited to planned performance, interoperability, and audit improvements rather than compatibility fallback layers.
+- Kernel client: HTTP/1.1, HTTP/2, **HTTP/3 (QUIC v1 + QPACK)**, WebSocket (including optional RFC 8441).
+- Transport WSK + crypto CNG; self-implemented TLS 1.2/1.3; caller-supplied trust anchors.
+- H3 default `Auto`: may prefer QUIC after learning **authenticated** Alt-Svc; proxy/cleartext/WS/`NoVerify` and similar never select H3.
+- Session owns the pool, redirects (default 10 hops), one stale retry for safe methods, and a 4-thread async queue.
 
-**Off by default, explicitly enable.** TLS compatibility features, post-handshake client auth, required revocation checks, TLS 1.3 0-RTT, `Expect: 100-continue`, HTTP/1.1 pipelining, h2c, HTTP/2 PING keepalive, per-request priority (`SendOptions.Http2Priority`), and WebSocket permessage-deflate.
+## Deliberate boundaries
 
-**Future directions.** Continue tightening protocol-safety ledgers such as timeouts, cancellation, frame/control-signal and malicious-input bounds while leaving normal buffered responses unlimited by default; reduce repeated allocations on hot paths via Workspace/lookaside/connection-resident buffers; keep plaintext HTTP over proxy absolute-form separate from HTTPS CONNECT tunneling and continue auditing opaque proxy-auth forwarding.
+- **Client only**; no server / inbound parser.
+- No WinHTTP / SChannel main path; no separate client layer.
+- Online OCSP/CRL fetch, on-disk HTTP cache, local H2 priority scheduling, other WS extensions, QUIC v2 / migration / multipath / WebTransport / WS-over-H3 are **non-goals** (matrix §4).
+- Default-off features (pipelining, h2c, 0-RTT, legacy TLS, PING keepalive, …) are listed under “Default-off” in the matrix; they exist in code and stay off until enabled.
 
-This describes current public behavior for fit assessment; see [Capability Matrix](capability-matrix.md) for the current state.
+## Forward directions (summary)
+
+- Keep tightening bounded defenses for timeouts, cancellation, frame/control signals, and malicious input; normal buffered responses stay without an overly low library-wide byte hard cap by default.
+- Reduce repeated hot-path allocation (Workspace / lookaside / connection-resident buffers).
+- Proxy paths: keep cleartext absolute-form separate from HTTPS CONNECT; audit opaque auth forwarding.
+- H3/QUIC: interoperability, performance, and diagnostics. Avoid compatibility fallback layers that replace protocol design.
+
+When assessing fit: read [Architecture](architecture.en.md), [Session & Pool](session-and-pool.en.md), and [TLS & Trust](tls-and-trust.en.md), then verify boundaries against the [Capability Matrix](capability-matrix.en.md).

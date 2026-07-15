@@ -75,33 +75,39 @@ plugins:
           build: true
           nav_translations:
             首页: Home
-            入门: Start
-            快速开始: Getting Started
-            构建与测试: Build & Test
-            协议: Protocols
-            能力边界: Capability Matrix
+            开始使用: Get Started
+            构建: Build
+            第一个请求: First Request
+            集成清单: Integration Checklist
+            Cookbook: Cookbook
+            概念与行为: Concepts
             架构: Architecture
-            HTTP/2 与 HPACK: HTTP/2 & HPACK
-            HTTP/3 与 QUIC: HTTP/3 & QUIC
-            TLS 与证书: TLS & Certificates
-            密码学: Cryptography
-            产品 API: Product API
-            内部接口: Internal Interfaces
-            配置: Configuration
-            模块边界: Module Boundaries
-            传输层: Transport Layer
-            NTSTATUS 错误码: NTSTATUS Errors
-            机制: Mechanics
-            连接池: Connection Pool
+            会话与连接池: Session & Pool
             异步模型: Async Model
-            内存模型: Memory Model
-            日志与诊断: Logging & Diagnostics
-            实战与项目: Guides
-            Cookbook 样例: Cookbook
-            常见问题: FAQ
-            路线图: Roadmap
-            术语表: Glossary
+            TLS 与信任: TLS & Trust
+            能力边界: Capability Matrix
+            错误码与 FAQ: Errors & FAQ
+            术语: Glossary
+            协议指南: Protocols
+            HTTP/1.1: HTTP/1.1
+            HTTP/2: HTTP/2
+            HTTP/3 与 QUIC: HTTP/3 & QUIC
+            WebSocket: WebSocket
+            编码与密码学: Encoding & Crypto
+            API 参考: API Reference
+            总览: Overview
+            会话与配置: Session & Config
+            请求与响应: Request & Response
+            同步 HTTP: Sync HTTP
+            异步 HTTP: Async HTTP
+            证书与 TLS 选项: TLS Options
+            Codec 与 Crypto: Codec & Crypto
+            贡献与项目: Contribute
+            构建与测试: Build & Test
+            日志与诊断: Logging
             贡献指南: Contributing
+            内部边界: Internals
+            路线图: Roadmap
 
 markdown_extensions:
   - admonition
@@ -121,33 +127,37 @@ markdown_extensions:
 
 nav:
   - 首页: index.md
-  - 入门:
-      - 快速开始: getting-started.md
-      - 构建与测试: build-and-test.md
-  - 协议:
-      - 能力边界: capability-matrix.md
+  - 开始使用:
+      - 构建: build.md
+      - 第一个请求: first-request.md
+      - 集成清单: integration-checklist.md
+      - Cookbook: cookbook.md
+  - 概念与行为:
       - 架构: architecture.md
+      - 会话与连接池: session-and-pool.md
+      - 异步模型: async-model.md
+      - TLS 与信任: tls-and-trust.md
+      - 能力边界: capability-matrix.md
+      - 错误码与 FAQ: errors-and-faq.md
+      - 术语: glossary.md
+  - 协议指南:
       - HTTP/1.1: http1.md
-      - HTTP/2 与 HPACK: http2.md
+      - HTTP/2: http2.md
       - HTTP/3 与 QUIC: http3-quic.md
       - WebSocket: websocket.md
-      - TLS 与证书: tls-and-certificates.md
-      - 密码学: cryptography.md
-  - API:
-      - 产品 API: high-level-api.md
-      - 内部接口: low-level-api.md
-      - 配置: configuration.md
-      - 模块边界: client-classes.md
-      - 传输层: transport-layer.md
-      - NTSTATUS 错误码: ntstatus-reference.md
-  - 机制:
-      - 连接池: connection-pool.md
-      - 异步模型: async-model.md
-      - 内存模型: memory-model.md
+      - 编码与密码学: encoding-and-crypto.md
+  - API 参考:
+      - 总览: api/overview.md
+      - 会话与配置: api/session-config.md
+      - 请求与响应: api/request-response.md
+      - 同步 HTTP: api/http-sync.md
+      - 异步 HTTP: api/http-async.md
+      - WebSocket: api/websocket.md
+      - 证书与 TLS 选项: api/tls-options.md
+      - Codec 与 Crypto: api/codec-crypto.md
+  - 贡献与项目:
+      - 构建与测试: build-and-test.md
       - 日志与诊断: logging.md
-  - 实战与项目:
-      - Cookbook 样例: cookbook.md
-      - 常见问题: faq.md
-      - 路线图: roadmap.md
-      - 术语表: glossary.md
       - 贡献指南: contributing.md
+      - 内部边界: internals.md
+      - 路线图: roadmap.md

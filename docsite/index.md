@@ -1,21 +1,28 @@
 # wknet
 
-**面向 Windows 内核驱动的 HTTP/HTTPS/WebSocket 客户端库**
+面向 Windows 内核驱动的纯内核态 HTTP/HTTPS/WebSocket 客户端库。
 
-wknet 使用 WSK 作为内核主传输、CNG/BCrypt 作为密码学主路径，实现 HTTP/1.1、HTTP/2、WebSocket、TLS 1.2/1.3、证书校验与内容编解码。
+传输走 WSK，密码学走内核态 CNG/BCrypt；不依赖 WinHTTP、WinINet 或 SChannel。公共 API 仅四个命名空间：`wknet::http`、`wknet::websocket`、`wknet::crypto`、`wknet::codec`。
 
-- 公共 API：`wknet::http`、`wknet::websocket`、`wknet::crypto`、`wknet::codec`
-- 内部分层：`rtl`、`net`、`tls`、`http1`、`http2`、`ws`、`transport`、`session`
-- Trace 默认关闭；测试与 wknettest 设置为 Max
-- 公共头只位于 `include/wknet`；内部实现头保持 src-local
-- 不存在平行 client 类或兼容 API
+## 适合 / 不适合
 
-## 导航
+| 适合 | 不适合 |
+|------|--------|
+| 内核驱动内发起出站 HTTP(S) / WebSocket | 作为 HTTP 服务端 / 入站 parser |
+| 需要明确的安全默认值与能力边界 | 依赖系统 CA 自动信任 |
+| 希望 HTTP/1.1 · HTTP/2 · HTTP/3 统一产品 API | 需要 QUIC 迁移 / WebTransport 等非目标能力 |
 
-- [快速开始](getting-started.md) · [构建与测试](build-and-test.md)
-- [能力账本](capability-matrix.md) · [架构](architecture.md)
-- [HTTP/1.1](http1.md) · [HTTP/2](http2.md) · [WebSocket](websocket.md)
-- [TLS 与证书](tls-and-certificates.md) · [密码学](cryptography.md)
-- [产品 API](high-level-api.md) · [内部接口边界](low-level-api.md)
-- [模块边界](client-classes.md) · [传输层](transport-layer.md)
-- [连接池](connection-pool.md) · [异步模型](async-model.md) · [内存模型](memory-model.md)
+## 硬约束（三行）
+
+1. 同步路径要求 `PASSIVE_LEVEL`；句柄均为堆对象，成对 Create / Close·Release。
+2. 信任锚、CA 包、pin、撤销证据由**调用方**提供；主机名校验不回退 CN。
+3. Trace 默认 `Off`；HTTP/3 默认 `Auto`（从已认证 Alt-Svc 学习）。
+
+## 从这里开始
+
+1. [构建](build.md) — 编出 `wknetlib.lib`
+2. [第一个请求](first-request.md) — 最小 GET / POST
+3. [集成清单](integration-checklist.md) — 上线前核对
+4. [能力边界](capability-matrix.md) — 已实现 / 默认关 / 拒绝 / 非目标
+
+需要任务范例见 [Cookbook](cookbook.md)；查函数签名见 [API 总览](api/overview.md)。

@@ -1,6 +1,8 @@
-# Build & Test
+# Build & test
 
-### Build the library
+How contributors build the library and run user-mode protocol tests. Product integrators only need [Build](build.md).
+
+## Build the library
 
 ```powershell
 pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1
@@ -8,11 +10,13 @@ pwsh -NoLogo -NoProfile -File .\tools\build-lib.ps1 -Configuration Debug -Platfo
 msbuild wknet.sln /m /restore /p:Configuration=Debug /p:Platform=x64
 ```
 
-Use `pwsh` (not `powershell`). Debug/Release builds treat warnings as errors at the highest warning level.
+Use `pwsh`. Debug/Release treat warnings as errors.
 
-### Run user-mode protocol tests
+Output: `src/wknetlib/<Platform>/<Configuration>/wknetlib.lib`.
 
-The complete protocol validation baseline builds and runs each test through `tools/build-tests.ps1`:
+## User-mode protocol tests
+
+Build and run each suite through `tools/build-tests.ps1`:
 
 ```powershell
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_parser_tests -Run
@@ -29,14 +33,28 @@ pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_api_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test high_level_api_tests -Run
 ```
 
-If the binaries are already built, they can also be executed directly from `.\tests\out\bin\`.
+Built binaries also run from `.\tests\out\bin\<name>.exe`.
 
-### Local TLS interop matrix
+## Local TLS interop
 
 ```powershell
 pwsh -NoLogo -NoProfile -File .\tests\integration\tls_matrix.ps1 -Configuration Debug -Platform x64
 ```
 
-Uses only 127.0.0.1; SKIPs cleanly when OpenSSL/BoringSSL is missing.
+Uses only `127.0.0.1`; SKIPs cleanly when OpenSSL/BoringSSL is missing.
 
-> Do not use `pwsh -NoLogo -NoProfile -File .\tests\integration\https_smoke.ps1 -Configuration Debug -Platform x64 -SkipDriverBuild`; it may hang in this repository's workflow.
+> Do not use `tests/integration/https_smoke.ps1` as a regular path (it may hang in some environments).
+
+## Samples and API regression
+
+| Path | Purpose |
+|------|---------|
+| `src/wknettest/samples/HighLevelApiSamples.cpp` | Product API scenarios |
+| `src/wknettest/samples/AdvancedScenarioSamples.cpp` | Edge and error paths |
+| `tests/high_level_api_tests.cpp` | User-mode API regression |
+
+Test hooks: [Internals](internals.md). Trace check:
+
+```powershell
+pwsh -NoLogo -NoProfile -File .\tools\check-trace-events.ps1
+```

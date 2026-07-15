@@ -2,29 +2,32 @@
 
 | 术语 | 含义 |
 |------|------|
-| **WSK** | Windows Sockets Kernel，内核态 socket 框架；本库网络主路径（[传输层](transport-layer.md)） |
-| **CNG / BCrypt** | Cryptography Next Generation，内核态密码学；本库密码学主路径（[密码学层](cryptography.md)） |
-| **SChannel** | 系统 TLS 实现；本库**不**用它，TLS 自实现 |
-| **IRQL** | Interrupt Request Level；同步 HTTP/WS/TLS/证书路径要求 `PASSIVE_LEVEL` |
-| **PASSIVE_LEVEL** | 最低 IRQL，可阻塞等待、分页可用；本库同步 API 的调用前提 |
-| **NTSTATUS** | 内核统一返回码；用 `NT_SUCCESS()` 判断（[错误码](ntstatus-reference.md)） |
-| **Transport** | opaque 字节流服务，统一明文/TLS（[传输层](transport-layer.md)） |
-| **Workspace** | 会话常驻的可复用缓冲集合，避免反复分配（[内存模型](memory-model.md)） |
-| **HeapObject / HeapArray** | RAII 堆封装，替代裸 `new/delete` |
-| **连接池 / Pool** | 连接复用，按 `session::ConnectionPoolKey` 匹配（[连接池](connection-pool.md)） |
-| **公共 API** | `wknet::http` / `wknet::websocket` / `wknet::crypto` / `wknet::codec` |
-| **ALPN** | Application-Layer Protocol Negotiation；协商 `h2` / `http/1.1` |
-| **SNI** | Server Name Indication；TLS 握手中的目标主机名 |
-| **h2 / h2c** | HTTP/2 over TLS / HTTP/2 明文（prior knowledge 或 Upgrade） |
-| **HPACK** | HTTP/2 头压缩（RFC 7541），含 Huffman + 动态表（[HTTP/2](http2.md)） |
-| **AEAD** | 带关联数据的认证加密（AES-GCM / ChaCha20-Poly1305 / AES-CCM） |
-| **HKDF** | 基于 HMAC 的密钥派生（TLS 1.3 密钥调度） |
-| **ECDHE / DHE** | (椭圆曲线) 临时 Diffie-Hellman 密钥交换 |
-| **SPKI pin** | Subject Public Key Info 哈希锁定，用于证书锁定（[TLS 与证书](tls-and-certificates.md)） |
-| **Trust Anchor** | 信任锚，链校验的可信根 |
-| **0-RTT / early data** | TLS 1.3 提前数据；默认关闭，需显式 replay-safe |
-| **Session Ticket** | TLS 会话恢复票据（1.2/1.3 缓存） |
-| **chunked** | HTTP/1.1 分块传输编码 |
-| **close-delimited** | 以连接关闭界定 body 结束的 HTTP/1.x 响应；不回连接池 |
-| **Drain** | 内部卸载路径等待在飞异步操作（[异步模型](async-model.md)） |
-| **WDK** | Windows Driver Kit，构建内核驱动所需 |
+| **wknet** | 本库：Windows 内核态 HTTP/WebSocket 客户端协议栈 |
+| **WSK** | Windows Sockets Kernel；传输主路径 |
+| **CNG / BCrypt** | 内核密码学 API；密码学主路径 |
+| **SChannel / WinHTTP / WinINet** | 系统 TLS/HTTP 组件；**本库主路径不使用** |
+| **IRQL / PASSIVE_LEVEL** | 中断请求级；同步 HTTP/WS/TLS/证书路径要求 `PASSIVE_LEVEL` |
+| **NTSTATUS** | 内核返回码；用 `NT_SUCCESS()` 判断（见 [错误码与 FAQ](errors-and-faq.md)） |
+| **Session** | 策略与资源所有者：池、TLS 默认、代理、H3、可选 cache |
+| **连接池** | 按 origin/TLS/代理身份复用连接；close-delimited 与 101 不回池 |
+| **ConnPolicy** | `ReuseOrCreate` / `ForceNew` / `NoPool` |
+| **Transport** | opaque 字节流服务，统一明文与 TLS I/O |
+| **Workspace** | 会话常驻可复用缓冲，减少热路径分配 |
+| **ALPN** | TLS 应用层协议协商（如 `h2`、`http/1.1`） |
+| **SNI** | TLS 目标主机名扩展 |
+| **h2 / h2c** | HTTP/2 over TLS / 明文 HTTP/2（prior knowledge 或 Upgrade，默认关） |
+| **HPACK / QPACK** | HTTP/2 / HTTP/3 头压缩 |
+| **Alt-Svc** | 替代服务通告；H3 Auto **仅从已认证 HTTPS 响应**学习精确 `h3` |
+| **HTTP/3 / QUIC** | 基于 UDP/QUIC v1 的 HTTP；默认 Auto 主路径之一 |
+| **AEAD** | 认证加密（AES-GCM、ChaCha20-Poly1305 等） |
+| **Trust Anchor** | 调用方提供的信任锚；库不硬编码系统 CA |
+| **SPKI pin** | 叶证书 Subject Public Key Info 哈希锁定 |
+| **0-RTT / early data** | TLS 1.3 提前数据；默认关，须声明 replay-safe |
+| **chunked** | HTTP/1.1 分块传输编码（库生成请求 framing） |
+| **close-delimited** | 以连接关闭结束 body 的响应；**不回池** |
+| **stale retry** | 复用连接失败后对 GET/HEAD/OPTIONS 恰好一次的 ForceNew 重试 |
+| **RFC 8441** | WebSocket over HTTP/2 extended CONNECT |
+| **Drain / Destroy** | 卸载前排空在飞异步操作：`wknet::http::Destroy()` |
+| **WDK** | Windows Driver Kit |
+
+能力分类见 [能力账本](capability-matrix.md)。

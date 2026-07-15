@@ -1,85 +1,96 @@
-# WebSocket 协议
+# WebSocket 协议指南
 
-### 帧编解码（`websocket/WebSocketFrame.cpp`）
+`wknet::websocket` 提供 `ws` / `wss` 客户端。`wss` 默认经 TLS ALPN `h2,http/1.1` 协商，优先 RFC 8441 extended CONNECT over HTTP/2；失败则 Auto 回落 HTTP/1.1 Upgrade。`ws://` **不**隐式 h2c。
 
-```cpp
-enum class WebSocketOpcode : UCHAR {
-    Continuation=0x0, Text=0x1, Binary=0x2, Close=0x8, Ping=0x9, Pong=0xA
-};
-```
-常量：client key 16 字节（base64 24）、Accept 28、掩码键 4、帧头最大 14、控制帧 payload ≤125。
+API 签名见 [WebSocket API](api/websocket.md)；HTTP/2 隧道原语见 [HTTP/2](http2.md)。
 
-`WebSocketCodec`（静态）：
-- `GenerateClientKey`：16 随机字节（CNG）→ base64，用后清零。
-- `ComputeAcceptValue`：SHA-1(`key + 258EAFA5-...`) → base64。
-- `ValidateServerHandshake`：要求 `101`、HTTP/1.1、`Connection: Upgrade`、`Upgrade: websocket`、**恰好一个** `Sec-WebSocket-Accept`（**常量时间**比对）；只接受已请求且参数合法的 `permessage-deflate`，未请求扩展、未知扩展、重复/非法参数一律拒绝；子协议须为请求过的之一。
-- `EncodeClientFrame`：客户端帧**必掩码**（payload XOR 4 字节键）；控制帧必须 FIN 且 ≤125。
-- `DecodeFrameHeader`：RSV2/RSV3 必须为 0；RSV1 仅供已协商的 `permessage-deflate` 首个 Text/Binary 片使用；**被掩码的服务端帧 → `STATUS_INVALID_NETWORK_RESPONSE`**；扩展长度强制最短编码。
+## 结论
 
-### 产品 API（`wknet::websocket`，见 [产品 API](high-level-api.md)）
+| 主题 | 行为 |
+|------|------|
+| 传输 | `TransportMode::Auto`（默认）；`Http11Only` 强制 H1 Upgrade |
+| `wss` | 默认 offer `h2,http/1.1`；h2 + `ENABLE_CONNECT_PROTOCOL` → RFC 8441 |
+| 分片发送 | `Send*Ex` + `FinalFragment=false` / `SendContinuation` |
+| 分片接收 | 默认聚合完整消息；`DeliverFragments=true` 按 wire 交付 |
+| permessage-deflate | **opt-in**；默认关；未请求扩展一律拒绝 |
+| Close | 主动发 close 后等 peer（3s）；被动 echo 后关 transport |
+| `Message.Data` | 指向内部缓冲；**下次 Receive / Close 前**有效 |
 
-```cpp
-// 连接（同步/异步，URL 或 ConnectConfig）
-wknet::websocket::Connect / ConnectEx / ConnectAsync / ConnectAsyncEx ; wknet::websocket::AsyncGetWebSocket
-// 发送（各有 *Ex 带 SendOptions{ bool FinalFragment }）
-wknet::websocket::SendText / SendBinary / SendContinuation / SendPing / SendPong
-// 接收 / 关闭 / 查询
-wknet::websocket::Receive / ReceiveEx ; wknet::websocket::Close / CloseEx ; wknet::websocket::SelectedSubprotocol
-```
-```cpp
-enum class wknet::websocket::MsgType { Text, Binary, Close, Continuation, Ping, Pong };
-struct wknet::websocket::Message { MsgType Type; const UCHAR* Data; SIZE_T DataLength; bool Final; bool FinalFragment; };
-struct wknet::websocket::ReceiveOptions { SIZE_T MaxMessageBytes; bool AutoAllocate=true; MessageCallback OnMessage; void* CallbackContext; bool DeliverFragments=false; };
-struct wknet::websocket::Header { const char* Name; SIZE_T NameLength; const char* Value; SIZE_T ValueLength; };
-struct wknet::websocket::ConnectConfig { const char* Url; SIZE_T UrlLength; const char* Subprotocol; SIZE_T SubprotocolLength;
-                            const Header* Headers; SIZE_T HeaderCount;
-                            websocket::PerMessageDeflateOptions PerMessageDeflate;
-                            wknet::http::TlsConfig Tls; wknet::http::AddressFamily Family; SIZE_T MaxMessageBytes; bool AutoReplyPing=true; };
-```
-
-### Opening handshake headers
-
-- `ConnectConfig.Headers` 可传调用方自定义握手头，例如 `Origin`、`Authorization`、`Cookie`。
-- 为防止握手被篡改，库受控头会被拒绝：`Host`、`Connection`、`Upgrade`、`Content-Length`、`Transfer-Encoding`、`Sec-WebSocket-Key`、`Sec-WebSocket-Version`、`Sec-WebSocket-Protocol`、`Sec-WebSocket-Extensions`。
-- 字段名/值走普通 HTTP header 文本校验，拒绝空名、超限长度、控制字符与 CRLF 注入。
-- 默认不跟随 opening-handshake 的 redirect、401/407 challenge：3xx/401/407 返回 `STATUS_NOT_SUPPORTED` 并保留握手状态码；其它非 101 响应返回 `STATUS_INVALID_NETWORK_RESPONSE`。跨源 redirect、认证重放等若未来支持，必须通过显式 opt-in 并沿用 HTTP redirect 安全规则。
-
-### permessage-deflate（显式 opt-in）
-
-- 默认关闭：`DefaultConnectConfig()` 不启用压缩，零初始化配置也不启用压缩；未请求时服务端返回任何扩展都会拒绝。
-- 启用方式：设置 `ConnectConfig.PerMessageDeflate.Enable=true`。可配置 `ClientNoContextTakeover`、`ServerNoContextTakeover`、`ClientMaxWindowBits`、`ServerMaxWindowBits`，window bits 只接受 `8..15`，非法配置返回 `STATUS_INVALID_PARAMETER`。
-- 握手：HTTP/1.1 Upgrade 与 RFC 8441 HTTP/2 Extended CONNECT 使用同一 offer 生成逻辑；调用方仍不能在 `Headers` 中手写 `Sec-WebSocket-Extensions`。
-- 数据路径：发送 Text/Binary 首片压缩并设置 RSV1，Continuation 不设置 RSV1；接收时只允许首片 Text/Binary 携带 RSV1，control frame、Continuation、未协商压缩时出现 RSV1 均按协议错误关闭。
-- 安全边界：解压受 `MaxMessageBytes`、输出容量与膨胀比限制约束；context takeover 按协商结果保留或在每条消息后重置。
-
-### 分片（**已支持**）
-
-- **发送**：`wknet::websocket::SendContinuation(Ex)` 续帧；`SendText/SendBinary` 的 `*Ex` 可带 `FinalFragment=false` 开启分片。客户端会按帧缓冲自动分块（首帧用真实 opcode，后续用 Continuation），并对文本消息**跨分片增量 UTF-8 校验**，最终片不完整码点 → `STATUS_INVALID_PARAMETER`。
-- **接收**：默认 `ReceiveOptions.DeliverFragments=false`，`ReceiveOptions.OnMessage` 回调或默认返回式都返回**客户端已重组的完整消息**，`finalFragment=true`。显式设置 `DeliverFragments=true` 后，接收路径按 wire fragment 交付：首帧返回 Text/Binary，续帧返回 Continuation，`finalFragment` 承载真实 FIN；文本消息仍跨分片做增量 UTF-8 校验，最终片不完整码点 → close 1007 / `STATUS_INVALID_NETWORK_RESPONSE`。`Message.Data` 指向内部缓冲，下次收/关前有效。
-
-### 行为与时序
-
-- 控制帧：`AutoReplyPing`（默认开）自动回 Pong；单次接收控制帧 > 100 → close 1008（`WsMaxControlFramesPerReceive`）。
-- 校验失败均以 close 帧失败连接：被掩码帧/分片状态错 → **1002**；文本/close payload 非法 UTF-8 → **1007**；累计超 `MaxMessageBytes` → **1009**（`STATUS_BUFFER_TOO_SMALL`）。
-- 合法接收 close 码：1000–1014（除 1004/1005/1006）或 3000–4999；长度恰为 1 的 close payload → 协议错误。
-- close 握手：主动 `Close` 发空 close 后 `WaitForPeerClose`（`WskCloseTimeoutMilliseconds = 3000` 超时，吞掉终止/超时为成功）；被动收到 peer close 则 echo 后关 transport。`CloseEx` reason ≤123 字节。
-- 连接：解析 ≤8 地址逐个尝试；`wss` 默认 WS 握手 ALPN 为 `h2,http/1.1`，协商到 h2 后走 RFC 8441，peer 未启用 `SETTINGS_ENABLE_CONNECT_PROTOCOL` 时按 Auto 规则重试 HTTP/1.1；显式 `Http11Only` 只走 HTTP/1.1，`ws://` 不隐式走 h2c；每地址都做 TLS1.2 确认重连；取消令牌贯穿。
-- **全双工时序**：`Close` 不得与同句柄「新 I/O 发起」并发；最安全单线程内 连接→发→收→关。
-
-### 边界 / 非目标
-
-`wknet::websocket::ConnectConfig` 默认 `TransportMode::Auto`；`wss` 可通过 RFC 8441 extended CONNECT over HTTP/2 建立隧道，不支持时回到 HTTP/1.1 Upgrade；`Http11Only` 可强制 HTTP/1.1。
-
-### 示例
+## 连接与握手
 
 ```cpp
+wknet::websocket::ConnectConfig cfg = wknet::websocket::DefaultConnectConfig();
+cfg.Url = "wss://echo.example/ws";
+cfg.UrlLength = 21;
+// cfg.TransportMode = wknet::http::WebSocketTransportMode::Http11Only;
+// cfg.PerMessageDeflate.Enable = true;
 wknet::websocket::WebSocket* ws = nullptr;
-if (NT_SUCCESS(wknet::websocket::Connect(session, "wss://echo.example/ws", 21, &ws))) {
-    wknet::websocket::SendText(ws, "hello", 5);
-    wknet::websocket::Message msg = {};
-    if (NT_SUCCESS(wknet::websocket::Receive(ws, &msg)) && msg.Type == wknet::websocket::MsgType::Text) {
-        // 使用 msg.Data / msg.DataLength（下次收/关前有效）
-    }
-    wknet::websocket::Close(ws);
-}
+wknet::websocket::ConnectEx(session, &cfg, &ws);
 ```
+
+- `ConnectConfig.Headers` 可带 `Origin` / `Authorization` / `Cookie` 等。
+- **库受控头被拒**：`Host`、`Connection`、`Upgrade`、`Content-Length`、`Transfer-Encoding`、全部 `Sec-WebSocket-*`。
+- `Sec-WebSocket-Accept` **常量时间**比对；子协议须为已请求之一。
+- 默认**不**跟随 opening-handshake 的 3xx / 401 / 407：返回 `STATUS_NOT_SUPPORTED` 并保留状态码；其它非 101 → `STATUS_INVALID_NETWORK_RESPONSE`。
+- 解析 ≤8 地址逐个尝试；取消令牌贯穿；同步路径 `PASSIVE_LEVEL`。
+
+| 传输 | 掩码 |
+|------|------|
+| HTTP/1.1 Upgrade | 客户端帧**始终掩码**（每帧新随机键） |
+| RFC 8441 over H2 | 按规范**无掩码** DATA 隧道 |
+| 收到被掩码的服务端帧 | 协议错误 → close **1002** |
+
+## 分片
+
+### 发送
+
+- `SendText` / `SendBinary` 默认整消息、`FinalFragment=true`。
+- `*Ex` 设 `FinalFragment=false` 开启分片；后续用 `SendContinuation` / `SendContinuationEx`。
+- 库按帧缓冲自动切块：首帧真实 opcode，后续 Continuation。
+- 文本消息**跨分片增量 UTF-8 校验**；最终片不完整码点 → `STATUS_INVALID_PARAMETER`。
+
+### 接收
+
+| `DeliverFragments` | 交付形态 |
+|--------------------|----------|
+| `false`（默认） | 客户端重组完整消息；`FinalFragment=true` |
+| `true` | 按 wire：首帧 Text/Binary，续帧 Continuation；`FinalFragment` = 真实 FIN |
+
+文本仍跨片 UTF-8 校验；最终片非法 → close **1007** / `STATUS_INVALID_NETWORK_RESPONSE`。
+
+### `Message.Data` 生命周期
+
+`Message.Data` / `DataLength` 指向库内缓冲，在**同句柄下一次成功 Receive 或 Close 之前**可读。需要跨调用保留时请自行拷贝。
+
+## permessage-deflate（默认关）
+
+- 开启：`ConnectConfig.PerMessageDeflate.Enable=true`。
+- 可配 `ClientNoContextTakeover` / `ServerNoContextTakeover` / `ClientMaxWindowBits` / `ServerMaxWindowBits`（仅 `8..15`）。
+- H1 Upgrade 与 RFC 8441 共用同一 offer/校验路径；调用方不得手写 `Sec-WebSocket-Extensions`。
+- 发送：仅压缩 Text/Binary **首片**设 RSV1；Continuation / 控制帧不设 RSV1。
+- 接收：未协商、控制帧、Continuation 上的 RSV1 → 协议错误关闭。
+- 解压受 `MaxMessageBytes`、输出容量与膨胀比限制；其它 WebSocket 扩展为**非目标**。
+
+## 控制帧与 Close
+
+| 事件 | 处理 |
+|------|------|
+| Ping | `AutoReplyPing` 默认开 → 自动 Pong |
+| 单次接收控制帧 >100 | close **1008** |
+| 被掩码帧 / 分片状态错 | close **1002** |
+| 非法 UTF-8（文本/close） | close **1007** |
+| 超 `MaxMessageBytes` | close **1009**（`STATUS_BUFFER_TOO_SMALL`） |
+
+合法入站 close 码：1000–1014（除 1004/1005/1006）或 3000–4999；长度恰为 1 的 close payload → 协议错误。
+
+**Close 时序**
+
+1. **主动** `Close` / `CloseEx`：发 close（`CloseEx` reason ≤123 字节）→ 等待 peer close（默认 3s；超时/终止吞为成功）→ 关 transport。  
+2. **被动**：收到 peer close → echo → 关 transport。  
+3. **并发约束**：`Close` 不得与同句柄「新 I/O 发起」并发；最安全为单线程 连接→发→收→关。
+
+## 边界
+
+- 无默认压缩；无默认握手 redirect / 401/407 跟随。  
+- 不支持 WebSocket over HTTP/3（见 [HTTP/3](http3-quic.md) 非目标）。  
+- 能力分类措辞以 [能力账本](capability-matrix.md) 为准。

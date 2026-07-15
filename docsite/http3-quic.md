@@ -1,62 +1,93 @@
-# HTTP/3 与 QUIC
+# HTTP/3 与 QUIC 协议指南
 
-wknet 的 HTTP/3 客户端主路径由 WSK Datagram、QUIC v1、TLS 1.3 over QUIC、HTTP/3 和 QPACK 组成，不依赖 MsQuic、SChannel、WinHTTP 或 WinINet。公开请求入口仍是 `wknet::http::Send*`。
+HTTP/3 是 HTTPS 的 **主路径候选**（默认 `Auto`）：WSK Datagram + QUIC v1 + TLS 1.3 over QUIC + HTTP/3 + QPACK，不依赖 MsQuic / SChannel / WinHTTP / WinINet。公开请求入口仍是 `wknet::http::Send*`。
 
-## 连接模式
+配置见 [会话配置](api/session-config.md)；能力边界见 [能力账本](capability-matrix.md)。
 
-`SessionConfig.Http3.Mode` 支持三种模式：
+## 结论
 
-- `Auto`：默认模式。首次没有先验的 HTTPS 请求使用 TCP TLS；只有已完成证书和 TLS 策略验证的响应中的精确 `h3` Alt-Svc 才会被缓存。后续同一安全身份的请求可优先使用 H3。
-- `Disabled`：不学习、不查询、不使用 Alt-Svc，始终保留现有 TCP HTTP/1.1 或 HTTP/2 路径。
-- `Required`：直接要求 HTTPS origin 使用 H3，适用于明确 prior-knowledge。它不读取 Alt-Svc，也不会自动回落 TCP。
+| 主题 | 行为 |
+|------|------|
+| 默认模式 | `Http3ConnectMode::Auto`：先 TCP，再从**已认证**响应学习精确 `h3` Alt-Svc |
+| `Disabled` | 不学习、不查询、不使用 Alt-Svc；始终 TCP H1/H2 |
+| `Required` | prior-knowledge 直接 H3；不读 Alt-Svc；**不**自动回落 TCP |
+| 身份边界 | alternative 只改 DNS/UDP；SNI / 证书 / `:authority` 绑原 origin |
+| Race / 回落 | 仅在未发送或一次安全重放规则满足时转 TCP；**从不**双提交 |
+| 非目标 | v2、0-RTT app data、迁移、多路径、ECN、DPLPMTUD、WebTransport、Datagram、WS over H3 |
 
 ```cpp
 wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
 config.Http3.Mode = wknet::http::Http3ConnectMode::Auto;
 config.Http3.Race = wknet::http::Http3RaceMode::DelayedTcpFallback;
-config.Http3.RaceWindowMs = 250;
-config.Http3.QuicProbeTimeoutMs = 1500;
+config.Http3.RaceWindowMs = 250;          // DelayedTcpFallback 探测窗
+config.Http3.QuicProbeTimeoutMs = 1500;   // SequentialPreferHttp3
 config.Http3.AltSvcMaxEntries = 64;
 config.Http3.AltSvcMaxAgeSec = 604800;
 ```
 
-明文 HTTP、h2c、HTTP proxy、WebSocket、显式非 HTTP ALPN 和 `SendOptions.Http2Priority` 不进入 H3。`CertPolicy::NoVerify` 响应默认不学习或自动使用 Alt-Svc。
+## 何时进入 H3
 
-## Alt-Svc 与身份边界
+**会进入（满足模式与先验时）**
 
-缓存键包含 origin scheme/host/port、effective TLS ServerName、证书策略与 store、TLS policy、client credential 和地址族策略。`clear`、`ma=0`、过期、跨主机 alternative、IPv6 literal、`persist` 和多 candidate 均按有界 parser 处理。
+- HTTPS origin
+- `Auto` 下缓存命中同一安全身份的 `h3` Alt-Svc，或 `Required` 强制 H3
 
-连接 alternative endpoint 时：
+**永不进入**
 
-- DNS/UDP 使用 alternative host/port；
-- SNI 与证书校验继续使用原 effective TLS ServerName；
-- HTTP `:authority` 继续使用原 origin；
-- 连接池不跨 origin 合并 H3 连接。
+- 明文 HTTP、h2c、HTTP proxy、WebSocket
+- 显式非 HTTP ALPN、`SendOptions.Http2Priority`
+- `CertPolicy::NoVerify` 响应：**不学习、不自动使用** Alt-Svc
 
-因此 alternative 主机不能改变请求的认证身份。
+## Alt-Svc 与身份
 
-## 回落与重放
+缓存键包含：origin scheme/host/port、effective TLS ServerName、证书策略与 store、TLS policy、client credential、地址族策略。有界 parser 处理 `clear`、`ma=0`、过期、跨主机 alternative、IPv6 literal、`persist`、多 candidate。
 
-`DelayedTcpFallback` 使用 `RaceWindowMs` 控制 QUIC probe 窗口；`SequentialPreferHttp3` 使用独立的 `QuicProbeTimeoutMs`。H3 失败时，只有请求仍可证明未发送，或符合一次安全重放规则，才允许转到 TCP。
+连接 alternative 时：
 
-默认可自动重放的方法是 `GET`、`HEAD` 和 `OPTIONS`，并且要求响应尚未开始、body 未消费或能够明确 rewind、调用方未禁止重试。`POST`、`PUT`、`PATCH`、`DELETE` 和 `CONNECT` 默认不自动重放。请求不会同时提交到 H3 和 TCP。
+| 维度 | 使用值 |
+|------|--------|
+| DNS / UDP | alternative host/port |
+| SNI + 证书校验 | 原 effective TLS ServerName |
+| HTTP `:authority` | 原 origin |
+| 连接池合并 | **不**跨 origin 合并 H3 |
 
-Alt-Svc broken 状态绑定 candidate 与地址族：网络失败采用 1–60 秒指数退避；协议、证书、SNI 或 ALPN 失败在当前 entry 生命周期内禁用 candidate；取消和本地资源不足不污染缓存。网络配置变化会清除 broken 状态。
+因此 alternative 主机不能替换已认证请求身份。
 
-## 资源与安全边界
+## Race、回落与重放
 
-QUIC packet 固定不超过 1200 字节。连接、stream、ACK range、sent-packet metadata、CRYPTO/STREAM 稀疏重组、CID、token、command queue、HTTP/3 field section、QPACK dynamic table、blocked streams/bytes、Alt-Svc entry/candidate 均有 NonPaged 硬上限和故障注入测试。
+| Race 模式 | 超时 |
+|-----------|------|
+| `DelayedTcpFallback`（默认） | `RaceWindowMs`（默认 250）作为 QUIC probe 窗 |
+| `SequentialPreferHttp3` | `QuicProbeTimeoutMs`（默认 1500） |
 
-日志不会记录 packet/header/body 原文、URL query、密钥、IV、nonce、ticket、Retry/NEW_TOKEN、reset token、完整 CID、完整 origin/alternative authority、证书原文或凭据。
+H3 失败后转 TCP 的条件：
 
-关键诊断事件包括：
+1. 请求**可证明尚未发送**，或  
+2. 满足**一次**安全重放规则  
 
-- `quic.connection.*`、`quic.handshake.*`、`quic.loss.detected`、`quic.pto.fired`
-- `http3.connection.*`、`http3.stream.*`、`qpack.*`
-- `http.altsvc.stored/cleared/expired/rejected/broken`
-- `http.protocol.select`、`http.connection.retry`、`http.request.failed`
+**默认可自动重放**：`GET` / `HEAD` / `OPTIONS`，且响应未开始、body 未消费或可 rewind、调用方未禁止重试。  
+**默认不重放**：`POST` / `PUT` / `PATCH` / `DELETE` / `CONNECT`。  
+请求**不会**同时提交到 H3 与 TCP。
+
+### Alt-Svc broken 状态
+
+- 作用域：candidate + 地址族  
+- 网络失败：1–60 s 指数退避  
+- 协议 / 证书 / SNI / ALPN 失败：当前 entry 生命周期内禁用 candidate  
+- 取消、本地资源不足：**不**污染缓存  
+- 网络配置变化：清除 broken 状态  
+
+## 协议与资源边界
+
+- QUIC packet 固定上限 1200 字节。
+- 连接、stream、ACK range、sent-packet、CRYPTO/STREAM 稀疏重组、CID、token、command queue、HTTP/3 field section、QPACK 动态表与 blocked bytes、Alt-Svc entry/candidate 均有 NonPaged 硬上限。
+- HTTP/3：control/QPACK 关键单向流、SETTINGS、HEADERS/DATA、1xx、HEAD/204/304/CONNECT body 语义、请求/响应 trailer、GOAWAY 与取消；**server push 安全拒绝**。
+- QPACK：static/dynamic table、blocked field section、双向 instruction streams。
+
+日志不暴露 packet/header/body 原文、URL query、密钥/IV/nonce、ticket、Retry/NEW_TOKEN、reset token、完整 CID、完整 origin/alternative authority、证书原文或凭据。
 
 ## 当前非目标
 
-当前主路径不实现 QUIC v2、0-RTT application data、主动迁移、多路径、ECN、DPLPMTUD、WebTransport、QUIC Datagram、Extended CONNECT over H3 或 WebSocket over HTTP/3。
+QUIC **v2**、**0-RTT application data**、主动**迁移**、**多路径**、**ECN**、**DPLPMTUD**、**WebTransport**、QUIC **Datagram**、Extended CONNECT over H3、**WebSocket over HTTP/3**。
 
+这些能力不在主路径；不要假设未来默认开启。TLS 1.3 0-RTT 若在 TLS 层单独 opt-in，也不等于 HTTP/3 应用数据 0-RTT。

@@ -1,11 +1,96 @@
-# WebSocket Protocol
+# WebSocket Protocol Guide
 
-Framing lives in the internal `wknet::ws` layer; the public API is `wknet::websocket`. Client frames are masked on HTTP/1.1 and unmasked inside RFC 8441 DATA tunnels. Server handshake validation compares `Sec-WebSocket-Accept` in constant time and rejects unrequested or invalid extensions.
+`wknet::websocket` is the `ws` / `wss` client. For `wss`, TLS ALPN defaults to `h2,http/1.1` and prefers RFC 8441 extended CONNECT over HTTP/2; Auto falls back to HTTP/1.1 Upgrade when that path is unavailable. `ws://` does **not** implicitly use h2c.
 
-**Fragmentation**: send is fully granular via `wknet::websocket::SendContinuation(Ex)` / `FinalFragment=false` (auto-chunked to the frame buffer, with incremental cross-fragment UTF-8 validation of text). Receive defaults to `ReceiveOptions.DeliverFragments=false`, so callbacks and the default return form deliver a **client-reassembled complete message** with `finalFragment=true`. Set `DeliverFragments=true` to receive wire fragments: the first frame reports Text/Binary, continuations report Continuation, and `finalFragment` reflects the real FIN bit. Text receive still uses incremental cross-fragment UTF-8 validation; an unfinished code point on the final fragment closes with 1007 / `STATUS_INVALID_NETWORK_RESPONSE`. `Message.Data` is valid until the next receive/close.
+API signatures: [WebSocket API](api/websocket.md). HTTP/2 tunnel primitive: [HTTP/2](http2.md).
 
-`ConnectConfig.Headers` accepts caller-supplied opening-handshake headers such as `Origin`, `Authorization`, and `Cookie`; controlled handshake headers (`Host`, `Connection`, `Upgrade`, `Content-Length`, `Transfer-Encoding`, and `Sec-WebSocket-*`) plus invalid header text are rejected.
+## Summary
 
-**permessage-deflate**: supported as an explicit opt-in through `ConnectConfig.PerMessageDeflate.Enable=true` (and the lower-level connect options). Defaults stay off: `DefaultConnectConfig()` and zero-initialized configs do not offer compression, and any server extension is rejected when not requested. `ClientNoContextTakeover`, `ServerNoContextTakeover`, `ClientMaxWindowBits`, and `ServerMaxWindowBits` are configurable; window bits must be `8..15` or connect returns `STATUS_INVALID_PARAMETER`. HTTP/1.1 Upgrade and RFC 8441 HTTP/2 Extended CONNECT share the same offer/validation path. Callers still cannot hand-write `Sec-WebSocket-Extensions`. The send path sets RSV1 only on the first compressed Text/Binary fragment; continuations and control frames never set RSV1. Receive rejects RSV1 on control frames, continuations, or unnegotiated connections, and inflate is bounded by `MaxMessageBytes`, output capacity, and expansion-ratio limits.
+| Topic | Behavior |
+|-------|----------|
+| Transport | `TransportMode::Auto` (default); `Http11Only` forces H1 Upgrade |
+| `wss` | Offers `h2,http/1.1` by default; h2 + `ENABLE_CONNECT_PROTOCOL` → RFC 8441 |
+| Fragmented send | `Send*Ex` + `FinalFragment=false` / `SendContinuation` |
+| Fragmented receive | Default: reassemble whole messages; `DeliverFragments=true` for wire fragments |
+| permessage-deflate | **Opt-in**; off by default; unrequested extensions rejected |
+| Close | Active: send close then wait (3s); passive: echo then close transport |
+| `Message.Data` | Points at an internal buffer; valid until the **next Receive / Close** |
 
-Behavior: auto-Pong (toggleable); >100 control frames per receive -> close **1002** lineage (masked/fragment-state errors), **1007** (bad UTF-8), **1008** (control flood), **1009** (over `MaxMessageBytes`). Valid incoming close codes 1000-1014 (minus 1004/1005/1006) or 3000-4999. Active close sends an empty close then waits for peer close (3 s timeout, swallowed as success); passive close echoes then closes. `wss` handshake ALPN defaults to `h2,http/1.1` and uses RFC 8441 when h2 is negotiated and enabled by the peer; Auto retries HTTP/1.1 when RFC 8441 is unsupported, `Http11Only` forces HTTP/1.1, and `ws://` does not implicitly use h2c. Opening-handshake redirects and 401/407 challenges are not followed by default: 3xx/401/407 return `STATUS_NOT_SUPPORTED` with the response status visible to the caller, while other non-101 responses return `STATUS_INVALID_NETWORK_RESPONSE`. Never run `Close` concurrently with new I/O on the same handle. Boundaries: no compression by default, no handshake redirect/401/407 following.
+## Connect and handshake
+
+```cpp
+wknet::websocket::ConnectConfig cfg = wknet::websocket::DefaultConnectConfig();
+cfg.Url = "wss://echo.example/ws";
+cfg.UrlLength = 21;
+// cfg.TransportMode = wknet::http::WebSocketTransportMode::Http11Only;
+// cfg.PerMessageDeflate.Enable = true;
+wknet::websocket::WebSocket* ws = nullptr;
+wknet::websocket::ConnectEx(session, &cfg, &ws);
+```
+
+- `ConnectConfig.Headers` may carry `Origin` / `Authorization` / `Cookie`, etc.
+- **Library-controlled headers are rejected**: `Host`, `Connection`, `Upgrade`, `Content-Length`, `Transfer-Encoding`, all `Sec-WebSocket-*`.
+- `Sec-WebSocket-Accept` is compared in **constant time**; the selected subprotocol must be one that was offered.
+- Opening-handshake 3xx / 401 / 407 are **not** followed by default: `STATUS_NOT_SUPPORTED` with the status preserved; other non-101 → `STATUS_INVALID_NETWORK_RESPONSE`.
+- Up to 8 resolved addresses are tried; cancellation tokens apply end-to-end; sync paths require `PASSIVE_LEVEL`.
+
+| Transport | Masking |
+|-----------|---------|
+| HTTP/1.1 Upgrade | Client frames are **always masked** (fresh key per frame) |
+| RFC 8441 over H2 | **Unmasked** DATA tunnel per the RFC |
+| Masked server frame | Protocol error → close **1002** |
+
+## Fragmentation
+
+### Send
+
+- `SendText` / `SendBinary` default to whole messages with `FinalFragment=true`.
+- Set `FinalFragment=false` on `*Ex` to start a fragmented message; continue with `SendContinuation` / `SendContinuationEx`.
+- The library auto-chunks to the frame buffer: first frame uses the real opcode, later frames use Continuation.
+- Text is validated with **incremental cross-fragment UTF-8**; an unfinished code point on the final fragment → `STATUS_INVALID_PARAMETER`.
+
+### Receive
+
+| `DeliverFragments` | Delivery |
+|--------------------|----------|
+| `false` (default) | Client-reassembled complete message; `FinalFragment=true` |
+| `true` | Wire fragments: first Text/Binary, then Continuation; `FinalFragment` = real FIN |
+
+Text still uses cross-fragment UTF-8 validation; a bad final fragment closes with **1007** / `STATUS_INVALID_NETWORK_RESPONSE`.
+
+### `Message.Data` lifetime
+
+`Message.Data` / `DataLength` refer to a library buffer readable until the **next successful Receive or Close on the same handle**. Copy the bytes if you need them longer.
+
+## permessage-deflate (off by default)
+
+- Enable with `ConnectConfig.PerMessageDeflate.Enable=true`.
+- Configurable: `ClientNoContextTakeover` / `ServerNoContextTakeover` / `ClientMaxWindowBits` / `ServerMaxWindowBits` (only `8..15`).
+- H1 Upgrade and RFC 8441 share the same offer/validation path; callers must not hand-write `Sec-WebSocket-Extensions`.
+- Send sets RSV1 only on the first compressed Text/Binary fragment; continuations and control frames never set RSV1.
+- Receive treats RSV1 on unnegotiated links, control frames, or continuations as a protocol error and closes.
+- Inflate is bounded by `MaxMessageBytes`, output capacity, and expansion ratio. Other WebSocket extensions are **non-goals**.
+
+## Control frames and Close
+
+| Event | Handling |
+|-------|----------|
+| Ping | `AutoReplyPing` defaults on → automatic Pong |
+| >100 control frames per receive | close **1008** |
+| Masked frame / bad fragment state | close **1002** |
+| Illegal UTF-8 (text/close) | close **1007** |
+| Over `MaxMessageBytes` | close **1009** (`STATUS_BUFFER_TOO_SMALL`) |
+
+Valid inbound close codes: 1000–1014 (except 1004/1005/1006) or 3000–4999; a close payload of length exactly 1 is a protocol error.
+
+**Close sequencing**
+
+1. **Active** `Close` / `CloseEx`: send close (`CloseEx` reason ≤123 bytes) → wait for peer close (default 3s; timeout/termination swallowed as success) → close transport.  
+2. **Passive**: receive peer close → echo → close transport.  
+3. **Concurrency**: never start new I/O on the same handle concurrently with `Close`; safest pattern is single-threaded connect→send→receive→close.
+
+## Boundaries
+
+- No compression by default; no default handshake redirect / 401/407 following.  
+- WebSocket over HTTP/3 is unsupported (see [HTTP/3](http3-quic.md) non-goals).  
+- Capability wording follows the [Capability matrix](capability-matrix.md).

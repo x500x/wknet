@@ -1,30 +1,40 @@
 # Cookbook
 
-A set of production-grade patterns for the `wknet::http` and `wknet::websocket` product APIs. Compilable examples live under `src/wknettest/samples`.
+Recipes by task. Compilable samples live under `src/wknettest/samples` and the user-mode tests; there is no separate `samples/Cookbook*` tree.
 
-### Samples
+## Sample sources (source of truth)
 
-| Sample | Demonstrates | Key APIs |
-|--------|--------------|----------|
-| QuickGet | Minimal correct GET + status check + guarded release | `Get` / `ResponseStatusCode` / `ResponseRelease` |
-| SessionReuse | Multiple requests to same host hitting pool keep-alive | `Get` (same Session) |
-| PostJson | POST JSON + custom headers + read response headers | `BodyCreateJson` / `HeadersAdd` / `SendEx` |
-| StreamingDownload | Callback streaming without buffering whole body | `SendOptions.OnHeader/OnBody` |
-| HttpsTls | HTTPS + explicit TLS: SNI, ALPN, always-on cert verify | `SendOptions.Tls` / `TlsConfig` |
-| AsyncRequest | Async issue → wait → fetch response | `AsyncGetEx` / `AsyncWait` / `AsyncGetResponse` |
-| AsyncCancel | Cooperative cancel (still wait for drain) | `AsyncCancel` / `AsyncWait` / `AsyncGetStatus` |
-| WebSocketEcho | connect→send→recv→close with full-duplex timing | `wknet::websocket::Connect` / `wknet::websocket::SendText` / `wknet::websocket::Receive` / `wknet::websocket::Close` |
+| Path | Content |
+|------|---------|
+| `src/wknettest/samples/HighLevelApiSamples.cpp` | Session, sync/async HTTP methods, body shapes, TLS, HTTP/2, WebSocket |
+| `src/wknettest/samples/AdvancedScenarioSamples.cpp` | Redirects, error statuses, large responses, concurrent async, timeouts, TLS failure, WS fragments |
+| `src/wknettest/samples/ExternalTrustStore.cpp` | External trust store / certificate scenarios |
+| `src/wknettest/samples/HttpApiSamples.cpp` | Driver-side sample entry |
+| `tests/high_level_api_tests.cpp` | User-mode API regression |
 
-### RAII guards (KhttpScopeGuard.h)
+Umbrella include: `#include <wknet/Wknet.h>`. WebSocket may also use `#include <wknet/websocket/WebSocket.h>`.
 
-`SessionGuard`, `RequestGuard`, `ResponseGuard`, `AsyncOpGuard`, `WebSocketGuard` — each calls the matching release/close on destruction (at `PASSIVE_LEVEL`). Members: `Receive()`, `Get()`, `Detach()`, `Reset()`, `operator bool`. Non-copyable, movable.
+## Scenario index
 
-### Notes
+| Scenario | Where to look | Key API |
+|----------|---------------|---------|
+| Minimal GET | [First request](first-request.md), `HighLevelApiSamples` | `Get` / `ResponseStatusCode` / `ResponseRelease` |
+| Same-host multi-request (pool hit) | Reuse one `Session` for successive `Get` | `SessionCreate` + reuse |
+| POST JSON / form / file | `HighLevelApiSamples` body section | `BodyCreateJson*` / `BodyCreateForm` / `BodyCreateFile*` |
+| Custom request headers | `HeadersAdd` + `SendEx` | `HeadersCreate` / `SendEx` |
+| Streaming download | `SendOptions.OnHeader` / `OnBody` | `SendOptionsCreate` + `SendEx` |
+| HTTPS + explicit TLS | `ExternalTrustStore`, [TLS & trust](tls-and-trust.md) | `TlsConfig` / `CertificateStore` |
+| Async request | `HighLevelApiSamples` async section | `AsyncGetEx` / `AsyncWait` / `AsyncGetResponse` |
+| Async cancel | Advanced concurrent/cancel section | After `AsyncCancel` still `AsyncWait` + `AsyncRelease` |
+| WebSocket echo | `HighLevelApiSamples` WS section | `websocket::Connect` / `SendText` / `Receive` / `Close` |
+| HTTP/3 Auto | [HTTP/3 & QUIC](http3-quic.md) | `SessionConfig.Http3.Mode` |
 
-1. **IRQL**: all calls and guard destruction at `PASSIVE_LEVEL`.
-2. **Ownership**: `Response` lifetime is independent of `Request`/`AsyncOp`.
-3. **Unload**: call `wknet::http::Destroy()` before unload after using async APIs. Synchronous-only paths do not require it, but may call it unconditionally.
-4. **WebSocket full-duplex**: never run `wknet::websocket::Close` concurrently with new I/O on the same handle; safest is single-threaded connect→send→recv→close.
-5. **`wknet::websocket::Receive`'s `message.Data`** points to an internal buffer valid until the next receive/close.
+## Discipline (every scenario)
 
-See `src/wknettest/samples/HighLevelApiSamples.cpp` and `tests/high_level_api_tests.cpp`.
+1. **IRQL**: calls and guard-style release at `PASSIVE_LEVEL`.
+2. **Ownership**: release `Response` separately from the `Request`/`AsyncOp` that produced it.
+3. **Unload**: after async APIs, call `wknet::http::Destroy()` before unload.
+4. **WebSocket timing**: do not race `Close` with new I/O; `Message.Data` lives until the next receive/close.
+5. **JSON**: the library does not parse JSON — it only forwards bytes.
+
+Handle rules: [API overview](api/overview.md). Error semantics: [Errors & FAQ](errors-and-faq.md).

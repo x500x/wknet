@@ -1,62 +1,93 @@
-# HTTP/3 and QUIC
+# HTTP/3 & QUIC Protocol Guide
 
-wknet's HTTP/3 client path combines WSK Datagram, QUIC v1, TLS 1.3 over QUIC, HTTP/3, and QPACK. It does not depend on MsQuic, SChannel, WinHTTP, or WinINet, and the public request entry points remain `wknet::http::Send*`.
+HTTP/3 is a **main-path candidate** for HTTPS (default `Auto`): WSK Datagram + QUIC v1 + TLS 1.3 over QUIC + HTTP/3 + QPACK, with no MsQuic / SChannel / WinHTTP / WinINet dependency. Public request entry points remain `wknet::http::Send*`.
 
-## Connection modes
+Configuration: [Session config](api/session-config.md). Capability wording: [Capability matrix](capability-matrix.md).
 
-`SessionConfig.Http3.Mode` supports three modes:
+## Summary
 
-- `Auto`: the default. The first HTTPS request without prior knowledge uses TCP TLS. Only an exact `h3` Alt-Svc from a certificate- and policy-verified response is cached, and a later request with the same security identity may prefer H3.
-- `Disabled`: does not learn, query, or use Alt-Svc and stays on the existing TCP HTTP/1.1 or HTTP/2 path.
-- `Required`: directly requires H3 for an HTTPS origin as explicit prior knowledge. It does not consume Alt-Svc and does not automatically fall back to TCP.
+| Topic | Behavior |
+|-------|----------|
+| Default mode | `Http3ConnectMode::Auto`: TCP first; learn exact `h3` Alt-Svc only from **authenticated** responses |
+| `Disabled` | Do not learn, query, or use Alt-Svc; always TCP H1/H2 |
+| `Required` | Prior-knowledge H3; does not consume Alt-Svc; **no** automatic TCP fallback |
+| Identity boundary | Alternative changes DNS/UDP only; SNI / cert / `:authority` stay on the origin |
+| Race / fallback | Move to TCP only if unsent or one safe-replay rule holds; **never** dual-submit |
+| Non-goals | v2, 0-RTT app data, migration, multipath, ECN, DPLPMTUD, WebTransport, Datagram, WS over H3 |
 
 ```cpp
 wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
 config.Http3.Mode = wknet::http::Http3ConnectMode::Auto;
 config.Http3.Race = wknet::http::Http3RaceMode::DelayedTcpFallback;
-config.Http3.RaceWindowMs = 250;
-config.Http3.QuicProbeTimeoutMs = 1500;
+config.Http3.RaceWindowMs = 250;          // probe window for DelayedTcpFallback
+config.Http3.QuicProbeTimeoutMs = 1500;   // SequentialPreferHttp3
 config.Http3.AltSvcMaxEntries = 64;
 config.Http3.AltSvcMaxAgeSec = 604800;
 ```
 
-Plaintext HTTP, h2c, HTTP proxies, WebSocket, explicit non-HTTP ALPN, and `SendOptions.Http2Priority` never enter H3. Responses obtained with `CertPolicy::NoVerify` are not learned or used automatically.
+## When H3 is selected
 
-## Alt-Svc and identity boundaries
+**May enter** (mode and prior knowledge permitting)
+
+- HTTPS origins
+- `Auto` with a cache hit for the same security identity’s `h3` Alt-Svc, or `Required` forcing H3
+
+**Never enters**
+
+- Plaintext HTTP, h2c, HTTP proxies, WebSocket
+- Explicit non-HTTP ALPN, `SendOptions.Http2Priority`
+- Responses under `CertPolicy::NoVerify`: Alt-Svc is **not learned and not used automatically**
+
+## Alt-Svc and identity
 
 The cache key includes origin scheme/host/port, effective TLS ServerName, certificate policy and store, TLS policy, client credential, and address-family policy. The bounded parser handles `clear`, `ma=0`, expiry, cross-host alternatives, IPv6 literals, `persist`, and multiple candidates.
 
-When connecting to an alternative endpoint:
+When connecting to an alternative:
 
-- DNS/UDP use the alternative host and port;
-- SNI and certificate verification keep the origin's effective TLS ServerName;
-- HTTP `:authority` remains the original origin;
-- H3 connections are not coalesced across origins.
+| Dimension | Value used |
+|-----------|------------|
+| DNS / UDP | Alternative host/port |
+| SNI + certificate verification | Origin effective TLS ServerName |
+| HTTP `:authority` | Original origin |
+| Pool coalescing | H3 connections are **not** merged across origins |
 
 An alternative host therefore cannot replace the authenticated request identity.
 
-## Fallback and replay
+## Race, fallback, and replay
 
-`DelayedTcpFallback` uses `RaceWindowMs` as the QUIC probe window, while `SequentialPreferHttp3` uses the separate `QuicProbeTimeoutMs`. H3 failure can move to TCP only while the request is provably unsent or satisfies the one-replay safety rules.
+| Race mode | Timeout |
+|-----------|---------|
+| `DelayedTcpFallback` (default) | `RaceWindowMs` (default 250) as the QUIC probe window |
+| `SequentialPreferHttp3` | `QuicProbeTimeoutMs` (default 1500) |
 
-Automatic replay is limited to `GET`, `HEAD`, and `OPTIONS`, with no response started, no consumed body unless it can be rewound, and no caller prohibition. `POST`, `PUT`, `PATCH`, `DELETE`, and `CONNECT` are not replayed automatically. The request is never submitted to both H3 and TCP.
+TCP after H3 failure is allowed only when:
 
-Alt-Svc broken state is scoped to a candidate and address family. Network failures use 1–60 second exponential backoff; protocol, certificate, SNI, or ALPN failures disable the candidate for the current entry lifetime. Cancellation and local resource exhaustion do not poison the cache, and network configuration changes clear broken state.
+1. The request is **provably unsent**, or  
+2. The **one-shot** safe-replay rules hold  
 
-## Resource and security boundaries
+**Auto-replay allowed by default**: `GET` / `HEAD` / `OPTIONS`, with no response started, no consumed body unless rewindable, and no caller prohibition.  
+**Not auto-replayed**: `POST` / `PUT` / `PATCH` / `DELETE` / `CONNECT`.  
+The request is **never** submitted to both H3 and TCP.
 
-QUIC packets are capped at 1200 bytes. Connections, streams, ACK ranges, sent-packet metadata, sparse CRYPTO/STREAM reassembly, CIDs, tokens, command queues, HTTP/3 field sections, QPACK dynamic tables and blocked bytes, and Alt-Svc entries/candidates all have explicit NonPaged limits and fault-injection coverage.
+### Alt-Svc broken state
 
-Logs do not expose packet/header/body bytes, URL queries, keys, IVs, nonces, tickets, Retry/NEW_TOKEN values, reset tokens, full CIDs, full origin/alternative authorities, certificate bytes, or credentials.
+- Scope: candidate + address family  
+- Network failure: 1–60 s exponential backoff  
+- Protocol / certificate / SNI / ALPN failure: disable the candidate for the current entry lifetime  
+- Cancellation and local resource exhaustion: **do not** poison the cache  
+- Network configuration change: clear broken state  
 
-Representative diagnostics include:
+## Protocol and resource bounds
 
-- `quic.connection.*`, `quic.handshake.*`, `quic.loss.detected`, `quic.pto.fired`
-- `http3.connection.*`, `http3.stream.*`, `qpack.*`
-- `http.altsvc.stored/cleared/expired/rejected/broken`
-- `http.protocol.select`, `http.connection.retry`, `http.request.failed`
+- QUIC packets are hard-capped at 1200 bytes.
+- Connections, streams, ACK ranges, sent-packet metadata, sparse CRYPTO/STREAM reassembly, CIDs, tokens, command queues, HTTP/3 field sections, QPACK dynamic tables and blocked bytes, and Alt-Svc entries/candidates all have NonPaged hard limits.
+- HTTP/3: critical control/QPACK unidirectional streams, SETTINGS, HEADERS/DATA, 1xx, HEAD/204/304/CONNECT body semantics, request/response trailers, GOAWAY, and cancellation; **server push is safely refused**.
+- QPACK: static/dynamic tables, blocked field sections, both instruction streams.
+
+Logs do not expose raw packet/header/body bytes, URL queries, keys/IVs/nonces, tickets, Retry/NEW_TOKEN values, reset tokens, full CIDs, full origin/alternative authorities, certificate bytes, or credentials.
 
 ## Current non-goals
 
-The current main path does not implement QUIC v2, 0-RTT application data, active migration, multipath, ECN, DPLPMTUD, WebTransport, QUIC Datagram, Extended CONNECT over H3, or WebSocket over HTTP/3.
+QUIC **v2**, **0-RTT application data**, active **migration**, **multipath**, **ECN**, **DPLPMTUD**, **WebTransport**, QUIC **Datagram**, Extended CONNECT over H3, and **WebSocket over HTTP/3**.
 
+These are not on the main path; do not assume they will turn on by default later. A separate TLS 1.3 0-RTT opt-in is not HTTP/3 application-data 0-RTT.
