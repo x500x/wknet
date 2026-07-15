@@ -9,6 +9,8 @@
 #include "ExiValueDecoder.h"
 #include "XmlWriter.h"
 
+#include <wknet/WknetLimits.h>
+
 namespace wknet
 {
 namespace codec
@@ -3546,7 +3548,7 @@ NTSTATUS DecodeExiContent(
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
         constexpr SIZE_T MinimumInflatedCapacity = 4096;
-        constexpr SIZE_T MaxDeflateExpansionRatio = 64;
+        constexpr SIZE_T MaxDeflateExpansionRatio = WKNET_HARD_MAX_DECODE_EXPANSION_RATIO;
         const SIZE_T maxSize = static_cast<SIZE_T>(~static_cast<SIZE_T>(0));
         if (compressedLength == maxSize ||
             destinationCapacity > 0xffffffffULL ||

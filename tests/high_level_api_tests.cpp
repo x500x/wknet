@@ -678,7 +678,7 @@ namespace
         if (TextEqualsLiteral(request->Scheme, request->SchemeLength, "wss")) {
             ++capture->WebSocketSecureCalls;
         }
-        if (TextEqualsLiteral(request->Host, request->HostLength, "websocket-echo.com")) {
+        if (TextEqualsLiteral(request->Host, request->HostLength, "ws.postman-echo.com")) {
             ++capture->WebSocketEchoHostCalls;
             if (request->Policy.Profile == wknet::http::TlsSecurityProfile::ModernDefault &&
                 !request->Policy.EnableTls12Sha1Signatures) {
@@ -694,12 +694,12 @@ namespace
             if (request->CertificateStore != nullptr) {
                 ++capture->WebSocketVerifyWithStoreCalls;
             }
-            if (TextEqualsLiteral(request->Host, request->HostLength, "websocket-echo.com") &&
+            if (TextEqualsLiteral(request->Host, request->HostLength, "ws.postman-echo.com") &&
                 request->MinTlsVersion == wknet::http::TlsVersion::Tls12 &&
                 request->MaxTlsVersion == wknet::http::TlsVersion::Tls13) {
                 ++capture->WebSocketTls12ToTls13Calls;
             }
-            if (TextEqualsLiteral(request->Host, request->HostLength, "websocket-echo.com") &&
+            if (TextEqualsLiteral(request->Host, request->HostLength, "ws.postman-echo.com") &&
                 request->MinTlsVersion == wknet::http::TlsVersion::Tls13 &&
                 request->MaxTlsVersion == wknet::http::TlsVersion::Tls13) {
                 ++capture->WebSocketTls13OnlyCalls;
@@ -1562,7 +1562,7 @@ namespace
 
         wknet::websocket::WebSocket* ws = nullptr;
         wknet::websocket::ConnectConfig wsConfig = wknet::websocket::DefaultConnectConfig();
-        wsConfig.Url = "wss://websocket-echo.com";
+        wsConfig.Url = "wss://ws.postman-echo.com/raw";
         wsConfig.UrlLength = strlen(wsConfig.Url);
         status = wknet::websocket::Connect(session, &wsConfig, &ws);
         Expect(NT_SUCCESS(status), "WsConnect succeeds for websocket receive limit test");
@@ -1600,7 +1600,7 @@ namespace
 
         wknet::websocket::WebSocket* ws = nullptr;
         wknet::websocket::ConnectConfig invalidConfig = wknet::websocket::DefaultConnectConfig();
-        invalidConfig.Url = "wss://websocket-echo.com";
+        invalidConfig.Url = "wss://ws.postman-echo.com/raw";
         invalidConfig.UrlLength = strlen(invalidConfig.Url);
         invalidConfig.Subprotocol = "bad token";
         invalidConfig.SubprotocolLength = strlen(invalidConfig.Subprotocol);
@@ -1610,7 +1610,7 @@ namespace
         Expect(capture.WebSocketConnectCalls == 0, "high-level invalid subprotocol does not hit transport");
 
         wknet::websocket::ConnectConfig validConfig = wknet::websocket::DefaultConnectConfig();
-        validConfig.Url = "wss://websocket-echo.com";
+        validConfig.Url = "wss://ws.postman-echo.com/raw";
         validConfig.UrlLength = strlen(validConfig.Url);
         status = wknet::websocket::Connect(session, &validConfig, &ws);
         Expect(NT_SUCCESS(status), "high-level WsConnect succeeds for validation");

@@ -1,12 +1,14 @@
 #include "ws/WebSocketDeflate.h"
 
+#include <wknet/WknetLimits.h>
+
 namespace wknet
 {
 namespace ws
 {
     namespace
     {
-        constexpr SIZE_T MaxExpansionRatio = 64;
+        constexpr SIZE_T MaxExpansionRatio = WKNET_HARD_MAX_DECODE_EXPANSION_RATIO;
         constexpr SIZE_T MaxLiteralLengthCodes = 288;
         constexpr SIZE_T MaxDistanceCodes = 32;
         constexpr SIZE_T MaxCodeLengthCodes = 19;

@@ -43,6 +43,10 @@ namespace
     // Prefer dual-stack, Cloudflare-fronted public endpoints. httpbun/nghttp2/httpbin.dev
     // frequently fail from kernel WSK DNS or stall after connect in real-network runs.
     constexpr const char* HttpGetUrl = "http://postman-echo.com/get";
+    // Pure IPv4 host (A-only) so AddressFamily::Ipv4 exercises real A-record resolution.
+    // postman-echo is dual-stack and WSK may only return AAAA in some environments.
+    constexpr const char* HttpIpv4GetUrl = "http://ipv4.icanhazip.com/";
+    // Dual-stack host for IPv6 / Any address-family samples.
     constexpr const char* HttpAddressFamilyGetUrl = "http://postman-echo.com/get";
     constexpr const char* HttpPostUrl = "http://postman-echo.com/post";
     constexpr const char* HttpPutUrl = "http://postman-echo.com/put";
@@ -52,8 +56,9 @@ namespace
     constexpr const char* HttpOptionsUrl = "http://postman-echo.com/get";
     constexpr const char* HttpsGetUrl = "https://postman-echo.com/get";
     constexpr const char* HttpsBuilderUrl = "https://postman-echo.com/post";
-    constexpr const char* WebSocketSecureEchoUrl = "wss://websocket-echo.com";
-    constexpr const char* WebSocketBinaryEchoUrl = "wss://websocket-echo.com";
+    // websocket-echo.com is intermittently unresolvable via WSK; postman /raw is a true echo.
+    constexpr const char* WebSocketSecureEchoUrl = "wss://ws.postman-echo.com/raw";
+    constexpr const char* WebSocketBinaryEchoUrl = "wss://ws.postman-echo.com/raw";
     constexpr const char* AlpnHttp11 = "http/1.1";
     constexpr const char* AlpnH2 = "h2";
 
@@ -2049,7 +2054,7 @@ namespace
         MergePublicHttpSampleStatus(aggregate, status, "HTTP HEAD");
         status = RunSimpleSync(session, "HTTP OPTIONS", wknet::http::Method::Options, HttpOptionsUrl, nullptr, 0, "无", results->HttpOptions);
         MergePublicHttpSampleStatus(aggregate, status, "HTTP OPTIONS");
-        status = RunSimpleSync(session, "HTTP GET IPv4 地址族", wknet::http::Method::Get, HttpAddressFamilyGetUrl, nullptr, 0, "无", results->HttpGetIpv4, nullptr, wknet::http::ConnPolicy::ReuseOrCreate, wknet::http::AddressFamily::Ipv4);
+        status = RunSimpleSync(session, "HTTP GET IPv4 地址族", wknet::http::Method::Get, HttpIpv4GetUrl, nullptr, 0, "无", results->HttpGetIpv4, nullptr, wknet::http::ConnPolicy::ReuseOrCreate, wknet::http::AddressFamily::Ipv4);
         MergeAddressFamilySampleStatus(aggregate, status, wknet::http::AddressFamily::Ipv4, "HTTP GET IPv4 地址族");
         status = RunSimpleSync(session, "HTTP GET IPv6 地址族", wknet::http::Method::Get, HttpAddressFamilyGetUrl, nullptr, 0, "无", results->HttpGetIpv6, nullptr, wknet::http::ConnPolicy::ReuseOrCreate, wknet::http::AddressFamily::Ipv6);
         MergeAddressFamilySampleStatus(aggregate, status, wknet::http::AddressFamily::Ipv6, "HTTP GET IPv6 地址族");

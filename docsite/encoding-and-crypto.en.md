@@ -8,7 +8,7 @@ Decode policy for Content-Encoding / Transfer-Encoding, plus the public codec / 
 |-------|----------|
 | Content-Encoding | `gzip` `deflate` `br` `compress` `zstd` `dcz` `aes128gcm` `exi` `pack200-gzip` `identity` |
 | Chain length | At most **2** codings; decoded in **reverse** order |
-| Decompression bomb | Per-step expansion ≤ **64** (`MaxDecodeExpansionRatio`); aggregate follows response/caller capacity |
+| Decompression bomb | Per-step expansion ≤ **1024** (`WKNET_HARD_MAX_DECODE_EXPANSION_RATIO`); aggregate follows response/caller capacity |
 | Transfer-Encoding | `chunked`/`gzip`/`deflate`/`compress` (≤4); **`br` only as Content-Encoding** |
 | EXI | Schema-less streams → Infoset-equivalent XML; external Schema/strict → `STATUS_NOT_SUPPORTED` |
 | Pack200 | Java 5–8 stable formats → semantically equivalent JAR |
@@ -40,7 +40,8 @@ When the caller supplies no `Accept-Encoding`, the engine injects
 ### Decompression bombs
 
 - Decoded aggregate follows the response buffer or caller `MaxResponseBytes` / destination capacity.  
-- **Per-step** expansion ratio ≤ 64; over limit → `STATUS_INVALID_NETWORK_RESPONSE`.  
+- **Per-step** expansion ratio ≤ 1024 (`WKNET_HARD_MAX_DECODE_EXPANSION_RATIO`); over limit → `STATUS_INVALID_NETWORK_RESPONSE`.  
+  This ceiling must admit highly compressible legitimate responses (e.g. echo services that re-encode a large request body as JSON then gzip, expanding hundreds of times). Absolute size is still bounded by `MaxResponseBytes`.  
 - WebSocket `permessage-deflate` is additionally bounded by `MaxMessageBytes` and the same class of expansion limits.
 
 ### EXI bounds

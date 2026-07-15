@@ -44,7 +44,7 @@ namespace codec
     namespace
     {
         constexpr SIZE_T MaxDecodedBytes = WKNET_HARD_MAX_DECODED_BYTES;
-        constexpr SIZE_T MaxDecodeExpansionRatio = 64;
+        constexpr SIZE_T MaxDecodeExpansionRatio = WKNET_HARD_MAX_DECODE_EXPANSION_RATIO;
         constexpr UCHAR GzipFlagHeaderCrc = 0x02;
         constexpr UCHAR GzipFlagExtra = 0x04;
         constexpr UCHAR GzipFlagName = 0x08;

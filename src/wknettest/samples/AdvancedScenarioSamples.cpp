@@ -52,7 +52,8 @@ namespace samples
         constexpr const char* DelayUrl = "https://postman-echo.com/delay/5";
         constexpr const char* TrustFailureUrl = "https://postman-echo.com/status/204";
         constexpr const char* HttpsGetUrl = "https://postman-echo.com/get";
-        constexpr const char* WebSocketUrl = "wss://websocket-echo.com";
+        // websocket-echo.com is intermittently unresolvable via WSK; postman raw echo is dual-usable and true echo.
+        constexpr const char* WebSocketUrl = "wss://ws.postman-echo.com/raw";
         constexpr const char* WebSocketText = "kernel-http advanced websocket";
         constexpr SIZE_T LargeBodyBytes = 64 * 1024;
         constexpr ULONG AsyncWaitImmediateMs = 0;

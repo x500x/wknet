@@ -8,7 +8,7 @@
 |------|------|
 | Content-Encoding | `gzip` `deflate` `br` `compress` `zstd` `dcz` `aes128gcm` `exi` `pack200-gzip` `identity` |
 | 链长 | 最多 **2** 级；**反序**解码 |
-| 解压炸弹 | 单级膨胀比 ≤ **64**（`MaxDecodeExpansionRatio`）；总量跟响应/调用方容量 |
+| 解压炸弹 | 单级膨胀比 ≤ **1024**（`WKNET_HARD_MAX_DECODE_EXPANSION_RATIO`）；总量跟响应/调用方容量 |
 | Transfer-Encoding | `chunked`/`gzip`/`deflate`/`compress`（≤4）；**`br` 仅 CE 不支持 TE** |
 | EXI | 无外部 Schema 流 → Infoset 等价 XML；外部 Schema/strict → `STATUS_NOT_SUPPORTED` |
 | Pack200 | Java 5–8 稳定格式 → 语义等价 JAR |
@@ -40,7 +40,8 @@
 ### 解压炸弹
 
 - decoded aggregate 跟随响应缓冲或调用方 `MaxResponseBytes` / 目标容量。  
-- **单级**膨胀比 ≤ 64；超限 → `STATUS_INVALID_NETWORK_RESPONSE`。  
+- **单级**膨胀比 ≤ 1024（`WKNET_HARD_MAX_DECODE_EXPANSION_RATIO`）；超限 → `STATUS_INVALID_NETWORK_RESPONSE`。  
+  该上限要覆盖高度可压缩的合法响应（例如 echo 服务把大请求体重编码为 JSON 再 gzip，膨胀可达数百倍），绝对体积仍由 `MaxResponseBytes` 约束。  
 - WebSocket `permessage-deflate` 另受 `MaxMessageBytes` 与同类膨胀约束。
 
 ### EXI 边界

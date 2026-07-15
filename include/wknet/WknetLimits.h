@@ -16,6 +16,13 @@ namespace wknet
     // 0 means decoded aggregate size follows the response buffer/caller cap.
     // Decompression-bomb protection is enforced by expansion ratio.
     constexpr SIZE_T WKNET_HARD_MAX_DECODED_BYTES = 0;
+    // Per-coding expansion ceiling for Content-Encoding / Transfer-Encoding /
+    // WebSocket permessage-deflate / EXI deflate blocks. Absolute size is still
+    // bounded by MaxResponseBytes / destination capacity. 1024x is high enough
+    // for highly compressible legitimate JSON/text (e.g. postman-echo re-encoding
+    // a 64 KiB payload into ~400 B gzip that inflates ~500-600x) while still
+    // rejecting pathological bombs relative to the compressed input size.
+    constexpr SIZE_T WKNET_HARD_MAX_DECODE_EXPANSION_RATIO = 1024;
     constexpr ULONG WKNET_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL = 100;
     // 0 disables a lifetime byte cap on long-lived connections.
     constexpr ULONGLONG WKNET_HARD_MAX_CONNECTION_BYTES = 0;
