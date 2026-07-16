@@ -73,9 +73,16 @@ namespace tls
         const char* DnsNames[8] = {};
         SIZE_T DnsNameLengths[8] = {};
         SIZE_T DnsNameCount = 0;
+        // True when the certificate has more DNS SANs than DnsNames[] can store.
+        // Host matching re-scans the raw SubjectAltName extension in that case.
+        bool DnsNamesTruncated = false;
         UCHAR IpAddresses[8][16] = {};
         SIZE_T IpAddressLengths[8] = {};
         SIZE_T IpAddressCount = 0;
+        bool IpAddressesTruncated = false;
+        // Raw SubjectAltName extension value (GeneralNames SEQUENCE), still inside Der.
+        const UCHAR* SubjectAltName = nullptr;
+        SIZE_T SubjectAltNameLength = 0;
         CertificatePublicKeyAlgorithm PublicKeyAlgorithm = CertificatePublicKeyAlgorithm::Unknown;
         CertificateSignatureAlgorithm SignatureAlgorithm = CertificateSignatureAlgorithm::Unknown;
         long long NotBefore = 0;

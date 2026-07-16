@@ -760,6 +760,11 @@ namespace tls
                 return STATUS_INVALID_NETWORK_RESPONSE;
             }
 
+            // Keep the raw GeneralNames SEQUENCE so host matching can re-scan when the
+            // fixed DnsNames[] / IpAddresses[] slots overflow (e.g. Wikimedia's 40+ SANs).
+            certificate.SubjectAltName = names.Value;
+            certificate.SubjectAltNameLength = names.ValueLength;
+
             SIZE_T offset = 0;
             while (offset < names.ValueLength) {
                 DerElement name = {};
@@ -774,7 +779,9 @@ namespace tls
                     }
 
                     if (certificate.DnsNameCount >= (sizeof(certificate.DnsNames) / sizeof(certificate.DnsNames[0]))) {
-                        return STATUS_NOT_SUPPORTED;
+                        // Overflow: skip extras, keep parsing remaining entries (IPs, later DNS).
+                        certificate.DnsNamesTruncated = true;
+                        continue;
                     }
 
                     const SIZE_T index = certificate.DnsNameCount;
@@ -789,7 +796,8 @@ namespace tls
                     }
 
                     if (certificate.IpAddressCount >= (sizeof(certificate.IpAddresses) / sizeof(certificate.IpAddresses[0]))) {
-                        return STATUS_NOT_SUPPORTED;
+                        certificate.IpAddressesTruncated = true;
+                        continue;
                     }
 
                     const SIZE_T index = certificate.IpAddressCount;
@@ -2434,6 +2442,62 @@ namespace tls
             return false;
         }
 
+        // When DnsNames[]/IpAddresses[] overflowed, re-walk the raw SubjectAltName
+        // GeneralNames SEQUENCE so a matching entry beyond the fixed slots still
+        // succeeds (e.g. stream.wikimedia.org against a 40+ DNS SAN leaf).
+        _Must_inspect_result_
+        bool HostMatchesFullSubjectAltName(
+            _In_ const ParsedCertificate& leaf,
+            _In_reads_(hostNameLength) const char* hostName,
+            SIZE_T hostNameLength,
+            _In_reads_bytes_opt_(hostAddressLength) const UCHAR* hostAddress,
+            SIZE_T hostAddressLength,
+            bool matchIp) noexcept
+        {
+            if (leaf.SubjectAltName == nullptr || leaf.SubjectAltNameLength == 0) {
+                return false;
+            }
+
+            SIZE_T offset = 0;
+            while (offset < leaf.SubjectAltNameLength) {
+                DerElement name = {};
+                const NTSTATUS status = ReadElement(
+                    leaf.SubjectAltName,
+                    leaf.SubjectAltNameLength,
+                    &offset,
+                    name);
+                if (!NT_SUCCESS(status)) {
+                    return false;
+                }
+
+                if (matchIp) {
+                    if (name.Tag == TagIpAddress &&
+                        hostAddress != nullptr &&
+                        name.ValueLength == hostAddressLength &&
+                        RtlCompareMemory(name.Value, hostAddress, hostAddressLength) == hostAddressLength) {
+                        return true;
+                    }
+                    continue;
+                }
+
+                if (name.Tag != TagDnsName) {
+                    continue;
+                }
+                if (!IsAsciiBytes(name.Value, name.ValueLength)) {
+                    continue;
+                }
+                if (HostNameMatches(
+                        reinterpret_cast<const char*>(name.Value),
+                        name.ValueLength,
+                        hostName,
+                        hostNameLength)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         _Must_inspect_result_
         NTSTATUS ValidateHostName(
             _In_ const ParsedCertificate& leaf,
@@ -2458,14 +2522,36 @@ namespace tls
                     }
                 }
 
+                if (leaf.IpAddressesTruncated &&
+                    HostMatchesFullSubjectAltName(
+                        leaf,
+                        hostName,
+                        hostNameLength,
+                        hostAddress.Get(),
+                        hostAddressLength,
+                        true)) {
+                    return STATUS_SUCCESS;
+                }
+
                 return STATUS_TRUST_FAILURE;
             }
 
-            if (leaf.DnsNameCount != 0) {
+            if (leaf.DnsNameCount != 0 || leaf.DnsNamesTruncated) {
                 for (SIZE_T index = 0; index < leaf.DnsNameCount; ++index) {
                     if (HostNameMatches(leaf.DnsNames[index], leaf.DnsNameLengths[index], hostName, hostNameLength)) {
                         return STATUS_SUCCESS;
                     }
+                }
+
+                if (leaf.DnsNamesTruncated &&
+                    HostMatchesFullSubjectAltName(
+                        leaf,
+                        hostName,
+                        hostNameLength,
+                        nullptr,
+                        0,
+                        false)) {
+                    return STATUS_SUCCESS;
                 }
 
                 return STATUS_TRUST_FAILURE;
@@ -3539,7 +3625,46 @@ namespace tls
                 }
             }
 
-            if (subject.DnsNameCount == 0 && subject.CommonName != nullptr && subject.CommonNameLength != 0) {
+            // Overflow DNS SANs are not in DnsNames[]; still enforce constraints on them.
+            if (subject.DnsNamesTruncated &&
+                subject.SubjectAltName != nullptr &&
+                subject.SubjectAltNameLength != 0) {
+                SIZE_T offset = 0;
+                SIZE_T seenDns = 0;
+                while (offset < subject.SubjectAltNameLength) {
+                    DerElement name = {};
+                    status = ReadElement(
+                        subject.SubjectAltName,
+                        subject.SubjectAltNameLength,
+                        &offset,
+                        name);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                    if (name.Tag != TagDnsName) {
+                        continue;
+                    }
+                    ++seenDns;
+                    if (seenDns <= subject.DnsNameCount) {
+                        continue; // already checked via DnsNames[]
+                    }
+                    if (!IsAsciiBytes(name.Value, name.ValueLength)) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    status = ValidateDnsNameAgainstConstraints(
+                        reinterpret_cast<const char*>(name.Value),
+                        name.ValueLength,
+                        issuer);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                }
+            }
+
+            if (subject.DnsNameCount == 0 &&
+                !subject.DnsNamesTruncated &&
+                subject.CommonName != nullptr &&
+                subject.CommonNameLength != 0) {
                 status = ValidateDnsNameAgainstConstraints(subject.CommonName, subject.CommonNameLength, issuer);
                 if (!NT_SUCCESS(status)) {
                     return status;
@@ -3553,6 +3678,42 @@ namespace tls
                     issuer);
                 if (!NT_SUCCESS(status)) {
                     return status;
+                }
+            }
+
+            if (subject.IpAddressesTruncated &&
+                subject.SubjectAltName != nullptr &&
+                subject.SubjectAltNameLength != 0) {
+                SIZE_T offset = 0;
+                SIZE_T seenIp = 0;
+                while (offset < subject.SubjectAltNameLength) {
+                    DerElement name = {};
+                    status = ReadElement(
+                        subject.SubjectAltName,
+                        subject.SubjectAltNameLength,
+                        &offset,
+                        name);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                    if (name.Tag != TagIpAddress) {
+                        continue;
+                    }
+                    ++seenIp;
+                    if (seenIp <= subject.IpAddressCount) {
+                        continue;
+                    }
+                    if (name.Value == nullptr ||
+                        (name.ValueLength != 4 && name.ValueLength != 16)) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    status = ValidateIpAddressAgainstConstraints(
+                        name.Value,
+                        name.ValueLength,
+                        issuer);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
                 }
             }
 

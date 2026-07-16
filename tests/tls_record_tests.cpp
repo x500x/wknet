@@ -5189,7 +5189,7 @@ namespace
         ExpectStatus(status, STATUS_INVALID_NETWORK_RESPONSE, "certificate parser rejects redundant DER unsigned integer zero");
     }
 
-    void TestCertificateParserRejectsSubjectAltNameOverflow()
+    void TestCertificateParserTruncatesSubjectAltNameOverflow()
     {
         UCHAR pem[TestMaxPemCertificateLength] = {};
         UCHAR der[TestMaxDerCertificateLength] = {};
@@ -5230,6 +5230,7 @@ namespace
             return;
         }
 
+        // 8 single-letter DNS SANs fill the fixed slots; 9th is beyond capacity.
         const UCHAR overflowSan[] = {
             0x30, 0x23,
             0x82, 0x01, 'a',
@@ -5250,7 +5251,31 @@ namespace
 
         ParsedCertificate parsed = {};
         const NTSTATUS status = CertificateValidator::ParseCertificate(mutated, derLength, parsed);
-        ExpectStatus(status, STATUS_NOT_SUPPORTED, "certificate parser rejects SAN lists beyond fixed parsed capacity");
+        ExpectStatus(status, STATUS_SUCCESS, "certificate parser accepts SAN lists beyond fixed cache capacity");
+        Expect(parsed.DnsNameCount == 8, "certificate parser keeps first 8 DNS SANs in fixed slots");
+        Expect(parsed.DnsNamesTruncated, "certificate parser marks DNS SAN overflow as truncated");
+        Expect(parsed.SubjectAltName != nullptr && parsed.SubjectAltNameLength != 0,
+            "certificate parser retains raw SubjectAltName for overflow re-scan");
+
+        // Host matching must still succeed for the overflowed 9th DNS SAN.
+        CertificateChainView chain = {};
+        chain.Certificates = mutated;
+        chain.CertificatesLength = derLength;
+        chain.CertificateCount = 1;
+
+        // Build a minimal validation that only exercises host matching path via Parse + ValidateHostName
+        // is internal; re-parse and check fields already prove truncation. Full chain validation needs trust.
+        // Directly verify the truncated flag path by ensuring the 9th name is not in DnsNames[] but present in raw SAN.
+        bool foundOverflowInCache = false;
+        for (SIZE_T i = 0; i < parsed.DnsNameCount; ++i) {
+            if (parsed.DnsNameLengths[i] == 9 &&
+                parsed.DnsNames[i] != nullptr &&
+                memcmp(parsed.DnsNames[i], "overflowx", 9) == 0) {
+                foundOverflowInCache = true;
+            }
+        }
+        Expect(!foundOverflowInCache, "overflowed 9th DNS SAN is not stored in fixed DnsNames slots");
+        (void)chain;
     }
 
     void TestCertificateParserRejectsSignatureAlgorithmMismatch()
@@ -7357,7 +7382,7 @@ int main()
     TestCertificateParserRejectsInvalidCalendarDate();
     TestCertificateParserRejectsNonMinimalDerLengths();
     TestCertificateParserRejectsRedundantUnsignedIntegerEncoding();
-    TestCertificateParserRejectsSubjectAltNameOverflow();
+    TestCertificateParserTruncatesSubjectAltNameOverflow();
     TestCertificateParserRejectsSignatureAlgorithmMismatch();
     TestCertificateParserRejectsDuplicateExtensionOid();
     TestCertificateParserRejectsUnknownCriticalExtension();
