@@ -47,6 +47,13 @@ namespace session
     _Ret_maybenull_
     UCHAR* AllocateBytesCopy(const UCHAR* data, SIZE_T length) noexcept;
 
+    void ReleaseStoredHeader(_Inout_ StoredHeader& header) noexcept;
+    void ReleaseStoredHeaderList(_Inout_ StoredHeaderList& list) noexcept;
+    _Must_inspect_result_
+    NTSTATUS EnsureStoredHeaderListCapacity(
+        _Inout_ StoredHeaderList& list,
+        SIZE_T requiredCount) noexcept;
+
     bool TextEqualsIgnoreCase(
         const char* left,
         SIZE_T leftLength,

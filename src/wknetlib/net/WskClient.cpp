@@ -48,7 +48,8 @@ namespace net
         }
 #endif
 
-        constexpr SIZE_T ResolveCacheCapacity = 16;
+        // Larger than a typical multi-origin client session; pure performance cache.
+        constexpr SIZE_T ResolveCacheCapacity = 256;
         constexpr SIZE_T ResolveCacheNodeNameChars = 256;
         constexpr SIZE_T ResolveCacheServiceNameChars = 16;
         constexpr ULONGLONG ResolveCacheTtl100ns = 5ULL * 60ULL * 1000ULL * 10000ULL;

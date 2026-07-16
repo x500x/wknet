@@ -782,12 +782,12 @@ NTSTATUS HttpCacheLookup(
         }
 
         if (result->RequiresValidation) {
-            if (responseMetadata.HasETag && responseMetadata.ETag.Length <= MaxHeaderValueLength) {
+            if (responseMetadata.HasETag && responseMetadata.ETag.Length <= HttpCacheValidatorFieldBytes) {
                 RtlCopyMemory(result->IfNoneMatch, responseMetadata.ETag.Data, responseMetadata.ETag.Length);
                 result->IfNoneMatchLength = responseMetadata.ETag.Length;
             }
             else if (responseMetadata.HasLastModified &&
-                responseMetadata.LastModified.Length <= MaxHeaderValueLength) {
+                responseMetadata.LastModified.Length <= HttpCacheValidatorFieldBytes) {
                 RtlCopyMemory(
                     result->IfModifiedSince,
                     responseMetadata.LastModified.Data,

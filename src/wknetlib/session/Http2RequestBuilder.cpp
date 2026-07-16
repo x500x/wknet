@@ -160,9 +160,15 @@ namespace session
         char* contentLengthBuffer,
         SIZE_T* headerCount) noexcept
     {
+        // Capacity is runtime-sized; require enough slots for reserved pseudo/promoted
+        // headers plus caller extras, and never exceed the protocol hard max.
+        const SIZE_T estimated =
+            Http2ReservedHeaderSlots + options.ExtraHeaderCount;
         if (requestHeaders == nullptr || lowerHeaderNames == nullptr ||
             contentLengthBuffer == nullptr || headerCount == nullptr ||
-            headerCapacity < Http2MaxRequestHeaders ||
+            headerCapacity == 0 ||
+            headerCapacity > Http2MaxRequestHeaders ||
+            estimated > headerCapacity ||
             (options.ExtraHeaders == nullptr && options.ExtraHeaderCount != 0) ||
             (options.Body != nullptr && options.BodySource != nullptr)) {
             return STATUS_INVALID_PARAMETER;
@@ -212,7 +218,7 @@ namespace session
 
         const bool acceptEncodingPromoted = options.AcceptEncoding.Data != nullptr && options.AcceptEncoding.Length != 0;
         for (SIZE_T extraIndex = 0; extraIndex < options.ExtraHeaderCount; ++extraIndex) {
-            if (index >= Http2MaxRequestHeaders) {
+            if (index >= headerCapacity) {
                 return STATUS_INVALID_PARAMETER;
             }
             const http1::HttpHeader& extra = options.ExtraHeaders[extraIndex];

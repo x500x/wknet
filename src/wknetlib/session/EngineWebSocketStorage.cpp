@@ -9,6 +9,7 @@ namespace session
         SIZE_T headerCount,
         WebSocket& websocket) noexcept
     {
+        ReleaseStoredHeaderList(websocket.ExtraHeaders);
         websocket.ExtraHeaderCount = 0;
 
         if (headerCount == 0) {
@@ -31,17 +32,28 @@ namespace session
             "Sec-WebSocket-Extensions"
         };
 
+        NTSTATUS status = EnsureStoredHeaderListCapacity(websocket.ExtraHeaders, headerCount);
+        if (!NT_SUCCESS(status)) {
+            return status == STATUS_BUFFER_TOO_SMALL ? STATUS_INVALID_PARAMETER : status;
+        }
+
         for (SIZE_T index = 0; index < headerCount; ++index) {
             const WebSocketHeader& header = headers[index];
             if (header.Name == nullptr || header.NameLength == 0) {
+                ReleaseStoredHeaderList(websocket.ExtraHeaders);
+                websocket.ExtraHeaderCount = 0;
                 return STATUS_INVALID_PARAMETER;
             }
             if (header.NameLength > MaxHeaderNameLength ||
                 header.ValueLength > MaxHeaderValueLength) {
+                ReleaseStoredHeaderList(websocket.ExtraHeaders);
+                websocket.ExtraHeaderCount = 0;
                 return STATUS_BUFFER_TOO_SMALL;
             }
             if (!IsValidHeaderText(header.Name, header.NameLength, true) ||
                 !IsValidHeaderText(header.Value, header.ValueLength, false)) {
+                ReleaseStoredHeaderList(websocket.ExtraHeaders);
+                websocket.ExtraHeaderCount = 0;
                 return STATUS_INVALID_PARAMETER;
             }
 
@@ -49,12 +61,16 @@ namespace session
                  controlled < sizeof(controlledHeaders) / sizeof(controlledHeaders[0]);
                  ++controlled) {
                 if (TextEqualsLiteralIgnoreCase(header.Name, header.NameLength, controlledHeaders[controlled])) {
+                    ReleaseStoredHeaderList(websocket.ExtraHeaders);
+                    websocket.ExtraHeaderCount = 0;
                     return STATUS_INVALID_PARAMETER;
                 }
             }
 
             char* nameCopy = AllocateTextCopy(header.Name, header.NameLength);
             if (nameCopy == nullptr) {
+                ReleaseStoredHeaderList(websocket.ExtraHeaders);
+                websocket.ExtraHeaderCount = 0;
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
 
@@ -63,15 +79,19 @@ namespace session
                 valueCopy = AllocateTextCopy(header.Value, header.ValueLength);
                 if (valueCopy == nullptr) {
                     FreeApiMemory(nameCopy);
+                    ReleaseStoredHeaderList(websocket.ExtraHeaders);
+                    websocket.ExtraHeaderCount = 0;
                     return STATUS_INSUFFICIENT_RESOURCES;
                 }
             }
 
-            StoredHeader& stored = websocket.ExtraHeaders[websocket.ExtraHeaderCount++];
+            StoredHeader& stored = websocket.ExtraHeaders[websocket.ExtraHeaderCount];
             stored.Name = nameCopy;
             stored.NameLength = header.NameLength;
             stored.Value = valueCopy;
             stored.ValueLength = header.ValueLength;
+            ++websocket.ExtraHeaderCount;
+            websocket.ExtraHeaders.Count = websocket.ExtraHeaderCount;
         }
 
         return STATUS_SUCCESS;
@@ -90,21 +110,21 @@ namespace session
         }
 #endif
         FreeApiMemory(websocket.Url);
+        FreeNonPagedArray(websocket.Path);
         FreeApiMemory(websocket.Subprotocol);
         FreeApiMemory(websocket.LastMessage);
-        for (SIZE_T index = 0; index < websocket.ExtraHeaderCount && index < MaxHeadersPerRequest; ++index) {
-            ReleaseStoredHeader(websocket.ExtraHeaders[index]);
-        }
+        ReleaseStoredHeaderList(websocket.ExtraHeaders);
         websocket.ExtraHeaderCount = 0;
         websocket.Url = nullptr;
         websocket.UrlLength = 0;
+        websocket.Path = nullptr;
+        websocket.PathLength = 0;
         websocket.Subprotocol = nullptr;
         websocket.SubprotocolLength = 0;
         websocket.LastMessage = nullptr;
         websocket.LastMessageLength = 0;
         websocket.SchemeLength = 0;
         websocket.HostLength = 0;
-        websocket.PathLength = 0;
         websocket.Port = 0;
         websocket.Connected = false;
         websocket.TransportClosed = true;

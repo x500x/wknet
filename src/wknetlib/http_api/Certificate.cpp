@@ -6,6 +6,90 @@
 namespace wknet::http {
 namespace
 {
+
+    template<typename T>
+    _Must_inspect_result_
+    NTSTATUS EnsureArrayCapacity(T*& items, SIZE_T& capacity, SIZE_T needed, SIZE_T hardMax) noexcept
+    {
+        if (needed == 0) {
+            return STATUS_SUCCESS;
+        }
+        if (needed > hardMax) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        if (needed <= capacity) {
+            return STATUS_SUCCESS;
+        }
+
+        SIZE_T newCapacity = capacity == 0 ? 4 : capacity;
+        while (newCapacity < needed) {
+            if (newCapacity > (hardMax / 2)) {
+                newCapacity = hardMax;
+                break;
+            }
+            newCapacity *= 2;
+        }
+        if (newCapacity > hardMax) {
+            newCapacity = hardMax;
+        }
+        if (newCapacity < needed) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        auto* replacement = AllocateNonPagedArray<T>(newCapacity);
+        if (replacement == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        if (items != nullptr && capacity != 0) {
+            RtlCopyMemory(replacement, items, capacity * sizeof(T));
+        }
+        FreeNonPagedArray(items);
+        items = replacement;
+        capacity = newCapacity;
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS EnsurePointerArrayCapacity(UCHAR**& items, SIZE_T& capacity, SIZE_T needed, SIZE_T hardMax) noexcept
+    {
+        if (needed == 0) {
+            return STATUS_SUCCESS;
+        }
+        if (needed > hardMax) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        if (needed <= capacity) {
+            return STATUS_SUCCESS;
+        }
+
+        SIZE_T newCapacity = capacity == 0 ? 4 : capacity;
+        while (newCapacity < needed) {
+            if (newCapacity > (hardMax / 2)) {
+                newCapacity = hardMax;
+                break;
+            }
+            newCapacity *= 2;
+        }
+        if (newCapacity > hardMax) {
+            newCapacity = hardMax;
+        }
+        if (newCapacity < needed) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        auto* replacement = AllocateNonPagedArray<UCHAR*>(newCapacity);
+        if (replacement == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        if (items != nullptr && capacity != 0) {
+            RtlCopyMemory(replacement, items, capacity * sizeof(UCHAR*));
+        }
+        FreeNonPagedArray(items);
+        items = replacement;
+        capacity = newCapacity;
+        return STATUS_SUCCESS;
+    }
+
     enum class AuthorityBundleFormat : UCHAR
     {
         Auto,
@@ -45,12 +129,44 @@ namespace
         if (store == nullptr) {
             return;
         }
-        for (SIZE_T index = 0; index < CertificateMaxAuthorityBundles; ++index) {
-            FreeNonPagedPoolBytes(store->OwnedAuthorityBundleData[index]);
-            store->OwnedAuthorityBundleData[index] = nullptr;
-            store->AuthorityBundles[index] = {};
+        if (store->OwnedAuthorityBundleData != nullptr) {
+            for (SIZE_T index = 0; index < store->AuthorityBundleCount; ++index) {
+                FreeNonPagedPoolBytes(store->OwnedAuthorityBundleData[index]);
+                store->OwnedAuthorityBundleData[index] = nullptr;
+            }
+        }
+        if (store->AuthorityBundles != nullptr) {
+            for (SIZE_T index = 0; index < store->AuthorityBundleCount; ++index) {
+                store->AuthorityBundles[index] = {};
+            }
         }
         store->AuthorityBundleCount = 0;
+    }
+
+    void FreeStoreLists(CertificateStore* store) noexcept
+    {
+        if (store == nullptr) {
+            return;
+        }
+        FreeOwnedBundles(store);
+        FreeNonPagedArray(store->TrustAnchors);
+        store->TrustAnchors = nullptr;
+        store->TrustAnchorCount = 0;
+        store->TrustAnchorCapacity = 0;
+        FreeNonPagedArray(store->AuthorityBundles);
+        store->AuthorityBundles = nullptr;
+        FreeNonPagedArray(store->OwnedAuthorityBundleData);
+        store->OwnedAuthorityBundleData = nullptr;
+        store->OwnedAuthorityBundleCapacity = 0;
+        store->AuthorityBundleCapacity = 0;
+        FreeNonPagedArray(store->Pins);
+        store->Pins = nullptr;
+        store->PinCount = 0;
+        store->PinCapacity = 0;
+        FreeNonPagedArray(store->RevocationEntries);
+        store->RevocationEntries = nullptr;
+        store->RevocationEntryCount = 0;
+        store->RevocationEntryCapacity = 0;
     }
 
     NTSTATUS PublicRevocationProvider(
@@ -145,11 +261,23 @@ namespace
             dataLength == 0) {
             return STATUS_INVALID_PARAMETER;
         }
-        if (store->AuthorityBundleCount >= CertificateMaxAuthorityBundles) {
-            return STATUS_INSUFFICIENT_RESOURCES;
+        NTSTATUS status = EnsureArrayCapacity(
+            store->AuthorityBundles,
+            store->AuthorityBundleCapacity,
+            store->AuthorityBundleCount + 1,
+            CertificateMaxAuthorityBundles);
+        if (NT_SUCCESS(status)) {
+            status = EnsurePointerArrayCapacity(
+                store->OwnedAuthorityBundleData,
+                store->OwnedAuthorityBundleCapacity,
+                store->AuthorityBundleCount + 1,
+                CertificateMaxAuthorityBundles);
+        }
+        if (!NT_SUCCESS(status)) {
+            return status;
         }
 
-        NTSTATUS status = STATUS_INVALID_PARAMETER;
+        status = STATUS_INVALID_PARAMETER;
         switch (format) {
         case AuthorityBundleFormat::Auto:
             status = tls::CertificateValidator::ValidateAuthorityBundle(data, dataLength);
@@ -234,40 +362,73 @@ NTSTATUS CertificateStoreCreate(
     created->RevocationProvider = source.RevocationProvider;
     created->RevocationProviderContext = source.RevocationProviderContext;
 
-    for (SIZE_T index = 0; index < source.TrustAnchorCount; ++index) {
-        const CertificateTrustAnchor& input = source.TrustAnchors[index];
-        tls::CertificateTrustAnchor& output = created->TrustAnchors[index];
-        output.SubjectName = input.SubjectName;
-        output.SubjectNameLength = input.SubjectNameLength;
-        RtlCopyMemory(output.SubjectPublicKeySha256, input.SubjectPublicKeySha256, sizeof(output.SubjectPublicKeySha256));
-        output.MatchSubjectPublicKey = input.MatchSubjectPublicKey;
+    if (source.TrustAnchorCount != 0) {
+        NTSTATUS growStatus = EnsureArrayCapacity(
+            created->TrustAnchors,
+            created->TrustAnchorCapacity,
+            source.TrustAnchorCount,
+            CertificateMaxTrustAnchors);
+        if (!NT_SUCCESS(growStatus)) {
+            CertificateStoreClose(created);
+            return growStatus;
+        }
+        for (SIZE_T index = 0; index < source.TrustAnchorCount; ++index) {
+            const CertificateTrustAnchor& input = source.TrustAnchors[index];
+            tls::CertificateTrustAnchor& output = created->TrustAnchors[index];
+            output.SubjectName = input.SubjectName;
+            output.SubjectNameLength = input.SubjectNameLength;
+            RtlCopyMemory(output.SubjectPublicKeySha256, input.SubjectPublicKeySha256, sizeof(output.SubjectPublicKeySha256));
+            output.MatchSubjectPublicKey = input.MatchSubjectPublicKey;
+        }
+        created->TrustAnchorCount = source.TrustAnchorCount;
     }
-    created->TrustAnchorCount = source.TrustAnchorCount;
 
-    for (SIZE_T index = 0; index < source.PinCount; ++index) {
-        const CertificatePin& input = source.Pins[index];
-        tls::CertificatePin& output = created->Pins[index];
-        output.HostName = input.HostName;
-        output.HostNameLength = input.HostNameLength;
-        RtlCopyMemory(output.LeafSubjectPublicKeySha256, input.LeafSubjectPublicKeySha256, sizeof(output.LeafSubjectPublicKeySha256));
+    if (source.PinCount != 0) {
+        NTSTATUS growStatus = EnsureArrayCapacity(
+            created->Pins,
+            created->PinCapacity,
+            source.PinCount,
+            CertificateMaxPins);
+        if (!NT_SUCCESS(growStatus)) {
+            CertificateStoreClose(created);
+            return growStatus;
+        }
+        for (SIZE_T index = 0; index < source.PinCount; ++index) {
+            const CertificatePin& input = source.Pins[index];
+            tls::CertificatePin& output = created->Pins[index];
+            output.HostName = input.HostName;
+            output.HostNameLength = input.HostNameLength;
+            RtlCopyMemory(output.LeafSubjectPublicKeySha256, input.LeafSubjectPublicKeySha256, sizeof(output.LeafSubjectPublicKeySha256));
+        }
+        created->PinCount = source.PinCount;
     }
-    created->PinCount = source.PinCount;
 
-    for (SIZE_T index = 0; index < source.RevocationEntryCount; ++index) {
-        const CertificateRevocationEntry& input = source.RevocationEntries[index];
-        tls::CertificateRevocationEntry& output = created->RevocationEntries[index];
-        output.IssuerName = input.IssuerName;
-        output.IssuerNameLength = input.IssuerNameLength;
-        output.SerialNumber = input.SerialNumber;
-        output.SerialNumberLength = input.SerialNumberLength;
-        output.Source = ToInternalSource(input.Source);
-        output.Status = ToInternalStatus(input.Status);
-        output.ThisUpdate = input.ThisUpdate;
-        output.NextUpdate = input.NextUpdate;
-        output.EvidenceDer = input.EvidenceDer;
-        output.EvidenceDerLength = input.EvidenceDerLength;
+    if (source.RevocationEntryCount != 0) {
+        NTSTATUS growStatus = EnsureArrayCapacity(
+            created->RevocationEntries,
+            created->RevocationEntryCapacity,
+            source.RevocationEntryCount,
+            CertificateMaxRevocationEntries);
+        if (!NT_SUCCESS(growStatus)) {
+            CertificateStoreClose(created);
+            return growStatus;
+        }
+        for (SIZE_T index = 0; index < source.RevocationEntryCount; ++index) {
+            const CertificateRevocationEntry& input = source.RevocationEntries[index];
+            tls::CertificateRevocationEntry& output = created->RevocationEntries[index];
+            output.IssuerName = input.IssuerName;
+            output.IssuerNameLength = input.IssuerNameLength;
+            output.SerialNumber = input.SerialNumber;
+            output.SerialNumberLength = input.SerialNumberLength;
+            output.Source = ToInternalSource(input.Source);
+            output.Status = ToInternalStatus(input.Status);
+            output.ThisUpdate = input.ThisUpdate;
+            output.NextUpdate = input.NextUpdate;
+            output.EvidenceDer = input.EvidenceDer;
+            output.EvidenceDerLength = input.EvidenceDerLength;
+        }
+        created->RevocationEntryCount = source.RevocationEntryCount;
     }
-    created->RevocationEntryCount = source.RevocationEntryCount;
 
     for (SIZE_T index = 0; index < source.AuthorityBundleCount; ++index) {
         NTSTATUS status = AppendOwnedBundle(
@@ -313,7 +474,7 @@ void CertificateStoreClose(CertificateStore* store) noexcept
         return;
     }
     store->Magic = 0;
-    FreeOwnedBundles(store);
+    FreeStoreLists(store);
     if (store->Engine != nullptr) {
         store->Engine->Reset();
         FreeNonPagedObject(store->Engine);

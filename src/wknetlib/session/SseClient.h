@@ -43,6 +43,8 @@ namespace session
         ULONG ReceiveTimeoutMs = 0;
         SIZE_T MaxEventBytes = 1 * 1024 * 1024;
         SIZE_T MaxParserBufferBytes = 256 * 1024;
+        // 0 = library default (32). Queue grows on demand up to this cap.
+        SIZE_T MaxQueuedEvents = 0;
         bool RequireEventStreamContentType = true;
         TlsOptions Tls = {};
         AddressFamily Family = AddressFamily::Any;

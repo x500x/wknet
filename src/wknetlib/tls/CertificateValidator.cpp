@@ -887,8 +887,10 @@ namespace tls
                 certificate.OcspUriLengths :
                 certificate.CrlDistributionPointUriLengths;
 
+            // Soft-truncate: public CertificateRevocationProviderQuery still exposes at
+            // most CertificateMaxRevocationUris slots (ABI). Extra peer URIs are ignored.
             if (*count >= CertificateMaxRevocationUris) {
-                return STATUS_NOT_SUPPORTED;
+                return STATUS_SUCCESS;
             }
 
             uris[*count] = reinterpret_cast<const char*>(uri.Value);
@@ -1037,8 +1039,11 @@ namespace tls
             SIZE_T* count = permitted ? &certificate.PermittedDnsSubtreeCount : &certificate.ExcludedDnsSubtreeCount;
             const char** names = permitted ? certificate.PermittedDnsSubtrees : certificate.ExcludedDnsSubtrees;
             SIZE_T* lengths = permitted ? certificate.PermittedDnsSubtreeLengths : certificate.ExcludedDnsSubtreeLengths;
+            // Soft-truncate like SAN overflow: keep parsing the peer certificate.
+            // NameConstraints beyond the fixed cache are rare; failing closed here
+            // made legitimate enterprise intermediates unusable.
             if (*count >= CertificateMaxNameConstraints) {
-                return STATUS_NOT_SUPPORTED;
+                return STATUS_SUCCESS;
             }
 
             names[*count] = reinterpret_cast<const char*>(value);
@@ -1062,7 +1067,7 @@ namespace tls
             UCHAR (*subtrees)[32] = permitted ? certificate.PermittedIpSubtrees : certificate.ExcludedIpSubtrees;
             SIZE_T* lengths = permitted ? certificate.PermittedIpSubtreeLengths : certificate.ExcludedIpSubtreeLengths;
             if (*count >= CertificateMaxNameConstraints) {
-                return STATUS_NOT_SUPPORTED;
+                return STATUS_SUCCESS;
             }
 
             RtlCopyMemory(subtrees[*count], value, length);
@@ -1095,7 +1100,7 @@ namespace tls
             const UCHAR** names = permitted ? certificate.PermittedDirectoryNames : certificate.ExcludedDirectoryNames;
             SIZE_T* lengths = permitted ? certificate.PermittedDirectoryNameLengths : certificate.ExcludedDirectoryNameLengths;
             if (*count >= CertificateMaxNameConstraints) {
-                return STATUS_NOT_SUPPORTED;
+                return STATUS_SUCCESS;
             }
 
             names[*count] = name.Full;

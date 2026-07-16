@@ -664,9 +664,18 @@ NTSTATUS ParseUrlIntoRequest(
         pathLength = 1;
     }
 
+    FreeNonPagedArray(request.Path);
+    request.Path = nullptr;
+    request.PathLength = 0;
+
     if (pathStart == 0) {
-        request.Path[0] = '/';
-        request.Path[1] = '\0';
+        char* pathCopy = AllocateNonPagedArray<char>(2);
+        if (pathCopy == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        pathCopy[0] = '/';
+        pathCopy[1] = '\0';
+        request.Path = pathCopy;
         request.PathLength = 1;
     }
     else {
@@ -676,17 +685,22 @@ NTSTATUS ParseUrlIntoRequest(
             return STATUS_BUFFER_TOO_SMALL;
         }
 
-        SIZE_T outputOffset = 0;
-        if (queryOnly) {
-            request.Path[outputOffset++] = '/';
-        }
-
         if (!IsValidRequestTargetText(url + pathStart, pathLength)) {
             return STATUS_INVALID_PARAMETER;
         }
 
-        RtlCopyMemory(request.Path + outputOffset, url + pathStart, pathLength);
-        request.Path[requestTargetLength] = '\0';
+        char* pathCopy = AllocateNonPagedArray<char>(requestTargetLength + 1);
+        if (pathCopy == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        SIZE_T outputOffset = 0;
+        if (queryOnly) {
+            pathCopy[outputOffset++] = '/';
+        }
+        RtlCopyMemory(pathCopy + outputOffset, url + pathStart, pathLength);
+        pathCopy[requestTargetLength] = '\0';
+        request.Path = pathCopy;
         request.PathLength = requestTargetLength;
     }
 
@@ -697,6 +711,9 @@ NTSTATUS ParseUrlIntoRequest(
         sizeof(request.Scheme),
         &request.SchemeLength);
     if (!NT_SUCCESS(status)) {
+        FreeNonPagedArray(request.Path);
+        request.Path = nullptr;
+        request.PathLength = 0;
         return status;
     }
 
@@ -708,6 +725,9 @@ NTSTATUS ParseUrlIntoRequest(
         sizeof(request.Host),
         &request.HostLength);
     if (!NT_SUCCESS(status)) {
+        FreeNonPagedArray(request.Path);
+        request.Path = nullptr;
+        request.PathLength = 0;
         return status;
     }
 

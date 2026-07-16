@@ -40,8 +40,6 @@ namespace
         }
     }
 
-    // Mirrors session::MaxHeadersPerRequest (the engine validates against the same cap).
-    constexpr SIZE_T kMaxConnectHeaders = 16;
 }
 
 NTSTATUS Connect(wknet::http::Session* session, const char* url, SIZE_T urlLength, WebSocket** websocket) noexcept
@@ -68,13 +66,17 @@ NTSTATUS ConnectEx(wknet::http::Session* session, const ConnectConfig* config, W
         return STATUS_INVALID_PARAMETER;
     }
 
-    ::wknet::HeapArray<::wknet::session::WebSocketHeader> headerBuffer(kMaxConnectHeaders);
+    const SIZE_T headerCount = config->HeaderCount;
+    if (headerCount > ::wknet::session::MaxHeadersPerRequest) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    ::wknet::HeapArray<::wknet::session::WebSocketHeader> headerBuffer(headerCount != 0 ? headerCount : 1);
     if (!headerBuffer.IsValid()) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
     ::wknet::session::WebSocketConnectOptions apiOptions = {};
-    FillApiConnectOptions(*config, headerBuffer.Get(), headerBuffer.Count(), apiOptions);
+    FillApiConnectOptions(*config, headerBuffer.Get(), headerCount, apiOptions);
 
     ::wknet::session::WebSocketHandle apiWs = nullptr;
     NTSTATUS status = ::wknet::session::WebSocketConnectSync(
@@ -116,13 +118,17 @@ NTSTATUS ConnectAsyncEx(wknet::http::Session* session, const ConnectConfig* conf
         return STATUS_INVALID_PARAMETER;
     }
 
-    ::wknet::HeapArray<::wknet::session::WebSocketHeader> headerBuffer(kMaxConnectHeaders);
+    const SIZE_T headerCount = config->HeaderCount;
+    if (headerCount > ::wknet::session::MaxHeadersPerRequest) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    ::wknet::HeapArray<::wknet::session::WebSocketHeader> headerBuffer(headerCount != 0 ? headerCount : 1);
     if (!headerBuffer.IsValid()) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
     ::wknet::session::WebSocketConnectOptions apiOptions = {};
-    FillApiConnectOptions(*config, headerBuffer.Get(), headerBuffer.Count(), apiOptions);
+    FillApiConnectOptions(*config, headerBuffer.Get(), headerCount, apiOptions);
 
     ::wknet::session::AsyncOperationHandle apiOp = nullptr;
     NTSTATUS status = ::wknet::session::WebSocketConnectAsync(

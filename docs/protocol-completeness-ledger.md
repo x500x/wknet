@@ -35,7 +35,7 @@
 | 真流式请求体上传 | SHOULD for large clients | 已实现/已验证 | `session/HttpH1Dispatch.cpp`、`session/HttpH2Dispatch.cpp`、`http_api/Body.cpp` | `tests/http_api_tests.cpp`、`tests/high_level_api_tests.cpp` | `BodyCreateStream` / `HttpRequestSetBodySource` 按块读取；已知长度走 `Content-Length`，未知长度走库生成 chunked。 |
 | `Expect: 100-continue` | SHOULD | 已实现/已验证 | `http1/HttpRequest.cpp`、`http1/HttpParser.cpp`、`session/HttpH1Dispatch.cpp` | `tests/http_parser_tests.cpp`、`tests/http_api_tests.cpp` | 显式 opt-in；默认关闭；覆盖 100 后发 body、final/417 不发 body、超时后发 body、断连错误。 |
 | 响应状态行与 HTTP/1.0/1.1 版本 | MUST | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 拒绝非 1.x 与非法状态码。 |
-| header section、单行、头数量上限 | MUST/安全边界 | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 64 KiB header section、8 KiB 单行、≤200 headers。 |
+| header section、单行、头数量上限 | MUST/安全边界 | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 64 KiB header section、8 KiB 单行、≤512 headers（session MaxResponseHeaders 可下调）。 |
 | obs-fold | OBSOLETE | 安全拒绝 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 拒绝而非规范化。 |
 | `Content-Length`/`Transfer-Encoding` 冲突 | MUST reject | 已实现/已验证 | `HttpParser.cpp`、`HttpTransferCoding.cpp` | `tests/http_parser_tests.cpp` | 多 CL、TE+CL 冲突拒绝。 |
 | response body framing：CL/chunked/close-delimited/no-body | MUST | 已实现/已验证 | `HttpParser.cpp` | `tests/http_parser_tests.cpp` | 1xx/204/205/304/HEAD 无 body。 |

@@ -22,8 +22,8 @@ namespace session
 namespace
 {
     constexpr ULONG kSseClientMagic = 0x4B485353; // 'KHSS'
-    constexpr SIZE_T kMaxQueuedEvents = 32;
-    constexpr SIZE_T kMaxExtraHeaders = MaxHeadersPerRequest;
+    constexpr SIZE_T kDefaultQueuedEvents = 32;
+    constexpr SIZE_T kHardMaxQueuedEvents = 4096;
 }
 
     struct SseQueuedEvent final
@@ -48,12 +48,14 @@ namespace
         SIZE_T UrlLength = 0;
         char* SeedLastEventId = nullptr;
         SIZE_T SeedLastEventIdLength = 0;
-        StoredHeader ExtraHeaders[kMaxExtraHeaders] = {};
+        StoredHeaderList ExtraHeaders = {};
         SIZE_T ExtraHeaderCount = 0;
         ULONGLONG TraceOperationId = 0;
 
         sse::EventStreamParser Parser = {};
-        SseQueuedEvent Queue[kMaxQueuedEvents] = {};
+        SseQueuedEvent* Queue = nullptr;
+        SIZE_T QueueCapacity = 0;
+        SIZE_T QueueMaxCapacity = kDefaultQueuedEvents;
         SIZE_T QueueHead = 0;
         SIZE_T QueueTail = 0;
         SIZE_T QueueCount = 0;
@@ -111,18 +113,87 @@ namespace
         event = {};
     }
 
+    void ReleaseEventQueueStorage(_Inout_ SseClientObject* client) noexcept
+    {
+        if (client->Queue != nullptr) {
+            for (SIZE_T index = 0; index < client->QueueCapacity; ++index) {
+                FreeQueuedEvent(client->Queue[index]);
+            }
+            FreeApiMemory(client->Queue);
+            client->Queue = nullptr;
+        }
+        client->QueueCapacity = 0;
+        client->QueueHead = 0;
+        client->QueueTail = 0;
+        client->QueueCount = 0;
+    }
+
     void ClearEventQueue(_Inout_ SseClientObject* client) noexcept
     {
 #if defined(WKNET_USER_MODE_TEST)
         std::lock_guard<std::mutex> guard(client->QueueMutex);
 #endif
-        for (SIZE_T index = 0; index < kMaxQueuedEvents; ++index) {
-            FreeQueuedEvent(client->Queue[index]);
+        if (client->Queue != nullptr) {
+            for (SIZE_T index = 0; index < client->QueueCapacity; ++index) {
+                FreeQueuedEvent(client->Queue[index]);
+            }
         }
         client->QueueHead = 0;
         client->QueueTail = 0;
         client->QueueCount = 0;
         FreeQueuedEvent(client->LastDelivered);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS EnsureEventQueueCapacity(_Inout_ SseClientObject* client, SIZE_T neededCount) noexcept
+    {
+        if (neededCount == 0) {
+            return STATUS_SUCCESS;
+        }
+        if (neededCount > client->QueueMaxCapacity) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        if (neededCount <= client->QueueCapacity) {
+            return STATUS_SUCCESS;
+        }
+
+        SIZE_T newCapacity = client->QueueCapacity == 0 ? kDefaultQueuedEvents : client->QueueCapacity;
+        while (newCapacity < neededCount) {
+            if (newCapacity > (client->QueueMaxCapacity / 2)) {
+                newCapacity = client->QueueMaxCapacity;
+                break;
+            }
+            newCapacity *= 2;
+        }
+        if (newCapacity > client->QueueMaxCapacity) {
+            newCapacity = client->QueueMaxCapacity;
+        }
+        if (newCapacity < neededCount) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        auto* replacement = static_cast<SseQueuedEvent*>(
+            AllocateApiMemory(newCapacity * sizeof(SseQueuedEvent)));
+        if (replacement == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        RtlZeroMemory(replacement, newCapacity * sizeof(SseQueuedEvent));
+
+        for (SIZE_T index = 0; index < client->QueueCount; ++index) {
+            const SIZE_T source = client->QueueCapacity == 0
+                ? 0
+                : ((client->QueueHead + index) % client->QueueCapacity);
+            if (client->Queue != nullptr) {
+                replacement[index] = client->Queue[source];
+                client->Queue[source] = {};
+            }
+        }
+        FreeApiMemory(client->Queue);
+        client->Queue = replacement;
+        client->QueueCapacity = newCapacity;
+        client->QueueHead = 0;
+        client->QueueTail = client->QueueCount;
+        return STATUS_SUCCESS;
     }
 
     void SignalOpen(_Inout_ SseClientObject* client, NTSTATUS status) noexcept
@@ -231,22 +302,26 @@ namespace
 #if defined(WKNET_USER_MODE_TEST)
         {
             std::lock_guard<std::mutex> guard(client->QueueMutex);
-            if (client->QueueCount >= kMaxQueuedEvents) {
+            NTSTATUS growStatus = EnsureEventQueueCapacity(client, client->QueueCount + 1);
+            if (!NT_SUCCESS(growStatus)) {
                 FreeQueuedEvent(slot);
-                return STATUS_INSUFFICIENT_RESOURCES;
+                return growStatus;
             }
             client->Queue[client->QueueTail] = slot;
-            client->QueueTail = (client->QueueTail + 1) % kMaxQueuedEvents;
+            client->QueueTail = (client->QueueTail + 1) % client->QueueCapacity;
             ++client->QueueCount;
         }
 #else
-        if (client->QueueCount >= kMaxQueuedEvents) {
-            FreeQueuedEvent(slot);
-            return STATUS_INSUFFICIENT_RESOURCES;
+        {
+            NTSTATUS growStatus = EnsureEventQueueCapacity(client, client->QueueCount + 1);
+            if (!NT_SUCCESS(growStatus)) {
+                FreeQueuedEvent(slot);
+                return growStatus;
+            }
+            client->Queue[client->QueueTail] = slot;
+            client->QueueTail = (client->QueueTail + 1) % client->QueueCapacity;
+            ++client->QueueCount;
         }
-        client->Queue[client->QueueTail] = slot;
-        client->QueueTail = (client->QueueTail + 1) % kMaxQueuedEvents;
-        ++client->QueueCount;
 #endif
         SignalEventAvailable(client);
         return STATUS_SUCCESS;
@@ -269,7 +344,7 @@ namespace
         FreeQueuedEvent(client->LastDelivered);
         client->LastDelivered = client->Queue[client->QueueHead];
         client->Queue[client->QueueHead] = {};
-        client->QueueHead = (client->QueueHead + 1) % kMaxQueuedEvents;
+        client->QueueHead = (client->QueueHead + 1) % client->QueueCapacity;
         --client->QueueCount;
 
         if (out != nullptr) {
@@ -482,11 +557,7 @@ namespace
 
     void ReleaseExtraHeaders(_Inout_ SseClientObject* client) noexcept
     {
-        for (SIZE_T index = 0; index < client->ExtraHeaderCount; ++index) {
-            FreeApiMemory(client->ExtraHeaders[index].Name);
-            FreeApiMemory(client->ExtraHeaders[index].Value);
-            client->ExtraHeaders[index] = {};
-        }
+        ReleaseStoredHeaderList(client->ExtraHeaders);
         client->ExtraHeaderCount = 0;
     }
 
@@ -507,6 +578,7 @@ namespace
         }
 
         ClearEventQueue(client);
+        ReleaseEventQueueStorage(client);
         client->Parser.Reset();
         ReleaseExtraHeaders(client);
         FreeApiMemory(client->UrlCopy);
@@ -530,6 +602,11 @@ namespace
         _Inout_ SseClientObject* client) noexcept
     {
         client->Options = options;
+        client->QueueMaxCapacity = options.MaxQueuedEvents == 0
+            ? kDefaultQueuedEvents
+            : (options.MaxQueuedEvents > kHardMaxQueuedEvents
+                ? kHardMaxQueuedEvents
+                : options.MaxQueuedEvents);
         client->Options.Url = nullptr;
         client->Options.LastEventId = nullptr;
         client->Options.Headers = nullptr;
@@ -554,8 +631,12 @@ namespace
         }
 
         if (options.Headers != nullptr && options.HeaderCount != 0) {
-            if (options.HeaderCount > kMaxExtraHeaders) {
+            if (options.HeaderCount > MaxHeadersPerRequest) {
                 return STATUS_INVALID_PARAMETER;
+            }
+            NTSTATUS status = EnsureStoredHeaderListCapacity(client->ExtraHeaders, options.HeaderCount);
+            if (!NT_SUCCESS(status)) {
+                return status == STATUS_BUFFER_TOO_SMALL ? STATUS_INVALID_PARAMETER : status;
             }
             for (SIZE_T index = 0; index < options.HeaderCount; ++index) {
                 const SseHeader& src = options.Headers[index];
@@ -580,6 +661,7 @@ namespace
                 client->ExtraHeaders[index].Value = value;
                 client->ExtraHeaders[index].ValueLength = src.ValueLength;
                 ++client->ExtraHeaderCount;
+                client->ExtraHeaders.Count = client->ExtraHeaderCount;
             }
         }
 

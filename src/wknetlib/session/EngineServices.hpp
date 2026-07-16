@@ -150,6 +150,14 @@ namespace session
     void ReleaseStoredHeader(_Inout_ StoredHeader& header) noexcept
         ;
 
+    void ReleaseStoredHeaderList(_Inout_ StoredHeaderList& list) noexcept
+        ;
+
+    NTSTATUS EnsureStoredHeaderListCapacity(
+        _Inout_ StoredHeaderList& list,
+        SIZE_T requiredCount) noexcept
+        ;
+
     void ReleaseOwnedBody(_Inout_ Request& request) noexcept
         ;
 

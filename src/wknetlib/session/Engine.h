@@ -44,7 +44,8 @@ namespace session
     constexpr SIZE_T DefaultRequestBufferBytes = 16 * 1024;
     constexpr SIZE_T DefaultMaxResponseBytes = 0;
     constexpr SIZE_T DefaultMaxWebSocketMessageBytes = 1024 * 1024;
-    constexpr SIZE_T DefaultMaxResponseHeaders = 64;
+    // Default matches the library hard ceiling; callers may lower per session.
+    constexpr SIZE_T DefaultMaxResponseHeaders = WKNET_HARD_MAX_HEADERS;
     constexpr SIZE_T MaxConfigurableResponseHeaders = WKNET_HARD_MAX_HEADERS;
     constexpr SIZE_T DefaultHttp2MaxHeaderBlockBytes = 32 * 1024;
     constexpr SIZE_T MaxHttp2HeaderBlockBytes = WKNET_HARD_MAX_HEADER_SECTION;

@@ -14,6 +14,7 @@
 using wknet::session::BuildHttp2RequestHeaders;
 using wknet::session::Http2ContentLengthBufferLength;
 using wknet::session::Http2MaxHeaderNameLength;
+using wknet::HeapArray;
 using wknet::session::Http2MaxRequestHeaders;
 using wknet::session::Http2RequestOptions;
 using wknet::session::Http2TransportMode;
@@ -1060,8 +1061,11 @@ namespace
         options.ExtraHeaders = extraHeaders;
         options.ExtraHeaderCount = sizeof(extraHeaders) / sizeof(extraHeaders[0]);
 
-        HttpHeader headers[Http2MaxRequestHeaders] = {};
-        char lowerHeaderNames[Http2MaxRequestHeaders][Http2MaxHeaderNameLength] = {};
+        HeapArray<HttpHeader> headersStorage(Http2MaxRequestHeaders);
+        HeapArray<char> lowerHeaderNameStorage(Http2MaxRequestHeaders * Http2MaxHeaderNameLength);
+        Expect(headersStorage.IsValid() && lowerHeaderNameStorage.IsValid(), "header scratch allocates");
+        HttpHeader* headers = headersStorage.Get();
+        auto* lowerHeaderNames = reinterpret_cast<char (*)[Http2MaxHeaderNameLength]>(lowerHeaderNameStorage.Get());
         char contentLength[Http2ContentLengthBufferLength] = {};
         size_t headerCount = 0;
 
@@ -1101,8 +1105,11 @@ namespace
         options.ExtraHeaders = extraHeaders;
         options.ExtraHeaderCount = sizeof(extraHeaders) / sizeof(extraHeaders[0]);
 
-        HttpHeader headers[Http2MaxRequestHeaders] = {};
-        char lowerHeaderNames[Http2MaxRequestHeaders][Http2MaxHeaderNameLength] = {};
+        HeapArray<HttpHeader> headersStorage(Http2MaxRequestHeaders);
+        HeapArray<char> lowerHeaderNameStorage(Http2MaxRequestHeaders * Http2MaxHeaderNameLength);
+        Expect(headersStorage.IsValid() && lowerHeaderNameStorage.IsValid(), "header scratch allocates");
+        HttpHeader* headers = headersStorage.Get();
+        auto* lowerHeaderNames = reinterpret_cast<char (*)[Http2MaxHeaderNameLength]>(lowerHeaderNameStorage.Get());
         char contentLength[Http2ContentLengthBufferLength] = {};
         size_t headerCount = 0;
 
@@ -1138,8 +1145,11 @@ namespace
         options.ExtraHeaders = validTe;
         options.ExtraHeaderCount = sizeof(validTe) / sizeof(validTe[0]);
 
-        HttpHeader headers[Http2MaxRequestHeaders] = {};
-        char lowerHeaderNames[Http2MaxRequestHeaders][Http2MaxHeaderNameLength] = {};
+        HeapArray<HttpHeader> headersStorage(Http2MaxRequestHeaders);
+        HeapArray<char> lowerHeaderNameStorage(Http2MaxRequestHeaders * Http2MaxHeaderNameLength);
+        Expect(headersStorage.IsValid() && lowerHeaderNameStorage.IsValid(), "header scratch allocates");
+        HttpHeader* headers = headersStorage.Get();
+        auto* lowerHeaderNames = reinterpret_cast<char (*)[Http2MaxHeaderNameLength]>(lowerHeaderNameStorage.Get());
         char contentLength[Http2ContentLengthBufferLength] = {};
         size_t headerCount = 0;
 
@@ -1184,8 +1194,11 @@ namespace
         options.Authority = MakeText("example.com");
         options.ConnectProtocol = MakeText("websocket");
 
-        HttpHeader headers[Http2MaxRequestHeaders] = {};
-        char lowerHeaderNames[Http2MaxRequestHeaders][Http2MaxHeaderNameLength] = {};
+        HeapArray<HttpHeader> headersStorage(Http2MaxRequestHeaders);
+        HeapArray<char> lowerHeaderNameStorage(Http2MaxRequestHeaders * Http2MaxHeaderNameLength);
+        Expect(headersStorage.IsValid() && lowerHeaderNameStorage.IsValid(), "header scratch allocates");
+        HttpHeader* headers = headersStorage.Get();
+        auto* lowerHeaderNames = reinterpret_cast<char (*)[Http2MaxHeaderNameLength]>(lowerHeaderNameStorage.Get());
         char contentLength[Http2ContentLengthBufferLength] = {};
         size_t headerCount = 0;
 
@@ -1233,8 +1246,11 @@ namespace
         options.ExtraHeaders = extraHeaders;
         options.ExtraHeaderCount = extraHeaderCount;
 
-        HttpHeader headers[Http2MaxRequestHeaders] = {};
-        char lowerHeaderNames[Http2MaxRequestHeaders][Http2MaxHeaderNameLength] = {};
+        HeapArray<HttpHeader> headersStorage(Http2MaxRequestHeaders);
+        HeapArray<char> lowerHeaderNameStorage(Http2MaxRequestHeaders * Http2MaxHeaderNameLength);
+        Expect(headersStorage.IsValid() && lowerHeaderNameStorage.IsValid(), "header scratch allocates");
+        HttpHeader* headers = headersStorage.Get();
+        auto* lowerHeaderNames = reinterpret_cast<char (*)[Http2MaxHeaderNameLength]>(lowerHeaderNameStorage.Get());
         char contentLength[Http2ContentLengthBufferLength] = {};
         size_t headerCount = 0;
 
@@ -1265,8 +1281,11 @@ namespace
         options.ExtraHeaders = mixedCaseName;
         options.ExtraHeaderCount = sizeof(mixedCaseName) / sizeof(mixedCaseName[0]);
 
-        HttpHeader headers[Http2MaxRequestHeaders] = {};
-        char lowerHeaderNames[Http2MaxRequestHeaders][Http2MaxHeaderNameLength] = {};
+        HeapArray<HttpHeader> headersStorage(Http2MaxRequestHeaders);
+        HeapArray<char> lowerHeaderNameStorage(Http2MaxRequestHeaders * Http2MaxHeaderNameLength);
+        Expect(headersStorage.IsValid() && lowerHeaderNameStorage.IsValid(), "header scratch allocates");
+        HttpHeader* headers = headersStorage.Get();
+        auto* lowerHeaderNames = reinterpret_cast<char (*)[Http2MaxHeaderNameLength]>(lowerHeaderNameStorage.Get());
         char contentLength[Http2ContentLengthBufferLength] = {};
         size_t headerCount = 0;
 

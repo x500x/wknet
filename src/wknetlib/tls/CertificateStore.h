@@ -9,10 +9,12 @@ namespace tls
 {
     constexpr SIZE_T CertificateSha256ThumbprintLength = 32;
     constexpr SIZE_T CertificateSha1ThumbprintLength = 20;
-    constexpr SIZE_T CertificateMaxTrustAnchors = 16;
-    constexpr SIZE_T CertificateMaxAuthorityBundles = 8;
-    constexpr SIZE_T CertificateMaxRevocationEntries = 32;
+    // Hard growth ceilings for engine-facing store lists (not fixed arrays).
+    constexpr SIZE_T CertificateMaxTrustAnchors = 1024;
+    constexpr SIZE_T CertificateMaxAuthorityBundles = 256;
+    constexpr SIZE_T CertificateMaxRevocationEntries = 4096;
     constexpr SIZE_T CertificateMaxRevocationUris = 4;
+    constexpr SIZE_T CertificateMaxPins = 1024;
 
     struct CertificateTrustAnchor final
     {

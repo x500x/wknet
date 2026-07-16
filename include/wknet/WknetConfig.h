@@ -21,9 +21,9 @@ namespace wknet
     constexpr SIZE_T MinRsaModulusBits = 2048;
     constexpr SIZE_T HttpMaxHeaderLineBytes = 8 * 1024;
     constexpr SIZE_T HttpMaxHeaderBytes = 64 * 1024;
-    constexpr SIZE_T HttpMaxHeaders = 200;
+    constexpr SIZE_T HttpMaxHeaders = WKNET_HARD_MAX_HEADERS;
     constexpr SIZE_T HttpMaxChunks = 8192;
-    constexpr SIZE_T HttpMaxTrailers = 256;
+    constexpr SIZE_T HttpMaxTrailers = WKNET_HARD_MAX_HEADERS;
     constexpr SIZE_T HttpMaxChunkSizeLineBytes = 32;
     constexpr SIZE_T WsMaxControlFramesPerReceive = 100;
     constexpr SIZE_T TlsMaxPostHandshakeMessagesPerRecord = 8;

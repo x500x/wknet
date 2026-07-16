@@ -151,6 +151,16 @@ namespace session
         }
 
         if (request.BodySourceCallback != nullptr) {
+            // Headers-only build for streaming body sources.
+            SIZE_T headerOnlyEstimate =
+                request.PathLength + request.HostLength + 512 + (request.HeaderCount * 128);
+            if (headerOnlyEstimate < 4096) {
+                headerOnlyEstimate = 4096;
+            }
+            status = WorkspaceEnsureRequestCapacity(&workspace, headerOnlyEstimate);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
             return http1::HttpRequestBuilder::BuildHeaders(
                 buildOptions,
                 reinterpret_cast<char*>(workspace.Request.Data),
@@ -158,11 +168,40 @@ namespace session
                 requestLength);
         }
 
-        return http1::HttpRequestBuilder::Build(
+        // Grow request wire buffer for long targets / many headers / large bodies.
+        SIZE_T estimate =
+            request.PathLength +
+            request.HostLength +
+            request.BodyLength +
+            1024 +
+            (request.HeaderCount * 192) +
+            (request.TrailerCount * 192);
+        if (estimate < workspace.Request.Length) {
+            estimate = workspace.Request.Length;
+        }
+        status = WorkspaceEnsureRequestCapacity(&workspace, estimate);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        status = http1::HttpRequestBuilder::Build(
             buildOptions,
             reinterpret_cast<char*>(workspace.Request.Data),
             workspace.Request.Length,
             requestLength);
+        if (status == STATUS_BUFFER_TOO_SMALL && requestLength != nullptr && *requestLength != 0) {
+            // Builder may report exact needed size; grow once and retry.
+            status = WorkspaceEnsureRequestCapacity(&workspace, *requestLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            status = http1::HttpRequestBuilder::Build(
+                buildOptions,
+                reinterpret_cast<char*>(workspace.Request.Data),
+                workspace.Request.Length,
+                requestLength);
+        }
+        return status;
     }
 
     _Must_inspect_result_

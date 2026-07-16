@@ -6,10 +6,13 @@
 namespace wknet::http {
     constexpr SIZE_T CertificateSha256ThumbprintLength = 32;
     constexpr SIZE_T CertificateSha1ThumbprintLength = 20;
-    constexpr SIZE_T CertificateMaxTrustAnchors = 16;
-    constexpr SIZE_T CertificateMaxAuthorityBundles = 8;
-    constexpr SIZE_T CertificateMaxPins = 32;
-    constexpr SIZE_T CertificateMaxRevocationEntries = 32;
+    // Soft documentation defaults / hard growth ceilings for store lists.
+    // Actual storage is heap-grown; these are not fixed embedded array sizes.
+    constexpr SIZE_T CertificateMaxTrustAnchors = 1024;
+    constexpr SIZE_T CertificateMaxAuthorityBundles = 256;
+    constexpr SIZE_T CertificateMaxPins = 1024;
+    constexpr SIZE_T CertificateMaxRevocationEntries = 4096;
+    // Public query ABI still exposes a fixed URI slot array of this size.
     constexpr SIZE_T CertificateMaxRevocationUris = 4;
 
     struct CertificateStore;

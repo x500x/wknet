@@ -76,8 +76,9 @@ struct Request final
 struct Headers final
 {
     ULONG Magic = detail::HighHeadersMagic;
-    detail::StoredHeader Items[::wknet::session::MaxHeadersPerRequest] = {};
+    detail::StoredHeader* Items = nullptr;
     SIZE_T Count = 0;
+    SIZE_T Capacity = 0;
 };
 
 struct Body final
@@ -100,8 +101,9 @@ struct Body final
     void* StreamContext = nullptr;
     SIZE_T StreamContentLength = 0;
     bool StreamContentLengthKnown = false;
-    detail::StoredHeader Trailers[::wknet::session::MaxHeadersPerRequest] = {};
+    detail::StoredHeader* Trailers = nullptr;
     SIZE_T TrailerCount = 0;
+    SIZE_T TrailerCapacity = 0;
 };
 
 struct Cache final
@@ -116,15 +118,20 @@ struct CertificateStore final
     ::wknet::tls::CertificateStore* Engine = nullptr;
     CertificateRevocationProviderCallback RevocationProvider = nullptr;
     void* RevocationProviderContext = nullptr;
-    ::wknet::tls::CertificateTrustAnchor TrustAnchors[CertificateMaxTrustAnchors] = {};
+    ::wknet::tls::CertificateTrustAnchor* TrustAnchors = nullptr;
     SIZE_T TrustAnchorCount = 0;
-    ::wknet::tls::CertificateAuthorityBundle AuthorityBundles[CertificateMaxAuthorityBundles] = {};
-    UCHAR* OwnedAuthorityBundleData[CertificateMaxAuthorityBundles] = {};
+    SIZE_T TrustAnchorCapacity = 0;
+    ::wknet::tls::CertificateAuthorityBundle* AuthorityBundles = nullptr;
     SIZE_T AuthorityBundleCount = 0;
-    ::wknet::tls::CertificatePin Pins[CertificateMaxPins] = {};
+    SIZE_T AuthorityBundleCapacity = 0;
+    UCHAR** OwnedAuthorityBundleData = nullptr;
+    SIZE_T OwnedAuthorityBundleCapacity = 0;
+    ::wknet::tls::CertificatePin* Pins = nullptr;
     SIZE_T PinCount = 0;
-    ::wknet::tls::CertificateRevocationEntry RevocationEntries[CertificateMaxRevocationEntries] = {};
+    SIZE_T PinCapacity = 0;
+    ::wknet::tls::CertificateRevocationEntry* RevocationEntries = nullptr;
     SIZE_T RevocationEntryCount = 0;
+    SIZE_T RevocationEntryCapacity = 0;
     ::wknet::tls::CertificateStoreOptions EngineOptions = {};
 };
 

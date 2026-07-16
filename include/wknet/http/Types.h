@@ -209,6 +209,7 @@ namespace wknet::http {
 
     constexpr SIZE_T DefaultRequestBufferBytes = 16 * 1024;
     constexpr SIZE_T DefaultMaxResponseBytes = 0;
+    constexpr SIZE_T DefaultMaxResponseHeaders = WKNET_HARD_MAX_HEADERS;
     constexpr SIZE_T DefaultMaxWebSocketMessageBytes = 1024 * 1024;
     constexpr ULONG DefaultPoolCapacity = 8;
     constexpr ULONG DefaultMaxConnsPerHost = 2;
@@ -344,6 +345,9 @@ namespace wknet::http {
         SIZE_T RequestBufferBytes = DefaultRequestBufferBytes;
         // 0 means no caller-imposed buffered response byte limit.
         SIZE_T MaxResponseBytes = DefaultMaxResponseBytes;
+        // Response header field-count capacity. Default/max is WKNET_HARD_MAX_HEADERS
+        // (512). Callers may lower it; values above the library hard ceiling are rejected.
+        SIZE_T MaxResponseHeaders = DefaultMaxResponseHeaders;
         ULONG PoolCapacity = DefaultPoolCapacity;
         ULONG MaxConnsPerHost = DefaultMaxConnsPerHost;
         ULONG IdleTimeoutMs = DefaultIdleTimeoutMs;

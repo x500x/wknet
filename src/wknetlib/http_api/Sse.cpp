@@ -8,7 +8,6 @@
 namespace wknet::sse {
 namespace
 {
-    constexpr SIZE_T kMaxConnectHeaders = 16;
     constexpr ULONG kPublicSseMagic = 0x50535345; // 'PSSE'
 
     struct PublicSseClient final
@@ -84,6 +83,7 @@ namespace
         dst.ReceiveTimeoutMs = src.ReceiveTimeoutMs;
         dst.MaxEventBytes = src.MaxEventBytes;
         dst.MaxParserBufferBytes = src.MaxParserBufferBytes;
+        dst.MaxQueuedEvents = src.MaxQueuedEvents;
         dst.RequireEventStreamContentType = src.RequireEventStreamContentType;
         wknet::http::detail::FillApiTlsOptions(src.Tls, dst.Tls);
         dst.Family = wknet::http::detail::ToApiAddressFamily(src.Family);
@@ -168,7 +168,11 @@ NTSTATUS ConnectEx(
         return STATUS_INVALID_PARAMETER;
     }
 
-    ::wknet::HeapArray<::wknet::session::SseHeader> headerBuffer(kMaxConnectHeaders);
+    const SIZE_T headerCount = config->HeaderCount;
+    if (headerCount > ::wknet::session::MaxHeadersPerRequest) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    ::wknet::HeapArray<::wknet::session::SseHeader> headerBuffer(headerCount != 0 ? headerCount : 1);
     if (!headerBuffer.IsValid()) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
@@ -188,7 +192,7 @@ NTSTATUS ConnectEx(
         *config,
         publicClient,
         headerBuffer.Get(),
-        headerBuffer.Count(),
+        headerCount,
         apiOptions);
 
     ::wknet::session::SseClientObject* engineClient = nullptr;

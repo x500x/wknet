@@ -47,9 +47,9 @@ namespace session
         bool SatisfiedRange = false;
         bool OnlyIfCachedMiss = false;
         HttpCacheSnapshot Snapshot = {};
-        char IfNoneMatch[MaxHeaderValueLength + 1] = {};
+        char IfNoneMatch[HttpCacheValidatorFieldBytes + 1] = {};
         SIZE_T IfNoneMatchLength = 0;
-        char IfModifiedSince[MaxHeaderValueLength + 1] = {};
+        char IfModifiedSince[HttpCacheValidatorFieldBytes + 1] = {};
         SIZE_T IfModifiedSinceLength = 0;
     };
 

@@ -12,7 +12,9 @@ namespace wknet
     // still set a nonzero MaxResponseBytes per session or per send.
     constexpr SIZE_T WKNET_HARD_MAX_RESPONSE_BYTES = 0;
     constexpr SIZE_T WKNET_HARD_MAX_HEADER_SECTION = 64 * 1024;
-    constexpr SIZE_T WKNET_HARD_MAX_HEADERS = 200;
+    // Absolute library ceiling for header/trailer field counts (request + response).
+    // Session MaxResponseHeaders may lower this per session; default is this value.
+    constexpr SIZE_T WKNET_HARD_MAX_HEADERS = 512;
     // 0 means decoded aggregate size follows the response buffer/caller cap.
     // Decompression-bomb protection is enforced by expansion ratio.
     constexpr SIZE_T WKNET_HARD_MAX_DECODED_BYTES = 0;

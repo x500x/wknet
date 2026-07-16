@@ -14,8 +14,11 @@ namespace session
     constexpr SIZE_T WorkspaceRequestBufferBytes = DefaultRequestBufferBytes;
     constexpr SIZE_T WorkspaceResponseInitialBytes = 4 * 1024;
     constexpr SIZE_T WorkspaceDecodedBodyBytes = 16 * 1024;
-    constexpr SIZE_T WorkspaceHttpHeaderScratchBytes = 24 * 1024;
-    constexpr SIZE_T WorkspaceHttp2HeaderScratchBytes = 16 * 1024;
+    // Sized for WKNET_HARD_MAX_HEADERS (512) request/response slots + host/target(16 KiB).
+    // H1: 4 * 512 * sizeof(HttpHeader≈32) + host + target ≈ 82 KiB → 96 KiB.
+    // H2: 3 header tables + 2 * 512 * MaxHeaderNameLength(128) lower-name rows ≈ 180 KiB → 192 KiB.
+    constexpr SIZE_T WorkspaceHttpHeaderScratchBytes = 96 * 1024;
+    constexpr SIZE_T WorkspaceHttp2HeaderScratchBytes = 192 * 1024;
     constexpr SIZE_T WorkspaceTlsHandshakeScratchBytes = 32 * 1024;
     constexpr SIZE_T WorkspaceCertificateScratchBytes = 64 * 1024;
     constexpr SIZE_T WorkspaceWebSocketFrameScratchBytes = 16 * 1024;
@@ -73,6 +76,11 @@ namespace session
 
     _Must_inspect_result_
     NTSTATUS WorkspaceEnsureResponseCapacity(
+        _Inout_ Workspace* workspace,
+        SIZE_T requiredCapacity) noexcept;
+
+    _Must_inspect_result_
+    NTSTATUS WorkspaceEnsureRequestCapacity(
         _Inout_ Workspace* workspace,
         SIZE_T requiredCapacity) noexcept;
 

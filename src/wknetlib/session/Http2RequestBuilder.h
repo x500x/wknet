@@ -3,15 +3,21 @@
 #include "http1/HttpRequest.h"
 #include "http1/HttpTypes.h"
 #include "http2/Http2Connection.h"
+#include "session/HandleTypes.h"
+#include <wknet/WknetLimits.h>
 
 namespace wknet
 {
 namespace session
 {
-    constexpr SIZE_T Http2MaxRequestHeaders = 16;
-    constexpr SIZE_T Http2MaxRequestTrailers = 16;
-    constexpr SIZE_T Http2MaxHeaderNameLength = 64;
+    // Protocol-safety ceiling for one H2 request header block (pseudo + regular).
+    // Storage is capacity-driven; these are not fixed stack array sizes.
+    constexpr SIZE_T Http2MaxRequestHeaders = WKNET_HARD_MAX_HEADERS;
+    constexpr SIZE_T Http2MaxRequestTrailers = WKNET_HARD_MAX_HEADERS;
+    constexpr SIZE_T Http2MaxHeaderNameLength = MaxHeaderNameLength;
     constexpr SIZE_T Http2ContentLengthBufferLength = 32;
+    // Reserved pseudo/promoted slots so user extras are not squeezed out.
+    constexpr SIZE_T Http2ReservedHeaderSlots = 12;
 
     enum class Http2TransportMode : UCHAR
     {

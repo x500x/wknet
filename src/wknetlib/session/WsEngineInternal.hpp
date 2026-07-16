@@ -17,8 +17,9 @@ namespace session
         WebSocketConnectOptions Options = {};
         char* Url = nullptr;
         char* Subprotocol = nullptr;
-        StoredHeader HeaderStorage[MaxHeadersPerRequest] = {};
-        WebSocketHeader HeaderViews[MaxHeadersPerRequest] = {};
+        StoredHeaderList HeaderStorage = {};
+        WebSocketHeader* HeaderViews = nullptr;
+        SIZE_T HeaderViewCapacity = 0;
         SIZE_T HeaderCount = 0;
         WebSocketHandle WebSocket = nullptr;
         volatile LONG SessionOperationEnded = 0;
@@ -213,10 +214,10 @@ namespace session
 
         FreeApiMemory(connectContext->Url);
         FreeApiMemory(connectContext->Subprotocol);
-        for (SIZE_T index = 0; index < connectContext->HeaderCount && index < MaxHeadersPerRequest; ++index) {
-            FreeApiMemory(connectContext->HeaderStorage[index].Name);
-            FreeApiMemory(connectContext->HeaderStorage[index].Value);
-        }
+        ReleaseStoredHeaderList(connectContext->HeaderStorage);
+        FreeApiMemory(connectContext->HeaderViews);
+        connectContext->HeaderViews = nullptr;
+        connectContext->HeaderViewCapacity = 0;
         connectContext->HeaderCount = 0;
         WebSocketHandle websocket = TakeAsyncWebSocketConnectResult(connectContext);
         if (websocket != nullptr) {

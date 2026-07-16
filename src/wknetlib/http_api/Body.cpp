@@ -1,4 +1,5 @@
 #include <wknet/http/Body.h>
+#include <wknet/WknetLimits.h>
 #include "session/detail/HttpHandles.h"
 
 namespace wknet::http {
@@ -275,7 +276,7 @@ NTSTATUS BodyCreateJsonCopyEx(const char* json, SIZE_T jsonLength, Body** body) 
 
 NTSTATUS BodyCreateForm(const NameValuePair* pairs, SIZE_T pairCount, Body** body) noexcept
 {
-    if (pairs == nullptr || pairCount == 0 || pairCount > ::wknet::session::MaxHeadersPerRequest) {
+    if (pairs == nullptr || pairCount == 0 || pairCount > WKNET_HARD_MAX_HEADERS) {
         return STATUS_INVALID_PARAMETER;
     }
     Body* created = nullptr;
@@ -299,7 +300,7 @@ NTSTATUS BodyCreateForm(const NameValuePair* pairs, SIZE_T pairCount, Body** bod
 
 NTSTATUS BodyCreateMultipart(const MultipartPart* parts, SIZE_T partCount, Body** body) noexcept
 {
-    if (parts == nullptr || partCount == 0 || partCount > ::wknet::session::MaxHeadersPerRequest) {
+    if (parts == nullptr || partCount == 0 || partCount > WKNET_HARD_MAX_HEADERS) {
         return STATUS_INVALID_PARAMETER;
     }
     for (SIZE_T index = 0; index < partCount; ++index) {
@@ -434,8 +435,27 @@ NTSTATUS BodyAddTrailerEx(Body* body, const char* name, SIZE_T nameLength, const
     if (IsForbiddenTrailer(name, nameLength)) {
         return STATUS_NOT_SUPPORTED;
     }
-    if (body->TrailerCount >= ::wknet::session::MaxHeadersPerRequest) {
+    if (body->TrailerCount >= WKNET_HARD_MAX_HEADERS) {
         return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    if (body->TrailerCount == body->TrailerCapacity) {
+        SIZE_T newCapacity = body->TrailerCapacity == 0 ? ::wknet::session::InitialHeaderListCapacity : body->TrailerCapacity * 2;
+        if (newCapacity > WKNET_HARD_MAX_HEADERS) {
+            newCapacity = WKNET_HARD_MAX_HEADERS;
+        }
+        if (newCapacity <= body->TrailerCapacity) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        auto* replacement = ::wknet::AllocateNonPagedArray<detail::StoredHeader>(newCapacity);
+        if (replacement == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        if (body->Trailers != nullptr && body->TrailerCount != 0) {
+            RtlCopyMemory(replacement, body->Trailers, body->TrailerCount * sizeof(detail::StoredHeader));
+        }
+        ::wknet::FreeNonPagedArray(body->Trailers);
+        body->Trailers = replacement;
+        body->TrailerCapacity = newCapacity;
     }
     char* nameCopy = CopyText(name, nameLength);
     if (nameCopy == nullptr) {
@@ -466,11 +486,17 @@ void BodyRelease(Body* body) noexcept
     ::wknet::FreeNonPagedArray(body->FormPairs);
     ::wknet::FreeNonPagedArray(body->MultipartParts);
     ::wknet::FreeNonPagedArray(body->FilePath);
-    for (SIZE_T index = 0; index < body->TrailerCount; ++index) {
-        ::wknet::FreeNonPagedArray(body->Trailers[index].Name);
-        ::wknet::FreeNonPagedArray(body->Trailers[index].Value);
-        body->Trailers[index] = {};
+    if (body->Trailers != nullptr) {
+        for (SIZE_T index = 0; index < body->TrailerCount; ++index) {
+            ::wknet::FreeNonPagedArray(body->Trailers[index].Name);
+            ::wknet::FreeNonPagedArray(body->Trailers[index].Value);
+            body->Trailers[index] = {};
+        }
+        ::wknet::FreeNonPagedArray(body->Trailers);
+        body->Trailers = nullptr;
     }
+    body->TrailerCount = 0;
+    body->TrailerCapacity = 0;
     body->Magic = 0;
     ::wknet::FreeNonPagedObject(body);
 }

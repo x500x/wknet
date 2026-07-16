@@ -11,6 +11,73 @@ namespace session
         header = {};
     }
 
+    void ReleaseStoredHeaderList(_Inout_ StoredHeaderList& list) noexcept
+    {
+        if (list.Items != nullptr) {
+            for (SIZE_T index = 0; index < list.Count; ++index) {
+                ReleaseStoredHeader(list.Items[index]);
+            }
+            FreeApiMemory(list.Items);
+        }
+        list.Items = nullptr;
+        list.Count = 0;
+        list.Capacity = 0;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS EnsureStoredHeaderListCapacity(
+        _Inout_ StoredHeaderList& list,
+        SIZE_T requiredCount) noexcept
+    {
+        if (requiredCount == 0) {
+            return STATUS_SUCCESS;
+        }
+        if (requiredCount > MaxHeadersPerRequest) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        if (requiredCount <= list.Capacity) {
+            return STATUS_SUCCESS;
+        }
+
+        SIZE_T newCapacity = list.Capacity;
+        if (newCapacity == 0) {
+            newCapacity = InitialHeaderListCapacity;
+        }
+        while (newCapacity < requiredCount) {
+            SIZE_T doubled = 0;
+            if (!AddSize(newCapacity, newCapacity, &doubled)) {
+                newCapacity = requiredCount;
+                break;
+            }
+            newCapacity = doubled;
+        }
+        if (newCapacity > MaxHeadersPerRequest) {
+            newCapacity = MaxHeadersPerRequest;
+        }
+        if (newCapacity < requiredCount) {
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+
+        if (newCapacity == 0 ||
+            newCapacity > (static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) / sizeof(StoredHeader))) {
+            return STATUS_INTEGER_OVERFLOW;
+        }
+        const SIZE_T bytes = newCapacity * sizeof(StoredHeader);
+
+        auto* replacement = static_cast<StoredHeader*>(AllocateApiMemory(bytes));
+        if (replacement == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        RtlZeroMemory(replacement, bytes);
+        if (list.Items != nullptr && list.Count != 0) {
+            RtlCopyMemory(replacement, list.Items, list.Count * sizeof(StoredHeader));
+        }
+        FreeApiMemory(list.Items);
+        list.Items = replacement;
+        list.Capacity = newCapacity;
+        return STATUS_SUCCESS;
+    }
+
     void ReleaseOwnedBody(_Inout_ Request& request) noexcept
     {
         if (request.OwnedBody != nullptr && request.OwnedBodyCapacity != 0) {
@@ -186,8 +253,11 @@ namespace session
             !IsValidHeaderText(value, valueLength, false)) {
             return STATUS_INVALID_PARAMETER;
         }
-        if (request.HeaderCount >= MaxHeadersPerRequest) {
-            return STATUS_INSUFFICIENT_RESOURCES;
+
+        const SIZE_T needed = request.HeaderCount + 1;
+        NTSTATUS status = EnsureStoredHeaderListCapacity(request.Headers, needed);
+        if (!NT_SUCCESS(status)) {
+            return status == STATUS_BUFFER_TOO_SMALL ? STATUS_INSUFFICIENT_RESOURCES : status;
         }
 
         char* nameCopy = AllocateTextCopy(name, nameLength);
@@ -204,11 +274,13 @@ namespace session
             }
         }
 
-        StoredHeader& header = request.Headers[request.HeaderCount++];
+        StoredHeader& header = request.Headers[request.HeaderCount];
         header.Name = nameCopy;
         header.NameLength = nameLength;
         header.Value = valueCopy;
         header.ValueLength = valueLength;
+        ++request.HeaderCount;
+        request.Headers.Count = request.HeaderCount;
         return STATUS_SUCCESS;
     }
 
@@ -243,8 +315,11 @@ namespace session
         if (IsForbiddenRequestTrailerField(name, nameLength)) {
             return STATUS_NOT_SUPPORTED;
         }
-        if (request.TrailerCount >= MaxHeadersPerRequest) {
-            return STATUS_INSUFFICIENT_RESOURCES;
+
+        const SIZE_T needed = request.TrailerCount + 1;
+        NTSTATUS status = EnsureStoredHeaderListCapacity(request.Trailers, needed);
+        if (!NT_SUCCESS(status)) {
+            return status == STATUS_BUFFER_TOO_SMALL ? STATUS_INSUFFICIENT_RESOURCES : status;
         }
 
         char* nameCopy = AllocateTextCopy(name, nameLength);
@@ -261,11 +336,13 @@ namespace session
             }
         }
 
-        StoredHeader& trailer = request.Trailers[request.TrailerCount++];
+        StoredHeader& trailer = request.Trailers[request.TrailerCount];
         trailer.Name = nameCopy;
         trailer.NameLength = nameLength;
         trailer.Value = valueCopy;
         trailer.ValueLength = valueLength;
+        ++request.TrailerCount;
+        request.Trailers.Count = request.TrailerCount;
         return STATUS_SUCCESS;
     }
 
@@ -279,7 +356,10 @@ namespace session
                     request.Headers[moveIndex - 1] = request.Headers[moveIndex];
                 }
                 --request.HeaderCount;
-                request.Headers[request.HeaderCount] = {};
+                request.Headers.Count = request.HeaderCount;
+                if (request.Headers.Items != nullptr) {
+                    request.Headers[request.HeaderCount] = {};
+                }
             }
             else {
                 ++index;
@@ -850,6 +930,8 @@ namespace session
         request.UrlLength = 0;
         request.SchemeLength = 0;
         request.HostLength = 0;
+        FreeNonPagedArray(request.Path);
+        request.Path = nullptr;
         request.PathLength = 0;
         request.Port = 0;
         ReleaseOwnedBody(request);
@@ -858,14 +940,9 @@ namespace session
         request.OwnedTlsServerName = nullptr;
         request.OwnedTlsAlpn = nullptr;
 
-        for (SIZE_T index = 0; index < request.HeaderCount && index < MaxHeadersPerRequest; ++index) {
-            ReleaseStoredHeader(request.Headers[index]);
-        }
+        ReleaseStoredHeaderList(request.Headers);
         request.HeaderCount = 0;
-
-        for (SIZE_T index = 0; index < request.TrailerCount && index < MaxHeadersPerRequest; ++index) {
-            ReleaseStoredHeader(request.Trailers[index]);
-        }
+        ReleaseStoredHeaderList(request.Trailers);
         request.TrailerCount = 0;
     }
 
@@ -908,7 +985,6 @@ namespace session
 #endif
         RtlCopyMemory(clone->Scheme, source.Scheme, sizeof(clone->Scheme));
         RtlCopyMemory(clone->Host, source.Host, sizeof(clone->Host));
-        RtlCopyMemory(clone->Path, source.Path, sizeof(clone->Path));
         RtlCopyMemory(clone->MultipartBoundary, source.MultipartBoundary, sizeof(clone->MultipartBoundary));
 
         if (source.Url != nullptr && source.UrlLength != 0) {
@@ -918,6 +994,18 @@ namespace session
                 FreeHandle(clone);
                 return STATUS_INSUFFICIENT_RESOURCES;
             }
+        }
+
+        if (source.Path != nullptr && source.PathLength != 0) {
+            clone->Path = AllocateNonPagedArray<char>(source.PathLength + 1);
+            if (clone->Path == nullptr) {
+                ReleaseRequestStorage(*clone);
+                FreeHandle(clone);
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            RtlCopyMemory(clone->Path, source.Path, source.PathLength);
+            clone->Path[source.PathLength] = '\0';
+            clone->PathLength = source.PathLength;
         }
 
         if (source.Tls.ServerName == source.Host) {

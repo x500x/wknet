@@ -912,7 +912,7 @@ NTSTATUS SubmitRequestTrailers(HttpH3DispatchContext *context) noexcept
     }
     HeapArray<qpack::QpackFieldView> fields;
     HeapArray<char> lowerNames;
-    NTSTATUS status = BuildFieldViews(request.Trailers, request.TrailerCount, fields, lowerNames);
+    NTSTATUS status = BuildFieldViews(request.Trailers.Data(), request.TrailerCount, fields, lowerNames);
     if (!NT_SUCCESS(status))
     {
         return status;

@@ -336,6 +336,33 @@ namespace
         return GrowBuffer(workspace->PoolType, &workspace->Response, newLength);
     }
 
+    NTSTATUS WorkspaceEnsureRequestCapacity(Workspace* workspace, SIZE_T requiredCapacity) noexcept
+    {
+        if (workspace == nullptr || requiredCapacity == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        if (requiredCapacity <= workspace->Request.Length) {
+            return STATUS_SUCCESS;
+        }
+
+        SIZE_T newLength = workspace->Request.Length;
+        if (newLength == 0) {
+            newLength = DefaultRequestBufferBytes;
+        }
+
+        while (newLength < requiredCapacity) {
+            if (AddWouldOverflow(newLength, newLength)) {
+                newLength = requiredCapacity;
+            }
+            else {
+                newLength *= 2;
+            }
+        }
+
+        return GrowBuffer(workspace->PoolType, &workspace->Request, newLength);
+    }
+
     NTSTATUS WorkspaceAppendResponse(Workspace* workspace, const UCHAR* data, SIZE_T dataLength) noexcept
     {
         if (workspace == nullptr || (data == nullptr && dataLength != 0)) {

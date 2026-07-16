@@ -14,17 +14,27 @@ namespace session
     struct HttpCache;
     struct AltSvcCache;
 
-    constexpr SIZE_T MaxHeadersPerRequest = 16;
+    // Growth ceilings for client-owned request headers. These are protocol-safety
+    // bounds (same family as WKNET_HARD_*), not fixed array sizes: storage is a
+    // pointer + count + capacity list that doubles until these limits.
+    constexpr SIZE_T MaxHeadersPerRequest = WKNET_HARD_MAX_HEADERS;
     constexpr SIZE_T MaxHeadersPerResponse = MaxConfigurableResponseHeaders;
-    constexpr SIZE_T MaxTrailersPerResponse = 16;
+    constexpr SIZE_T MaxTrailersPerResponse = WKNET_HARD_MAX_HEADERS;
+    // Names stay modest (token identifiers); values follow the H1 line budget so
+    // Cookie / JWT / large Authorization headers are accepted.
     constexpr SIZE_T MaxHeaderNameLength = 128;
-    constexpr SIZE_T MaxHeaderValueLength = 512;
+    constexpr SIZE_T MaxHeaderValueLength = 8 * 1024;
+    // Cache validators keep a smaller inline copy until M5 heap conversion.
+    constexpr SIZE_T HttpCacheValidatorFieldBytes = 512;
     constexpr SIZE_T MaxSchemeLength = 5;
     constexpr SIZE_T MaxHostLength = PoolMaxHostLength;
     constexpr SIZE_T MaxHostHeaderLength = MaxHostLength + 9;
-    constexpr SIZE_T MaxPathLength = 8000;
+    // Hard ceiling for request-target length (path + query). Storage is heap-owned.
+    // Keep this within Workspace header-scratch budget (see HttpRequestTargetScratchBytes).
+    constexpr SIZE_T MaxPathLength = 16 * 1024;
     constexpr SIZE_T MaxServiceNameLength = 5;
     constexpr SIZE_T InitialOwnedBodyCapacity = 256;
+    constexpr SIZE_T InitialHeaderListCapacity = 8;
     constexpr SIZE_T MultipartBoundaryStorageLength = 64;
 
     enum class HandleKind : ULONG
@@ -70,6 +80,37 @@ namespace session
         SIZE_T ValueLength = 0;
     };
 
+    // Growable NonPaged header table. Items is null when Capacity == 0.
+    // Call EnsureStoredHeaderListCapacity before writing a new slot.
+    struct StoredHeaderList
+    {
+        StoredHeader* Items = nullptr;
+        SIZE_T Count = 0;
+        SIZE_T Capacity = 0;
+
+        _Ret_maybenull_
+        StoredHeader* Data() noexcept
+        {
+            return Items;
+        }
+
+        _Ret_maybenull_
+        const StoredHeader* Data() const noexcept
+        {
+            return Items;
+        }
+
+        StoredHeader& operator[](SIZE_T index) noexcept
+        {
+            return Items[index];
+        }
+
+        const StoredHeader& operator[](SIZE_T index) const noexcept
+        {
+            return Items[index];
+        }
+    };
+
     struct Request
     {
         HandleHeader Header = { HandleKind::Request, 0, nullptr };
@@ -81,7 +122,7 @@ namespace session
         SIZE_T SchemeLength = 0;
         char Host[MaxHostLength + 1] = {};
         SIZE_T HostLength = 0;
-        char Path[MaxPathLength + 1] = {};
+        char* Path = nullptr;
         SIZE_T PathLength = 0;
         USHORT Port = 0;
         const UCHAR* Body = nullptr;
@@ -97,9 +138,9 @@ namespace session
         SIZE_T OwnedBodyCapacity = 0;
         ULONG BodyBuildCounter = 0;
         char MultipartBoundary[MultipartBoundaryStorageLength] = {};
-        StoredHeader Headers[MaxHeadersPerRequest] = {};
-        SIZE_T HeaderCount = 0;
-        StoredHeader Trailers[MaxHeadersPerRequest] = {};
+        StoredHeaderList Headers = {};
+        SIZE_T HeaderCount = 0; // mirrors Headers.Count for call-site compatibility
+        StoredHeaderList Trailers = {};
         SIZE_T TrailerCount = 0;
         TlsOptions Tls = {};
         char* OwnedTlsServerName = nullptr;
@@ -152,12 +193,12 @@ namespace session
         SIZE_T SchemeLength = 0;
         char Host[MaxHostLength + 1] = {};
         SIZE_T HostLength = 0;
-        char Path[MaxPathLength + 1] = {};
+        char* Path = nullptr;
         SIZE_T PathLength = 0;
         USHORT Port = 0;
         char* Subprotocol = nullptr;
         SIZE_T SubprotocolLength = 0;
-        StoredHeader ExtraHeaders[MaxHeadersPerRequest] = {};
+        StoredHeaderList ExtraHeaders = {};
         SIZE_T ExtraHeaderCount = 0;
         UCHAR* LastMessage = nullptr;
         SIZE_T LastMessageLength = 0;

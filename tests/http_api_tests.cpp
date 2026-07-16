@@ -428,7 +428,8 @@ namespace
         char Body[256] = {};
         SIZE_T BodyLength = 0;
         SIZE_T ObservedBodyLength = 0;
-        char BuiltRequest[1024] = {};
+        // Sized large enough for dynamic multi-header / long Cookie request wires.
+        char BuiltRequest[8 * 1024] = {};
         SIZE_T BuiltRequestLength = 0;
         SIZE_T CallCount = 0;
         const char* RawResponse = nullptr;
@@ -886,7 +887,7 @@ namespace
 
         ++capture->CallCount;
         static const char marker[] = " HTTP/1.1\r\n";
-        constexpr SIZE_T requestTargetLength = 8000;
+        constexpr SIZE_T requestTargetLength = 16384;
         if (request->BuiltRequest != nullptr &&
             request->BuiltRequestLength > 4 + requestTargetLength + sizeof(marker) - 1 &&
             memcmp(request->BuiltRequest, "GET /", 5) == 0 &&
@@ -2877,8 +2878,8 @@ namespace
         wknet::http::SessionClose(session);
         wknet::http::test::SetHttpTransport(nullptr, nullptr);
 
-        static char longUrl[sizeof("http://example.com/") + 7999] = {};
-        static char tooLongUrl[sizeof("http://example.com/") + 8000] = {};
+        static char longUrl[sizeof("http://example.com/") + 16383] = {};
+        static char tooLongUrl[sizeof("http://example.com/") + 16384] = {};
         const char prefix[] = "http://example.com/";
         memcpy(longUrl, prefix, sizeof(prefix) - 1);
         for (SIZE_T index = sizeof(prefix) - 1; index < sizeof(longUrl) - 1; ++index) {
@@ -2900,16 +2901,16 @@ namespace
 
         resp = nullptr;
         status = wknet::http::Get(session, longUrl, Length(longUrl), &resp);
-        Expect(NT_SUCCESS(status), "8000-octet request-target succeeds");
+        Expect(NT_SUCCESS(status), "16384-octet request-target succeeds");
         Expect(longCapture.CallCount == 1, "long URL reaches transport");
-        Expect(longCapture.SawLongOriginForm, "long URL is sent as 8000-octet origin-form target");
+        Expect(longCapture.SawLongOriginForm, "long URL is sent as 16384-octet origin-form target");
         wknet::http::ResponseRelease(resp);
 
         request = nullptr;
         status = wknet::http::RequestCreate(session, &request);
         Expect(NT_SUCCESS(status), "RequestCreate succeeds for too-long URL");
         status = wknet::http::RequestSetUrl(request, tooLongUrl, Length(tooLongUrl));
-        Expect(status == STATUS_BUFFER_TOO_SMALL, "RequestSetUrl rejects request-target above 8000 octets");
+        Expect(status == STATUS_BUFFER_TOO_SMALL, "RequestSetUrl rejects request-target above 16384 octets");
 
         wknet::http::RequestRelease(request);
         wknet::http::SessionClose(session);
@@ -4311,10 +4312,12 @@ namespace
             wknet::net::WskAddressFamily::Any);
         Expect(NT_SUCCESS(status), "initial capacity ResolveAll succeeds");
 
-        for (SIZE_T index = 1; index <= 16; ++index) {
-            wchar_t host[] = L"host00.example";
-            host[4] = static_cast<wchar_t>(L'0' + (index / 10));
-            host[5] = static_cast<wchar_t>(L'0' + (index % 10));
+        // ResolveCacheCapacity is 256. Fill 256 additional hosts after host00 so host00 is evicted.
+        for (SIZE_T index = 1; index <= 256; ++index) {
+            wchar_t host[] = L"host000.example";
+            host[4] = static_cast<wchar_t>(L'0' + ((index / 100) % 10));
+            host[5] = static_cast<wchar_t>(L'0' + ((index / 10) % 10));
+            host[6] = static_cast<wchar_t>(L'0' + (index % 10));
             status = client.ResolveAll(
                 host,
                 L"443",
@@ -4333,7 +4336,8 @@ namespace
             &addressCount,
             wknet::net::WskAddressFamily::Any);
         Expect(NT_SUCCESS(status), "evicted ResolveAll succeeds");
-        Expect(capture.CallCount == 18, "DNS cache capacity replacement evicts the oldest slot");
+        // 1 initial host00 + 256 fillers + 1 re-resolve after eviction = 258.
+        Expect(capture.CallCount == 258, "DNS cache capacity replacement evicts the oldest slot");
 
         wknet::net::WskTestSetResolveAll(nullptr, nullptr);
         wknet::net::WskTestClearResolveCache();
@@ -5269,6 +5273,8 @@ namespace
 
     void TestSessionRequestBufferBytesLimitsRequestBody() noexcept
     {
+        // Request wire buffer now grows on demand. RequestBufferBytes is an initial
+        // size hint, not a hard rejection threshold for ordinary request bodies.
         static UCHAR body[20 * 1024] = {};
         for (SIZE_T index = 0; index < sizeof(body); ++index) {
             body[index] = static_cast<UCHAR>('a' + (index % 26));
@@ -5296,9 +5302,10 @@ namespace
             body,
             sizeof(body),
             &resp);
-        Expect(status == STATUS_BUFFER_TOO_SMALL, "default request buffer rejects oversized request body");
-        Expect(captured.CallCount == 0, "oversized request body does not reach transport");
-        Expect(resp == nullptr, "oversized request body does not allocate response");
+        Expect(NT_SUCCESS(status), "default request buffer grows for oversized request body");
+        Expect(captured.CallCount == 1, "grown request body reaches transport");
+        Expect(captured.ObservedBodyLength == sizeof(body), "grown request body length reaches transport");
+        Expect(wknet::http::ResponseStatusCode(resp) == 200, "grown request body response parses");
         wknet::http::ResponseRelease(resp);
         wknet::http::SessionClose(session);
 
@@ -5418,6 +5425,69 @@ namespace
 
         wknet::http::ResponseRelease(resp);
         wknet::http::RequestRelease(request);
+        wknet::http::SessionClose(session);
+        wknet::http::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+
+    void TestDynamicRequestHeadersAndLongValues() noexcept
+    {
+        const char* response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Length: 2\r\n"
+            "\r\n"
+            "ok";
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = Length(response);
+        wknet::http::test::SetHttpTransport(TestTransport, &captured);
+
+        wknet::http::Session* session = nullptr;
+        NTSTATUS status = wknet::http::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for dynamic headers");
+
+        wknet::http::Headers* headers = nullptr;
+        status = wknet::http::HeadersCreate(&headers);
+        Expect(NT_SUCCESS(status), "HeadersCreate succeeds");
+
+        // More than the old fixed 16-slot table.
+        for (ULONG index = 0; index < 40; ++index) {
+            char name[32] = {};
+            char value[16] = {};
+            const int nameLength = sprintf_s(name, "X-Dyn-%u", index);
+            const int valueLength = sprintf_s(value, "%u", index);
+            Expect(nameLength > 0 && valueLength > 0, "dynamic header names format");
+            status = wknet::http::HeadersAddEx(
+                headers,
+                name,
+                static_cast<SIZE_T>(nameLength),
+                value,
+                static_cast<SIZE_T>(valueLength));
+            Expect(NT_SUCCESS(status), "HeadersAddEx grows past old 16-slot cap");
+        }
+
+        // Cookie/JWT-sized value that exceeds the old 512-byte hard cap.
+        char longCookie[700] = {};
+        memset(longCookie, 'a', sizeof(longCookie) - 1);
+        status = wknet::http::HeadersAdd(headers, "Cookie", longCookie);
+        Expect(NT_SUCCESS(status), "HeadersAdd accepts >512-byte Cookie");
+
+        wknet::http::Response* resp = nullptr;
+        const char* url = "http://example.com/dynamic-headers";
+        status = wknet::http::GetEx(session, url, Length(url), headers, nullptr, &resp);
+        Expect(NT_SUCCESS(status), "GetEx with many/long headers succeeds");
+        Expect(captured.CallCount == 1, "dynamic header request reaches transport");
+        Expect(captured.BuiltRequestLength != 0, "transport captured request bytes");
+        Expect(
+            BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "Cookie:"),
+            "long Cookie is serialized");
+        Expect(
+            BufferContainsLiteral(captured.BuiltRequest, captured.BuiltRequestLength, "X-Dyn-39:"),
+            "40th custom header is serialized");
+        Expect(captured.BuiltRequestLength > 512, "request wire size exceeds old value cap");
+
+        wknet::http::ResponseRelease(resp);
+        wknet::http::HeadersRelease(headers);
         wknet::http::SessionClose(session);
         wknet::http::test::SetHttpTransport(nullptr, nullptr);
     }
@@ -8081,6 +8151,7 @@ int main() noexcept
     TestTrailersRejectedWithoutChunked();
     TestSessionRequestBufferBytesLimitsRequestBody();
     TestRequestBuilder();
+    TestDynamicRequestHeadersAndLongValues();
     TestRequestTransferEncodingRejected();
     TestRequestReservedHeadersRejected();
     TestExpectContinueSendsBodyAfter100();

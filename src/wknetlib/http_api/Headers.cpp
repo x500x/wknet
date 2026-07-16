@@ -1,5 +1,6 @@
 #include <wknet/http/Headers.h>
 #include "session/detail/HttpHandles.h"
+#include <wknet/WknetLimits.h>
 
 namespace wknet::http {
 namespace
@@ -110,12 +111,59 @@ namespace
 
     SIZE_T FindHeader(const Headers& headers, const char* name, SIZE_T nameLength) noexcept
     {
+        if (headers.Items == nullptr) {
+            return headers.Count;
+        }
         for (SIZE_T index = 0; index < headers.Count; ++index) {
             if (TextEqualsIgnoreCase(headers.Items[index].Name, headers.Items[index].NameLength, name, nameLength)) {
                 return index;
             }
         }
         return headers.Count;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS EnsureHeadersCapacity(Headers& headers, SIZE_T requiredCount) noexcept
+    {
+        if (requiredCount == 0) {
+            return STATUS_SUCCESS;
+        }
+        if (requiredCount > WKNET_HARD_MAX_HEADERS) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        if (requiredCount <= headers.Capacity) {
+            return STATUS_SUCCESS;
+        }
+
+        SIZE_T newCapacity = headers.Capacity == 0 ? ::wknet::session::InitialHeaderListCapacity : headers.Capacity;
+        while (newCapacity < requiredCount) {
+            if (newCapacity > (static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) / 2)) {
+                newCapacity = requiredCount;
+                break;
+            }
+            newCapacity *= 2;
+        }
+        if (newCapacity > WKNET_HARD_MAX_HEADERS) {
+            newCapacity = WKNET_HARD_MAX_HEADERS;
+        }
+        if (newCapacity < requiredCount) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        if (newCapacity > (static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) / sizeof(detail::StoredHeader))) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        auto* replacement = ::wknet::AllocateNonPagedArray<detail::StoredHeader>(newCapacity);
+        if (replacement == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        if (headers.Items != nullptr && headers.Count != 0) {
+            RtlCopyMemory(replacement, headers.Items, headers.Count * sizeof(detail::StoredHeader));
+        }
+        ::wknet::FreeNonPagedArray(headers.Items);
+        headers.Items = replacement;
+        headers.Capacity = newCapacity;
+        return STATUS_SUCCESS;
     }
 }
 
@@ -150,8 +198,11 @@ NTSTATUS HeadersAddEx(Headers* headers, const char* name, SIZE_T nameLength, con
     }
 
     const SIZE_T slot = FindHeader(*headers, name, nameLength);
-    if (slot == headers->Count && headers->Count >= ::wknet::session::MaxHeadersPerRequest) {
-        return STATUS_INSUFFICIENT_RESOURCES;
+    if (slot == headers->Count) {
+        NTSTATUS status = EnsureHeadersCapacity(*headers, headers->Count + 1);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
     }
 
     char* nameCopy = CopyText(name, nameLength);
@@ -183,10 +234,15 @@ void HeadersRelease(Headers* headers) noexcept
     if (headers == nullptr || headers->Magic != detail::HighHeadersMagic) {
         return;
     }
-    for (SIZE_T index = 0; index < headers->Count; ++index) {
-        ReleaseStoredHeader(headers->Items[index]);
+    if (headers->Items != nullptr) {
+        for (SIZE_T index = 0; index < headers->Count; ++index) {
+            ReleaseStoredHeader(headers->Items[index]);
+        }
+        ::wknet::FreeNonPagedArray(headers->Items);
+        headers->Items = nullptr;
     }
     headers->Count = 0;
+    headers->Capacity = 0;
     headers->Magic = 0;
     ::wknet::FreeNonPagedObject(headers);
 }

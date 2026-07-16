@@ -94,8 +94,11 @@ namespace session
         request->SchemeLength = parsed->SchemeLength;
         RtlCopyMemory(request->Host, parsed->Host, sizeof(request->Host));
         request->HostLength = parsed->HostLength;
-        RtlCopyMemory(request->Path, parsed->Path, sizeof(request->Path));
+        FreeNonPagedArray(request->Path);
+        request->Path = parsed->Path;
         request->PathLength = parsed->PathLength;
+        parsed->Path = nullptr;
+        parsed->PathLength = 0;
         request->Port = parsed->Port;
 
         if (!request->HasTlsOverride &&

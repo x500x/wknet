@@ -104,6 +104,12 @@ namespace session
             return status;
         }
 
+        HeapArray<char> pathScratch(MaxPathLength + 1);
+        if (!pathScratch.IsValid()) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
         status = ParseUrlParts(
             newWebSocket->Url,
             newWebSocket->UrlLength,
@@ -114,8 +120,8 @@ namespace session
             newWebSocket->Host,
             sizeof(newWebSocket->Host),
             &newWebSocket->HostLength,
-            newWebSocket->Path,
-            sizeof(newWebSocket->Path),
+            pathScratch.Get(),
+            pathScratch.Count(),
             &newWebSocket->PathLength,
             &newWebSocket->Port);
         if (!NT_SUCCESS(status)) {
@@ -123,6 +129,14 @@ namespace session
             FreeHandle(newWebSocket);
             return status;
         }
+        newWebSocket->Path = AllocateNonPagedArray<char>(newWebSocket->PathLength + 1);
+        if (newWebSocket->Path == nullptr) {
+            ReleaseWebSocketStorage(*newWebSocket);
+            FreeHandle(newWebSocket);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        RtlCopyMemory(newWebSocket->Path, pathScratch.Get(), newWebSocket->PathLength);
+        newWebSocket->Path[newWebSocket->PathLength] = '\0';
         if (WebSocketModeRequiresWss(options) &&
             !TextEqualsLiteralIgnoreCase(newWebSocket->Scheme, newWebSocket->SchemeLength, "wss")) {
             ReleaseWebSocketStorage(*newWebSocket);
@@ -516,6 +530,19 @@ namespace session
                 return STATUS_INVALID_PARAMETER;
             }
 
+            NTSTATUS headerStatus = EnsureStoredHeaderListCapacity(context->HeaderStorage, options->HeaderCount);
+            if (!NT_SUCCESS(headerStatus)) {
+                CleanupAsyncWebSocketConnectContext(context);
+                return headerStatus == STATUS_BUFFER_TOO_SMALL ? STATUS_INVALID_PARAMETER : headerStatus;
+            }
+            context->HeaderViews = static_cast<WebSocketHeader*>(AllocateApiMemory(options->HeaderCount * sizeof(WebSocketHeader)));
+            if (context->HeaderViews == nullptr) {
+                CleanupAsyncWebSocketConnectContext(context);
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            context->HeaderViewCapacity = options->HeaderCount;
+            RtlZeroMemory(context->HeaderViews, options->HeaderCount * sizeof(WebSocketHeader));
+
             for (SIZE_T index = 0; index < options->HeaderCount; ++index) {
                 const WebSocketHeader& src = options->Headers[index];
                 StoredHeader& dst = context->HeaderStorage[index];
@@ -537,6 +564,7 @@ namespace session
                 dst.ValueLength = src.ValueLength;
 
                 context->HeaderCount = index + 1;
+                context->HeaderStorage.Count = context->HeaderCount;
 
                 context->HeaderViews[index].Name = dst.Name;
                 context->HeaderViews[index].NameLength = dst.NameLength;

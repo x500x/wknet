@@ -2,6 +2,7 @@
 #include "session/detail/HttpHandles.h"
 #include <wknet/http/Body.h>
 #include <wknet/http/Headers.h>
+#include <wknet/WknetLimits.h>
 #include <wknet/http/Options.h>
 #include "session/Engine.h"
 
@@ -236,8 +237,35 @@ NTSTATUS RequestSetHeader(Request* request, const char* name, SIZE_T nameLength,
             return status;
         }
     }
-    if (request->BuilderHeaders->Count >= ::wknet::session::MaxHeadersPerRequest) {
+    // Builder stores caller headers as-is (including reserved names); send-time
+    // validation rejects controlled fields. Do not route through HeadersAddEx,
+    // which filters Host/Content-Length/Connection/TE/Transfer-Encoding.
+    if (request->BuilderHeaders->Count >= WKNET_HARD_MAX_HEADERS) {
         return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    if (request->BuilderHeaders->Count == request->BuilderHeaders->Capacity) {
+        SIZE_T newCapacity = request->BuilderHeaders->Capacity == 0
+            ? ::wknet::session::InitialHeaderListCapacity
+            : request->BuilderHeaders->Capacity * 2;
+        if (newCapacity > WKNET_HARD_MAX_HEADERS) {
+            newCapacity = WKNET_HARD_MAX_HEADERS;
+        }
+        if (newCapacity <= request->BuilderHeaders->Capacity) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        auto* replacement = ::wknet::AllocateNonPagedArray<detail::StoredHeader>(newCapacity);
+        if (replacement == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        if (request->BuilderHeaders->Items != nullptr && request->BuilderHeaders->Count != 0) {
+            RtlCopyMemory(
+                replacement,
+                request->BuilderHeaders->Items,
+                request->BuilderHeaders->Count * sizeof(detail::StoredHeader));
+        }
+        ::wknet::FreeNonPagedArray(request->BuilderHeaders->Items);
+        request->BuilderHeaders->Items = replacement;
+        request->BuilderHeaders->Capacity = newCapacity;
     }
     char* nameCopy = CopyText(name, nameLength);
     if (nameCopy == nullptr) {
