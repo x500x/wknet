@@ -16,6 +16,7 @@ namespace wknet::ktest
         Http2,
         Http3,
         Ws,
+        Sse,
         Net,
         Transport,
         Rtl,
@@ -71,6 +72,7 @@ namespace wknet::ktest
         case Module::Http2: return "http2";
         case Module::Http3: return "http3";
         case Module::Ws: return "ws";
+        case Module::Sse: return "sse";
         case Module::Net: return "net";
         case Module::Transport: return "transport";
         case Module::Rtl: return "rtl";

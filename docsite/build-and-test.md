@@ -20,8 +20,11 @@ msbuild wknet.sln /m /restore /p:Configuration=Debug /p:Platform=x64
 
 ```powershell
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_parser_tests -Run
+pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_chunked_decoder_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test websocket_frame_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test websocket_client_tests -Run
+pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test sse_parser_tests -Run
+pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test sse_client_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http2_frame_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test hpack_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http2_client_tests -Run
@@ -31,6 +34,12 @@ pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_record_tests -Ru
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test tls_interop_matrix_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test http_api_tests -Run
 pwsh -NoLogo -NoProfile -File .\tools\build-tests.ps1 -Test high_level_api_tests -Run
+```
+
+回归组（含 SSE）也可：
+
+```powershell
+pwsh -NoLogo -NoProfile -File .\tools\run-http3-test-suite.ps1 -Group Regression
 ```
 
 已构建二进制可直接运行：`.\tests\out\bin\<name>.exe`。
@@ -49,9 +58,11 @@ pwsh -NoLogo -NoProfile -File .\tests\integration\tls_matrix.ps1 -Configuration 
 
 | 路径 | 用途 |
 |------|------|
-| `src/wknettest/samples/HighLevelApiSamples.cpp` | 产品 API 场景 |
+| `src/wknettest/samples/HighLevelApiSamples.cpp` | 产品 API 场景（含 SSE fake transport 样品） |
 | `src/wknettest/samples/AdvancedScenarioSamples.cpp` | 边界与错误路径 |
 | `tests/high_level_api_tests.cpp` | 用户态 API 回归 |
+| `tests/sse_parser_tests.cpp` | SSE 解析器 |
+| `tests/sse_client_tests.cpp` | SSE 客户端 + 重连 |
 
 测试钩子见 [内部边界](internals.md)。Trace 检查：
 

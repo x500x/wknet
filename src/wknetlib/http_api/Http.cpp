@@ -95,6 +95,9 @@ namespace
         dst.Flags = src.Flags;
         dst.MaxRedirects = src.MaxRedirects;
         dst.ExpectContinueTimeoutMilliseconds = src.ExpectContinueTimeoutMs;
+        dst.ResponseHeaderTimeoutMilliseconds = src.ResponseHeaderTimeoutMs;
+        dst.BodyReadTimeoutMilliseconds = src.BodyReadTimeoutMs;
+        dst.BodyIdleTimeoutMilliseconds = src.BodyIdleTimeoutMs;
         dst.HeaderCallback = reinterpret_cast<::wknet::session::HeaderCallback>(src.OnHeader);
         dst.BodyCallback = reinterpret_cast<::wknet::session::BodyCallback>(src.OnBody);
         dst.CallbackContext = src.CallbackContext;

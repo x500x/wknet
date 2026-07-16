@@ -692,6 +692,121 @@ namespace http1
         }
     }
 
+    NTSTATUS HttpParser::ParseResponseHeaders(
+        const char* data,
+        SIZE_T dataLength,
+        const HttpParseOptions& options,
+        HttpResponse& response,
+        SIZE_T* contentLengthOut) noexcept
+    {
+        response = {};
+        if (contentLengthOut != nullptr) {
+            *contentLengthOut = 0;
+        }
+
+        if (data == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (dataLength == 0) {
+            return STATUS_MORE_PROCESSING_REQUIRED;
+        }
+
+        const SIZE_T headerEnd = FindHeaderEnd(data, dataLength);
+        if (headerEnd == InvalidOffset) {
+            return STATUS_MORE_PROCESSING_REQUIRED;
+        }
+        if (headerEnd > HttpMaxHeaderBytes) {
+            response = {};
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        const SIZE_T statusLineEnd = FindCrlf(data, dataLength, 0);
+        if (statusLineEnd == InvalidOffset || statusLineEnd + 2 > headerEnd) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        NTSTATUS status = ParseStatusLine({ data, statusLineEnd }, response);
+        if (!NT_SUCCESS(status)) {
+            response = {};
+            return status;
+        }
+
+        SIZE_T headerCount = 0;
+        status = ParseHeaders(
+            data,
+            dataLength,
+            statusLineEnd + 2,
+            headerEnd,
+            options.Headers,
+            options.HeaderCapacity,
+            &headerCount);
+        if (!NT_SUCCESS(status)) {
+            response = {};
+            return status;
+        }
+
+        response.Headers = options.Headers;
+        response.HeaderCount = headerCount;
+        response.Trailers = options.Trailers;
+        response.TrailerCount = 0;
+        response.Body = nullptr;
+        response.BodyLength = 0;
+        response.BytesConsumed = headerEnd;
+
+        if (options.ResponseBodyForbidden || StatusCodeHasNoBody(response.StatusCode)) {
+            response.BodyKind = HttpBodyKind::None;
+            return STATUS_SUCCESS;
+        }
+
+        HttpTransferCodingInfo transferInfo = {};
+        status = HttpTransferCoding::Parse(response.Headers, response.HeaderCount, transferInfo);
+        if (!NT_SUCCESS(status)) {
+            response = {};
+            return status;
+        }
+
+        if (transferInfo.HasTransferEncoding &&
+            (response.MajorVersion < 1 ||
+                (response.MajorVersion == 1 && response.MinorVersion < 1))) {
+            response = {};
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+
+        bool hasContentLength = false;
+        SIZE_T contentLength = 0;
+        status = ReadContentLength(response, &hasContentLength, &contentLength);
+        if (!NT_SUCCESS(status)) {
+            response = {};
+            return status;
+        }
+
+        if (transferInfo.HasTransferEncoding) {
+            if (hasContentLength) {
+                response = {};
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            if (!transferInfo.FinalCodingIsChunked) {
+                // Non-chunked TE requires full-message path for now.
+                response = {};
+                return STATUS_NOT_SUPPORTED;
+            }
+            response.BodyKind = HttpBodyKind::Chunked;
+            return STATUS_SUCCESS;
+        }
+
+        if (hasContentLength) {
+            response.BodyKind = HttpBodyKind::ContentLength;
+            if (contentLengthOut != nullptr) {
+                *contentLengthOut = contentLength;
+            }
+            return STATUS_SUCCESS;
+        }
+
+        response.BodyKind = HttpBodyKind::CloseDelimited;
+        response.BodyEndsOnConnectionClose = true;
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS HttpParser::ParseResponse(
         const char* data,
         SIZE_T dataLength,

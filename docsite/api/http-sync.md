@@ -99,6 +99,9 @@ struct SendOptions final {
     ULONG Flags;
     ULONG MaxRedirects;
     ULONG ExpectContinueTimeoutMs;
+    ULONG ResponseHeaderTimeoutMs; // 0 = 库默认
+    ULONG BodyReadTimeoutMs;       // 0 = 库默认（单次底层 body 读）
+    ULONG BodyIdleTimeoutMs;       // 0 = 禁用 body 字节空闲超时
     HeaderCallback OnHeader;
     BodyCallback OnBody;
     void* CallbackContext;
@@ -121,8 +124,11 @@ struct SendOptions final {
 | `Flags` | `SendFlagNone` | 见下表 |
 | `MaxRedirects` | `0` | **`0` → 使用 `DefaultMaxRedirects`（10）**；用尽后**直接返回该 3xx 响应**（不报错） |
 | `ExpectContinueTimeoutMs` | `0`（Create） | `SendFlagExpectContinue` 时等待 `100 Continue`；库侧默认超时常量 `DefaultExpectContinueTimeoutMs` (1000) |
+| `ResponseHeaderTimeoutMs` | `0` | `0`=库默认；等待响应头完成 |
+| `BodyReadTimeoutMs` | `0` | `0`=库默认；**单次**底层 body 读超时 |
+| `BodyIdleTimeoutMs` | `0` | `0`=禁用；body 字节间空闲超时（长流 / SSE 友好） |
 | `OnHeader` | `nullptr` | 响应头回调；失败中止并传播 |
-| `OnBody` | `nullptr` | 响应体分块回调；`finalChunk` 标结束 |
+| `OnBody` | `nullptr` | 响应体**增量**回调：可按到达顺序**多次**调用；仅最后一次 `finalChunk=true`。未设置时仍聚合完整 body |
 | `CallbackContext` | `nullptr` | 传给上述回调 |
 | `Tls` / `HasTlsOverride` | 默认 TLS / `false` | `HasTlsOverride==true` 时覆盖会话 TLS |
 | `ConnectionPolicy` | `ReuseOrCreate` | `ReuseOrCreate` / `ForceNew` / `NoPool` |
@@ -150,7 +156,7 @@ enum SendFlags : ULONG {
 
 | 标志 | 说明 |
 |------|------|
-| `AggregateWithCallbacks` | 回调同时保留聚合响应 |
+| `AggregateWithCallbacks` | 有 `OnBody`/`OnHeader` 时**同时**保留聚合响应体；未设且仅回调时，`ResponseBody` 可能为空 |
 | `DisableAutoRedirect` | 禁用自动重定向，返回 3xx |
 | `ExpectContinue` | 有 body 的 HTTP/1.1 发 `Expect: 100-continue` |
 | `AllowTrace` | 允许 TRACE |
@@ -194,6 +200,14 @@ typedef NTSTATUS (*RequestBodyReadCallback)(void* context,
     UCHAR* buffer, SIZE_T bufferCapacity,
     SIZE_T* bytesRead, bool* endOfBody);
 ```
+
+`OnBody` 语义（流式修正）：
+
+- 有 `OnBody` 时，H1/H2/H3 在 transfer-decode 后的应用 body 字节按到达顺序**多次**回调。
+- `finalChunk=true` 只在响应体真正结束（含空尾包）时出现一次。
+- 返回失败状态会中止发送并向上传播。
+- 不要假设「整 body 只回调一次」；需要整包请勿设 `OnBody`，或加 `SendFlagAggregateWithCallbacks`。
+- SSE 产品 API 见 [SSE](sse.md)，内部同样消费此增量路径。
 
 ## Method 枚举
 

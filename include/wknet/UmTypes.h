@@ -74,6 +74,10 @@ using LONGLONG = int64_t;
 #define STATUS_BUFFER_TOO_SMALL ((NTSTATUS)0xC0000023L)
 #endif
 
+#ifndef STATUS_BUFFER_OVERFLOW
+#define STATUS_BUFFER_OVERFLOW ((NTSTATUS)0x80000005L)
+#endif
+
 #ifndef STATUS_INTEGER_OVERFLOW
 #define STATUS_INTEGER_OVERFLOW ((NTSTATUS)0xC0000095L)
 #endif
@@ -216,6 +220,10 @@ using LONGLONG = int64_t;
 
 #ifndef UNREFERENCED_PARAMETER
 #define UNREFERENCED_PARAMETER(P) (void)(P)
+#endif
+
+#ifndef MAXULONG
+#define MAXULONG 0xffffffffUL
 #endif
 
 // Kernel-style atomic helpers for user-mode protocol tests (MSVC).

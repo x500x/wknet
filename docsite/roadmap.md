@@ -4,7 +4,7 @@
 
 ## 当前主路径（已落地）
 
-- 内核客户端：HTTP/1.1、HTTP/2、**HTTP/3（QUIC v1 + QPACK）**、WebSocket（含 RFC 8441 可选路径）。
+- 内核客户端：HTTP/1.1、HTTP/2、**HTTP/3（QUIC v1 + QPACK）**、WebSocket（含 RFC 8441 可选路径）、**SSE（WHATWG event-stream 客户端）**。
 - 传输 WSK + 密码学 CNG；TLS 1.2/1.3 自实现；信任锚调用方提供。
 - H3 默认 `Auto`：从通过校验的 Alt-Svc 学习后，后续 HTTPS 可优先 QUIC。代理、明文 HTTP、WebSocket 与 `NoVerify` 等仍使用 TCP 路径。
 - Session 拥有池、重定向（默认 10 跳）、安全方法 stale 重试一次、异步 4 线程队列。

@@ -45,6 +45,7 @@
     <ClCompile Include="session\HttpResponseHandling.cpp" />
     <ClCompile Include="session\HttpRoute.cpp" />
     <ClCompile Include="session\HttpSend.cpp" />
+    <ClCompile Include="session\SseClient.cpp" />
     <ClCompile Include="session\HttpTransportDispatch.cpp" />
     <ClCompile Include="session\HttpCache.cpp" />
     <ClCompile Include="session\AltSvcCache.cpp" />
@@ -87,6 +88,8 @@
     <ClCompile Include="http_api\Response.cpp" />
     <ClCompile Include="http_api\Session.cpp" />
     <ClCompile Include="http_api\WebSocket.cpp" />
+    <ClCompile Include="http_api\Sse.cpp" />
+    <ClCompile Include="sse\EventStreamParser.cpp" />
     <ClCompile Include="codec\ContentCoding.cpp" />
     <ClCompile Include="http1\HttpCachePolicy.cpp" />
     <ClCompile Include="http1\HttpContentEncoding.cpp" />
@@ -107,6 +110,7 @@
     <ClCompile Include="codec\Pack200Decoder.cpp" />
     <ClCompile Include="codec\Pack200JarWriter.cpp" />
     <ClCompile Include="http1\HttpParser.cpp" />
+    <ClCompile Include="http1\HttpChunkedDecoder.cpp" />
     <ClCompile Include="http1\HttpRequest.cpp" />
     <ClCompile Include="http1\HttpResponse.cpp" />
     <ClCompile Include="http1\HttpTransferCoding.cpp" />

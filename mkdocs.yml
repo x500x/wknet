@@ -92,6 +92,7 @@ plugins:
             HTTP/2: HTTP/2
             HTTP/3 与 QUIC: HTTP/3 & QUIC
             WebSocket: WebSocket
+            SSE: SSE
             编码与密码学: Encoding & Crypto
             API 参考: API Reference
             总览: Overview
@@ -143,6 +144,7 @@ nav:
       - HTTP/2: http2.md
       - HTTP/3 与 QUIC: http3-quic.md
       - WebSocket: websocket.md
+      - SSE: sse.md
       - 编码与密码学: encoding-and-crypto.md
   - API 参考:
       - 总览: api/overview.md
@@ -151,6 +153,7 @@ nav:
       - 同步 HTTP: api/http-sync.md
       - 异步 HTTP: api/http-async.md
       - WebSocket: api/websocket.md
+      - SSE: api/sse.md
       - 证书与 TLS 选项: api/tls-options.md
       - Codec 与 Crypto: api/codec-crypto.md
   - 贡献与项目:

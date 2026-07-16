@@ -96,6 +96,7 @@ NTSTATUS RunFunctionalSampleSuite(MatrixContext* context) noexcept
     Map(report, "hl.ws_connect_async", Module::Ws, Property::Functional, hl.WebSocketConnectAsync);
     Map(report, "hl.ws_config_connect_async", Module::Ws, Property::Functional, hl.WebSocketConfigConnectAsync);
     Map(report, "hl.ws_connect_async_ex", Module::Ws, Property::Functional, hl.WebSocketConnectAsyncEx);
+    Map(report, "hl.sse_connect_receive", Module::Sse, Property::Functional, hl.SseConnectReceive);
 
     // --- Advanced scenarios (Reject / Resource / Concurrency / Lifecycle) ---
     Map(report, "adv.http_redirect", Module::Session, Property::Functional, adv.HttpRedirect);

@@ -201,7 +201,7 @@ void ResponseRelease(_In_opt_ Response* response) noexcept;
 
 - `ResponseStatusCode(nullptr)` 等对空句柄返回 0 / `nullptr`。
 - body / header 指针在 `ResponseRelease` 前有效。
-- 流式 `OnHeader`/`OnBody` 时，若未设 `SendFlagAggregateWithCallbacks`，聚合 body 可能为空。
+- 流式 `OnHeader`/`OnBody`：`OnBody` 可被调用**多次**；`finalChunk` 仅在结束时为 true。未设 `SendFlagAggregateWithCallbacks` 时，聚合 body 可能为空。
 
 ## 相关链接
 

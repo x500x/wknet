@@ -7,7 +7,7 @@ This page describes what wknet supports today, what is enabled by default, and w
 3. **Policy rejection** — requests or responses rejected by protocol or security policy  
 4. **Not supported** — not provided in the current release  
 
-Scope: HTTP/HTTPS/WebSocket client. Transport main path is WSK; cryptography main path is CNG/BCrypt. WinHTTP, WinINet, and SChannel are not used. Trust anchors, CA bundles, pins, and revocation evidence are caller-supplied. Synchronous paths require `PASSIVE_LEVEL`.
+Scope: HTTP/HTTPS/WebSocket/SSE client. Transport main path is WSK; cryptography main path is CNG/BCrypt. WinHTTP, WinINet, and SChannel are not used. Trust anchors, CA bundles, pins, and revocation evidence are caller-supplied. Synchronous paths require `PASSIVE_LEVEL`.
 
 ---
 
@@ -46,6 +46,15 @@ Scope: HTTP/HTTPS/WebSocket client. Transport main path is WSK; cryptography mai
 - `wss` may offer `h2,http/1.1` → RFC 8441 or fall back to HTTP/1.1 Upgrade; `ws://` never implicitly uses h2c.
 - Fragmented send / optional fragment receive; auto-Pong; UTF-8/length/control-frame limits; active/passive close.
 - Handshake 3xx/401/407 are **not** auto-followed → `STATUS_NOT_SUPPORTED`.
+
+### Server-Sent Events (WHATWG event-stream)
+
+- `wknet::sse::SseClient`: `Connect` / `Receive` / `Close`; **GET only**; default requires `Content-Type: text/event-stream`.
+- Parser: partial chunks, comments, `id`/`event`/`data`/`retry`, multi-line data; `Last-Event-ID` tracking and reconnect injection.
+- Auto-reconnect on by default; exponential backoff + `retry:`; **no reconnect on HTTP 4xx open**; `Close` aborts delay.
+- Timeouts: separate `ConnectTimeoutMs` / body idle `IdleTimeoutMs` / per-`ReceiveTimeoutMs` (long streams are not bound to a single 30s whole-response deadline).
+- Response bodies are truly incremental: when set, `SendOptions.OnBody` is invoked **multiple times** in arrival order; `finalChunk` is true only at the real end.
+- First release: identity Content-Encoding; no SSE server; no POST-body SSE.
 
 ### TLS / certificates / crypto
 
@@ -163,10 +172,12 @@ The following behaviors are rejected by design. Rejection here is policy, not a 
 | Capability | Notes |
 |------------|-------|
 | HTTP server / inbound request parser | Client library; no server role |
+| SSE server / POST-body SSE | Client GET event-stream only |
 | On-disk persistent HTTP cache | In-memory NonPaged cache objects only |
 | Local HTTP/2 priority-tree bandwidth scheduling | Not implemented |
 | WebSocket extensions other than permessage-deflate | Not negotiated |
 | Online revocation fetching | Library does not initiate OCSP/CRL network fetch |
+| Streaming Content-Encoding on SSE/OnBody paths (gzip/br, …) | First release requires identity; architecture can grow |
 | QUIC v2, H3 0-RTT application data, active migration, multipath, ECN, DPLPMTUD, WebTransport, QUIC Datagram, WebSocket over H3 | Not supported |
 | WinHTTP / WinINet / SChannel as kernel main path | Not used |
 | Separate client layer / second connection lifecycle | Not provided |

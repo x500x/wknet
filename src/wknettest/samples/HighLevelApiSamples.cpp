@@ -7,9 +7,12 @@
 #include <wknet/http/Response.h>
 #include <wknet/http/Session.h>
 #include <wknet/websocket/WebSocket.h>
+#include <wknet/sse/Sse.h>
 #include <wknettest/SampleStatus.h>
 #include "samples/ExternalTrustStore.h"
 #include "WknetTestLog.h"
+
+#include <string.h>
 
 #ifndef STATUS_CONNECTION_REFUSED
 #define STATUS_CONNECTION_REFUSED ((NTSTATUS)0xC0000236L)
@@ -61,6 +64,9 @@ namespace
     // which ModernDefault correctly rejects; websocket-echo.com is intermittently unresolvable via WSK.
     constexpr const char* WebSocketSecureEchoUrl = "wss://ws.ifelse.io/";
     constexpr const char* WebSocketBinaryEchoUrl = "wss://ws.ifelse.io/";
+    // Public long-lived event-stream (Wikimedia recent changes). Real external path for UM + KM.
+    constexpr const char* SsePublicStreamUrl =
+        "https://stream.wikimedia.org/v2/stream/recentchange";
     constexpr const char* AlpnHttp11 = "http/1.1";
     constexpr const char* AlpnH2 = "h2";
 
@@ -476,6 +482,26 @@ namespace
         MergeFatalSampleStatus(aggregate, status);
     }
 
+    void MergePublicSseSampleStatus(
+        NTSTATUS& aggregate,
+        NTSTATUS status,
+        const char* sampleName) noexcept
+    {
+        if (NT_SUCCESS(status)) {
+            return;
+        }
+
+        if (IsPublicEndpointDiagnosticStatus(status)) {
+            WKNET_SAMPLE_LOG(
+                "[SSE响应] 示例=%s 公网连接环境失败已记录，不计入总失败 NTSTATUS=0x%08X\r\n",
+                sampleName,
+                static_cast<ULONG>(status));
+            return;
+        }
+
+        MergeFatalSampleStatus(aggregate, status);
+    }
+
     void CaptureStatus(
         HighLevelApiSampleResult& result,
         NTSTATUS status,
@@ -485,6 +511,79 @@ namespace
         result.Status = status;
         result.StatusCode = statusCode;
         result.BodyLength = bodyLength;
+    }
+
+    NTSTATUS RunSseConnectReceiveSample(
+        wknet::http::Session* session,
+        const wknet::http::TlsConfig* tlsConfig,
+        HighLevelApiSampleResult& result) noexcept
+    {
+        CaptureStatus(result, STATUS_SUCCESS, 0, 0);
+        if (session == nullptr) {
+            CaptureStatus(result, STATUS_INVALID_PARAMETER, 0, 0);
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        wknet::sse::ConnectConfig config = wknet::sse::DefaultConnectConfig();
+        config.Url = SsePublicStreamUrl;
+        config.UrlLength = LiteralLength(SsePublicStreamUrl);
+        config.AutoReconnect = false;
+        config.ConnectTimeoutMs = 30000;
+        // Wikimedia recentchange is continuous; first event usually arrives quickly.
+        config.ReceiveTimeoutMs = 45000;
+        config.IdleTimeoutMs = 0;
+        config.RequireEventStreamContentType = true;
+        if (tlsConfig != nullptr) {
+            config.Tls = *tlsConfig;
+        }
+        // Prefer HTTP/1.1 for the public smoke path so long-lived event-stream
+        // is exercised on the H1 streaming reader first (still real external TLS).
+        config.Tls.Alpn = AlpnHttp11;
+        config.Tls.AlpnLength = LiteralLength(AlpnHttp11);
+
+        WKNET_SAMPLE_LOG(
+            "[SSE请求] 示例=SSE Connect/Receive URL=%s AutoReconnect=%s ConnectTimeoutMs=%lu ReceiveTimeoutMs=%lu\r\n",
+            config.Url,
+            config.AutoReconnect ? "true" : "false",
+            config.ConnectTimeoutMs,
+            config.ReceiveTimeoutMs);
+
+        wknet::sse::SseClient* client = nullptr;
+        NTSTATUS status = wknet::sse::ConnectEx(session, &config, &client);
+        if (!NT_SUCCESS(status) || client == nullptr) {
+            CaptureStatus(result, status, 0, 0);
+            WKNET_SAMPLE_LOG(
+                "[SSE响应] Connect 失败 NTSTATUS=0x%08X\r\n",
+                static_cast<ULONG>(status));
+            return status;
+        }
+
+        wknet::sse::Event event = {};
+        status = wknet::sse::Receive(client, &event);
+        SIZE_T dataLength = 0;
+        if (NT_SUCCESS(status)) {
+            dataLength = event.DataLength;
+            // Public stream payloads vary; require a delivered event with type and/or data.
+            if ((event.Type == nullptr || event.TypeLength == 0) &&
+                (event.Data == nullptr || event.DataLength == 0)) {
+                status = STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            WKNET_SAMPLE_LOG(
+                "[SSE响应] type_bytes=%Iu data_bytes=%Iu id_bytes=%Iu NTSTATUS=0x%08X\r\n",
+                event.TypeLength,
+                event.DataLength,
+                event.IdLength,
+                static_cast<ULONG>(status));
+        }
+        else {
+            WKNET_SAMPLE_LOG(
+                "[SSE响应] Receive 失败 NTSTATUS=0x%08X\r\n",
+                static_cast<ULONG>(status));
+        }
+
+        (void)wknet::sse::Close(client);
+        CaptureStatus(result, status, NT_SUCCESS(status) ? 200 : 0, dataLength);
+        return status;
     }
 
     void LogSessionConfig(const char* sampleName, const wknet::http::SessionConfig& config) noexcept
@@ -2146,6 +2245,9 @@ namespace
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket 异步配置连接");
         status = RunWebSocketAsyncSample(session, "WebSocket 异步 ConnectEx", WsConnectVariant::Ex, WebSocketSecureEchoUrl, &webSocketTls, results->WebSocketConnectAsyncEx);
         MergePublicWebSocketSampleStatus(aggregate, status, "WebSocket 异步 ConnectEx");
+
+        status = RunSseConnectReceiveSample(session, &webSocketTls, results->SseConnectReceive);
+        MergePublicSseSampleStatus(aggregate, status, "SSE Connect/Receive");
 
         ResetExternalTrustStore(trustStore);
         return aggregate;

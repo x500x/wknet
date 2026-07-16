@@ -34,6 +34,8 @@
 | WebSocket 连接 | WS | `ws.connect.start`、`ws.connect.complete`、`ws.connect.failed` | 开始/完成 Info，最终失败 Error | 必须带 op/conn |
 | WebSocket 握手 | WS | `ws.handshake.request_built`、`ws.handshake.validation_failed`、`ws.alpn.unexpected` | 构建细节 Verbose，协议不匹配/失败 Error | 必须带 op/conn |
 | WebSocket 帧/消息 | WS | `ws.frame.encode`、`ws.frame.decode_header`、`ws.message.receive_failed` | 帧头元数据 Max，最终收发失败 Error | 必须带 op/conn；不记录消息内容 |
+| SSE 连接 | Session | `sse.connect.start`、`sse.connect.complete`、`sse.connect.failed` | 开始/完成 Info，最终失败 Error | 必须带 op；不记录 URL query、事件 data、完整头值 |
+| SSE 流与重连 | Session | `sse.stream.start`、`sse.reconnect.scheduled`、`sse.close.start`、`sse.close.complete` | 流启动 Verbose；重连调度 Warning；关闭 Info | 必须带 op；只记录 attempt/delay/status/长度；禁止事件正文 |
 | Session 生命周期 | Session | `session.created`、`session.close.start`、`session.close.complete`、`session.shutdown.session_close_stalled` | 创建/关闭 Info，扫尾未推进 Warning | 不要求 op；连接/请求事件另行关联 |
 
 ## 账本维护规则

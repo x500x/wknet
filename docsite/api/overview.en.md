@@ -2,7 +2,7 @@
 
 `#include <wknet/Wknet.h>`
 
-Namespaces: `wknet::http` · `wknet::websocket` · `wknet::codec` · `wknet::crypto`
+Namespaces: `wknet::http` · `wknet::websocket` · `wknet::sse` · `wknet::codec` · `wknet::crypto`
 
 ## Conventions
 
@@ -28,6 +28,7 @@ Namespaces: `wknet::http` · `wknet::websocket` · `wknet::codec` · `wknet::cry
 | `Cache` | `wknet::http` | `CacheCreate` | `CacheRelease` | `http/Cache.h` |
 | `CertificateStore` | `wknet::http` | `CertificateStoreCreate` | `CertificateStoreClose` | `http/Certificate.h` |
 | `WebSocket` | `wknet::websocket` | `Connect*` | `Close` / `CloseEx` | `websocket/WebSocket.h` |
+| `SseClient` | `wknet::sse` | `Connect*` | `Close` | `sse/Sse.h` |
 
 `SendOptions` / `AsyncOptions`: [Sync HTTP](http-sync.md) / [Async HTTP](http-async.md).
 
@@ -50,6 +51,7 @@ Namespaces: `wknet::http` · `wknet::websocket` · `wknet::codec` · `wknet::cry
 | `wknet/http/Certificate.h` | `CertificateStore`, pins, mTLS types |
 | `wknet/http/Cache.h` | In-memory cache |
 | `wknet/websocket/WebSocket.h` | WebSocket connect and I/O |
+| `wknet/sse/Sse.h` | Server-Sent Events client |
 | `wknet/codec/Codec.h` | Content-coding / EXI / Pack200 |
 | `wknet/crypto/Aead.h` | AEAD |
 | `wknet/crypto/TlsCredential.h` | `TlsClientCredential` (via `Certificate.h`) |
@@ -64,7 +66,7 @@ Namespaces: `wknet::http` · `wknet::websocket` · `wknet::codec` · `wknet::cry
 | `DefaultSessionConfig()` | `SessionConfig` |
 | `DefaultTlsConfig()` | `TlsConfig` |
 | `DefaultSendOptions()` | `SendOptions` value |
-| `DefaultConnectConfig()` | `websocket::ConnectConfig` |
+| `DefaultConnectConfig()` | `websocket::ConnectConfig` or `sse::DefaultConnectConfig()` |
 
 Use `SendOptionsCreate` / `AsyncOptionsCreate` when passing `SendOptions` / `AsyncOptions` to APIs (constructors are private).
 
@@ -77,5 +79,6 @@ Use `SendOptionsCreate` / `AsyncOptionsCreate` when passing `SendOptions` / `Asy
 | [Sync HTTP](http-sync.md) | `Send` / method-specific send, `SendOptions` |
 | [Async HTTP](http-async.md) | `AsyncSend`, `AsyncOp`, `Destroy` |
 | [WebSocket](websocket.md) | `Connect` / send / receive / close |
+| [SSE](sse.md) | `SseClient` Connect / Receive / Close |
 | [TLS options](tls-options.md) | `TlsConfig`, `CertificateStore`, mTLS |
 | [Codec & crypto](codec-crypto.md) | Decode and AEAD |

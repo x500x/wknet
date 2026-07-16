@@ -7,11 +7,11 @@
 | `Off` | 不输出（产品默认） |
 | `Error` | 当前操作无法完成，或协议/安全/状态约束被破坏 |
 | `Warning` | 异常但可重试、切换路径或继续收尾 |
-| `Info` | 请求、连接、TLS、Session、WebSocket 的关键生命周期边界 |
+| `Info` | 请求、连接、TLS、Session、WebSocket、SSE 的关键生命周期边界 |
 | `Verbose` | 地址尝试、缓存/池决策、帧分派、协议阶段 |
 | `Max` | 长度、数量、窗口、算法编号、帧头等高频元数据 |
 
-任何等级都**禁止**输出 body、完整头值、Cookie、凭据、密钥、随机数、证书原文、URL query 或内核地址。
+任何等级都**禁止**输出 body、SSE 事件 data/id 原文、完整头值、Cookie、凭据、密钥、随机数、证书原文、URL query 或内核地址。
 
 ## 组件过滤
 

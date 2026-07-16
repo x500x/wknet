@@ -216,6 +216,12 @@ namespace session
         const char* value,
         SIZE_T valueLength);
 
+    // Invoked once after final response status/headers are known and before body
+    // bytes are delivered via BodyCallback. Used by long-lived consumers (SSE).
+    typedef NTSTATUS (*ResponseStartCallback)(
+        void* context,
+        USHORT statusCode);
+
     typedef NTSTATUS (*BodyCallback)(
         void* context,
         const UCHAR* data,
@@ -337,7 +343,14 @@ namespace session
         ULONG MaxRedirects = 0;
         // 0 means use DefaultExpectContinueTimeoutMilliseconds.
         ULONG ExpectContinueTimeoutMilliseconds = 0;
+        // 0 means use WskOperationTimeoutMilliseconds for response headers.
+        ULONG ResponseHeaderTimeoutMilliseconds = 0;
+        // 0 means use WskOperationTimeoutMilliseconds for each body read.
+        ULONG BodyReadTimeoutMilliseconds = 0;
+        // 0 disables idle-gap abort between body bytes.
+        ULONG BodyIdleTimeoutMilliseconds = 0;
         HeaderCallback HeaderCallback = nullptr;
+        ResponseStartCallback ResponseStartCallback = nullptr;
         BodyCallback BodyCallback = nullptr;
         void* CallbackContext = nullptr;
         AsyncCompletionCallback CompletionCallback = nullptr;

@@ -391,6 +391,70 @@ namespace session
             return status;
         }
 
+        // Simulate true streaming delivery in the user-mode test transport.
+        // Status/headers first so long-lived clients (SSE) can observe them before body.
+        if (sendOptions.ResponseStartCallback != nullptr) {
+            status = sendOptions.ResponseStartCallback(
+                sendOptions.CallbackContext,
+                parsed->StatusCode);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+        if (sendOptions.HeaderCallback != nullptr) {
+            for (SIZE_T index = 0; index < parsed->HeaderCount; ++index) {
+                const http1::HttpHeader& header = parsed->Headers[index];
+                status = sendOptions.HeaderCallback(
+                    sendOptions.CallbackContext,
+                    header.Name.Data,
+                    header.Name.Length,
+                    header.Value.Data,
+                    header.Value.Length);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+            parsed->HeadersDeliveredViaCallback = true;
+        }
+
+        if (sendOptions.BodyCallback != nullptr &&
+            parsed->Body != nullptr &&
+            parsed->BodyLength != 0) {
+            constexpr SIZE_T kChunk = 64;
+            SIZE_T offset = 0;
+            while (offset < parsed->BodyLength) {
+                const SIZE_T remaining = parsed->BodyLength - offset;
+                const SIZE_T take = remaining < kChunk ? remaining : kChunk;
+                const bool finalChunk = (offset + take) == parsed->BodyLength;
+                status = sendOptions.BodyCallback(
+                    sendOptions.CallbackContext,
+                    reinterpret_cast<const UCHAR*>(parsed->Body) + offset,
+                    take,
+                    finalChunk);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                offset += take;
+            }
+            parsed->BodyDeliveredViaCallback = true;
+            if ((sendOptions.Flags & HttpSendFlagAggregateWithCallbacks) == 0) {
+                // Stream-only: drop aggregate body view (payload already delivered).
+                parsed->Body = nullptr;
+                parsed->BodyLength = 0;
+            }
+        }
+        else if (sendOptions.BodyCallback != nullptr) {
+            status = sendOptions.BodyCallback(
+                sendOptions.CallbackContext,
+                nullptr,
+                0,
+                true);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            parsed->BodyDeliveredViaCallback = true;
+        }
+
         if (testHttp11PipelineLease) {
             status = PreserveHttp1PipelineTrailingBytes(
                 &session->ConnectionPool,
@@ -703,19 +767,49 @@ namespace session
                 }
             }
 
-            status = ReadHttpResponseFromSocket(
-                activeTransport,
-                workspace,
-                request.Method == HttpMethod::Head,
-                &acceptPolicy,
-                sendOptions.ContentCodingMaterials,
-                parsed,
-                responseHeaders,
-                headerCapacity,
-                responseTrailers,
-                trailerCapacity,
-                rawResponseLength);
+            const bool useStreamingBody = sendOptions.BodyCallback != nullptr;
+            if (useStreamingBody) {
+                const bool aggregateBody =
+                    (sendOptions.Flags & HttpSendFlagAggregateWithCallbacks) != 0;
+                bool bodyDelivered = false;
+                status = ReadHttpResponseFromSocketStreaming(
+                    activeTransport,
+                    workspace,
+                    request.Method == HttpMethod::Head,
+                    sendOptions.BodyReadTimeoutMilliseconds,
+                    sendOptions.BodyIdleTimeoutMilliseconds,
+                    aggregateBody,
+                    sendOptions.ResponseStartCallback,
+                    sendOptions.HeaderCallback,
+                    sendOptions.BodyCallback,
+                    sendOptions.CallbackContext,
+                    &bodyDelivered,
+                    parsed,
+                    responseHeaders,
+                    headerCapacity,
+                    responseTrailers,
+                    trailerCapacity,
+                    rawResponseLength);
+                if (NT_SUCCESS(status)) {
+                    parsed->BodyDeliveredViaCallback = bodyDelivered;
+                }
+            }
+            else {
+                status = ReadHttpResponseFromSocket(
+                    activeTransport,
+                    workspace,
+                    request.Method == HttpMethod::Head,
+                    &acceptPolicy,
+                    sendOptions.ContentCodingMaterials,
+                    parsed,
+                    responseHeaders,
+                    headerCapacity,
+                    responseTrailers,
+                    trailerCapacity,
+                    rawResponseLength);
+            }
         }
+
         if (!NT_SUCCESS(status)) {
             return status;
         }

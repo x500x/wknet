@@ -99,6 +99,9 @@ struct SendOptions final {
     ULONG Flags;
     ULONG MaxRedirects;
     ULONG ExpectContinueTimeoutMs;
+    ULONG ResponseHeaderTimeoutMs; // 0 = library default
+    ULONG BodyReadTimeoutMs;       // 0 = library default (per underlying body read)
+    ULONG BodyIdleTimeoutMs;       // 0 = disable body idle timeout
     HeaderCallback OnHeader;
     BodyCallback OnBody;
     void* CallbackContext;
@@ -121,8 +124,11 @@ struct SendOptions final {
 | `Flags` | `SendFlagNone` | See below |
 | `MaxRedirects` | `0` | **`0` → `DefaultMaxRedirects` (10)**; when exhausted, **returns the 3xx response** (not an error) |
 | `ExpectContinueTimeoutMs` | `0` (Create) | Wait for `100 Continue` when `SendFlagExpectContinue`; constant `DefaultExpectContinueTimeoutMs` (1000) |
+| `ResponseHeaderTimeoutMs` | `0` | `0` = library default; wait for response headers |
+| `BodyReadTimeoutMs` | `0` | `0` = library default; **per** underlying body read |
+| `BodyIdleTimeoutMs` | `0` | `0` = disabled; idle gap between body bytes (long streams / SSE) |
 | `OnHeader` | `nullptr` | Header callback; failure aborts |
-| `OnBody` | `nullptr` | Body chunk callback; `finalChunk` ends |
+| `OnBody` | `nullptr` | Incremental body callback: may run **multiple** times in arrival order; only the last call has `finalChunk=true`. Without it, body still aggregates |
 | `CallbackContext` | `nullptr` | Passed to callbacks |
 | `Tls` / `HasTlsOverride` | default TLS / `false` | Override session TLS when `HasTlsOverride` |
 | `ConnectionPolicy` | `ReuseOrCreate` | `ReuseOrCreate` / `ForceNew` / `NoPool` |
@@ -150,7 +156,7 @@ enum SendFlags : ULONG {
 
 | Flag | Notes |
 |------|-------|
-| `AggregateWithCallbacks` | Callbacks plus aggregated response |
+| `AggregateWithCallbacks` | Keep aggregated body **and** run `OnBody`/`OnHeader`; without it, callback-only may leave `ResponseBody` empty |
 | `DisableAutoRedirect` | Return 3xx without following |
 | `ExpectContinue` | Send `Expect: 100-continue` for bodied HTTP/1.1 |
 | `AllowTrace` | Permit TRACE |
@@ -194,6 +200,14 @@ typedef NTSTATUS (*RequestBodyReadCallback)(void* context,
     UCHAR* buffer, SIZE_T bufferCapacity,
     SIZE_T* bytesRead, bool* endOfBody);
 ```
+
+`OnBody` semantics (streaming fix):
+
+- When `OnBody` is set, H1/H2/H3 invoke it **multiple times** for transfer-decoded application body bytes in arrival order.
+- `finalChunk=true` appears once, only when the body truly ends (including an empty trailing call).
+- Returning a failure status aborts the send and propagates.
+- Do not assume a single whole-body callback; for a full buffer leave `OnBody` null, or set `SendFlagAggregateWithCallbacks`.
+- Product SSE API: [SSE](sse.md); it consumes the same incremental path.
 
 ## Method enum
 

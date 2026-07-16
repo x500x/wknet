@@ -7,7 +7,7 @@
 3. **策略拒绝** — 出于协议或安全策略会拒绝的请求/响应  
 4. **当前不支持** — 现阶段未提供  
 
-定位：HTTP/HTTPS/WebSocket 客户端。传输主路径为 WSK，密码学主路径为 CNG/BCrypt；不使用 WinHTTP、WinINet 或 SChannel。信任锚、CA 包、pin 与撤销证据由调用方提供。同步路径要求 `PASSIVE_LEVEL`。
+定位：HTTP/HTTPS/WebSocket/SSE 客户端。传输主路径为 WSK，密码学主路径为 CNG/BCrypt；不使用 WinHTTP、WinINet 或 SChannel。信任锚、CA 包、pin 与撤销证据由调用方提供。同步路径要求 `PASSIVE_LEVEL`。
 
 ---
 
@@ -46,6 +46,15 @@
 - `wss` 默认可 offer `h2,http/1.1` → RFC 8441 或回落 HTTP/1.1 Upgrade；`ws://` 不隐式 h2c。
 - 分片发送/可选分片接收；自动 Pong；UTF-8/长度/控制帧上限；主动/被动 close。
 - 握手 3xx/401/407 **不**自动跟随 → `STATUS_NOT_SUPPORTED`。
+
+### Server-Sent Events（WHATWG event-stream）
+
+- `wknet::sse::SseClient`：`Connect` / `Receive` / `Close`；仅 **GET**；默认要求 `Content-Type: text/event-stream`。
+- 解析：半包、comment、`id`/`event`/`data`/`retry`、多行 data；`Last-Event-ID` 跟踪与重连注入。
+- 自动重连默认开；指数退避 + 尊重 `retry:`；**HTTP 4xx open 失败不重连**；`Close` 中止 delay。
+- 超时：`ConnectTimeoutMs` / `Body` 空闲 `IdleTimeoutMs` / 单次 `ReceiveTimeoutMs` 分字段（不再把整条长流绑在 30s 总 deadline）。
+- 底层响应体为真增量：`SendOptions.OnBody` 在启用时按到达顺序**多次**回调，`finalChunk` 仅在结束时为 true。
+- 首版：identity Content-Encoding；无 SSE 服务端；无 POST body 型 SSE。
 
 ### TLS / 证书 / 密码学
 
@@ -163,10 +172,12 @@ TLS 1.3 0-RTT（`EnableEarlyData` / `EarlyDataReplaySafe`）仅存在于内部 T
 | 能力 | 说明 |
 |------|------|
 | HTTP server / 入站 request parser | 客户端库，不提供服务端 |
+| SSE 服务端 / POST body 型 SSE | 仅客户端 GET event-stream |
 | 磁盘持久化 HTTP cache | 仅有内存 NonPaged cache 对象 |
 | HTTP/2 本地 priority 树带宽调度 | 不实现 |
 | 除 permessage-deflate 外的 WS 扩展 | 不协商其它扩展 |
 | 在线撤销抓取 | 库不发起 OCSP/CRL 网络请求 |
+| 流式 Content-Encoding（SSE/OnBody 路径 gzip/br 等） | 首版要求 identity；架构可扩展 |
 | QUIC v2、H3 0-RTT 应用数据、主动迁移、多路径、ECN、DPLPMTUD、WebTransport、QUIC Datagram、WebSocket over H3 | 当前不支持 |
 | WinHTTP / WinINet / SChannel 内核主路径 | 不使用 |
 | 独立 client 层 / 第二套连接生命周期 | 不提供 |

@@ -62,6 +62,7 @@ NTSTATUS SendRequiredHttp3Request(SessionHandle session, const Request &request,
         startOptions.CancellationOperation = cancellationOperation;
         startOptions.ProbeTimeoutMilliseconds = session->Options.Http3.QuicProbeTimeoutMilliseconds;
         startOptions.AttemptGeneration = static_cast<ULONGLONG>(attempt) + 1;
+        startOptions.DirectCallbacks = sendOptions.BodyCallback != nullptr;
 
         NTSTATUS status = HttpH3DispatchRequired(dispatch.Get(), &startOptions);
         if (status == STATUS_PENDING)
@@ -886,7 +887,10 @@ void LearnAltSvcFromResponse(SessionHandle session, const Request &request, Http
         }
 
         if (NT_SUCCESS(status)) {
-            status = InvokeResponseCallbacks(effectiveOptions, parsed);
+            status = InvokeResponseCallbacks(
+                effectiveOptions,
+                parsed,
+                parsed.BodyDeliveredViaCallback);
         }
 
         if (NT_SUCCESS(status) &&

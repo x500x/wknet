@@ -4,7 +4,7 @@ Direction only. Full capability classification is in the [Capability Matrix](cap
 
 ## Current main path (landed)
 
-- Kernel client: HTTP/1.1, HTTP/2, **HTTP/3 (QUIC v1 + QPACK)**, WebSocket (including optional RFC 8441).
+- Kernel client: HTTP/1.1, HTTP/2, **HTTP/3 (QUIC v1 + QPACK)**, WebSocket (including optional RFC 8441), **SSE (WHATWG event-stream client)**.
 - Transport WSK + crypto CNG; self-implemented TLS 1.2/1.3; caller-supplied trust anchors.
 - H3 default `Auto`: after learning validated Alt-Svc, later HTTPS may prefer QUIC. Proxies, cleartext HTTP, WebSocket, and `NoVerify` stay on TCP paths.
 - Session owns the pool, redirects (default 10 hops), one stale retry for safe methods, and a 4-thread async queue.

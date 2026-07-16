@@ -17,5 +17,6 @@
 #include <wknet/http/Session.h>
 #include <wknet/http/Types.h>
 #include <wknet/websocket/WebSocket.h>
+#include <wknet/sse/Sse.h>
 #include <wknet/crypto/Aead.h>
 #include <wknet/codec/Codec.h>

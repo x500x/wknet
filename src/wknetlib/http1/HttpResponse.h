@@ -40,6 +40,10 @@ namespace http1
         SIZE_T BodyLength = 0;
         HttpBodyKind BodyKind = HttpBodyKind::None;
         bool BodyEndsOnConnectionClose = false;
+        // True when body bytes were already delivered via BodyCallback during receive.
+        bool BodyDeliveredViaCallback = false;
+        // True when headers were already delivered via HeaderCallback during receive.
+        bool HeadersDeliveredViaCallback = false;
         SIZE_T BytesConsumed = 0;
 
         _Must_inspect_result_

@@ -7,11 +7,11 @@ wknet uses one tiered `wknet::Trace*` system. **Product default is `Off`**; test
 | `Off` | No output (product default) |
 | `Error` | Operation cannot complete, or a protocol/security/state constraint failed |
 | `Warning` | Anomaly with retry, path switch, or continued cleanup |
-| `Info` | Key request, connection, TLS, session, and WebSocket lifecycle boundaries |
+| `Info` | Key request, connection, TLS, session, WebSocket, and SSE lifecycle boundaries |
 | `Verbose` | Address attempts, cache/pool decisions, frame dispatch, protocol stages |
 | `Max` | High-frequency metadata: lengths, counts, windows, algorithm ids, frame headers |
 
-No level may emit bodies, complete header values, cookies, credentials, keys, random values, raw certificates, URL queries, or kernel addresses.
+No level may emit bodies, SSE event data/id text, complete header values, cookies, credentials, keys, random values, raw certificates, URL queries, or kernel addresses.
 
 ## Components
 

@@ -1,12 +1,12 @@
 # wknet
 
-A pure kernel-mode HTTP/HTTPS/WebSocket client library for Windows drivers.
+A pure kernel-mode HTTP/HTTPS/WebSocket/SSE client library for Windows drivers.
 
-Transport main path is WSK; cryptography main path is kernel CNG/BCrypt. No WinHTTP, WinINet, or SChannel. Public API is four namespaces: `wknet::http`, `wknet::websocket`, `wknet::crypto`, `wknet::codec`.
+Transport main path is WSK; cryptography main path is kernel CNG/BCrypt. No WinHTTP, WinINet, or SChannel. Public API namespaces: `wknet::http`, `wknet::websocket`, `wknet::sse`, `wknet::crypto`, `wknet::codec`.
 
 ## Scope
 
-wknet is a kernel-mode HTTP/HTTPS/WebSocket **client**. It is for drivers that issue requests and want explicit security defaults, with one product API across HTTP/1.1, HTTP/2, and HTTP/3.
+wknet is a kernel-mode HTTP/HTTPS/WebSocket/SSE **client**. It is for drivers that issue requests and want explicit security defaults, with one product API across HTTP/1.1, HTTP/2, and HTTP/3.
 
 It does not provide an HTTP server or inbound request parser, and it does not ship a system CA store. Features such as QUIC migration and WebTransport are not supported today; see the [capability matrix](capability-matrix.md).
 

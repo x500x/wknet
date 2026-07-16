@@ -48,6 +48,9 @@
     <Filter Include="Source Files\websocket">
       <UniqueIdentifier>{6113F4C7-2EF7-49AB-887E-77C9F19FAD29}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\sse">
+      <UniqueIdentifier>{B2C8D0E1-4F5A-4B6C-9D0E-1F2A3B4C5D6E}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\third_party\brotli">
       <UniqueIdentifier>{A961B65D-115E-44B3-9E77-3B8D9751446C}</UniqueIdentifier>
     </Filter>
@@ -203,6 +206,9 @@
     <ClCompile Include="session\HttpSend.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
+    <ClCompile Include="session\SseClient.cpp">
+      <Filter>Source Files\engine</Filter>
+    </ClCompile>
     <ClCompile Include="session\HttpTransportDispatch.cpp">
       <Filter>Source Files\engine</Filter>
     </ClCompile>
@@ -312,6 +318,9 @@
       <Filter>Source Files\http</Filter>
     </ClCompile>
     <ClCompile Include="http1\HttpParser.cpp">
+      <Filter>Source Files\http</Filter>
+    </ClCompile>
+    <ClCompile Include="http1\HttpChunkedDecoder.cpp">
       <Filter>Source Files\http</Filter>
     </ClCompile>
     <ClCompile Include="http1\HttpRequest.cpp">
@@ -487,6 +496,12 @@
     </ClCompile>
     <ClCompile Include="ws\WebSocketFrame.cpp">
       <Filter>Source Files\websocket</Filter>
+    </ClCompile>
+    <ClCompile Include="sse\EventStreamParser.cpp">
+      <Filter>Source Files\sse</Filter>
+    </ClCompile>
+    <ClCompile Include="http_api\Sse.cpp">
+      <Filter>Source Files\http_api</Filter>
     </ClCompile>
     <ClCompile Include="..\..\third_party\brotli\c\common\constants.c">
       <Filter>Source Files\third_party\brotli</Filter>

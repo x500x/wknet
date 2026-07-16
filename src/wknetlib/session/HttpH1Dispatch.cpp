@@ -1,9 +1,11 @@
 #include "session/HttpEngineInternal.hpp"
+#include "http1/HttpChunkedDecoder.h"
 
 namespace wknet
 {
 namespace session
 {
+
     _Must_inspect_result_
     NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ Workspace& workspace) noexcept
     {
@@ -633,6 +635,123 @@ namespace session
 #endif
 
 #if !defined(WKNET_USER_MODE_TEST)
+
+    namespace
+    {
+        bool ResponseHasNonIdentityContentEncoding(const http1::HttpResponse& response) noexcept
+        {
+            const http1::HttpHeader* header = nullptr;
+            if (!response.FindHeader(http1::MakeText("Content-Encoding"), &header) ||
+                header == nullptr) {
+                return false;
+            }
+            if (header->Value.Length == 0) {
+                return false;
+            }
+            // identity is a no-op; anything else needs full-buffer decode today.
+            return !http1::TextEqualsIgnoreCase(header->Value, http1::MakeText("identity"));
+        }
+
+        struct StreamAggregateContext final
+        {
+            BodyCallback UserCallback = nullptr;
+            void* UserContext = nullptr;
+            UCHAR* Aggregate = nullptr;
+            SIZE_T AggregateCapacity = 0;
+            SIZE_T AggregateLength = 0;
+            SIZE_T MaxAggregateBytes = 0; // 0 = unlimited
+            bool DoAggregate = false;
+        };
+
+        NTSTATUS StreamBodyOnData(
+            void* context,
+            const UCHAR* data,
+            SIZE_T dataLength) noexcept
+        {
+            auto* state = static_cast<StreamAggregateContext*>(context);
+            if (state == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (state->DoAggregate && dataLength != 0) {
+                if (state->MaxAggregateBytes != 0 &&
+                    (state->AggregateLength > state->MaxAggregateBytes ||
+                        dataLength > state->MaxAggregateBytes - state->AggregateLength)) {
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+                const SIZE_T needed = state->AggregateLength + dataLength;
+                if (needed > state->AggregateCapacity) {
+                    SIZE_T newCap = state->AggregateCapacity == 0 ? 4096 : state->AggregateCapacity;
+                    while (newCap < needed) {
+                        if (newCap > (static_cast<SIZE_T>(~static_cast<SIZE_T>(0)) / 2)) {
+                            return STATUS_BUFFER_TOO_SMALL;
+                        }
+                        newCap *= 2;
+                    }
+                    if (state->MaxAggregateBytes != 0 && newCap > state->MaxAggregateBytes) {
+                        newCap = state->MaxAggregateBytes;
+                    }
+                    if (newCap < needed) {
+                        return STATUS_BUFFER_TOO_SMALL;
+                    }
+                    UCHAR* grown = static_cast<UCHAR*>(AllocateNonPagedPoolBytes(newCap));
+                    if (grown == nullptr) {
+                        return STATUS_INSUFFICIENT_RESOURCES;
+                    }
+                    if (state->Aggregate != nullptr && state->AggregateLength != 0) {
+                        RtlCopyMemory(grown, state->Aggregate, state->AggregateLength);
+                    }
+                    FreeNonPagedPoolBytes(state->Aggregate);
+                    state->Aggregate = grown;
+                    state->AggregateCapacity = newCap;
+                }
+                RtlCopyMemory(state->Aggregate + state->AggregateLength, data, dataLength);
+                state->AggregateLength += dataLength;
+            }
+
+            if (state->UserCallback != nullptr && dataLength != 0) {
+                return state->UserCallback(
+                    state->UserContext,
+                    data,
+                    dataLength,
+                    false);
+            }
+            return STATUS_SUCCESS;
+        }
+
+        NTSTATUS StreamReceiveMore(
+            transport::Transport* transport,
+            UCHAR* window,
+            SIZE_T windowCapacity,
+            SIZE_T* windowLength,
+            ULONG timeoutMilliseconds,
+            SIZE_T* receivedOut) noexcept
+        {
+            if (receivedOut != nullptr) {
+                *receivedOut = 0;
+            }
+            if (transport == nullptr || window == nullptr || windowLength == nullptr || receivedOut == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (*windowLength >= windowCapacity) {
+                return STATUS_BUFFER_TOO_SMALL;
+            }
+            SIZE_T received = 0;
+            NTSTATUS status = transport::TransportReceiveWithTimeout(
+                transport,
+                window + *windowLength,
+                windowCapacity - *windowLength,
+                &received,
+                timeoutMilliseconds);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            *windowLength += received;
+            *receivedOut = received;
+            return STATUS_SUCCESS;
+        }
+    }
+
     _Must_inspect_result_
     ULONGLONG MakeResponseReadDeadline(ULONG timeoutMilliseconds) noexcept
     {
@@ -912,6 +1031,417 @@ namespace session
             responseTrailers,
             trailerCapacity,
             rawResponseLength);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS ReadHttpResponseFromSocketStreaming(
+        _Inout_ transport::Transport* transport,
+        _Inout_ Workspace& workspace,
+        bool responseBodyForbidden,
+        ULONG bodyReadTimeoutMilliseconds,
+        ULONG bodyIdleTimeoutMilliseconds,
+        bool aggregateBody,
+        _In_opt_ ResponseStartCallback responseStartCallback,
+        _In_opt_ HeaderCallback headerCallback,
+        _In_opt_ BodyCallback bodyCallback,
+        _In_opt_ void* callbackContext,
+        _Out_ bool* bodyDelivered,
+        _Out_ http1::HttpResponse* parsed,
+        _Out_writes_(headerCapacity) http1::HttpHeader* responseHeaders,
+        SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http1::HttpHeader* responseTrailers,
+        SIZE_T trailerCapacity,
+        _Out_ SIZE_T* rawResponseLength) noexcept
+    {
+        if (bodyDelivered != nullptr) {
+            *bodyDelivered = false;
+        }
+        if (rawResponseLength != nullptr) {
+            *rawResponseLength = 0;
+        }
+        if (transport == nullptr ||
+            parsed == nullptr ||
+            responseHeaders == nullptr ||
+            responseTrailers == nullptr ||
+            rawResponseLength == nullptr ||
+            bodyDelivered == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        const ULONG perReadTimeout = bodyReadTimeoutMilliseconds == 0 ?
+            WskOperationTimeoutMilliseconds :
+            bodyReadTimeoutMilliseconds;
+        const ULONG idleTimeout = bodyIdleTimeoutMilliseconds == 0 ?
+            perReadTimeout :
+            bodyIdleTimeoutMilliseconds;
+
+        SIZE_T responseLength = workspace.ResponseLength;
+        http1::HttpResponse headerParsed = {};
+        SIZE_T contentLength = 0;
+        for (;;) {
+            http1::HttpParseOptions parseOptions = {};
+            parseOptions.Headers = responseHeaders;
+            parseOptions.HeaderCapacity = headerCapacity;
+            parseOptions.Trailers = responseTrailers;
+            parseOptions.TrailerCapacity = trailerCapacity;
+            parseOptions.ResponseBodyForbidden = responseBodyForbidden;
+
+            NTSTATUS status = http1::HttpParser::ParseResponseHeaders(
+                reinterpret_cast<const char*>(workspace.Response.Data),
+                responseLength,
+                parseOptions,
+                headerParsed,
+                &contentLength);
+            if (status == STATUS_SUCCESS) {
+                if (IsNonFinalInformationalResponse(headerParsed)) {
+                    if (headerParsed.BytesConsumed > responseLength) {
+                        return STATUS_INVALID_NETWORK_RESPONSE;
+                    }
+                    const SIZE_T remaining = responseLength - headerParsed.BytesConsumed;
+                    if (remaining != 0) {
+                        RtlMoveMemory(
+                            workspace.Response.Data,
+                            workspace.Response.Data + headerParsed.BytesConsumed,
+                            remaining);
+                    }
+                    responseLength = remaining;
+                    workspace.ResponseLength = responseLength;
+                    headerParsed = {};
+                    contentLength = 0;
+                    continue;
+                }
+                break;
+            }
+            if (status != STATUS_MORE_PROCESSING_REQUIRED) {
+                return status;
+            }
+            if (responseLength >= HttpMaxHeaderBytes + 4) {
+                return STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            status = WorkspaceEnsureResponseCapacity(&workspace, responseLength + 4096);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            SIZE_T received = 0;
+            status = transport::TransportReceiveWithTimeout(
+                transport,
+                workspace.Response.Data + responseLength,
+                workspace.Response.Length - responseLength,
+                &received,
+                perReadTimeout);
+            if (!NT_SUCCESS(status)) {
+                if (IsOrderlyConnectionCloseStatus(status)) {
+                    return responseLength == 0 ? STATUS_CONNECTION_DISCONNECTED : status;
+                }
+                return status;
+            }
+            if (received == 0) {
+                return responseLength == 0 ?
+                    STATUS_CONNECTION_DISCONNECTED :
+                    STATUS_INVALID_NETWORK_RESPONSE;
+            }
+            responseLength += received;
+            workspace.ResponseLength = responseLength;
+        }
+
+        *parsed = headerParsed;
+        const SIZE_T headerBytes = headerParsed.BytesConsumed;
+        if (headerBytes > responseLength) {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (ResponseHasNonIdentityContentEncoding(headerParsed) &&
+            headerParsed.BodyKind != http1::HttpBodyKind::None) {
+            return STATUS_NOT_SUPPORTED;
+        }
+
+        if (responseStartCallback != nullptr) {
+            const NTSTATUS startStatus = responseStartCallback(
+                callbackContext,
+                headerParsed.StatusCode);
+            if (!NT_SUCCESS(startStatus)) {
+                return startStatus;
+            }
+        }
+        if (headerCallback != nullptr) {
+            for (SIZE_T index = 0; index < headerParsed.HeaderCount; ++index) {
+                const http1::HttpHeader& header = headerParsed.Headers[index];
+                const NTSTATUS headerStatus = headerCallback(
+                    callbackContext,
+                    header.Name.Data,
+                    header.Name.Length,
+                    header.Value.Data,
+                    header.Value.Length);
+                if (!NT_SUCCESS(headerStatus)) {
+                    return headerStatus;
+                }
+            }
+            parsed->HeadersDeliveredViaCallback = true;
+        }
+
+        // Kernel system-thread stacks are small. Never put the 16 KiB receive window
+        // (or HttpChunkedDecoder's multi-KiB trailer buffers) on the stack.
+        constexpr SIZE_T kWindowCapacity = 16 * 1024;
+        struct StreamingBodyResources final
+        {
+            UCHAR* Window = nullptr;
+            http1::HttpChunkedDecoder* Decoder = nullptr;
+            StreamAggregateContext StreamCtx = {};
+
+            ~StreamingBodyResources() noexcept
+            {
+                FreeNonPagedPoolBytes(StreamCtx.Aggregate);
+                StreamCtx.Aggregate = nullptr;
+                delete Decoder;
+                Decoder = nullptr;
+                FreeNonPagedPoolBytes(Window);
+                Window = nullptr;
+            }
+        };
+
+        if (headerParsed.BodyKind == http1::HttpBodyKind::None) {
+            if (bodyCallback != nullptr) {
+                const NTSTATUS status = bodyCallback(callbackContext, nullptr, 0, true);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                *bodyDelivered = true;
+            }
+            *rawResponseLength = headerBytes;
+            workspace.ResponseLength = 0;
+            return STATUS_SUCCESS;
+        }
+
+        StreamingBodyResources resources = {};
+        resources.Window = static_cast<UCHAR*>(AllocateNonPagedPoolBytes(kWindowCapacity));
+        if (resources.Window == nullptr) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        SIZE_T windowLength = 0;
+        SIZE_T workspaceBodyOffset = headerBytes;
+        SIZE_T workspaceBodyRemaining = responseLength - headerBytes;
+        UCHAR* const window = resources.Window;
+
+        resources.StreamCtx.UserCallback = bodyCallback;
+        resources.StreamCtx.UserContext = callbackContext;
+        resources.StreamCtx.DoAggregate = aggregateBody;
+        resources.StreamCtx.MaxAggregateBytes = workspace.MaxResponseBytes;
+
+        // Content-Length path
+        if (headerParsed.BodyKind == http1::HttpBodyKind::ContentLength) {
+            SIZE_T remaining = contentLength;
+            // Account for bytes already in window/workspace leftovers by processing window loop.
+            // Restart window fill: we may have consumed break above after first fill — re-init.
+            windowLength = 0;
+            workspaceBodyOffset = headerBytes;
+            workspaceBodyRemaining = responseLength - headerBytes;
+
+            while (remaining != 0) {
+                if (windowLength == 0 && workspaceBodyRemaining != 0) {
+                    const SIZE_T take = workspaceBodyRemaining < kWindowCapacity ?
+                        workspaceBodyRemaining : kWindowCapacity;
+                    RtlCopyMemory(
+                        window,
+                        workspace.Response.Data + workspaceBodyOffset,
+                        take);
+                    windowLength = take;
+                    workspaceBodyOffset += take;
+                    workspaceBodyRemaining -= take;
+                }
+                if (windowLength == 0) {
+                    SIZE_T received = 0;
+                    NTSTATUS status = StreamReceiveMore(
+                        transport,
+                        window,
+                        kWindowCapacity,
+                        &windowLength,
+                        idleTimeout,
+                        &received);
+                    if (!NT_SUCCESS(status) || received == 0) {
+                        return STATUS_CONNECTION_DISCONNECTED;
+                    }
+                }
+
+                const SIZE_T take = windowLength < remaining ? windowLength : remaining;
+                NTSTATUS status = StreamBodyOnData(&resources.StreamCtx, window, take);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                if (take < windowLength) {
+                    RtlMoveMemory(window, window + take, windowLength - take);
+                }
+                windowLength -= take;
+                remaining -= take;
+            }
+
+            if (bodyCallback != nullptr) {
+                const NTSTATUS status = bodyCallback(callbackContext, nullptr, 0, true);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                *bodyDelivered = true;
+            }
+            if (aggregateBody && resources.StreamCtx.AggregateLength != 0) {
+                FreeNonPagedPoolBytes(workspace.Response.Data);
+                workspace.Response.Data = resources.StreamCtx.Aggregate;
+                workspace.Response.Length = resources.StreamCtx.AggregateCapacity;
+                workspace.ResponseLength = resources.StreamCtx.AggregateLength;
+                resources.StreamCtx.Aggregate = nullptr;
+                parsed->Body = reinterpret_cast<const char*>(workspace.Response.Data);
+                parsed->BodyLength = workspace.ResponseLength;
+            }
+            else {
+                parsed->Body = nullptr;
+                parsed->BodyLength = 0;
+                workspace.ResponseLength = 0;
+            }
+            *rawResponseLength = headerBytes + contentLength;
+            return STATUS_SUCCESS;
+        }
+
+        if (headerParsed.BodyKind == http1::HttpBodyKind::Chunked) {
+            // HttpChunkedDecoder embeds multi-KiB trailer buffers; keep it off the stack.
+            resources.Decoder = new http1::HttpChunkedDecoder();
+            if (resources.Decoder == nullptr) {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            resources.Decoder->SetTrailerStorage(responseTrailers, trailerCapacity);
+            windowLength = 0;
+            workspaceBodyOffset = headerBytes;
+            workspaceBodyRemaining = responseLength - headerBytes;
+
+            for (;;) {
+                if (windowLength == 0 && workspaceBodyRemaining != 0) {
+                    const SIZE_T take = workspaceBodyRemaining < kWindowCapacity ?
+                        workspaceBodyRemaining : kWindowCapacity;
+                    RtlCopyMemory(
+                        window,
+                        workspace.Response.Data + workspaceBodyOffset,
+                        take);
+                    windowLength = take;
+                    workspaceBodyOffset += take;
+                    workspaceBodyRemaining -= take;
+                }
+                if (windowLength == 0) {
+                    SIZE_T received = 0;
+                    NTSTATUS status = StreamReceiveMore(
+                        transport,
+                        window,
+                        kWindowCapacity,
+                        &windowLength,
+                        idleTimeout,
+                        &received);
+                    if (!NT_SUCCESS(status) || received == 0) {
+                        return STATUS_CONNECTION_DISCONNECTED;
+                    }
+                }
+
+                SIZE_T consumed = 0;
+                NTSTATUS status = resources.Decoder->Feed(
+                    reinterpret_cast<const char*>(window),
+                    windowLength,
+                    &consumed,
+                    StreamBodyOnData,
+                    &resources.StreamCtx);
+                if (consumed != 0) {
+                    if (consumed < windowLength) {
+                        RtlMoveMemory(window, window + consumed, windowLength - consumed);
+                    }
+                    windowLength -= consumed;
+                }
+                if (status == STATUS_SUCCESS) {
+                    parsed->Trailers = responseTrailers;
+                    parsed->TrailerCount = resources.Decoder->TrailerCount();
+                    if (bodyCallback != nullptr) {
+                        status = bodyCallback(callbackContext, nullptr, 0, true);
+                        if (!NT_SUCCESS(status)) {
+                            return status;
+                        }
+                        *bodyDelivered = true;
+                    }
+                    if (aggregateBody && resources.StreamCtx.AggregateLength != 0) {
+                        FreeNonPagedPoolBytes(workspace.Response.Data);
+                        workspace.Response.Data = resources.StreamCtx.Aggregate;
+                        workspace.Response.Length = resources.StreamCtx.AggregateCapacity;
+                        workspace.ResponseLength = resources.StreamCtx.AggregateLength;
+                        resources.StreamCtx.Aggregate = nullptr;
+                        parsed->Body = reinterpret_cast<const char*>(workspace.Response.Data);
+                        parsed->BodyLength = workspace.ResponseLength;
+                    }
+                    else {
+                        parsed->Body = nullptr;
+                        parsed->BodyLength = 0;
+                        workspace.ResponseLength = 0;
+                    }
+                    *rawResponseLength = headerBytes;
+                    return STATUS_SUCCESS;
+                }
+                if (status != STATUS_MORE_PROCESSING_REQUIRED) {
+                    return status;
+                }
+            }
+        }
+
+        // Close-delimited.
+        windowLength = 0;
+        workspaceBodyOffset = headerBytes;
+        workspaceBodyRemaining = responseLength - headerBytes;
+        for (;;) {
+            if (windowLength == 0 && workspaceBodyRemaining != 0) {
+                const SIZE_T take = workspaceBodyRemaining < kWindowCapacity ?
+                    workspaceBodyRemaining : kWindowCapacity;
+                RtlCopyMemory(
+                    window,
+                    workspace.Response.Data + workspaceBodyOffset,
+                    take);
+                windowLength = take;
+                workspaceBodyOffset += take;
+                workspaceBodyRemaining -= take;
+            }
+            if (windowLength != 0) {
+                NTSTATUS status = StreamBodyOnData(&resources.StreamCtx, window, windowLength);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                windowLength = 0;
+                continue;
+            }
+
+            SIZE_T received = 0;
+            NTSTATUS status = StreamReceiveMore(
+                transport,
+                window,
+                kWindowCapacity,
+                &windowLength,
+                idleTimeout,
+                &received);
+            if (!NT_SUCCESS(status) || received == 0) {
+                if (bodyCallback != nullptr) {
+                    status = bodyCallback(callbackContext, nullptr, 0, true);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                    *bodyDelivered = true;
+                }
+                parsed->BodyEndsOnConnectionClose = true;
+                if (aggregateBody && resources.StreamCtx.AggregateLength != 0) {
+                    FreeNonPagedPoolBytes(workspace.Response.Data);
+                    workspace.Response.Data = resources.StreamCtx.Aggregate;
+                    workspace.Response.Length = resources.StreamCtx.AggregateCapacity;
+                    workspace.ResponseLength = resources.StreamCtx.AggregateLength;
+                    resources.StreamCtx.Aggregate = nullptr;
+                    parsed->Body = reinterpret_cast<const char*>(workspace.Response.Data);
+                    parsed->BodyLength = workspace.ResponseLength;
+                }
+                else {
+                    parsed->Body = nullptr;
+                    parsed->BodyLength = 0;
+                    workspace.ResponseLength = 0;
+                }
+                *rawResponseLength = headerBytes;
+                return STATUS_SUCCESS;
+            }
+        }
     }
 
     _Must_inspect_result_

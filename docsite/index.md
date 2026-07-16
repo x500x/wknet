@@ -1,12 +1,12 @@
 # wknet
 
-面向 Windows 内核驱动的纯内核态 HTTP/HTTPS/WebSocket 客户端库。
+面向 Windows 内核驱动的纯内核态 HTTP/HTTPS/WebSocket/SSE 客户端库。
 
-传输主路径为 WSK，密码学主路径为内核态 CNG/BCrypt；不依赖 WinHTTP、WinINet 或 SChannel。公共 API 为四个命名空间：`wknet::http`、`wknet::websocket`、`wknet::crypto`、`wknet::codec`。
+传输主路径为 WSK，密码学主路径为内核态 CNG/BCrypt；不依赖 WinHTTP、WinINet 或 SChannel。公共 API 命名空间：`wknet::http`、`wknet::websocket`、`wknet::sse`、`wknet::crypto`、`wknet::codec`。
 
 ## 定位
 
-wknet 是内核态 HTTP/HTTPS/WebSocket **客户端**。面向需要在驱动里发起请求、并希望安全默认值明确的场景；HTTP/1.1、HTTP/2、HTTP/3 共用同一产品 API。
+wknet 是内核态 HTTP/HTTPS/WebSocket/SSE **客户端**。面向需要在驱动里发起请求、并希望安全默认值明确的场景；HTTP/1.1、HTTP/2、HTTP/3 共用同一产品 API。
 
 当前不提供 HTTP 服务端或入站 request parser，也不内置系统 CA。QUIC 迁移、WebTransport 等能力尚未支持，详见 [能力边界](capability-matrix.md)。
 

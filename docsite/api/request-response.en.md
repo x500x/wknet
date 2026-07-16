@@ -201,7 +201,7 @@ void ResponseRelease(_In_opt_ Response* response) noexcept;
 
 - Null response returns 0 / `nullptr` from accessors.
 - Body/header pointers valid until `ResponseRelease`.
-- With streaming callbacks and without `SendFlagAggregateWithCallbacks`, aggregated body may be empty.
+- Streaming `OnHeader`/`OnBody`: `OnBody` may run **multiple** times; `finalChunk` is true only at the end. Without `SendFlagAggregateWithCallbacks`, aggregated body may be empty.
 
 ## See also
 

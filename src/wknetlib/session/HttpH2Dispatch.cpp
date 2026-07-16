@@ -101,6 +101,95 @@ namespace session
         return WorkspaceAppendResponse(workspace, data, dataLength);
     }
 
+    struct Http2StreamingBodyContext final
+    {
+        Workspace* WorkspaceObject = nullptr;
+        ResponseStartCallback ResponseStartCallback = nullptr;
+        HeaderCallback HeaderCallback = nullptr;
+        BodyCallback Callback = nullptr;
+        void* CallbackContext = nullptr;
+        const USHORT* StatusCodePointer = nullptr;
+        const http1::HttpHeader* ResponseHeaders = nullptr;
+        const SIZE_T* ResponseHeaderCount = nullptr;
+        bool Aggregate = false;
+        bool DeliveredAny = false;
+        bool HeadersDelivered = false;
+    };
+
+    _Must_inspect_result_
+    NTSTATUS EnsureHttp2StreamingHeadersDelivered(
+        _Inout_ Http2StreamingBodyContext* state) noexcept
+    {
+        if (state == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (state->HeadersDelivered) {
+            return STATUS_SUCCESS;
+        }
+        if (state->StatusCodePointer == nullptr) {
+            return STATUS_SUCCESS;
+        }
+        const USHORT statusCode = *state->StatusCodePointer;
+        if (statusCode == 0) {
+            return STATUS_SUCCESS;
+        }
+        if (state->ResponseStartCallback != nullptr) {
+            const NTSTATUS status = state->ResponseStartCallback(state->CallbackContext, statusCode);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+        if (state->HeaderCallback != nullptr &&
+            state->ResponseHeaders != nullptr &&
+            state->ResponseHeaderCount != nullptr) {
+            const SIZE_T count = *state->ResponseHeaderCount;
+            for (SIZE_T index = 0; index < count; ++index) {
+                const http1::HttpHeader& header = state->ResponseHeaders[index];
+                const NTSTATUS status = state->HeaderCallback(
+                    state->CallbackContext,
+                    header.Name.Data,
+                    header.Name.Length,
+                    header.Value.Data,
+                    header.Value.Length);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+        }
+        state->HeadersDelivered = true;
+        return STATUS_SUCCESS;
+    }
+
+    _Must_inspect_result_
+    NTSTATUS AppendHttp2ResponseBodyStreaming(
+        void* context,
+        const UCHAR* data,
+        SIZE_T dataLength) noexcept
+    {
+        auto* state = static_cast<Http2StreamingBodyContext*>(context);
+        if (state == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        NTSTATUS status = EnsureHttp2StreamingHeadersDelivered(state);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        if (state->Aggregate && state->WorkspaceObject != nullptr && dataLength != 0) {
+            status = WorkspaceAppendResponse(state->WorkspaceObject, data, dataLength);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+        }
+
+        if (state->Callback != nullptr && dataLength != 0) {
+            state->DeliveredAny = true;
+            return state->Callback(state->CallbackContext, data, dataLength, false);
+        }
+        return STATUS_SUCCESS;
+    }
+
     _Must_inspect_result_
     NTSTATUS DecodeContentWithWorkspace(
         _In_reads_(responseHeaderCount) const http1::HttpHeader* responseHeaders,
@@ -266,8 +355,26 @@ namespace session
         SIZE_T responseBodyLength = 0;
         USHORT statusCode = 0;
         http2::Http2ResponseBodySink responseBodySink = {};
-        responseBodySink.Append = AppendHttp2ResponseBodyToWorkspace;
-        responseBodySink.Context = &workspace;
+        Http2StreamingBodyContext streamingBody = {};
+        const bool h2StreamBody = sendOptions.BodyCallback != nullptr;
+        if (h2StreamBody) {
+            streamingBody.WorkspaceObject = &workspace;
+            streamingBody.ResponseStartCallback = sendOptions.ResponseStartCallback;
+            streamingBody.HeaderCallback = sendOptions.HeaderCallback;
+            streamingBody.Callback = sendOptions.BodyCallback;
+            streamingBody.CallbackContext = sendOptions.CallbackContext;
+            streamingBody.StatusCodePointer = &statusCode;
+            streamingBody.ResponseHeaders = responseHeaders;
+            streamingBody.ResponseHeaderCount = &responseHeaderCount;
+            streamingBody.Aggregate =
+                (sendOptions.Flags & HttpSendFlagAggregateWithCallbacks) != 0;
+            responseBodySink.Append = AppendHttp2ResponseBodyStreaming;
+            responseBodySink.Context = &streamingBody;
+        }
+        else {
+            responseBodySink.Append = AppendHttp2ResponseBodyToWorkspace;
+            responseBodySink.Context = &workspace;
+        }
 
         const bool h2LeaseAlreadyHeld =
             ConnectionPoolHasHttp2StreamLease(&pooledConnection);
@@ -377,6 +484,56 @@ namespace session
         }
 
         http1::HttpContentDecodeResult decoded = {};
+        if (h2StreamBody) {
+            // Streaming mode: identity body only (no full-buffer content-coding).
+            for (SIZE_T index = 0; index < responseHeaderCount; ++index) {
+                if (http1::TextEqualsIgnoreCase(
+                        responseHeaders[index].Name,
+                        http1::MakeText("Content-Encoding")) &&
+                    responseHeaders[index].Value.Length != 0 &&
+                    !http1::TextEqualsIgnoreCase(
+                        responseHeaders[index].Value,
+                        http1::MakeText("identity"))) {
+                    return STATUS_NOT_SUPPORTED;
+                }
+            }
+            status = EnsureHttp2StreamingHeadersDelivered(&streamingBody);
+            if (!NT_SUCCESS(status)) {
+                return status;
+            }
+            if (streamingBody.Callback != nullptr) {
+                status = streamingBody.Callback(
+                    streamingBody.CallbackContext,
+                    nullptr,
+                    0,
+                    true);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+            }
+            parsed->MajorVersion = 2;
+            parsed->MinorVersion = 0;
+            parsed->StatusCode = statusCode;
+            parsed->Headers = responseHeaders;
+            parsed->HeaderCount = responseHeaderCount;
+            if (streamingBody.HeadersDelivered) {
+                parsed->HeadersDeliveredViaCallback = true;
+            }
+            if (streamingBody.Aggregate) {
+                parsed->Body = reinterpret_cast<const char*>(workspace.Response.Data);
+                parsed->BodyLength = workspace.ResponseLength;
+            }
+            else {
+                parsed->Body = nullptr;
+                parsed->BodyLength = 0;
+            }
+            parsed->BytesConsumed = responseBodyLength;
+            parsed->BodyKind = http1::HttpBodyKind::ContentLength;
+            parsed->BodyDeliveredViaCallback = true;
+            *rawResponseLength = responseBodyLength;
+            return STATUS_SUCCESS;
+        }
+
         status = DecodeContentWithWorkspace(
             responseHeaders,
             responseHeaderCount,

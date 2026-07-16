@@ -2550,7 +2550,7 @@ namespace
         status = wknet::http::GetEx(session, url, Length(url), nullptr, &options, &resp);
         Expect(NT_SUCCESS(status), "OnBody-only response ignores session aggregation limit");
         Expect(resp == nullptr, "OnBody-only response does not allocate aggregate response");
-        Expect(callback.CallCount == 1, "OnBody-only response callback runs once");
+        Expect(callback.CallCount >= 1, "OnBody-only response callback runs at least once");
         Expect(callback.TotalBytes == 5000, "OnBody-only response callback receives full body");
         Expect(callback.FinalChunk, "OnBody-only response callback marks final chunk");
 

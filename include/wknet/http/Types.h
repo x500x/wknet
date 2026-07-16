@@ -363,6 +363,12 @@ namespace wknet::http {
         ULONG Flags;
         ULONG MaxRedirects;
         ULONG ExpectContinueTimeoutMs;
+        // 0 = use library default (WSK op timeout) for waiting on response headers.
+        ULONG ResponseHeaderTimeoutMs;
+        // 0 = use library default for each underlying body read.
+        ULONG BodyReadTimeoutMs;
+        // 0 = disabled; when set, idle gap between body bytes aborts the stream.
+        ULONG BodyIdleTimeoutMs;
         HeaderCallback OnHeader;
         BodyCallback OnBody;
         void* CallbackContext;

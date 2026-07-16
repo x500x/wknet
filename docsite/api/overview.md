@@ -2,7 +2,7 @@
 
 `#include <wknet/Wknet.h>`
 
-命名空间：`wknet::http` · `wknet::websocket` · `wknet::codec` · `wknet::crypto`
+命名空间：`wknet::http` · `wknet::websocket` · `wknet::sse` · `wknet::codec` · `wknet::crypto`
 
 ## 约定
 
@@ -28,6 +28,7 @@
 | `Cache` | `wknet::http` | `CacheCreate` | `CacheRelease` | `http/Cache.h` |
 | `CertificateStore` | `wknet::http` | `CertificateStoreCreate` | `CertificateStoreClose` | `http/Certificate.h` |
 | `WebSocket` | `wknet::websocket` | `Connect*` | `Close` / `CloseEx` | `websocket/WebSocket.h` |
+| `SseClient` | `wknet::sse` | `Connect*` | `Close` | `sse/Sse.h` |
 
 `SendOptions` / `AsyncOptions` 见 [同步 HTTP](http-sync.md) / [异步 HTTP](http-async.md)。
 
@@ -50,6 +51,7 @@
 | `wknet/http/Certificate.h` | `CertificateStore`、pin、mTLS 相关类型 |
 | `wknet/http/Cache.h` | 内存 cache |
 | `wknet/websocket/WebSocket.h` | WebSocket 连接与收发 |
+| `wknet/sse/Sse.h` | Server-Sent Events 客户端 |
 | `wknet/codec/Codec.h` | content-coding / EXI / Pack200 |
 | `wknet/crypto/Aead.h` | AEAD |
 | `wknet/crypto/TlsCredential.h` | `TlsClientCredential`（经 `Certificate.h`） |
@@ -64,7 +66,7 @@
 | `DefaultSessionConfig()` | `SessionConfig` |
 | `DefaultTlsConfig()` | `TlsConfig` |
 | `DefaultSendOptions()` | `SendOptions` 值 |
-| `DefaultConnectConfig()` | `websocket::ConnectConfig` |
+| `DefaultConnectConfig()` | `websocket::ConnectConfig` 或 `sse::DefaultConnectConfig()` |
 
 `SendOptions` / `AsyncOptions` 作为 API 参数时使用 `SendOptionsCreate` / `AsyncOptionsCreate`（构造函数私有）。
 
@@ -77,5 +79,6 @@
 | [同步 HTTP](http-sync.md) | `Send` / 按方法发送、`SendOptions` |
 | [异步 HTTP](http-async.md) | `AsyncSend`、`AsyncOp`、`Destroy` |
 | [WebSocket](websocket.md) | `Connect` / 收发 / 关闭 |
+| [SSE](sse.md) | `SseClient` Connect / Receive / Close |
 | [证书与 TLS](tls-options.md) | `TlsConfig`、`CertificateStore`、mTLS |
 | [Codec 与 Crypto](codec-crypto.md) | 解码与 AEAD |

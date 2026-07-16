@@ -15,7 +15,7 @@ wknet 使用统一的 `wknet::Trace*` 分级日志。驱动和库默认等级为
 | `Off` | 无 | 禁止输出。产品默认值。 |
 | `Error` | `Error` | 当前操作无法完成；协议、安全或状态约束被破坏；不可继续的连接、解析、校验、加解密、收发失败。必须带 `status`、错误码或足以定位失败阶段的非敏感元数据。 |
 | `Warning` | `Error`、`Warning` | 异常已经发生，但上层操作仍可重试、切换地址/协议或继续收尾；对端发送 GOAWAY/RST_STREAM/Alert 等需要关注的信号；资源繁忙导致日志丢弃以外的可恢复情况。不得把最终失败降为 Warning。 |
-| `Info` | `Error`、`Warning`、`Info` | 请求、连接、握手、Session、WebSocket 等关键生命周期的开始、完成、关闭、复用和明确的协议选择。应能在不启用详细日志时还原一次操作的主链路。 |
+| `Info` | `Error`、`Warning`、`Info` | 请求、连接、握手、Session、WebSocket、SSE 等关键生命周期的开始、完成、关闭、复用和明确的协议选择。应能在不启用详细日志时还原一次操作的主链路。 |
 | `Verbose` | 以上全部加 `Verbose` | 地址尝试、帧分派、记录收发、缓存/连接池决策、协议阶段推进等详细流程。用于定位“在哪一步偏离预期”，不记录载荷。 |
 | `Max` | 全部等级 | 帧头、长度、计数、窗口、算法编号、证书索引、编解码阶段等高频细节。即使在 Max，也严格禁止输出秘密和正文。 |
 
@@ -68,7 +68,7 @@ http2.stream.reset stream_id=3 error_code=0x00000008
 
 所有等级（包括 Max）只允许元数据。禁止记录：
 
-- 请求或响应正文、WebSocket 消息内容；
+- 请求或响应正文、WebSocket 消息内容、SSE 事件 `data`/`id` 原文；
 - 完整 HTTP 头值、Cookie、Authorization、Proxy-Authorization、凭据和口令；
 - 密钥、派生秘密、随机数、nonce 原文；
 - 证书 DER、证书原文、完整 SPKI 哈希或 pin；

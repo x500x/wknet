@@ -56,6 +56,7 @@ $groups = @{
         'tls_record_tests',
         'tls_interop_matrix_tests',
         'http_parser_tests',
+        'http_chunked_decoder_tests',
         'http2_frame_tests',
         'http2_client_tests',
         'http_api_tests',
@@ -63,6 +64,8 @@ $groups = @{
         'high_level_api_tests',
         'websocket_frame_tests',
         'websocket_client_tests',
+        'sse_parser_tests',
+        'sse_client_tests',
         'trace_tests'
     )
 }

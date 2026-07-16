@@ -194,7 +194,16 @@ namespace session
         const HttpSendOptions& options,
         const http1::HttpResponse& parsed) noexcept
     {
-        if (options.HeaderCallback != nullptr) {
+        return InvokeResponseCallbacks(options, parsed, false);
+    }
+
+    _Must_inspect_result_
+    NTSTATUS InvokeResponseCallbacks(
+        const HttpSendOptions& options,
+        const http1::HttpResponse& parsed,
+        bool bodyAlreadyDelivered) noexcept
+    {
+        if (options.HeaderCallback != nullptr && !parsed.HeadersDeliveredViaCallback) {
             for (SIZE_T index = 0; index < parsed.HeaderCount; ++index) {
                 const http1::HttpHeader& header = parsed.Headers[index];
                 NTSTATUS status = options.HeaderCallback(
@@ -209,7 +218,7 @@ namespace session
             }
         }
 
-        if (options.BodyCallback != nullptr) {
+        if (!bodyAlreadyDelivered && options.BodyCallback != nullptr) {
             return options.BodyCallback(
                 options.CallbackContext,
                 reinterpret_cast<const UCHAR*>(parsed.Body),

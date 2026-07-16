@@ -1112,6 +1112,7 @@ namespace session
         SessionHandle Session = nullptr;
         HttpH3Peer Peer = {};
         void *ResponseAccumulator = nullptr;
+        http1::HttpResponse *ParsedResponse = nullptr;
         void *CompletionFence = nullptr;
         HttpH3RequestState State = HttpH3RequestState::NoStream;
         HttpH3RequestState LastProgressState = HttpH3RequestState::NoStream;
@@ -1179,6 +1180,13 @@ namespace session
     NTSTATUS InvokeResponseCallbacks(
         const HttpSendOptions& options,
         const http1::HttpResponse& parsed) noexcept;
+
+    // When bodyAlreadyDelivered is true, only OnHeader runs (body was streamed).
+    _Must_inspect_result_
+    NTSTATUS InvokeResponseCallbacks(
+        const HttpSendOptions& options,
+        const http1::HttpResponse& parsed,
+        bool bodyAlreadyDelivered) noexcept;
 
     _Must_inspect_result_
     NTSTATUS CreateOwnedResponse(
@@ -1373,6 +1381,30 @@ namespace session
         bool responseBodyForbidden,
         _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
         _In_opt_ const codec::DecodeMaterials* materials,
+        _Out_ http1::HttpResponse* parsed,
+        _Out_writes_(headerCapacity) http1::HttpHeader* responseHeaders,
+        SIZE_T headerCapacity,
+        _Out_writes_(trailerCapacity) http1::HttpHeader* responseTrailers,
+        SIZE_T trailerCapacity,
+        _Out_ SIZE_T* rawResponseLength) noexcept;
+
+    // Streaming H1 response reader: delivers body via BodyCallback incrementally.
+    // When aggregateBody is true, also materializes parsed.Body (subject to MaxResponseBytes).
+    // Non-identity Content-Encoding is rejected with STATUS_NOT_SUPPORTED.
+    // Sets *bodyDelivered via callbacks when BodyCallback is non-null.
+    _Must_inspect_result_
+    NTSTATUS ReadHttpResponseFromSocketStreaming(
+        _Inout_ transport::Transport* transport,
+        _Inout_ Workspace& workspace,
+        bool responseBodyForbidden,
+        ULONG bodyReadTimeoutMilliseconds,
+        ULONG bodyIdleTimeoutMilliseconds,
+        bool aggregateBody,
+        _In_opt_ ResponseStartCallback responseStartCallback,
+        _In_opt_ HeaderCallback headerCallback,
+        _In_opt_ BodyCallback bodyCallback,
+        _In_opt_ void* callbackContext,
+        _Out_ bool* bodyDelivered,
         _Out_ http1::HttpResponse* parsed,
         _Out_writes_(headerCapacity) http1::HttpHeader* responseHeaders,
         SIZE_T headerCapacity,

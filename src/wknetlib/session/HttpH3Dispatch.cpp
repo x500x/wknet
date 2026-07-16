@@ -255,9 +255,37 @@ void MaterializeFields(const UCHAR *base, const HeapArray<HttpH3StoredField> &st
 
 NTSTATUS FinalizeResponse(HttpH3DispatchContext *context) noexcept
 {
-    if (context == nullptr || context->ResponseAccumulator == nullptr)
+    if (context == nullptr)
     {
-        return context != nullptr && context->DirectCallbacks ? STATUS_SUCCESS : STATUS_INVALID_PARAMETER;
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (context->DirectCallbacks)
+    {
+        if (context->ResponseStatusCode < 200 || context->ResponseStatusCode > 999)
+        {
+            return STATUS_INVALID_NETWORK_RESPONSE;
+        }
+        if (context->ParsedResponse != nullptr)
+        {
+            http1::HttpResponse &parsed = *context->ParsedResponse;
+            parsed.MajorVersion = 3;
+            parsed.MinorVersion = 0;
+            parsed.StatusCode = static_cast<USHORT>(context->ResponseStatusCode);
+            parsed.BodyDeliveredViaCallback = context->SendOptions != nullptr &&
+                context->SendOptions->BodyCallback != nullptr;
+            if (parsed.BodyDeliveredViaCallback &&
+                context->SendOptions != nullptr &&
+                (context->SendOptions->Flags & HttpSendFlagAggregateWithCallbacks) == 0)
+            {
+                parsed.Body = nullptr;
+                parsed.BodyLength = 0;
+            }
+        }
+        return STATUS_SUCCESS;
+    }
+    if (context->ResponseAccumulator == nullptr)
+    {
+        return STATUS_INVALID_PARAMETER;
     }
     HttpH3ResponseAccumulator *accumulator = static_cast<HttpH3ResponseAccumulator *>(context->ResponseAccumulator);
     if (context->ResponseStatusCode < 200 || context->ResponseStatusCode > 999)
@@ -925,6 +953,7 @@ NTSTATUS HttpH3DispatchInitialize(HttpH3DispatchContext *context, const HttpH3Di
     context->RequestObject = options->RequestObject;
     context->SendOptions = options->SendOptions;
     context->DirectCallbacks = options->DirectCallbacks;
+    context->ParsedResponse = options->ParsedResponse;
     context->AttemptGeneration = options->AttemptGeneration;
     context->StreamId = HttpH3UnsetStreamId;
     context->LastGoawayId = HttpH3MaximumStreamId;
@@ -1233,6 +1262,15 @@ void HttpH3DispatchNotifyResponseStarted(HttpH3DispatchContext *context, ULONG s
     }
     context->ResponseStatusCode = statusCode;
     (void)HttpH3DispatchAdvanceState(context, HttpH3RequestState::ResponseStarted, context->StreamId, STATUS_PENDING);
+    if (context->DirectCallbacks &&
+        context->SendOptions != nullptr &&
+        context->SendOptions->ResponseStartCallback != nullptr &&
+        statusCode <= 999)
+    {
+        (void)context->SendOptions->ResponseStartCallback(
+            context->SendOptions->CallbackContext,
+            static_cast<USHORT>(statusCode));
+    }
 }
 
 NTSTATUS HttpH3DispatchNotifyHeader(HttpH3DispatchContext *context, const char *name, SIZE_T nameLength,

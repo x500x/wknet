@@ -459,6 +459,31 @@ namespace
             return SetLargePostResponse(response);
         }
 
+        // High-level SSE public sample (stream.wikimedia.org) under the test transport.
+        // KM/wknettest uses real WSK and does not install this transport.
+        if (BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "Accept: text/event-stream") ||
+            BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "stream.wikimedia.org") ||
+            BufferContainsLiteral(request->BuiltRequest, request->BuiltRequestLength, "/v2/stream/recentchange")) {
+            static const char sseResponse[] =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/event-stream; charset=utf-8\r\n"
+                "Cache-Control: no-cache\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+                "event: message\n"
+                "id: test-event-1\n"
+                "data: {\"hello\":\"sse\"}\n"
+                "\n";
+            response->RawResponse = sseResponse;
+            response->RawResponseLength = sizeof(sseResponse) - 1;
+            response->ConnectionReusable = false;
+            if (isHttps && TextEqualsLiteral(request->Alpn, request->AlpnLength, "http/1.1")) {
+                response->NegotiatedAlpn = "http/1.1";
+                response->NegotiatedAlpnLength = 8;
+            }
+            return STATUS_SUCCESS;
+        }
+
         if (isHttps && TextEqualsLiteral(request->Alpn, request->AlpnLength, "h2")) {
             response->NegotiatedAlpn = "h2";
             response->NegotiatedAlpnLength = 2;
@@ -884,13 +909,13 @@ namespace
         Expect(NT_SUCCESS(status), "load-time high-level samples succeed under test transport");
         Expect(NT_SUCCESS(results.SessionDefaultConfig.Status), "default session sample succeeds");
         Expect(NT_SUCCESS(results.SessionCustomConfig.Status), "custom session sample succeeds");
-        Expect(capture.HttpCalls == 38, "all HTTP/HTTPS high-level samples are issued");
+        Expect(capture.HttpCalls == 39, "all HTTP/HTTPS/SSE high-level samples are issued");
         Expect(capture.HttpIpv4Calls == 1, "dedicated HTTP IPv4 sample forces IPv4");
         Expect(capture.HttpIpv6Calls == 1, "IPv6 HTTP sample is issued");
-        Expect(capture.HttpAnyCalls == 36, "general HTTP/HTTPS samples use default address family");
+        Expect(capture.HttpAnyCalls == 37, "general HTTP/HTTPS/SSE samples use default address family");
         Expect(capture.HttpNoPoolCalls >= 10, "no-pool connection policy samples are issued");
-        Expect(capture.HttpForceNewCalls >= 1, "force-new connection policy sample is issued");
-        Expect(capture.HttpsVerifyCalls == 4, "verified HTTPS samples are issued");
+        Expect(capture.HttpForceNewCalls >= 2, "force-new connection policy samples are issued");
+        Expect(capture.HttpsVerifyCalls == 5, "verified HTTPS samples are issued");
         Expect(
             capture.HttpsVerifyWithStoreCalls == capture.HttpsVerifyCalls,
             "verified HTTPS samples provide a certificate store");
@@ -898,7 +923,7 @@ namespace
         Expect(
             capture.HttpsNoVerifyWithoutStoreCalls == capture.HttpsNoVerifyCalls,
             "no-verify HTTPS sample does not require a certificate store");
-        Expect(capture.HttpsHttp11AlpnCalls == 1, "HTTPS HTTP/1.1 ALPN sample is issued");
+        Expect(capture.HttpsHttp11AlpnCalls == 2, "HTTPS HTTP/1.1 ALPN samples are issued");
         Expect(capture.HttpsHttp2AlpnCalls == 1, "HTTPS HTTP/2 ALPN sample is issued");
         Expect(capture.HttpsDefaultAlpnOfferCalls >= 2, "HTTPS default samples offer h2 and HTTP/1.1 automatically");
 
@@ -937,6 +962,8 @@ namespace
         Expect(results.WebSocketReceiveEx.BodyLength == capture.WebSocketEchoLength, "websocket receive callback records body");
         Expect(results.HttpAsyncCancel.StatusCode == 1, "async cancel sample marks operation canceled");
         Expect(results.HttpAsyncCancel.BodyLength == 1, "async cancel sample waits for terminal operation state");
+        Expect(NT_SUCCESS(results.SseConnectReceive.Status), "SSE Connect/Receive sample succeeds under test transport");
+        Expect(results.SseConnectReceive.BodyLength != 0, "SSE sample delivers event data");
 
         wknet::http::test::SetHttpTransport(nullptr, nullptr);
         wknet::http::test::SetWebSocketTransport(nullptr, nullptr, nullptr, nullptr, nullptr);

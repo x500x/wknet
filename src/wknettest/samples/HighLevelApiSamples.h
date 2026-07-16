@@ -80,6 +80,7 @@ namespace samples
         HighLevelApiSampleResult WebSocketConnectAsync = {};
         HighLevelApiSampleResult WebSocketConfigConnectAsync = {};
         HighLevelApiSampleResult WebSocketConnectAsyncEx = {};
+        HighLevelApiSampleResult SseConnectReceive = {};
     };
 
     _Must_inspect_result_
