@@ -8,10 +8,16 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function ConvertTo-WikiPageName {
-    param([Parameter(Mandatory = $true)][string]$SourceFileName)
+    param([Parameter(Mandatory = $true)][string]$RelativePath)
 
-    $stem = [System.IO.Path]::GetFileNameWithoutExtension($SourceFileName)
-    if ($stem -eq "index") {
+    $normalized = ($RelativePath -replace '\\', '/').TrimStart('/')
+    $dir = [System.IO.Path]::GetDirectoryName($normalized)
+    if ($null -eq $dir) { $dir = "" }
+    $dir = ($dir -replace '\\', '/').Trim('/')
+    $fileName = [System.IO.Path]::GetFileName($normalized)
+    $stem = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
+
+    if ($stem -eq "index" -and [string]::IsNullOrEmpty($dir)) {
         return "Home"
     }
 
@@ -23,9 +29,17 @@ function ConvertTo-WikiPageName {
         "ntstatus" = "NTSTATUS"
         "tls" = "TLS"
         "websocket" = "WebSocket"
+        "sse" = "SSE"
     }
 
-    $parts = foreach ($part in ($stem -split "-")) {
+    $rawParts = @()
+    if (-not [string]::IsNullOrEmpty($dir)) {
+        $rawParts += ($dir -split '/')
+    }
+    $rawParts += ($stem -split "-")
+
+    $parts = foreach ($part in $rawParts) {
+        if ([string]::IsNullOrEmpty($part)) { continue }
         $word = $part.ToLowerInvariant()
         if ($knownWords.ContainsKey($word)) {
             $knownWords[$word]
@@ -60,21 +74,90 @@ function Get-ResolvedDirectory {
     return $resolved.Path
 }
 
+function ConvertTo-PosixRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$FullPath
+    )
+
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    $pathFull = [System.IO.Path]::GetFullPath($FullPath)
+    if (-not $pathFull.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path is outside source root: $FullPath"
+    }
+
+    $relative = $pathFull.Substring($rootFull.Length).TrimStart('\', '/')
+    return ($relative -replace '\\', '/')
+}
+
+function Resolve-DocsiteLinkPath {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$CurrentDir,
+        [Parameter(Mandatory = $true)][string]$LinkPath
+    )
+
+    $normalizedLink = ($LinkPath -replace '\\', '/').Trim()
+    if ([string]::IsNullOrWhiteSpace($normalizedLink)) {
+        return $null
+    }
+
+    # Drop a leading "./"
+    while ($normalizedLink.StartsWith("./")) {
+        $normalizedLink = $normalizedLink.Substring(2)
+    }
+
+    $combined = if ([string]::IsNullOrEmpty($CurrentDir) -or $normalizedLink.StartsWith("/")) {
+        $normalizedLink.TrimStart('/')
+    } else {
+        ($CurrentDir.Trim('/') + "/" + $normalizedLink).Trim('/')
+    }
+
+    $parts = [System.Collections.Generic.List[string]]::new()
+    foreach ($part in ($combined -split '/')) {
+        if ([string]::IsNullOrEmpty($part) -or $part -eq ".") { continue }
+        if ($part -eq "..") {
+            if ($parts.Count -eq 0) {
+                return $null
+            }
+            $parts.RemoveAt($parts.Count - 1)
+            continue
+        }
+        $parts.Add($part)
+    }
+
+    return ($parts -join '/')
+}
+
+function ConvertTo-ChineseSourceKey {
+    param([Parameter(Mandatory = $true)][string]$RelativePath)
+
+    $key = ($RelativePath -replace '\\', '/').ToLowerInvariant()
+    if ($key.EndsWith(".en.md")) {
+        return $key.Substring(0, $key.Length - ".en.md".Length) + ".md"
+    }
+    return $key
+}
+
 function New-PageMap {
     param([Parameter(Mandatory = $true)][string]$Root)
 
     $map = @{}
-    $pages = Get-ChildItem -LiteralPath $Root -Filter "*.md" -File |
-        Where-Object { $_.Name -notlike "*.en.md" } |
-        Sort-Object Name
+    $pages = Get-ChildItem -LiteralPath $Root -Filter "*.md" -File -Recurse |
+        Where-Object {
+            $_.Name -notlike "*.en.md" -and
+            $_.FullName -notmatch '[\\/](stylesheets|javascripts|assets|images|img|static)([\\/]|$)'
+        } |
+        Sort-Object FullName
+
     foreach ($page in $pages) {
-        $key = $page.Name.ToLowerInvariant()
-        $wikiName = ConvertTo-WikiPageName -SourceFileName $page.Name
+        $relative = ConvertTo-PosixRelativePath -Root $Root -FullPath $page.FullName
+        $key = $relative.ToLowerInvariant()
+        $wikiName = ConvertTo-WikiPageName -RelativePath $relative
         if ($map.ContainsKey($key)) {
-            throw "Duplicate docsite page name: $($page.Name)"
+            throw "Duplicate docsite page path: $relative"
         }
         if ($map.Values -contains $wikiName) {
-            throw "Duplicate generated wiki page name: $wikiName"
+            throw "Duplicate generated wiki page name: $wikiName (from $relative)"
         }
         $map[$key] = $wikiName
     }
@@ -85,7 +168,8 @@ function New-PageMap {
 function ConvertTo-WikiLinkTarget {
     param(
         [Parameter(Mandatory = $true)][string]$Target,
-        [Parameter(Mandatory = $true)][hashtable]$PageMap
+        [Parameter(Mandatory = $true)][hashtable]$PageMap,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$CurrentDir
     )
 
     if ($Target.StartsWith("#")) {
@@ -103,12 +187,23 @@ function ConvertTo-WikiLinkTarget {
         $fragment = $Target.Substring($hashIndex)
     }
 
-    $fileName = [System.IO.Path]::GetFileName($path)
-    if ([string]::IsNullOrWhiteSpace($fileName) -or -not $fileName.EndsWith(".md", [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ([string]::IsNullOrWhiteSpace($path)) {
         return $Target
     }
 
-    $key = $fileName.ToLowerInvariant()
+    $resolved = Resolve-DocsiteLinkPath -CurrentDir $CurrentDir -LinkPath $path
+    if ($null -eq $resolved) {
+        throw "Markdown link escapes the docsite root: $Target"
+    }
+
+    if (-not $resolved.EndsWith(".md", [System.StringComparison]::OrdinalIgnoreCase)) {
+        # Non-markdown assets keep their original target.
+        return $Target
+    }
+
+    # Wiki pages are bilingual and keyed by the Chinese source path (X.md).
+    # English sources may cross-link with either X.md or X.en.md.
+    $key = ConvertTo-ChineseSourceKey -RelativePath $resolved
     if (-not $PageMap.ContainsKey($key)) {
         throw "Markdown link points to an unknown docsite page: $Target"
     }
@@ -119,7 +214,8 @@ function ConvertTo-WikiLinkTarget {
 function Convert-MarkdownLinks {
     param(
         [Parameter(Mandatory = $true)][string]$Content,
-        [Parameter(Mandatory = $true)][hashtable]$PageMap
+        [Parameter(Mandatory = $true)][hashtable]$PageMap,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$CurrentDir
     )
 
     $pattern = "(?<!!)\[(?<text>[^\]]+)\]\((?<target>[^)]+)\)"
@@ -131,7 +227,7 @@ function Convert-MarkdownLinks {
 
             $text = $match.Groups["text"].Value
             $target = $match.Groups["target"].Value.Trim()
-            $converted = ConvertTo-WikiLinkTarget -Target $target -PageMap $PageMap
+            $converted = ConvertTo-WikiLinkTarget -Target $target -PageMap $PageMap -CurrentDir $CurrentDir
             return "[$text]($converted)"
         })
 }
@@ -238,12 +334,12 @@ function New-SidebarContent {
             continue
         }
 
-        $fileName = [System.IO.Path]::GetFileName($target).ToLowerInvariant()
-        if (-not $PageMap.ContainsKey($fileName)) {
+        $key = ConvertTo-ChineseSourceKey -RelativePath (($target -replace '\\', '/').TrimStart('/'))
+        if (-not $PageMap.ContainsKey($key)) {
             throw "mkdocs nav points to an unknown docsite page: $target"
         }
 
-        $sidebar.Add("$prefix- [$label]($($PageMap[$fileName]))")
+        $sidebar.Add("$prefix- [$label]($($PageMap[$key]))")
     }
 
     $sidebar.Add("")
@@ -259,18 +355,35 @@ Get-ChildItem -LiteralPath $wikiRoot -Filter "*.md" -File | Remove-Item -Force
 
 # Each wiki page is bilingual: Chinese body, separator, English body. Only
 # the Chinese sources (X.md) drive the loop; the matching X.en.md is
-# appended when present.
-foreach ($sourcePage in (Get-ChildItem -LiteralPath $sourceRoot -Filter "*.md" -File | Where-Object { $_.Name -notlike "*.en.md" } | Sort-Object Name)) {
-    $wikiPage = $pageMap[$sourcePage.Name.ToLowerInvariant()]
+# appended when present. Nested docs (e.g. api/*.md) are included.
+$sourcePages = Get-ChildItem -LiteralPath $sourceRoot -Filter "*.md" -File -Recurse |
+    Where-Object {
+        $_.Name -notlike "*.en.md" -and
+        $_.FullName -notmatch '[\\/](stylesheets|javascripts|assets|images|img|static)([\\/]|$)'
+    } |
+    Sort-Object FullName
+
+foreach ($sourcePage in $sourcePages) {
+    $relative = ConvertTo-PosixRelativePath -Root $sourceRoot -FullPath $sourcePage.FullName
+    $key = $relative.ToLowerInvariant()
+    $wikiPage = $pageMap[$key]
     $targetPath = Join-Path -Path $wikiRoot -ChildPath "$wikiPage.md"
+    $currentDir = [System.IO.Path]::GetDirectoryName($relative)
+    if ($null -eq $currentDir) { $currentDir = "" }
+    $currentDir = ($currentDir -replace '\\', '/').Trim('/')
 
     $zhRaw = Get-Content -LiteralPath $sourcePage.FullName -Raw -Encoding UTF8
-    $zhConverted = Convert-MarkdownLinks -Content $zhRaw -PageMap $pageMap
+    $zhConverted = Convert-MarkdownLinks -Content $zhRaw -PageMap $pageMap -CurrentDir $currentDir
 
-    $enSource = Join-Path $sourceRoot ($sourcePage.BaseName + ".en.md")
+    $enRelative = if ($relative -match '\.md$') {
+        $relative.Substring(0, $relative.Length - 3) + ".en.md"
+    } else {
+        $relative + ".en.md"
+    }
+    $enSource = Join-Path $sourceRoot ($enRelative -replace '/', [System.IO.Path]::DirectorySeparatorChar)
     if (Test-Path -LiteralPath $enSource) {
         $enRaw = Get-Content -LiteralPath $enSource -Raw -Encoding UTF8
-        $enConverted = Convert-MarkdownLinks -Content $enRaw -PageMap $pageMap
+        $enConverted = Convert-MarkdownLinks -Content $enRaw -PageMap $pageMap -CurrentDir $currentDir
         $combined = $zhConverted.TrimEnd() + "`n`n---`n`n## English`n`n" + $enConverted.TrimEnd() + "`n"
     } else {
         $combined = $zhConverted
