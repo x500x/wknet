@@ -35,6 +35,57 @@ namespace session
     }
 
     _Must_inspect_result_
+    NTSTATUS DecodeContentWithWorkspace(
+        _In_reads_(responseHeaderCount) const http1::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCount,
+        _In_reads_bytes_(responseBodyLength) const char* responseBody,
+        SIZE_T responseBodyLength,
+        _Inout_ Workspace& workspace,
+        _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const codec::DecodeMaterials* materials,
+        _Out_ http1::HttpContentDecodeResult* decoded) noexcept
+    {
+        if (decoded == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        *decoded = {};
+
+        for (;;) {
+            http1::HttpContentDecodeBuffers decodeBuffers = {};
+            decodeBuffers.DecodedBody = reinterpret_cast<char*>(workspace.DecodedBody.Data);
+            decodeBuffers.DecodedBodyCapacity = workspace.DecodedBody.Length;
+            decodeBuffers.ScratchBody = reinterpret_cast<char*>(workspace.Request.Data);
+            decodeBuffers.ScratchBodyCapacity = workspace.Request.Length;
+            decodeBuffers.Materials = materials;
+
+            NTSTATUS status = http1::HttpContentEncoding::Decode(
+                responseHeaders,
+                responseHeaderCount,
+                responseBody,
+                responseBodyLength,
+                decodeBuffers,
+                *decoded,
+                acceptPolicy);
+            if (status != STATUS_BUFFER_TOO_SMALL) {
+                if (NT_SUCCESS(status) &&
+                    workspace.MaxResponseBytes != 0 &&
+                    decoded->BodyLength > workspace.MaxResponseBytes) {
+                    *decoded = {};
+                    return STATUS_BUFFER_TOO_SMALL;
+                }
+                return status;
+            }
+
+            status = GrowDecodedBodyAfterBufferTooSmall(workspace);
+            if (!NT_SUCCESS(status)) {
+                *decoded = {};
+                return status;
+            }
+        }
+    }
+
+    _Must_inspect_result_
     NTSTATUS BuildRequestBytes(
         const Request& request,
         bool addExpectContinue,
@@ -750,6 +801,104 @@ namespace session
             *receivedOut = received;
             return STATUS_SUCCESS;
         }
+
+        // After transfer-decoded body is fully accumulated (or streamed), either:
+        // - identity: keep existing aggregate/callback semantics, or
+        // - non-identity CE: full-buffer decode then deliver plaintext to BodyCallback.
+        _Must_inspect_result_
+        NTSTATUS FinalizeStreamingBody(
+            _Inout_ StreamAggregateContext& streamCtx,
+            _Inout_ Workspace& workspace,
+            _Inout_ http1::HttpResponse* parsed,
+            bool aggregateBody,
+            bool needsContentDecode,
+            _In_reads_(responseHeaderCount) const http1::HttpHeader* responseHeaders,
+            SIZE_T responseHeaderCount,
+            _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
+            _In_opt_ const codec::DecodeMaterials* materials,
+            _In_opt_ BodyCallback bodyCallback,
+            _In_opt_ void* callbackContext,
+            _Out_ bool* bodyDelivered) noexcept
+        {
+            if (parsed == nullptr || bodyDelivered == nullptr) {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            if (needsContentDecode) {
+                const char* encodedBody = reinterpret_cast<const char*>(streamCtx.Aggregate);
+                const SIZE_T encodedLength = streamCtx.AggregateLength;
+                http1::HttpContentDecodeResult decoded = {};
+                NTSTATUS status = DecodeContentWithWorkspace(
+                    responseHeaders,
+                    responseHeaderCount,
+                    encodedBody,
+                    encodedLength,
+                    workspace,
+                    acceptPolicy,
+                    materials,
+                    &decoded);
+                // Encoded aggregate is no longer needed after decode.
+                FreeNonPagedPoolBytes(streamCtx.Aggregate);
+                streamCtx.Aggregate = nullptr;
+                streamCtx.AggregateLength = 0;
+                streamCtx.AggregateCapacity = 0;
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+
+                if (bodyCallback != nullptr) {
+                    if (decoded.BodyLength != 0 && decoded.Body != nullptr) {
+                        status = bodyCallback(
+                            callbackContext,
+                            reinterpret_cast<const UCHAR*>(decoded.Body),
+                            decoded.BodyLength,
+                            false);
+                        if (!NT_SUCCESS(status)) {
+                            return status;
+                        }
+                    }
+                    status = bodyCallback(callbackContext, nullptr, 0, true);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                    *bodyDelivered = true;
+                }
+
+                if (aggregateBody && decoded.BodyLength != 0 && decoded.Body != nullptr) {
+                    parsed->Body = decoded.Body;
+                    parsed->BodyLength = decoded.BodyLength;
+                }
+                else {
+                    parsed->Body = nullptr;
+                    parsed->BodyLength = 0;
+                }
+                workspace.ResponseLength = 0;
+                return STATUS_SUCCESS;
+            }
+
+            if (bodyCallback != nullptr) {
+                const NTSTATUS status = bodyCallback(callbackContext, nullptr, 0, true);
+                if (!NT_SUCCESS(status)) {
+                    return status;
+                }
+                *bodyDelivered = true;
+            }
+            if (aggregateBody && streamCtx.AggregateLength != 0) {
+                FreeNonPagedPoolBytes(workspace.Response.Data);
+                workspace.Response.Data = streamCtx.Aggregate;
+                workspace.Response.Length = streamCtx.AggregateCapacity;
+                workspace.ResponseLength = streamCtx.AggregateLength;
+                streamCtx.Aggregate = nullptr;
+                parsed->Body = reinterpret_cast<const char*>(workspace.Response.Data);
+                parsed->BodyLength = workspace.ResponseLength;
+            }
+            else {
+                parsed->Body = nullptr;
+                parsed->BodyLength = 0;
+                workspace.ResponseLength = 0;
+            }
+            return STATUS_SUCCESS;
+        }
     }
 
     _Must_inspect_result_
@@ -1038,6 +1187,8 @@ namespace session
         _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         bool responseBodyForbidden,
+        _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const codec::DecodeMaterials* materials,
         ULONG bodyReadTimeoutMilliseconds,
         ULONG bodyIdleTimeoutMilliseconds,
         bool aggregateBody,
@@ -1149,10 +1300,12 @@ namespace session
         if (headerBytes > responseLength) {
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
-        if (ResponseHasNonIdentityContentEncoding(headerParsed) &&
-            headerParsed.BodyKind != http1::HttpBodyKind::None) {
-            return STATUS_NOT_SUPPORTED;
-        }
+
+        // Non-identity CE requires full-buffer decode after transfer-coding is complete.
+        // Accumulate TE-decoded body without live user callbacks, then decode + deliver.
+        const bool needsContentDecode =
+            ResponseHasNonIdentityContentEncoding(headerParsed) &&
+            headerParsed.BodyKind != http1::HttpBodyKind::None;
 
         if (responseStartCallback != nullptr) {
             const NTSTATUS startStatus = responseStartCallback(
@@ -1222,16 +1375,16 @@ namespace session
         SIZE_T workspaceBodyRemaining = responseLength - headerBytes;
         UCHAR* const window = resources.Window;
 
-        resources.StreamCtx.UserCallback = bodyCallback;
+        // CE path: force internal aggregation and suppress live user body callbacks so
+        // compressed wire bytes never leak to OnBody. Identity path keeps prior semantics.
+        resources.StreamCtx.UserCallback = needsContentDecode ? nullptr : bodyCallback;
         resources.StreamCtx.UserContext = callbackContext;
-        resources.StreamCtx.DoAggregate = aggregateBody;
+        resources.StreamCtx.DoAggregate = needsContentDecode || aggregateBody;
         resources.StreamCtx.MaxAggregateBytes = workspace.MaxResponseBytes;
 
         // Content-Length path
         if (headerParsed.BodyKind == http1::HttpBodyKind::ContentLength) {
             SIZE_T remaining = contentLength;
-            // Account for bytes already in window/workspace leftovers by processing window loop.
-            // Restart window fill: we may have consumed break above after first fill — re-init.
             windowLength = 0;
             workspaceBodyOffset = headerBytes;
             workspaceBodyRemaining = responseLength - headerBytes;
@@ -1274,29 +1427,20 @@ namespace session
                 remaining -= take;
             }
 
-            if (bodyCallback != nullptr) {
-                const NTSTATUS status = bodyCallback(callbackContext, nullptr, 0, true);
-                if (!NT_SUCCESS(status)) {
-                    return status;
-                }
-                *bodyDelivered = true;
-            }
-            if (aggregateBody && resources.StreamCtx.AggregateLength != 0) {
-                FreeNonPagedPoolBytes(workspace.Response.Data);
-                workspace.Response.Data = resources.StreamCtx.Aggregate;
-                workspace.Response.Length = resources.StreamCtx.AggregateCapacity;
-                workspace.ResponseLength = resources.StreamCtx.AggregateLength;
-                resources.StreamCtx.Aggregate = nullptr;
-                parsed->Body = reinterpret_cast<const char*>(workspace.Response.Data);
-                parsed->BodyLength = workspace.ResponseLength;
-            }
-            else {
-                parsed->Body = nullptr;
-                parsed->BodyLength = 0;
-                workspace.ResponseLength = 0;
-            }
             *rawResponseLength = headerBytes + contentLength;
-            return STATUS_SUCCESS;
+            return FinalizeStreamingBody(
+                resources.StreamCtx,
+                workspace,
+                parsed,
+                aggregateBody,
+                needsContentDecode,
+                responseHeaders,
+                headerParsed.HeaderCount,
+                acceptPolicy,
+                materials,
+                bodyCallback,
+                callbackContext,
+                bodyDelivered);
         }
 
         if (headerParsed.BodyKind == http1::HttpBodyKind::Chunked) {
@@ -1352,29 +1496,20 @@ namespace session
                 if (status == STATUS_SUCCESS) {
                     parsed->Trailers = responseTrailers;
                     parsed->TrailerCount = resources.Decoder->TrailerCount();
-                    if (bodyCallback != nullptr) {
-                        status = bodyCallback(callbackContext, nullptr, 0, true);
-                        if (!NT_SUCCESS(status)) {
-                            return status;
-                        }
-                        *bodyDelivered = true;
-                    }
-                    if (aggregateBody && resources.StreamCtx.AggregateLength != 0) {
-                        FreeNonPagedPoolBytes(workspace.Response.Data);
-                        workspace.Response.Data = resources.StreamCtx.Aggregate;
-                        workspace.Response.Length = resources.StreamCtx.AggregateCapacity;
-                        workspace.ResponseLength = resources.StreamCtx.AggregateLength;
-                        resources.StreamCtx.Aggregate = nullptr;
-                        parsed->Body = reinterpret_cast<const char*>(workspace.Response.Data);
-                        parsed->BodyLength = workspace.ResponseLength;
-                    }
-                    else {
-                        parsed->Body = nullptr;
-                        parsed->BodyLength = 0;
-                        workspace.ResponseLength = 0;
-                    }
                     *rawResponseLength = headerBytes;
-                    return STATUS_SUCCESS;
+                    return FinalizeStreamingBody(
+                        resources.StreamCtx,
+                        workspace,
+                        parsed,
+                        aggregateBody,
+                        needsContentDecode,
+                        responseHeaders,
+                        headerParsed.HeaderCount,
+                        acceptPolicy,
+                        materials,
+                        bodyCallback,
+                        callbackContext,
+                        bodyDelivered);
                 }
                 if (status != STATUS_MORE_PROCESSING_REQUIRED) {
                     return status;
@@ -1416,30 +1551,21 @@ namespace session
                 idleTimeout,
                 &received);
             if (!NT_SUCCESS(status) || received == 0) {
-                if (bodyCallback != nullptr) {
-                    status = bodyCallback(callbackContext, nullptr, 0, true);
-                    if (!NT_SUCCESS(status)) {
-                        return status;
-                    }
-                    *bodyDelivered = true;
-                }
                 parsed->BodyEndsOnConnectionClose = true;
-                if (aggregateBody && resources.StreamCtx.AggregateLength != 0) {
-                    FreeNonPagedPoolBytes(workspace.Response.Data);
-                    workspace.Response.Data = resources.StreamCtx.Aggregate;
-                    workspace.Response.Length = resources.StreamCtx.AggregateCapacity;
-                    workspace.ResponseLength = resources.StreamCtx.AggregateLength;
-                    resources.StreamCtx.Aggregate = nullptr;
-                    parsed->Body = reinterpret_cast<const char*>(workspace.Response.Data);
-                    parsed->BodyLength = workspace.ResponseLength;
-                }
-                else {
-                    parsed->Body = nullptr;
-                    parsed->BodyLength = 0;
-                    workspace.ResponseLength = 0;
-                }
                 *rawResponseLength = headerBytes;
-                return STATUS_SUCCESS;
+                return FinalizeStreamingBody(
+                    resources.StreamCtx,
+                    workspace,
+                    parsed,
+                    aggregateBody,
+                    needsContentDecode,
+                    responseHeaders,
+                    headerParsed.HeaderCount,
+                    acceptPolicy,
+                    materials,
+                    bodyCallback,
+                    callbackContext,
+                    bodyDelivered);
             }
         }
     }

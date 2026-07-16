@@ -466,6 +466,8 @@ namespace
         SIZE_T CallCount = 0;
         SIZE_T TotalBytes = 0;
         bool FinalChunk = false;
+        char Buffer[512] = {};
+        SIZE_T BufferLength = 0;
     };
 
     struct RedirectCapture
@@ -783,6 +785,14 @@ namespace
         ++capture->CallCount;
         capture->TotalBytes += dataLength;
         capture->FinalChunk = finalChunk;
+        if (data != nullptr && dataLength != 0) {
+            const SIZE_T room = sizeof(capture->Buffer) - capture->BufferLength;
+            const SIZE_T take = dataLength < room ? dataLength : room;
+            if (take != 0) {
+                memcpy(capture->Buffer + capture->BufferLength, data, take);
+                capture->BufferLength += take;
+            }
+        }
         return STATUS_SUCCESS;
     }
 
@@ -2553,6 +2563,157 @@ namespace
         Expect(callback.CallCount >= 1, "OnBody-only response callback runs at least once");
         Expect(callback.TotalBytes == 5000, "OnBody-only response callback receives full body");
         Expect(callback.FinalChunk, "OnBody-only response callback marks final chunk");
+
+        wknet::http::ResponseRelease(resp);
+        wknet::http::SessionClose(session);
+        wknet::http::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    SIZE_T BuildGzipContentEncodingResponse(char* buffer, SIZE_T capacity) noexcept
+    {
+        if (buffer == nullptr) {
+            return 0;
+        }
+        const int headerLength = snprintf(
+            buffer,
+            capacity,
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Encoding: gzip\r\n"
+            "Content-Length: %zu\r\n"
+            "\r\n",
+            sizeof(GzipBody));
+        if (headerLength <= 0 || static_cast<SIZE_T>(headerLength) > capacity) {
+            return 0;
+        }
+        SIZE_T responseLength = static_cast<SIZE_T>(headerLength);
+        if (responseLength + sizeof(GzipBody) > capacity) {
+            return 0;
+        }
+        memcpy(buffer + responseLength, GzipBody, sizeof(GzipBody));
+        return responseLength + sizeof(GzipBody);
+    }
+
+    void TestResponseBodyCallbackDecodesGzipContentEncoding() noexcept
+    {
+        char response[256] = {};
+        const SIZE_T responseLength = BuildGzipContentEncodingResponse(response, sizeof(response));
+        Expect(responseLength != 0, "gzip OnBody fixture builds");
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = responseLength;
+        wknet::http::test::SetHttpTransport(TestTransport, &captured);
+
+        wknet::http::Session* session = nullptr;
+        NTSTATUS status = wknet::http::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for OnBody gzip decode");
+
+        BodyCallbackCapture callback = {};
+        wknet::http::SendOptions options = wknet::http::DefaultSendOptions();
+        options.OnBody = CountingBodyCallback;
+        options.CallbackContext = &callback;
+
+        const char* url = "http://example.com/gzip-onbody";
+        wknet::http::Response* resp = nullptr;
+        status = wknet::http::GetEx(session, url, Length(url), nullptr, &options, &resp);
+        Expect(NT_SUCCESS(status), "OnBody gzip Content-Encoding request succeeds");
+        Expect(resp == nullptr, "OnBody-only gzip response does not allocate aggregate response");
+        Expect(callback.FinalChunk, "OnBody gzip callback marks final chunk");
+        Expect(
+            callback.TotalBytes == Length(EncodedBodyLiteral),
+            "OnBody gzip callback receives decoded byte count");
+        Expect(
+            callback.BufferLength == Length(EncodedBodyLiteral) &&
+                memcmp(callback.Buffer, EncodedBodyLiteral, Length(EncodedBodyLiteral)) == 0,
+            "OnBody gzip callback receives decoded plaintext");
+        Expect(
+            callback.BufferLength < 2 ||
+                !(static_cast<unsigned char>(callback.Buffer[0]) == 0x1f &&
+                    static_cast<unsigned char>(callback.Buffer[1]) == 0x8b),
+            "OnBody gzip callback does not receive raw gzip magic");
+
+        wknet::http::ResponseRelease(resp);
+        wknet::http::SessionClose(session);
+        wknet::http::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestResponseBodyCallbackAggregateDecodesGzip() noexcept
+    {
+        char response[256] = {};
+        const SIZE_T responseLength = BuildGzipContentEncodingResponse(response, sizeof(response));
+        Expect(responseLength != 0, "gzip AggregateWithCallbacks fixture builds");
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = responseLength;
+        wknet::http::test::SetHttpTransport(TestTransport, &captured);
+
+        wknet::http::Session* session = nullptr;
+        NTSTATUS status = wknet::http::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for AggregateWithCallbacks gzip decode");
+
+        BodyCallbackCapture callback = {};
+        wknet::http::SendOptions options = wknet::http::DefaultSendOptions();
+        options.Flags = wknet::http::SendFlagAggregateWithCallbacks;
+        options.OnBody = CountingBodyCallback;
+        options.CallbackContext = &callback;
+
+        const char* url = "http://example.com/gzip-aggregate-onbody";
+        wknet::http::Response* resp = nullptr;
+        status = wknet::http::GetEx(session, url, Length(url), nullptr, &options, &resp);
+        Expect(NT_SUCCESS(status), "AggregateWithCallbacks gzip Content-Encoding request succeeds");
+        Expect(resp != nullptr, "AggregateWithCallbacks gzip allocates response");
+        Expect(
+            resp != nullptr &&
+                wknet::http::ResponseBodyLength(resp) == Length(EncodedBodyLiteral) &&
+                memcmp(
+                    wknet::http::ResponseBody(resp),
+                    EncodedBodyLiteral,
+                    Length(EncodedBodyLiteral)) == 0,
+            "AggregateWithCallbacks gzip response body is decoded plaintext");
+        Expect(
+            callback.TotalBytes == Length(EncodedBodyLiteral) &&
+                callback.BufferLength == Length(EncodedBodyLiteral) &&
+                memcmp(callback.Buffer, EncodedBodyLiteral, Length(EncodedBodyLiteral)) == 0,
+            "AggregateWithCallbacks gzip OnBody also receives decoded plaintext");
+        Expect(callback.FinalChunk, "AggregateWithCallbacks gzip OnBody marks final chunk");
+
+        wknet::http::ResponseRelease(resp);
+        wknet::http::SessionClose(session);
+        wknet::http::test::SetHttpTransport(nullptr, nullptr);
+    }
+
+    void TestResponseBodyCallbackGzipHonorsAcceptEncodingPolicy() noexcept
+    {
+        char response[256] = {};
+        const SIZE_T responseLength = BuildGzipContentEncodingResponse(response, sizeof(response));
+        Expect(responseLength != 0, "gzip policy OnBody fixture builds");
+
+        CapturedRequest captured = {};
+        captured.RawResponse = response;
+        captured.RawResponseLength = responseLength;
+        wknet::http::test::SetHttpTransport(TestTransport, &captured);
+
+        wknet::http::Session* session = nullptr;
+        NTSTATUS status = wknet::http::SessionCreate(&session);
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for OnBody Accept-Encoding policy");
+
+        wknet::http::AcceptEncodingPreference preferences[] = {
+            { wknet::http::AcceptCoding::Identity, 1000 }
+        };
+        BodyCallbackCapture callback = {};
+        wknet::http::SendOptions options = wknet::http::DefaultSendOptions();
+        options.OnBody = CountingBodyCallback;
+        options.CallbackContext = &callback;
+        options.AcceptEncodingPreferences = preferences;
+        options.AcceptEncodingPreferenceCount = sizeof(preferences) / sizeof(preferences[0]);
+
+        const char* url = "http://example.com/gzip-onbody-policy";
+        wknet::http::Response* resp = nullptr;
+        status = wknet::http::GetEx(session, url, Length(url), nullptr, &options, &resp);
+        Expect(status == STATUS_NOT_SUPPORTED, "OnBody gzip fails closed under identity Accept-Encoding");
+        Expect(resp == nullptr, "policy-rejected OnBody gzip does not allocate response");
+        Expect(callback.TotalBytes == 0, "policy-rejected OnBody gzip delivers no body bytes");
 
         wknet::http::ResponseRelease(resp);
         wknet::http::SessionClose(session);
@@ -7873,6 +8034,9 @@ int main() noexcept
     TestInformationalResponsesAreSkipped();
     TestSessionMaxResponseBytesLimitsSimpleApi();
     TestResponseBodyCallbackIgnoresAggregationLimit();
+    TestResponseBodyCallbackDecodesGzipContentEncoding();
+    TestResponseBodyCallbackAggregateDecodesGzip();
+    TestResponseBodyCallbackGzipHonorsAcceptEncodingPolicy();
     TestRequestRejectsHeaderAndUrlInjection();
     TestUrlRequestTargetAndHostSemantics();
     TestReusedConnectionFailureRetriesWithFreshConnection();

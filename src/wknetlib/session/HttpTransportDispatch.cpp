@@ -776,6 +776,8 @@ namespace session
                     activeTransport,
                     workspace,
                     request.Method == HttpMethod::Head,
+                    &acceptPolicy,
+                    sendOptions.ContentCodingMaterials,
                     sendOptions.BodyReadTimeoutMilliseconds,
                     sendOptions.BodyIdleTimeoutMilliseconds,
                     aggregateBody,

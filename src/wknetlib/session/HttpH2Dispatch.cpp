@@ -114,7 +114,26 @@ namespace session
         bool Aggregate = false;
         bool DeliveredAny = false;
         bool HeadersDelivered = false;
+        // When true, DATA is buffered only; BodyCallback receives plaintext after CE decode.
+        bool SuppressLiveBodyCallback = false;
     };
+
+    bool ResponseHeadersHaveNonIdentityContentEncoding(
+        _In_reads_(headerCount) const http1::HttpHeader* headers,
+        SIZE_T headerCount) noexcept
+    {
+        if (headers == nullptr) {
+            return false;
+        }
+        for (SIZE_T index = 0; index < headerCount; ++index) {
+            if (http1::TextEqualsIgnoreCase(headers[index].Name, http1::MakeText("Content-Encoding")) &&
+                headers[index].Value.Length != 0 &&
+                !http1::TextEqualsIgnoreCase(headers[index].Value, http1::MakeText("identity"))) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     _Must_inspect_result_
     NTSTATUS EnsureHttp2StreamingHeadersDelivered(
@@ -157,6 +176,15 @@ namespace session
             }
         }
         state->HeadersDelivered = true;
+        // Non-identity CE needs full-buffer decode: buffer DATA and suppress live OnBody.
+        if (state->ResponseHeaders != nullptr &&
+            state->ResponseHeaderCount != nullptr &&
+            ResponseHeadersHaveNonIdentityContentEncoding(
+                state->ResponseHeaders,
+                *state->ResponseHeaderCount)) {
+            state->SuppressLiveBodyCallback = true;
+            state->Aggregate = true;
+        }
         return STATUS_SUCCESS;
     }
 
@@ -176,69 +204,22 @@ namespace session
             return status;
         }
 
-        if (state->Aggregate && state->WorkspaceObject != nullptr && dataLength != 0) {
+        if ((state->Aggregate || state->SuppressLiveBodyCallback) &&
+            state->WorkspaceObject != nullptr &&
+            dataLength != 0) {
             status = WorkspaceAppendResponse(state->WorkspaceObject, data, dataLength);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
         }
 
-        if (state->Callback != nullptr && dataLength != 0) {
+        if (state->Callback != nullptr &&
+            !state->SuppressLiveBodyCallback &&
+            dataLength != 0) {
             state->DeliveredAny = true;
             return state->Callback(state->CallbackContext, data, dataLength, false);
         }
         return STATUS_SUCCESS;
-    }
-
-    _Must_inspect_result_
-    NTSTATUS DecodeContentWithWorkspace(
-        _In_reads_(responseHeaderCount) const http1::HttpHeader* responseHeaders,
-        SIZE_T responseHeaderCount,
-        _In_reads_bytes_(responseBodyLength) const char* responseBody,
-        SIZE_T responseBodyLength,
-        _Inout_ Workspace& workspace,
-        _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
-        _In_opt_ const codec::DecodeMaterials* materials,
-        _Out_ http1::HttpContentDecodeResult* decoded) noexcept
-    {
-        if (decoded == nullptr) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        *decoded = {};
-
-        for (;;) {
-            http1::HttpContentDecodeBuffers decodeBuffers = {};
-            decodeBuffers.DecodedBody = reinterpret_cast<char*>(workspace.DecodedBody.Data);
-            decodeBuffers.DecodedBodyCapacity = workspace.DecodedBody.Length;
-            decodeBuffers.ScratchBody = reinterpret_cast<char*>(workspace.Request.Data);
-            decodeBuffers.ScratchBodyCapacity = workspace.Request.Length;
-            decodeBuffers.Materials = materials;
-
-            NTSTATUS status = http1::HttpContentEncoding::Decode(
-                responseHeaders,
-                responseHeaderCount,
-                responseBody,
-                responseBodyLength,
-                decodeBuffers,
-                *decoded,
-                acceptPolicy);
-            if (status != STATUS_BUFFER_TOO_SMALL) {
-                if (NT_SUCCESS(status) &&
-                    workspace.MaxResponseBytes != 0 &&
-                    decoded->BodyLength > workspace.MaxResponseBytes) {
-                    *decoded = {};
-                    return STATUS_BUFFER_TOO_SMALL;
-                }
-                return status;
-            }
-
-            status = GrowDecodedBodyAfterBufferTooSmall(workspace);
-            if (!NT_SUCCESS(status)) {
-                *decoded = {};
-                return status;
-            }
-        }
     }
 
     _Must_inspect_result_
@@ -485,22 +466,84 @@ namespace session
 
         http1::HttpContentDecodeResult decoded = {};
         if (h2StreamBody) {
-            // Streaming mode: identity body only (no full-buffer content-coding).
-            for (SIZE_T index = 0; index < responseHeaderCount; ++index) {
-                if (http1::TextEqualsIgnoreCase(
-                        responseHeaders[index].Name,
-                        http1::MakeText("Content-Encoding")) &&
-                    responseHeaders[index].Value.Length != 0 &&
-                    !http1::TextEqualsIgnoreCase(
-                        responseHeaders[index].Value,
-                        http1::MakeText("identity"))) {
-                    return STATUS_NOT_SUPPORTED;
-                }
-            }
             status = EnsureHttp2StreamingHeadersDelivered(&streamingBody);
             if (!NT_SUCCESS(status)) {
                 return status;
             }
+
+            const bool needsContentDecode =
+                ResponseHeadersHaveNonIdentityContentEncoding(
+                    responseHeaders,
+                    responseHeaderCount);
+            if (needsContentDecode) {
+                // Full-buffer CE decode after all DATA frames are buffered.
+                status = DecodeContentWithWorkspace(
+                    responseHeaders,
+                    responseHeaderCount,
+                    reinterpret_cast<const char*>(workspace.Response.Data),
+                    workspace.ResponseLength,
+                    workspace,
+                    &acceptPolicy,
+                    sendOptions.ContentCodingMaterials,
+                    &decoded);
+                if (!NT_SUCCESS(status)) {
+                    WKNET_TRACE_CORRELATED(
+                        ::wknet::ComponentHttp2,
+                        ::wknet::TraceLevel::Error,
+                        &streamCorrelation,
+                        "http2.content_decode.failed status=0x%08X body_bytes=%Iu",
+                        static_cast<ULONG>(status),
+                        workspace.ResponseLength);
+                    return status;
+                }
+
+                if (streamingBody.Callback != nullptr) {
+                    if (decoded.BodyLength != 0 && decoded.Body != nullptr) {
+                        status = streamingBody.Callback(
+                            streamingBody.CallbackContext,
+                            reinterpret_cast<const UCHAR*>(decoded.Body),
+                            decoded.BodyLength,
+                            false);
+                        if (!NT_SUCCESS(status)) {
+                            return status;
+                        }
+                    }
+                    status = streamingBody.Callback(
+                        streamingBody.CallbackContext,
+                        nullptr,
+                        0,
+                        true);
+                    if (!NT_SUCCESS(status)) {
+                        return status;
+                    }
+                }
+
+                parsed->MajorVersion = 2;
+                parsed->MinorVersion = 0;
+                parsed->StatusCode = statusCode;
+                parsed->Headers = responseHeaders;
+                parsed->HeaderCount = responseHeaderCount;
+                if (streamingBody.HeadersDelivered) {
+                    parsed->HeadersDeliveredViaCallback = true;
+                }
+                if ((sendOptions.Flags & HttpSendFlagAggregateWithCallbacks) != 0 &&
+                    decoded.BodyLength != 0 &&
+                    decoded.Body != nullptr) {
+                    parsed->Body = decoded.Body;
+                    parsed->BodyLength = decoded.BodyLength;
+                }
+                else {
+                    parsed->Body = nullptr;
+                    parsed->BodyLength = 0;
+                }
+                parsed->BytesConsumed = responseBodyLength;
+                parsed->BodyKind = http1::HttpBodyKind::ContentLength;
+                parsed->BodyDeliveredViaCallback = true;
+                *rawResponseLength = responseBodyLength;
+                return STATUS_SUCCESS;
+            }
+
+            // Identity CE: live callbacks already ran during DATA; send final marker.
             if (streamingBody.Callback != nullptr) {
                 status = streamingBody.Callback(
                     streamingBody.CallbackContext,
@@ -519,7 +562,8 @@ namespace session
             if (streamingBody.HeadersDelivered) {
                 parsed->HeadersDeliveredViaCallback = true;
             }
-            if (streamingBody.Aggregate) {
+            if (streamingBody.Aggregate &&
+                (sendOptions.Flags & HttpSendFlagAggregateWithCallbacks) != 0) {
                 parsed->Body = reinterpret_cast<const char*>(workspace.Response.Data);
                 parsed->BodyLength = workspace.ResponseLength;
             }

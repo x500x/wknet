@@ -110,6 +110,19 @@ namespace session
     _Must_inspect_result_
     NTSTATUS GrowDecodedBodyAfterBufferTooSmall(_Inout_ Workspace& workspace) noexcept;
 
+    // Full-buffer Content-Encoding decode into workspace.DecodedBody, growing as needed.
+    // Shared by H1 streaming CE path and H2/H3 aggregate decode.
+    _Must_inspect_result_
+    NTSTATUS DecodeContentWithWorkspace(
+        _In_reads_(responseHeaderCount) const http1::HttpHeader* responseHeaders,
+        SIZE_T responseHeaderCount,
+        _In_reads_bytes_(responseBodyLength) const char* responseBody,
+        SIZE_T responseBodyLength,
+        _Inout_ Workspace& workspace,
+        _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const codec::DecodeMaterials* materials,
+        _Out_ http1::HttpContentDecodeResult* decoded) noexcept;
+
     inline http1::HttpText DefaultAcceptEncoding() noexcept
     {
         return http1::MakeText(
@@ -1390,13 +1403,16 @@ namespace session
 
     // Streaming H1 response reader: delivers body via BodyCallback incrementally.
     // When aggregateBody is true, also materializes parsed.Body (subject to MaxResponseBytes).
-    // Non-identity Content-Encoding is rejected with STATUS_NOT_SUPPORTED.
+    // Non-identity Content-Encoding is supported by buffering the transfer-decoded body,
+    // full-buffer CE decoding, then delivering the plaintext to callbacks (no incremental inflate).
     // Sets *bodyDelivered via callbacks when BodyCallback is non-null.
     _Must_inspect_result_
     NTSTATUS ReadHttpResponseFromSocketStreaming(
         _Inout_ transport::Transport* transport,
         _Inout_ Workspace& workspace,
         bool responseBodyForbidden,
+        _In_opt_ const http1::HttpAcceptEncodingPolicy* acceptPolicy,
+        _In_opt_ const codec::DecodeMaterials* materials,
         ULONG bodyReadTimeoutMilliseconds,
         ULONG bodyIdleTimeoutMilliseconds,
         bool aggregateBody,
