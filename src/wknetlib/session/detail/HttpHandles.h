@@ -75,10 +75,12 @@ struct Session final
     char* AuthHeaderValue = nullptr;
     SIZE_T AuthHeaderValueLength = 0;
     // Serializes DefaultHeaders / Auth / CookieJar clear with concurrent Send prepare.
+    // KMUTEX (not FAST_MUTEX): PrepareRequest applies headers via APIs that call
+    // CheckPassiveLevel(); FAST_MUTEX raises APC_LEVEL and fails those checks.
 #if defined(WKNET_USER_MODE_TEST)
     volatile LONG ConfigLock = 0;
 #else
-    FAST_MUTEX ConfigLock = {};
+    KMUTEX ConfigLock = {};
     volatile LONG ConfigLockState = 0;
 #endif
 };
@@ -313,7 +315,7 @@ namespace detail
 #else
         if (InterlockedCompareExchange(&session->ConfigLockState, 0, 0) != 2) {
             if (InterlockedCompareExchange(&session->ConfigLockState, 1, 0) == 0) {
-                ExInitializeFastMutex(&session->ConfigLock);
+                KeInitializeMutex(&session->ConfigLock, 0);
                 InterlockedExchange(&session->ConfigLockState, 2);
             } else {
                 LARGE_INTEGER delay = {};
@@ -323,7 +325,7 @@ namespace detail
                 }
             }
         }
-        ExAcquireFastMutex(&session->ConfigLock);
+        KeWaitForSingleObject(&session->ConfigLock, Executive, KernelMode, FALSE, nullptr);
 #endif
     }
 
@@ -335,7 +337,7 @@ namespace detail
 #if defined(WKNET_USER_MODE_TEST)
         InterlockedExchange(&session->ConfigLock, 0);
 #else
-        ExReleaseFastMutex(&session->ConfigLock);
+        KeReleaseMutex(&session->ConfigLock, FALSE);
 #endif
     }
 

@@ -49,10 +49,12 @@ namespace wknet::session
         SIZE_T TotalBytes = 0;
         // Serializes jar mutation and snapshot builds so concurrent Send on the
         // same Session cannot race Items/Count during Set-Cookie / Cookie header.
+        // KMUTEX (not FAST_MUTEX): library sync APIs require PASSIVE_LEVEL and
+        // CheckPassiveLevel() is exact-equality; FAST_MUTEX would raise APC_LEVEL.
 #if defined(WKNET_USER_MODE_TEST)
         volatile LONG Lock = 0;
 #else
-        FAST_MUTEX Lock = {};
+        KMUTEX Lock = {};
         volatile LONG LockState = 0;
 #endif
     };

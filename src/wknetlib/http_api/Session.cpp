@@ -159,7 +159,7 @@ NTSTATUS SessionCreate(const SessionConfig* config, Session** session) noexcept
 
     (void)::wknet::session::CookieJarInitialize(&highSession->CookieJar);
 #if !defined(WKNET_USER_MODE_TEST)
-    ExInitializeFastMutex(&highSession->ConfigLock);
+    KeInitializeMutex(&highSession->ConfigLock, 0);
     highSession->ConfigLockState = 2;
 #endif
     *session = highSession;

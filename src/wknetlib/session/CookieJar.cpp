@@ -175,7 +175,7 @@ namespace
 #else
         if (InterlockedCompareExchange(&jar->LockState, 0, 0) != 2) {
             if (InterlockedCompareExchange(&jar->LockState, 1, 0) == 0) {
-                ExInitializeFastMutex(&jar->Lock);
+                KeInitializeMutex(&jar->Lock, 0);
                 InterlockedExchange(&jar->LockState, 2);
             } else {
                 LARGE_INTEGER delay = {};
@@ -185,7 +185,7 @@ namespace
                 }
             }
         }
-        ExAcquireFastMutex(&jar->Lock);
+        KeWaitForSingleObject(&jar->Lock, Executive, KernelMode, FALSE, nullptr);
 #endif
     }
 
@@ -194,7 +194,7 @@ namespace
 #if defined(WKNET_USER_MODE_TEST)
         InterlockedExchange(&jar->Lock, 0);
 #else
-        ExReleaseFastMutex(&jar->Lock);
+        KeReleaseMutex(&jar->Lock, FALSE);
 #endif
     }
 
@@ -284,7 +284,7 @@ namespace
         }
         RtlZeroMemory(jar, sizeof(*jar));
 #if !defined(WKNET_USER_MODE_TEST)
-        ExInitializeFastMutex(&jar->Lock);
+        KeInitializeMutex(&jar->Lock, 0);
         jar->LockState = 2;
 #endif
         return STATUS_SUCCESS;
