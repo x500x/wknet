@@ -61,8 +61,11 @@ namespace session
         TlsVersion MinTlsVersion = TlsVersion::Tls12;
         TlsVersion MaxTlsVersion = TlsVersion::Tls13;
         CertificatePolicy CertificatePolicy = CertificatePolicy::Verify;
-        const tls::CertificateStore* CertificateStore = nullptr;
-        const tls::TlsClientCredential* ClientCredential = nullptr;
+        // Opaque identity tokens for pool matching only. Do not dereference.
+        // Equal pointers share identity; distinct non-null stores/credentials never mix
+        // even if content is equivalent (caller lifetime is outside the pool).
+        SIZE_T CertificateStoreIdentity = 0;
+        SIZE_T ClientCredentialIdentity = 0;
         tls::TlsPolicy Policy = {};
         ULONG MaxTls12Renegotiations = DefaultMaxTls12Renegotiations;
         char TlsServerName[PoolMaxTlsServerNameLength + 1] = {};

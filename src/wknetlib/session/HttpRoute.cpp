@@ -239,8 +239,10 @@ namespace session
         key->MinTlsVersion = request.Tls.MinVersion;
         key->MaxTlsVersion = request.Tls.MaxVersion;
         key->CertificatePolicy = request.Tls.CertificatePolicy;
-        key->CertificateStore = request.Tls.CertificateStore;
-        key->ClientCredential = request.Tls.ClientCredential;
+        key->CertificateStoreIdentity =
+            reinterpret_cast<SIZE_T>(request.Tls.CertificateStore);
+        key->ClientCredentialIdentity =
+            reinterpret_cast<SIZE_T>(request.Tls.ClientCredential);
         key->Policy = request.Tls.Policy;
         key->MaxTls12Renegotiations = request.Tls.MaxTls12Renegotiations;
         key->AutomaticAlpn = IsAutomaticHttpAlpnMode(request);

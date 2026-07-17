@@ -136,7 +136,12 @@ NTSTATUS ConnectAsyncEx(wknet::http::Session* session, const ConnectConfig* conf
         &apiOptions,
         &apiOp);
     if (NT_SUCCESS(status) && operation != nullptr) {
-        *operation = wknet::http::detail::FromApiAsyncOp(apiOp);
+        wknet::http::AsyncOp* wrapper = wknet::http::detail::FromApiAsyncOp(apiOp);
+        if (wrapper == nullptr) {
+            ::wknet::session::AsyncRelease(apiOp);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        *operation = wrapper;
     }
     return status;
 }

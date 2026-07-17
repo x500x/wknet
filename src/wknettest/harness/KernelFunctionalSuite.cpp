@@ -46,6 +46,11 @@ NTSTATUS RunFunctionalSampleSuite(MatrixContext* context) noexcept
     // --- High-level API surface (Functional / Lifecycle / Cancel) ---
     Map(report, "hl.session_default_config", Module::HttpApi, Property::Functional, hl.SessionDefaultConfig);
     Map(report, "hl.session_custom_config", Module::HttpApi, Property::Functional, hl.SessionCustomConfig);
+    Map(report, "hl.http_sessionless_get", Module::HttpApi, Property::Functional, hl.HttpSessionlessGet);
+    Map(report, "hl.http_sessionless_post", Module::HttpApi, Property::Functional, hl.HttpSessionlessPost);
+    Map(report, "hl.http_sessionless_async_get", Module::HttpApi, Property::Functional, hl.HttpSessionlessAsyncGet);
+    Map(report, "hl.http_detached_request_send", Module::HttpApi, Property::Functional, hl.HttpDetachedRequestSend);
+    Map(report, "hl.session_default_header_auth", Module::HttpApi, Property::Functional, hl.SessionDefaultHeaderAuth);
     Map(report, "hl.http_get", Module::HttpApi, Property::Functional, hl.HttpGet);
     Map(report, "hl.http_get_shortcut", Module::HttpApi, Property::Functional, hl.HttpShortcutGet);
     Map(report, "hl.http_post_shortcut", Module::HttpApi, Property::Functional, hl.HttpShortcutPost);

@@ -1,4 +1,7 @@
 #include <wknet/http/Request.h>
+#include <wknet/http/Session.h>
+#include "TransientSessionPool.h"
+#include "session/EngineUtils.h"
 #include "session/detail/HttpHandles.h"
 #include <wknet/http/Body.h>
 #include <wknet/http/Headers.h>
@@ -7,7 +10,6 @@
 #include "session/Engine.h"
 
 namespace wknet::http {
-#if defined(WKNET_USER_MODE_TEST)
 namespace
 {
     char* CopyText(const char* text, SIZE_T length) noexcept
@@ -54,6 +56,45 @@ namespace
         }
         return SendOptionsCreate(&request->BuilderOptions);
     }
+
+    SIZE_T StringLengthLocal(const char* text) noexcept
+    {
+        if (text == nullptr) {
+            return 0;
+        }
+        SIZE_T n = 0;
+        while (text[n] != 0) {
+            ++n;
+        }
+        return n;
+    }
+
+    NTSTATUS WithValidationEngine(
+        Request* request,
+        NTSTATUS (*fn)(::wknet::session::SessionHandle engine, void* ctx) noexcept,
+        void* ctx) noexcept
+    {
+        NTSTATUS status = ::wknet::session::CheckPassiveLevel();
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        if (request->Parent != nullptr) {
+            if (!detail::IsValidSession(request->Parent)) {
+                return STATUS_INVALID_PARAMETER;
+            }
+            return fn(request->Parent->Engine, ctx);
+        }
+        Session* managedSession = nullptr;
+        status = detail::AcquireTransientSession(&managedSession);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+        status = fn(managedSession->Engine, ctx);
+        detail::ReleaseTransientSession(managedSession);
+        return status;
+    }
+
+
 
     NTSTATUS AppendGeneratedByte(
         char* destination,
@@ -108,26 +149,41 @@ namespace
         return STATUS_SUCCESS;
     }
 }
-#endif
+
+
+NTSTATUS RequestCreate(Request** out) noexcept
+{
+    if (out != nullptr) {
+        *out = nullptr;
+    }
+    if (out == nullptr) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    NTSTATUS status = ::wknet::session::CheckPassiveLevel();
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+    auto* request = ::wknet::AllocateNonPagedObject<Request>();
+    if (request == nullptr) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    request->Parent = nullptr;
+    *out = request;
+    return STATUS_SUCCESS;
+}
 
 NTSTATUS RequestCreate(Session* session, Request** out) noexcept
 {
     if (out != nullptr) {
         *out = nullptr;
     }
+    NTSTATUS status = ::wknet::session::CheckPassiveLevel();
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
     if (out == nullptr || !detail::AddSessionRef(session)) {
         return STATUS_INVALID_PARAMETER;
     }
-
-#if defined(WKNET_USER_MODE_TEST)
-    ::wknet::session::RequestHandle validationRequest = nullptr;
-    NTSTATUS validationStatus = ::wknet::session::HttpRequestCreate(session->Engine, &validationRequest);
-    if (!NT_SUCCESS(validationStatus)) {
-        detail::ReleaseSessionRef(session);
-        return validationStatus;
-    }
-    ::wknet::session::HttpRequestRelease(validationRequest);
-#endif
 
     auto* request = ::wknet::AllocateNonPagedObject<Request>();
     if (request == nullptr) {
@@ -149,9 +205,7 @@ void RequestRelease(Request* request) noexcept
         return;
     }
 
-#if defined(WKNET_USER_MODE_TEST)
     ReleaseBuilderState(request);
-#endif
 
     request->Closed = 1;
     Session* parent = request->Parent;
@@ -164,20 +218,37 @@ void RequestRelease(Request* request) noexcept
     }
 }
 
-#if defined(WKNET_USER_MODE_TEST)
+NTSTATUS RequestSetUrl(Request* request, const char* url) noexcept
+{
+    return RequestSetUrl(request, url, StringLengthLocal(url));
+}
+
+NTSTATUS RequestSetUrlEx(Request* request, const char* url, SIZE_T urlLength) noexcept
+{
+    return RequestSetUrl(request, url, urlLength);
+}
+
 NTSTATUS RequestSetUrl(Request* request, const char* url, SIZE_T urlLength) noexcept
 {
     if (!IsValidRequestBuilder(request) || url == nullptr || urlLength == 0) {
         return STATUS_INVALID_PARAMETER;
     }
 
-    ::wknet::session::RequestHandle validationRequest = nullptr;
-    NTSTATUS status = ::wknet::session::HttpRequestCreate(request->Parent->Engine, &validationRequest);
-    if (!NT_SUCCESS(status)) {
-        return status;
-    }
-    status = ::wknet::session::HttpRequestSetUrl(validationRequest, url, urlLength);
-    ::wknet::session::HttpRequestRelease(validationRequest);
+    struct UrlCtx { const char* u; SIZE_T n; } ctx{url, urlLength};
+    NTSTATUS status = WithValidationEngine(
+        request,
+        [](::wknet::session::SessionHandle engine, void* raw) noexcept -> NTSTATUS {
+            auto* c = static_cast<UrlCtx*>(raw);
+            ::wknet::session::RequestHandle validationRequest = nullptr;
+            NTSTATUS st = ::wknet::session::HttpRequestCreate(engine, &validationRequest);
+            if (!NT_SUCCESS(st)) {
+                return st;
+            }
+            st = ::wknet::session::HttpRequestSetUrl(validationRequest, c->u, c->n);
+            ::wknet::session::HttpRequestRelease(validationRequest);
+            return st;
+        },
+        &ctx);
     if (!NT_SUCCESS(status)) {
         return status;
     }
@@ -196,6 +267,12 @@ NTSTATUS RequestSetMethod(Request* request, Method method) noexcept
 {
     if (!IsValidRequestBuilder(request)) {
         return STATUS_INVALID_PARAMETER;
+    }
+    {
+        NTSTATUS passive = ::wknet::session::CheckPassiveLevel();
+        if (!NT_SUCCESS(passive)) {
+            return passive;
+        }
     }
     switch (method) {
     case Method::Get:
@@ -220,13 +297,21 @@ NTSTATUS RequestSetHeader(Request* request, const char* name, SIZE_T nameLength,
         return STATUS_INVALID_PARAMETER;
     }
 
-    ::wknet::session::RequestHandle validationRequest = nullptr;
-    NTSTATUS status = ::wknet::session::HttpRequestCreate(request->Parent->Engine, &validationRequest);
-    if (!NT_SUCCESS(status)) {
-        return status;
-    }
-    status = ::wknet::session::HttpRequestSetHeader(validationRequest, name, nameLength, value, valueLength);
-    ::wknet::session::HttpRequestRelease(validationRequest);
+    struct HdrCtx { const char* n; SIZE_T nl; const char* v; SIZE_T vl; } hctx{name, nameLength, value, valueLength};
+    NTSTATUS status = WithValidationEngine(
+        request,
+        [](::wknet::session::SessionHandle engine, void* raw) noexcept -> NTSTATUS {
+            auto* c = static_cast<HdrCtx*>(raw);
+            ::wknet::session::RequestHandle validationRequest = nullptr;
+            NTSTATUS st = ::wknet::session::HttpRequestCreate(engine, &validationRequest);
+            if (!NT_SUCCESS(st)) {
+                return st;
+            }
+            st = ::wknet::session::HttpRequestSetHeader(validationRequest, c->n, c->nl, c->v, c->vl);
+            ::wknet::session::HttpRequestRelease(validationRequest);
+            return st;
+        },
+        &hctx);
     if (!NT_SUCCESS(status)) {
         return status;
     }
@@ -539,5 +624,4 @@ NTSTATUS RequestSetAddressFamily(Request* request, AddressFamily family) noexcep
     }
     return status;
 }
-#endif
 }

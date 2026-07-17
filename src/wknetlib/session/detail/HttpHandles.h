@@ -3,8 +3,10 @@
 #include "session/Engine.h"
 #include "session/HandleTypes.h"
 #include <wknet/http/Types.h>
+#include <wknet/http/Headers.h>
 #include "net/WskClient.h"
 #include "tls/CertificateStore.h"
+#include "session/CookieJar.h"
 
 namespace wknet::http {
 namespace detail
@@ -15,6 +17,7 @@ namespace detail
     constexpr ULONG HighBodyMagic = 0x4B484232;
     constexpr ULONG HighCacheMagic = 0x4B484332;
     constexpr ULONG HighCertificateStoreMagic = 0x4B484353;
+    constexpr ULONG HighAsyncOpMagic = 0x4B484133;
 
     enum class BodyStorageKind : ULONG
     {
@@ -56,21 +59,33 @@ struct Session final
     volatile LONG RefCount = 1;
     ::wknet::net::WskClient* Wsk = nullptr;
     ::wknet::session::SessionHandle Engine = nullptr;
+    Headers* DefaultHeaders = nullptr;
+    ::wknet::session::CookieJar CookieJar = {};
+    // Prebuilt Authorization header value without the field name; empty means no session-level Authorization.
+    char* AuthHeaderValue = nullptr;
+    SIZE_T AuthHeaderValueLength = 0;
 };
 
 struct Request final
 {
     ULONG Magic = detail::HighRequestMagic;
     volatile LONG Closed = 0;
+    // Optional associated Session; nullptr means Send/AsyncSend uses a library-managed Session.
     Session* Parent = nullptr;
-#if defined(WKNET_USER_MODE_TEST)
     char* BuilderUrl = nullptr;
     SIZE_T BuilderUrlLength = 0;
     Method BuilderMethod = Method::Get;
     Headers* BuilderHeaders = nullptr;
     Body* BuilderBody = nullptr;
     SendOptions* BuilderOptions = nullptr;
-#endif
+};
+
+struct AsyncOp final
+{
+    ULONG Magic = detail::HighAsyncOpMagic;
+    ::wknet::session::AsyncOperation* Engine = nullptr;
+    // Non-null when this op owns a library-managed Session from a session-less entry point.
+    Session* OwnedSession = nullptr;
 };
 
 struct Headers final
@@ -173,7 +188,10 @@ namespace detail
 
     inline ::wknet::session::AsyncOperation* ToApiAsyncOp(AsyncOp* op) noexcept
     {
-        return reinterpret_cast<::wknet::session::AsyncOperation*>(op);
+        if (op == nullptr || op->Magic != HighAsyncOpMagic) {
+            return nullptr;
+        }
+        return op->Engine;
     }
 
     inline ::wknet::session::HttpCache* ToApiCache(Cache* cache) noexcept
@@ -213,9 +231,29 @@ namespace detail
         return reinterpret_cast<wknet::websocket::WebSocket*>(ws);
     }
 
+    // Wraps an engine async op. On failure returns nullptr and does NOT release `op`
+    // (caller must AsyncRelease the engine op). ownedSession may be null.
+    _Ret_maybenull_
+    inline AsyncOp* WrapAsyncOp(
+        ::wknet::session::AsyncOperation* op,
+        Session* ownedSession) noexcept
+    {
+        if (op == nullptr) {
+            return nullptr;
+        }
+        auto* wrapper = ::wknet::AllocateNonPagedObject<AsyncOp>();
+        if (wrapper == nullptr) {
+            return nullptr;
+        }
+        wrapper->Magic = HighAsyncOpMagic;
+        wrapper->Engine = op;
+        wrapper->OwnedSession = ownedSession;
+        return wrapper;
+    }
+
     inline AsyncOp* FromApiAsyncOp(::wknet::session::AsyncOperation* op) noexcept
     {
-        return reinterpret_cast<AsyncOp*>(op);
+        return WrapAsyncOp(op, nullptr);
     }
 
     inline Session* FromApiSession(::wknet::session::Session* s) noexcept
@@ -284,6 +322,15 @@ namespace detail
         if (session->Wsk != nullptr) {
             ::wknet::net::WskClientClose(session->Wsk);
             session->Wsk = nullptr;
+        }
+        HeadersRelease(session->DefaultHeaders);
+        session->DefaultHeaders = nullptr;
+        ::wknet::session::CookieJarDestroy(&session->CookieJar);
+        if (session->AuthHeaderValue != nullptr) {
+            RtlSecureZeroMemory(session->AuthHeaderValue, session->AuthHeaderValueLength);
+            ::wknet::FreeNonPagedArray(session->AuthHeaderValue);
+            session->AuthHeaderValue = nullptr;
+            session->AuthHeaderValueLength = 0;
         }
         session->Magic = 0;
         ::wknet::FreeNonPagedObject(session);

@@ -30,6 +30,12 @@ namespace samples
     {
         HighLevelApiSampleResult SessionDefaultConfig = {};
         HighLevelApiSampleResult SessionCustomConfig = {};
+        // Session-less entry points and Request without an associated Session.
+        HighLevelApiSampleResult HttpSessionlessGet = {};
+        HighLevelApiSampleResult HttpSessionlessPost = {};
+        HighLevelApiSampleResult HttpSessionlessAsyncGet = {};
+        HighLevelApiSampleResult HttpDetachedRequestSend = {};
+        HighLevelApiSampleResult SessionDefaultHeaderAuth = {};
         HighLevelApiSampleResult HttpGet = {};
         HighLevelApiSampleResult HttpShortcutGet = {};
         HighLevelApiSampleResult HttpShortcutPost = {};

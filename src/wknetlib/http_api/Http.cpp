@@ -1,6 +1,10 @@
 #include <wknet/http/Http.h>
+#include <wknet/http/Session.h>
+#include "TransientSessionPool.h"
 #include "session/detail/HttpHandles.h"
 #include "session/Engine.h"
+#include "session/CookieJar.h"
+#include "session/EngineUtils.h"
 
 namespace wknet::http {
 namespace
@@ -340,6 +344,57 @@ namespace
         if (NT_SUCCESS(status)) {
             status = ApplyBodyToRequest(apiRequest, body, headers);
         }
+        // Apply session default headers first; request headers override on name collision.
+        if (NT_SUCCESS(status) && session->DefaultHeaders != nullptr) {
+            status = ApplyHeadersToRequest(apiRequest, session->DefaultHeaders, false);
+        }
+        // Apply session Authorization when the request does not set Authorization.
+        if (NT_SUCCESS(status) &&
+            session->AuthHeaderValue != nullptr &&
+            session->AuthHeaderValueLength != 0 &&
+            !FindHeader(headers, "Authorization", nullptr, nullptr) &&
+            (session->DefaultHeaders == nullptr ||
+             !FindHeader(session->DefaultHeaders, "Authorization", nullptr, nullptr))) {
+            status = ::wknet::session::HttpRequestSetHeader(
+                apiRequest,
+                "Authorization",
+                13,
+                session->AuthHeaderValue,
+                session->AuthHeaderValueLength);
+        }
+        // Apply Cookie jar contents when the request does not set Cookie.
+        if (NT_SUCCESS(status) &&
+            !FindHeader(headers, "Cookie", nullptr, nullptr) &&
+            (session->DefaultHeaders == nullptr ||
+             !FindHeader(session->DefaultHeaders, "Cookie", nullptr, nullptr))) {
+            char cookieHeader[8192] = {};
+            SIZE_T cookieLength = 0;
+            // Wall-clock for Max-Age expiry evaluation (user-mode tests use a fixed value).
+#if defined(WKNET_USER_MODE_TEST)
+            const ULONGLONG now100ns = 1;
+#else
+            LARGE_INTEGER t = {};
+            KeQuerySystemTimePrecise(&t);
+            const ULONGLONG now100ns = static_cast<ULONGLONG>(t.QuadPart);
+#endif
+            NTSTATUS cookieStatus = ::wknet::session::CookieJarBuildHeader(
+                &session->CookieJar,
+                url,
+                urlLength,
+                false,
+                now100ns,
+                cookieHeader,
+                sizeof(cookieHeader),
+                &cookieLength);
+            if (NT_SUCCESS(cookieStatus) && cookieLength != 0) {
+                status = ::wknet::session::HttpRequestSetHeader(
+                    apiRequest,
+                    "Cookie",
+                    6,
+                    cookieHeader,
+                    cookieLength);
+            }
+        }
         const bool skipContentType = body != nullptr && FindHeader(headers, "Content-Type", nullptr, nullptr);
         if (NT_SUCCESS(status)) {
             status = ApplyHeadersToRequest(apiRequest, headers, skipContentType);
@@ -370,6 +425,12 @@ namespace
         if (response == nullptr) {
             return STATUS_INVALID_PARAMETER;
         }
+        {
+            NTSTATUS passive = ::wknet::session::CheckPassiveLevel();
+            if (!NT_SUCCESS(passive)) {
+                return passive;
+            }
+        }
 
         ::wknet::session::RequestHandle apiRequest = nullptr;
         NTSTATUS status = PrepareRequest(session, method, url, urlLength, headers, body, options, &apiRequest);
@@ -389,6 +450,38 @@ namespace
         ::wknet::session::HttpRequestRelease(apiRequest);
 
         if (NT_SUCCESS(status)) {
+            // Apply Set-Cookie response headers to the session cookie jar.
+            if (apiResp != nullptr) {
+#if defined(WKNET_USER_MODE_TEST)
+                const ULONGLONG now100ns = 1;
+#else
+                LARGE_INTEGER t = {};
+                KeQuerySystemTimePrecise(&t);
+                const ULONGLONG now100ns = static_cast<ULONGLONG>(t.QuadPart);
+#endif
+                const SIZE_T headerCount = ::wknet::session::ResponseHeaderCount(apiResp);
+                for (SIZE_T hi = 0; hi < headerCount; ++hi) {
+                    const char* name = nullptr;
+                    SIZE_T nameLength = 0;
+                    const char* value = nullptr;
+                    SIZE_T valueLength = 0;
+                    if (!NT_SUCCESS(::wknet::session::ResponseGetHeaderAt(
+                            apiResp, hi, &name, &nameLength, &value, &valueLength))) {
+                        continue;
+                    }
+                    if (nameLength == 10 &&
+                        (name[0] == 'S' || name[0] == 's') &&
+                        TextEqualsLiteralIgnoreCase(name, nameLength, "Set-Cookie")) {
+                        (void)::wknet::session::CookieJarStoreFromSetCookie(
+                            &session->CookieJar,
+                            url,
+                            urlLength,
+                            value,
+                            valueLength,
+                            now100ns);
+                    }
+                }
+            }
             *response = detail::FromApiResponse(apiResp);
         }
         else if (apiResp != nullptr) {
@@ -496,41 +589,45 @@ NTSTATUS Head(Session* session, const char* url, SIZE_T urlLength, Response** re
 NTSTATUS Options(Session* session, const char* url, SIZE_T urlLength, Response** response) noexcept { return OptionsEx(session, url, urlLength, nullptr, nullptr, response); }
 NTSTATUS Trace(Session* session, const char* url, SIZE_T urlLength, Response** response) noexcept { return TraceEx(session, url, urlLength, nullptr, nullptr, response); }
 
-#if defined(WKNET_USER_MODE_TEST)
-NTSTATUS Send(Session* session, Request* request, Response** response) noexcept
+NTSTATUS Send(Request* request, Response** response) noexcept
 {
-    return SendEx(session, request, nullptr, response);
+    return SendEx(request, nullptr, response);
 }
 
-NTSTATUS Send(Session* session, Request* request, const SendOptions* options, Response** response) noexcept
+NTSTATUS Send(Request* request, const SendOptions* options, Response** response) noexcept
 {
-    return SendEx(session, request, options, response);
+    return SendEx(request, options, response);
 }
 
-NTSTATUS SendEx(Session* session, Request* request, const SendOptions* options, Response** response) noexcept
+NTSTATUS SendEx(Request* request, const SendOptions* options, Response** response) noexcept
 {
-    UNREFERENCED_PARAMETER(session);
-    if (request == nullptr || request->Magic != detail::HighRequestMagic) {
-        if (response != nullptr) {
-            *response = nullptr;
+    if (response != nullptr) {
+        *response = nullptr;
+    }
+    {
+        NTSTATUS passive = ::wknet::session::CheckPassiveLevel();
+        if (!NT_SUCCESS(passive)) {
+            return passive;
         }
+    }
+    if (request == nullptr || request->Magic != detail::HighRequestMagic ||
+        request->Closed != 0 ||
+        request->BuilderUrl == nullptr || request->BuilderUrlLength == 0) {
         return STATUS_INVALID_PARAMETER;
     }
-    ::wknet::session::RequestHandle validationRequest = nullptr;
-    NTSTATUS status = ::wknet::session::HttpRequestCreate(request->Parent->Engine, &validationRequest);
-    if (!NT_SUCCESS(status)) {
-        if (response != nullptr) {
-            *response = nullptr;
+
+    Session* session = request->Parent;
+    bool ownsSession = false;
+    if (session == nullptr) {
+        NTSTATUS status = detail::AcquireTransientSession(&session);
+        if (!NT_SUCCESS(status)) {
+            return status;
         }
-        return status;
-    }
-    ::wknet::session::HttpRequestRelease(validationRequest);
-    if (request->BuilderUrl == nullptr || request->BuilderUrlLength == 0) {
-        if (response != nullptr) {
-            *response = nullptr;
-        }
+        ownsSession = true;
+    } else if (!detail::IsValidSession(session)) {
         return STATUS_INVALID_PARAMETER;
     }
+
     SendOptions mergedOptions = options != nullptr ? *options : DefaultSendOptions();
     const SendOptions* effectiveOptions = nullptr;
     if (request->BuilderOptions != nullptr) {
@@ -543,12 +640,12 @@ NTSTATUS SendEx(Session* session, Request* request, const SendOptions* options, 
         mergedOptions.AcceptEncodingPreferences = request->BuilderOptions->AcceptEncodingPreferences;
         mergedOptions.AcceptEncodingPreferenceCount = request->BuilderOptions->AcceptEncodingPreferenceCount;
         effectiveOptions = &mergedOptions;
-    }
-    else if (options != nullptr) {
+    } else if (options != nullptr) {
         effectiveOptions = &mergedOptions;
     }
-    return SendEx(
-        request,
+
+    NTSTATUS status = SendCore(
+        session,
         request->BuilderMethod,
         request->BuilderUrl,
         request->BuilderUrlLength,
@@ -556,8 +653,82 @@ NTSTATUS SendEx(Session* session, Request* request, const SendOptions* options, 
         request->BuilderBody,
         effectiveOptions,
         response);
+
+    if (ownsSession) {
+        detail::ReleaseTransientSession(session);
+    }
+    return status;
 }
-#endif
+
+NTSTATUS Send(Session* session, Request* request, Response** response) noexcept
+{
+    return SendEx(session, request, nullptr, response);
+}
+
+NTSTATUS Send(Session* session, Request* request, const SendOptions* options, Response** response) noexcept
+{
+    return SendEx(session, request, options, response);
+}
+
+NTSTATUS SendEx(Session* session, Request* request, const SendOptions* options, Response** response) noexcept
+{
+    if (request == nullptr || request->Magic != detail::HighRequestMagic) {
+        if (response != nullptr) {
+            *response = nullptr;
+        }
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (session != nullptr && request->Parent != nullptr && session != request->Parent) {
+        if (response != nullptr) {
+            *response = nullptr;
+        }
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (request->Parent == nullptr && session != nullptr) {
+        Session* previous = request->Parent;
+        request->Parent = session;
+        NTSTATUS status = SendEx(request, options, response);
+        request->Parent = previous;
+        return status;
+    }
+    return SendEx(request, options, response);
+}
+
+NTSTATUS Send(Method method, const char* url, const Headers* headers, const Body* body, const SendOptions* options, Response** response) noexcept
+{
+    return SendEx(method, url, StringLength(url), headers, body, options, response);
+}
+
+NTSTATUS SendEx(Method method, const char* url, SIZE_T urlLength, const Headers* headers, const Body* body, const SendOptions* options, Response** response) noexcept
+{
+    if (response != nullptr) {
+        *response = nullptr;
+    }
+    Session* session = nullptr;
+    NTSTATUS status = detail::AcquireTransientSession(&session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+    status = SendCore(session, method, url, urlLength, headers, body, options, response);
+    detail::ReleaseTransientSession(session);
+    return status;
+}
+
+NTSTATUS Get(const char* url, Response** response) noexcept { return GetEx(url, StringLength(url), nullptr, nullptr, response); }
+NTSTATUS GetEx(const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(Method::Get, url, urlLength, headers, nullptr, options, response); }
+NTSTATUS Post(const char* url, const Body* body, Response** response) noexcept { return PostEx(url, StringLength(url), nullptr, body, nullptr, response); }
+NTSTATUS PostEx(const char* url, SIZE_T urlLength, const Headers* headers, const Body* body, const SendOptions* options, Response** response) noexcept { return SendEx(Method::Post, url, urlLength, headers, body, options, response); }
+NTSTATUS Put(const char* url, const Body* body, Response** response) noexcept { return PutEx(url, StringLength(url), nullptr, body, nullptr, response); }
+NTSTATUS PutEx(const char* url, SIZE_T urlLength, const Headers* headers, const Body* body, const SendOptions* options, Response** response) noexcept { return SendEx(Method::Put, url, urlLength, headers, body, options, response); }
+NTSTATUS Patch(const char* url, const Body* body, Response** response) noexcept { return PatchEx(url, StringLength(url), nullptr, body, nullptr, response); }
+NTSTATUS PatchEx(const char* url, SIZE_T urlLength, const Headers* headers, const Body* body, const SendOptions* options, Response** response) noexcept { return SendEx(Method::Patch, url, urlLength, headers, body, options, response); }
+NTSTATUS Delete(const char* url, Response** response) noexcept { return DeleteEx(url, StringLength(url), nullptr, nullptr, response); }
+NTSTATUS DeleteEx(const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(Method::Delete, url, urlLength, headers, nullptr, options, response); }
+NTSTATUS Head(const char* url, Response** response) noexcept { return HeadEx(url, StringLength(url), nullptr, nullptr, response); }
+NTSTATUS HeadEx(const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(Method::Head, url, urlLength, headers, nullptr, options, response); }
+NTSTATUS Options(const char* url, Response** response) noexcept { return OptionsEx(url, StringLength(url), nullptr, nullptr, response); }
+NTSTATUS OptionsEx(const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(Method::Options, url, urlLength, headers, nullptr, options, response); }
+
 
 NTSTATUS Get(Request* request, const char* url, Response** response) noexcept { return GetEx(request, url, StringLength(url), nullptr, nullptr, response); }
 NTSTATUS GetEx(Request* request, const char* url, SIZE_T urlLength, const Headers* headers, const SendOptions* options, Response** response) noexcept { return SendEx(request, Method::Get, url, urlLength, headers, nullptr, options, response); }

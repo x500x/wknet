@@ -909,10 +909,15 @@ namespace
         Expect(NT_SUCCESS(status), "load-time high-level samples succeed under test transport");
         Expect(NT_SUCCESS(results.SessionDefaultConfig.Status), "default session sample succeeds");
         Expect(NT_SUCCESS(results.SessionCustomConfig.Status), "custom session sample succeeds");
-        Expect(capture.HttpCalls == 39, "all HTTP/HTTPS/SSE high-level samples are issued");
+        Expect(NT_SUCCESS(results.HttpSessionlessGet.Status), "session-less Get sample succeeds");
+        Expect(NT_SUCCESS(results.HttpSessionlessPost.Status), "session-less Post sample succeeds");
+        Expect(NT_SUCCESS(results.HttpSessionlessAsyncGet.Status), "session-less AsyncGet sample succeeds");
+        Expect(NT_SUCCESS(results.HttpDetachedRequestSend.Status), "detached Request Send sample succeeds");
+        Expect(NT_SUCCESS(results.SessionDefaultHeaderAuth.Status), "session default header/auth sample succeeds");
+        Expect(capture.HttpCalls == 44, "all HTTP/HTTPS/SSE high-level samples are issued");
         Expect(capture.HttpIpv4Calls == 1, "dedicated HTTP IPv4 sample forces IPv4");
         Expect(capture.HttpIpv6Calls == 1, "IPv6 HTTP sample is issued");
-        Expect(capture.HttpAnyCalls == 37, "general HTTP/HTTPS/SSE samples use default address family");
+        Expect(capture.HttpAnyCalls == 42, "general HTTP/HTTPS/SSE samples use default address family");
         Expect(capture.HttpNoPoolCalls >= 10, "no-pool connection policy samples are issued");
         Expect(capture.HttpForceNewCalls >= 2, "force-new connection policy samples are issued");
         Expect(capture.HttpsVerifyCalls == 5, "verified HTTPS samples are issued");
@@ -1295,10 +1300,11 @@ namespace
         static const UCHAR requestBody[] = { 'x' };
 
         wknet::http::SessionConfig config = wknet::http::DefaultSessionConfig();
+        // 0 normalizes to DefaultMaxResponseBytes (16 MiB); 180 KiB body still fits.
         config.MaxResponseBytes = 0;
         wknet::http::Session* session = nullptr;
         NTSTATUS status = wknet::http::SessionCreate(&config, &session);
-        Expect(NT_SUCCESS(status), "SessionCreate succeeds for unlimited large POST response");
+        Expect(NT_SUCCESS(status), "SessionCreate succeeds for default-capped large POST response");
 
         wknet::http::Response* response = nullptr;
         status = wknet::http::Post(
@@ -1308,7 +1314,7 @@ namespace
             requestBody,
             sizeof(requestBody),
             &response);
-        Expect(NT_SUCCESS(status), "wknet::http::Post aggregates large response with unlimited MaxResponseBytes");
+        Expect(NT_SUCCESS(status), "wknet::http::Post aggregates large response within default MaxResponseBytes");
         Expect(
             wknet::http::ResponseBodyLength(response) == LargePostBodyLength,
             "wknet::http::Post large response body length matches");

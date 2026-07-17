@@ -35,6 +35,8 @@
     <ClCompile Include="session\RequestApi.cpp" />
     <ClCompile Include="session\ResponseApi.cpp" />
     <ClCompile Include="session\SessionLife.cpp" />
+    <ClCompile Include="session\CookieDomain.cpp" />
+    <ClCompile Include="session\CookieJar.cpp" />
     <ClCompile Include="session\HttpH1Dispatch.cpp" />
     <ClCompile Include="session\HttpH2Dispatch.cpp" />
     <ClCompile Include="session\HttpH3Dispatch.cpp" />

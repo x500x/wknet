@@ -4,11 +4,17 @@
 
 namespace wknet::http {
     _Must_inspect_result_
+    NTSTATUS RequestCreate(_Out_ Request** out) noexcept;
+
+    _Must_inspect_result_
     NTSTATUS RequestCreate(_In_ Session* session, _Out_ Request** out) noexcept;
 
     void RequestRelease(_In_opt_ Request* request) noexcept;
 
-#if defined(WKNET_USER_MODE_TEST)
+    _Must_inspect_result_
+    NTSTATUS RequestSetUrl(_In_ Request* request, _In_z_ const char* url) noexcept;
+    _Must_inspect_result_
+    NTSTATUS RequestSetUrlEx(_In_ Request* request, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength) noexcept;
     _Must_inspect_result_
     NTSTATUS RequestSetUrl(_In_ Request* request, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength) noexcept;
     _Must_inspect_result_
@@ -53,5 +59,4 @@ namespace wknet::http {
     NTSTATUS RequestSetConnPolicy(_In_ Request* request, ConnPolicy policy) noexcept;
     _Must_inspect_result_
     NTSTATUS RequestSetAddressFamily(_In_ Request* request, AddressFamily family) noexcept;
-#endif
 }

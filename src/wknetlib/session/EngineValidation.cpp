@@ -20,13 +20,19 @@ namespace session
 
     SIZE_T NormalizeMaxResponseBytes(SIZE_T value) noexcept
     {
+        if (value == 0) {
+            return DefaultMaxResponseBytes;
+        }
+        if (value > WKNET_HARD_MAX_RESPONSE_BYTES) {
+            return WKNET_HARD_MAX_RESPONSE_BYTES;
+        }
         return value;
     }
 
     bool IsValidMaxResponseBytes(SIZE_T value) noexcept
     {
-        UNREFERENCED_PARAMETER(value);
-        return true;
+        // 0 means "use default" and is accepted; values above the hard ceiling are rejected.
+        return value <= WKNET_HARD_MAX_RESPONSE_BYTES;
     }
 
     bool IsValidMaxResponseHeaders(SIZE_T value) noexcept
@@ -131,6 +137,9 @@ namespace session
 
     SIZE_T EffectiveMaxResponseBytes(const HttpSendOptions* options, SIZE_T sessionValue) noexcept
     {
+        // Prefer explicit per-send value when provided (including 0 → default).
+        // Session value is already normalized at SessionCreate for stored options;
+        // still normalize here so raw 0 never means "unlimited".
         if (options != nullptr && options->MaxResponseBytes != 0) {
             return NormalizeMaxResponseBytes(options->MaxResponseBytes);
         }

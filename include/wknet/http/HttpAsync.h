@@ -6,6 +6,43 @@
 #include <wknet/http/Types.h>
 
 namespace wknet::http {
+
+    // Session-less async entry points: library-managed Session is owned by AsyncOp until AsyncRelease.
+    _Must_inspect_result_
+    NTSTATUS AsyncSend(Method method, _In_z_ const char* url, _In_opt_ const Headers* headers, _In_opt_ const Body* body, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncSendEx(Method method, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const Body* body, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncGet(_In_z_ const char* url, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncGetEx(_In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncPost(_In_z_ const char* url, _In_opt_ const Body* body, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncPostEx(_In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const Body* body, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncPut(_In_z_ const char* url, _In_opt_ const Body* body, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncPutEx(_In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const Body* body, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncPatch(_In_z_ const char* url, _In_opt_ const Body* body, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncPatchEx(_In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const Body* body, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncDelete(_In_z_ const char* url, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncDeleteEx(_In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncHead(_In_z_ const char* url, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncHeadEx(_In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+
+    // Request entry points (associated Session optional).
+    _Must_inspect_result_
+    NTSTATUS AsyncSend(_In_ Request* request, _Out_ AsyncOp** operation) noexcept;
+    _Must_inspect_result_
+    NTSTATUS AsyncSend(_In_ Request* request, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
+
     _Must_inspect_result_
     NTSTATUS AsyncSend(_In_ Session* session, Method method, _In_z_ const char* url, _In_opt_ const Headers* headers, _In_opt_ const Body* body, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
     _Must_inspect_result_
@@ -81,7 +118,6 @@ namespace wknet::http {
     _Must_inspect_result_
     NTSTATUS AsyncTraceEx(_In_ Request* request, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _In_opt_ const Headers* headers, _In_opt_ const AsyncOptions* options, _Out_ AsyncOp** operation) noexcept;
 
-#if defined(WKNET_USER_MODE_TEST)
     _Must_inspect_result_
     NTSTATUS GetAsync(_In_ Session* session, _In_reads_bytes_(urlLength) const char* url, SIZE_T urlLength, _Out_ AsyncOp** operation) noexcept;
     _Must_inspect_result_
@@ -92,5 +128,4 @@ namespace wknet::http {
     NTSTATUS SendAsync(_In_ Session* session, _In_ Request* request, _In_opt_ const SendOptions* options, _Out_ AsyncOp** operation) noexcept;
     _Must_inspect_result_
     NTSTATUS SendAsyncEx(_In_ Session* session, _In_ Request* request, _In_opt_ const SendOptions* options, _Out_ AsyncOp** operation) noexcept;
-#endif
 }

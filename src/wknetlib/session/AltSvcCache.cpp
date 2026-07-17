@@ -324,8 +324,10 @@ namespace
     {
         return left.SchemeLength == right.SchemeLength && left.OriginHostLength == right.OriginHostLength &&
                left.OriginPort == right.OriginPort && left.TlsServerNameLength == right.TlsServerNameLength &&
-               left.CertificatePolicy == right.CertificatePolicy && left.CertificateStore == right.CertificateStore &&
-               left.ClientCredential == right.ClientCredential && left.AddressFamily == right.AddressFamily &&
+               left.CertificatePolicy == right.CertificatePolicy &&
+               left.CertificateStoreIdentity == right.CertificateStoreIdentity &&
+               left.ClientCredentialIdentity == right.ClientCredentialIdentity &&
+               left.AddressFamily == right.AddressFamily &&
                left.Policy.Profile == right.Policy.Profile &&
                left.Policy.EnableTls12RsaKeyExchange == right.Policy.EnableTls12RsaKeyExchange &&
                left.Policy.EnableTls12Cbc == right.Policy.EnableTls12Cbc &&
@@ -637,8 +639,10 @@ namespace
         RtlCopyMemory(key->TlsServerName, serverName, serverNameLength);
         key->TlsServerNameLength = serverNameLength;
         key->CertificatePolicy = request.Tls.CertificatePolicy;
-        key->CertificateStore = request.Tls.CertificateStore;
-        key->ClientCredential = request.Tls.ClientCredential;
+        key->CertificateStoreIdentity =
+            reinterpret_cast<SIZE_T>(request.Tls.CertificateStore);
+        key->ClientCredentialIdentity =
+            reinterpret_cast<SIZE_T>(request.Tls.ClientCredential);
         key->Policy = request.Tls.Policy;
         key->AddressFamily = request.AddressFamily;
         return STATUS_SUCCESS;

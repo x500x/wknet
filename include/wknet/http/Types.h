@@ -208,7 +208,8 @@ namespace wknet::http {
     };
 
     constexpr SIZE_T DefaultRequestBufferBytes = 16 * 1024;
-    constexpr SIZE_T DefaultMaxResponseBytes = 0;
+    // 0 on SessionConfig/SendOptions means "use this default" after Normalize.
+    constexpr SIZE_T DefaultMaxResponseBytes = 16 * 1024 * 1024;
     constexpr SIZE_T DefaultMaxResponseHeaders = WKNET_HARD_MAX_HEADERS;
     constexpr SIZE_T DefaultMaxWebSocketMessageBytes = 1024 * 1024;
     constexpr ULONG DefaultPoolCapacity = 8;
@@ -343,7 +344,8 @@ namespace wknet::http {
     {
         PoolType ResponsePool = PoolType::NonPaged;
         SIZE_T RequestBufferBytes = DefaultRequestBufferBytes;
-        // 0 means no caller-imposed buffered response byte limit.
+        // 0 means use DefaultMaxResponseBytes after Normalize; hard cap is
+        // WKNET_HARD_MAX_RESPONSE_BYTES (fail-closed above that).
         SIZE_T MaxResponseBytes = DefaultMaxResponseBytes;
         // Response header field-count capacity. Default/max is WKNET_HARD_MAX_HEADERS
         // (512). Callers may lower it; values above the library hard ceiling are rejected.

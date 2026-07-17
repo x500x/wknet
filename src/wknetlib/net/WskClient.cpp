@@ -983,7 +983,8 @@ namespace net
 #if defined(WKNET_USER_MODE_TEST)
     void WskClient::TestNotifyNetworkChange() noexcept
     {
-        networkChangeMonitor_.Notify();
+        // UM has no system worker thread; process on the calling test thread.
+        networkChangeMonitor_.NotifyAndProcessForTest();
     }
 #endif
 

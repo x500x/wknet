@@ -25,8 +25,14 @@ namespace
     volatile LONG g_asyncInFlight = 0;
     volatile LONG g_asyncRuntimeState = 0;
     KEVENT g_asyncDrainEvent = {};
-    constexpr ULONG AsyncWorkerCount = 4;
-    constexpr ULONG MaxAsyncQueueDepth = 256;
+    ULONG g_asyncWorkerCount = 4;
+    ULONG g_asyncMaxQueueDepth = 256;
+    constexpr ULONG AsyncWorkerCountMin = 1;
+    constexpr ULONG AsyncWorkerCountMax = 16;
+    constexpr ULONG AsyncQueueDepthMin = 16;
+    constexpr ULONG AsyncQueueDepthMax = 4096;
+    constexpr ULONG AsyncWorkerCountDefault = 4;
+    constexpr ULONG AsyncQueueDepthDefault = 256;
     FAST_MUTEX g_asyncQueueLock = {};
     KSEMAPHORE g_asyncQueueSemaphore = {};
     KEVENT g_asyncWorkersExitedEvent = {};
@@ -35,8 +41,8 @@ namespace
     volatile LONG g_asyncWorkerExitCount = 0;
     AsyncOperation* g_asyncQueueHead = nullptr;
     AsyncOperation* g_asyncQueueTail = nullptr;
-    PETHREAD g_asyncWorkers[AsyncWorkerCount] = {};
-    AsyncOperation* g_asyncWorkerOperations[AsyncWorkerCount] = {};
+    PETHREAD g_asyncWorkers[AsyncWorkerCountMax] = {};
+    AsyncOperation* g_asyncWorkerOperations[AsyncWorkerCountMax] = {};
 #endif
 
     _Ret_maybenull_
@@ -173,7 +179,7 @@ namespace
         if (InterlockedCompareExchange(&g_asyncQueueStopped, 0, 0) != 0) {
             status = STATUS_DEVICE_NOT_READY;
         }
-        else if (InterlockedCompareExchange(&g_asyncQueueDepth, 0, 0) >= static_cast<LONG>(MaxAsyncQueueDepth)) {
+        else if (InterlockedCompareExchange(&g_asyncQueueDepth, 0, 0) >= static_cast<LONG>(g_asyncMaxQueueDepth)) {
             status = STATUS_INSUFFICIENT_RESOURCES;
         }
         else {
@@ -208,7 +214,7 @@ namespace
             }
             operation->QueueNext = nullptr;
             InterlockedDecrement(&g_asyncQueueDepth);
-            if (workerIndex < AsyncWorkerCount) {
+            if (workerIndex < g_asyncWorkerCount) {
                 g_asyncWorkerOperations[workerIndex] = operation;
             }
         }
@@ -235,7 +241,7 @@ namespace
 
     void ClearWorkerOperation(ULONG workerIndex) noexcept
     {
-        if (workerIndex >= AsyncWorkerCount) {
+        if (workerIndex >= g_asyncWorkerCount) {
             return;
         }
 
@@ -247,7 +253,7 @@ namespace
     void CancelRunningOperationsForShutdown() noexcept
     {
         AcquireAsyncQueueLock();
-        for (ULONG index = 0; index < AsyncWorkerCount; ++index) {
+        for (ULONG index = 0; index < g_asyncWorkerCount; ++index) {
             AsyncOperation* operation = g_asyncWorkerOperations[index];
             if (operation != nullptr) {
                 InterlockedExchange(&operation->Canceled, 1);
@@ -261,7 +267,7 @@ namespace
         KeReleaseSemaphore(
             &g_asyncQueueSemaphore,
             IO_NO_INCREMENT,
-            static_cast<LONG>(AsyncWorkerCount),
+            static_cast<LONG>(g_asyncWorkerCount),
             FALSE);
     }
 
@@ -286,7 +292,7 @@ namespace
 
     NTSTATUS JoinReferencedAsyncWorkers(_In_opt_ LARGE_INTEGER* timeout) noexcept
     {
-        for (ULONG index = 0; index < AsyncWorkerCount; ++index) {
+        for (ULONG index = 0; index < g_asyncWorkerCount; ++index) {
             PETHREAD thread = g_asyncWorkers[index];
             if (thread == nullptr) {
                 continue;
@@ -340,7 +346,7 @@ namespace
             EndAsyncOperation();
         }
 
-        if (InterlockedIncrement(&g_asyncWorkerExitCount) == static_cast<LONG>(AsyncWorkerCount)) {
+        if (InterlockedIncrement(&g_asyncWorkerExitCount) == static_cast<LONG>(g_asyncWorkerCount)) {
             KeSetEvent(&g_asyncWorkersExitedEvent, IO_NO_INCREMENT, FALSE);
         }
 
@@ -350,7 +356,7 @@ namespace
     _Must_inspect_result_
     NTSTATUS StartAsyncWorkers() noexcept
     {
-        for (ULONG index = 0; index < AsyncWorkerCount; ++index) {
+        for (ULONG index = 0; index < g_asyncWorkerCount; ++index) {
             if (g_asyncWorkers[index] != nullptr) {
                 continue;
             }
@@ -408,7 +414,7 @@ namespace
             KeInitializeSemaphore(
                 &g_asyncQueueSemaphore,
                 0,
-                static_cast<LONG>(MaxAsyncQueueDepth + AsyncWorkerCount));
+                static_cast<LONG>(g_asyncMaxQueueDepth + g_asyncWorkerCount));
             KeInitializeEvent(&g_asyncDrainEvent, NotificationEvent, TRUE);
             KeInitializeEvent(&g_asyncWorkersExitedEvent, NotificationEvent, FALSE);
             InterlockedExchange(&g_asyncQueueStopped, 0);
@@ -864,5 +870,31 @@ namespace
         return status;
     }
 #endif
+
+    NTSTATUS AsyncRuntimeConfigure(const AsyncRuntimeConfig& config) noexcept
+    {
+#if defined(WKNET_USER_MODE_TEST)
+        UNREFERENCED_PARAMETER(config);
+        return STATUS_SUCCESS;
+#else
+        if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+            return STATUS_INVALID_DEVICE_REQUEST;
+        }
+        const ULONG workers = config.WorkerCount == 0 ? AsyncWorkerCountDefault : config.WorkerCount;
+        const ULONG depth = config.QueueDepth == 0 ? AsyncQueueDepthDefault : config.QueueDepth;
+        if (workers < AsyncWorkerCountMin || workers > AsyncWorkerCountMax ||
+            depth < AsyncQueueDepthMin || depth > AsyncQueueDepthMax) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        // Busy if runtime started.
+        if (InterlockedCompareExchange(&g_asyncRuntimeState, 0, 0) != 0 ||
+            InterlockedCompareExchange(&g_asyncInFlight, 0, 0) != 0) {
+            return STATUS_DEVICE_BUSY;
+        }
+        g_asyncWorkerCount = workers;
+        g_asyncMaxQueueDepth = depth;
+        return STATUS_SUCCESS;
+#endif
+    }
 }
 }

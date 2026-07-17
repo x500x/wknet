@@ -4,4 +4,13 @@
 
 namespace wknet::http {
     void Destroy() noexcept;
+
+    struct AsyncRuntimeConfig final
+    {
+        ULONG WorkerCount = 4;
+        ULONG QueueDepth = 256;
+    };
+
+    _Must_inspect_result_
+    NTSTATUS AsyncRuntimeConfigure(_In_ const AsyncRuntimeConfig* config) noexcept;
 }

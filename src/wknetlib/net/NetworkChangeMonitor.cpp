@@ -17,8 +17,39 @@ namespace
         NetworkChangeMonitor *monitor = static_cast<NetworkChangeMonitor *>(context);
         if (monitor != nullptr)
         {
+            // Notification context may be above PASSIVE. Only signal the worker.
             monitor->Notify();
         }
+    }
+
+    void WorkerThreadRoutine(void *context) noexcept
+    {
+        auto *monitor = static_cast<NetworkChangeMonitor *>(context);
+        if (monitor == nullptr)
+        {
+            return;
+        }
+
+        for (;;)
+        {
+            const NTSTATUS waitStatus = KeWaitForSingleObject(
+                &monitor->WorkEvent,
+                Executive,
+                KernelMode,
+                FALSE,
+                nullptr);
+            UNREFERENCED_PARAMETER(waitStatus);
+
+            if (InterlockedCompareExchange(&monitor->Stopping, 0, 0) != 0)
+            {
+                break;
+            }
+
+            monitor->ProcessPendingNotifications();
+        }
+
+        KeSetEvent(&monitor->WorkerStoppedEvent, IO_NO_INCREMENT, FALSE);
+        PsTerminateSystemThread(STATUS_SUCCESS);
     }
 #endif
 
@@ -58,6 +89,8 @@ namespace
     {
 #if !defined(WKNET_USER_MODE_TEST)
         ExInitializeFastMutex(&Lock);
+        KeInitializeEvent(&WorkEvent, SynchronizationEvent, FALSE);
+        KeInitializeEvent(&WorkerStoppedEvent, NotificationEvent, FALSE);
 #endif
     }
 
@@ -72,7 +105,46 @@ namespace
         {
             return STATUS_SUCCESS;
         }
+
 #if !defined(WKNET_USER_MODE_TEST)
+        InterlockedExchange(&Stopping, 0);
+        InterlockedExchange(&PendingNotifications, 0);
+        KeClearEvent(&WorkEvent);
+        KeClearEvent(&WorkerStoppedEvent);
+
+        HANDLE threadHandle = nullptr;
+        const NTSTATUS threadStatus = PsCreateSystemThread(
+            &threadHandle,
+            THREAD_ALL_ACCESS,
+            nullptr,
+            nullptr,
+            nullptr,
+            WorkerThreadRoutine,
+            this);
+        if (!NT_SUCCESS(threadStatus))
+        {
+            return threadStatus;
+        }
+
+        PETHREAD threadObject = nullptr;
+        const NTSTATUS refStatus = ObReferenceObjectByHandle(
+            threadHandle,
+            THREAD_ALL_ACCESS,
+            *PsThreadType,
+            KernelMode,
+            reinterpret_cast<PVOID *>(&threadObject),
+            nullptr);
+        ZwClose(threadHandle);
+        if (!NT_SUCCESS(refStatus))
+        {
+            InterlockedExchange(&Stopping, 1);
+            KeSetEvent(&WorkEvent, IO_NO_INCREMENT, FALSE);
+            return refStatus;
+        }
+
+        WorkerThread = threadObject;
+        InterlockedExchange(&WorkerStarted, 1);
+
         const NETIO_STATUS status = NotifyIpInterfaceChange(
             AF_UNSPEC,
             InterfaceChanged,
@@ -82,6 +154,13 @@ namespace
         if (!NETIO_SUCCESS(status))
         {
             NotificationHandle = nullptr;
+            InterlockedExchange(&Stopping, 1);
+            KeSetEvent(&WorkEvent, IO_NO_INCREMENT, FALSE);
+            KeWaitForSingleObject(WorkerThread, Executive, KernelMode, FALSE, nullptr);
+            ObDereferenceObject(WorkerThread);
+            WorkerThread = nullptr;
+            InterlockedExchange(&WorkerStarted, 0);
+            InterlockedExchange(&Stopping, 0);
             return static_cast<NTSTATUS>(status);
         }
 #endif
@@ -95,16 +174,33 @@ namespace
         {
             return;
         }
+
 #if !defined(WKNET_USER_MODE_TEST)
         if (NotificationHandle != nullptr)
         {
             (void)CancelMibChangeNotify2(NotificationHandle);
             NotificationHandle = nullptr;
         }
+
+        if (InterlockedCompareExchange(&WorkerStarted, 0, 0) != 0)
+        {
+            InterlockedExchange(&Stopping, 1);
+            KeSetEvent(&WorkEvent, IO_NO_INCREMENT, FALSE);
+            if (WorkerThread != nullptr)
+            {
+                KeWaitForSingleObject(WorkerThread, Executive, KernelMode, FALSE, nullptr);
+                ObDereferenceObject(WorkerThread);
+                WorkerThread = nullptr;
+            }
+            InterlockedExchange(&WorkerStarted, 0);
+            InterlockedExchange(&Stopping, 0);
+        }
 #endif
+
         {
             MonitorLock lock(this);
             RtlZeroMemory(Subscribers, sizeof(Subscribers));
+            InterlockedExchange(&PendingNotifications, 0);
             Initialized = false;
         }
     }
@@ -151,14 +247,51 @@ namespace
 
     void NetworkChangeMonitor::Notify() noexcept
     {
-        MonitorLock lock(this);
-        for (ULONG index = 0; index < MaximumSubscribers; ++index)
+        InterlockedIncrement(&PendingNotifications);
+#if !defined(WKNET_USER_MODE_TEST)
+        KeSetEvent(&WorkEvent, IO_NO_INCREMENT, FALSE);
+#endif
+    }
+
+    void NetworkChangeMonitor::ProcessPendingNotifications() noexcept
+    {
+        for (;;)
         {
-            if (Subscribers[index].Callback != nullptr)
+            if (InterlockedCompareExchange(&PendingNotifications, 0, 0) == 0)
             {
-                Subscribers[index].Callback(Subscribers[index].Context);
+                return;
+            }
+
+            // Coalesce: clear the counter before snapshot so concurrent Notify
+            // after snapshot will re-arm another pass.
+            InterlockedExchange(&PendingNotifications, 0);
+
+            Subscriber snapshot[MaximumSubscribers] = {};
+            {
+                MonitorLock lock(this);
+                if (!Initialized)
+                {
+                    return;
+                }
+                RtlCopyMemory(snapshot, Subscribers, sizeof(snapshot));
+            }
+
+            for (ULONG index = 0; index < MaximumSubscribers; ++index)
+            {
+                if (snapshot[index].Callback != nullptr)
+                {
+                    snapshot[index].Callback(snapshot[index].Context);
+                }
             }
         }
     }
+
+#if defined(WKNET_USER_MODE_TEST)
+    void NetworkChangeMonitor::NotifyAndProcessForTest() noexcept
+    {
+        Notify();
+        ProcessPendingNotifications();
+    }
+#endif
 
 }

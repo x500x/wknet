@@ -1,4 +1,6 @@
 #include <wknet/http/Session.h>
+#include <wknet/http/Headers.h>
+#include "session/EngineUtils.h"
 #include "session/detail/HttpHandles.h"
 #include "session/Engine.h"
 
@@ -155,6 +157,7 @@ NTSTATUS SessionCreate(const SessionConfig* config, Session** session) noexcept
         return status;
     }
 
+    (void)::wknet::session::CookieJarInitialize(&highSession->CookieJar);
     *session = highSession;
     return STATUS_SUCCESS;
 }
@@ -189,6 +192,197 @@ void SessionClose(Session* session) noexcept
         detail::FreeClosedSession(session);
     }
 }
+
+namespace {
+    SIZE_T StrLen(const char* s) noexcept
+    {
+        if (s == nullptr) {
+            return 0;
+        }
+        SIZE_T n = 0;
+        while (s[n] != 0) {
+            ++n;
+        }
+        return n;
+    }
+
+    void Base64Encode(
+        const UCHAR* input,
+        SIZE_T inputLength,
+        char* output,
+        SIZE_T outputCapacity,
+        SIZE_T* outputLength) noexcept
+    {
+        static const char kTable[] =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        if (outputLength != nullptr) {
+            *outputLength = 0;
+        }
+        if (output == nullptr || outputCapacity == 0) {
+            return;
+        }
+        SIZE_T out = 0;
+        SIZE_T i = 0;
+        while (i < inputLength) {
+            const SIZE_T remain = inputLength - i;
+            const ULONG b0 = input[i++];
+            const ULONG b1 = remain > 1 ? input[i++] : 0;
+            const ULONG b2 = remain > 2 ? input[i++] : 0;
+            const ULONG triple = (b0 << 16) | (b1 << 8) | b2;
+            if (out + 4 >= outputCapacity) {
+                break;
+            }
+            output[out++] = kTable[(triple >> 18) & 63];
+            output[out++] = kTable[(triple >> 12) & 63];
+            output[out++] = remain > 1 ? kTable[(triple >> 6) & 63] : '=';
+            output[out++] = remain > 2 ? kTable[triple & 63] : '=';
+        }
+        output[out] = 0;
+        if (outputLength != nullptr) {
+            *outputLength = out;
+        }
+    }
+}
+
+NTSTATUS SessionSetDefaultHeader(Session* session, const char* name, const char* value) noexcept
+{
+    return SessionSetDefaultHeaderEx(session, name, StrLen(name), value, StrLen(value));
+}
+
+NTSTATUS SessionSetDefaultHeaderEx(
+    Session* session,
+    const char* name,
+    SIZE_T nameLength,
+    const char* value,
+    SIZE_T valueLength) noexcept
+{
+    NTSTATUS status = ::wknet::session::CheckPassiveLevel();
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+    if (!detail::IsValidSession(session) || name == nullptr || nameLength == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (session->DefaultHeaders == nullptr) {
+        status = HeadersCreate(&session->DefaultHeaders);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+    }
+    return HeadersAddEx(session->DefaultHeaders, name, nameLength, value, valueLength);
+}
+
+void SessionClearDefaultHeaders(Session* session) noexcept
+{
+    if (!detail::IsValidSession(session)) {
+        return;
+    }
+    HeadersRelease(session->DefaultHeaders);
+    session->DefaultHeaders = nullptr;
+}
+
+void SessionClearAuth(Session* session) noexcept
+{
+    if (session == nullptr || session->Magic != detail::HighSessionMagic) {
+        return;
+    }
+    if (session->AuthHeaderValue != nullptr) {
+        RtlSecureZeroMemory(session->AuthHeaderValue, session->AuthHeaderValueLength);
+        ::wknet::FreeNonPagedArray(session->AuthHeaderValue);
+        session->AuthHeaderValue = nullptr;
+        session->AuthHeaderValueLength = 0;
+    }
+}
+
+NTSTATUS SessionSetBasicAuth(
+    Session* session,
+    const char* user,
+    SIZE_T userLength,
+    const char* password,
+    SIZE_T passwordLength) noexcept
+{
+    NTSTATUS status = ::wknet::session::CheckPassiveLevel();
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+    if (!detail::IsValidSession(session) || user == nullptr || userLength == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (password == nullptr) {
+        passwordLength = 0;
+    }
+    const SIZE_T rawLen = userLength + 1 + passwordLength;
+    auto* raw = ::wknet::AllocateNonPagedArray<UCHAR>(rawLen);
+    if (raw == nullptr) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    RtlCopyMemory(raw, user, userLength);
+    raw[userLength] = static_cast<UCHAR>(':');
+    if (passwordLength != 0) {
+        RtlCopyMemory(raw + userLength + 1, password, passwordLength);
+    }
+    const SIZE_T b64Cap = ((rawLen + 2) / 3) * 4 + 1;
+    auto* b64 = ::wknet::AllocateNonPagedArray<char>(b64Cap);
+    if (b64 == nullptr) {
+        RtlSecureZeroMemory(raw, rawLen);
+        ::wknet::FreeNonPagedArray(raw);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    SIZE_T b64Len = 0;
+    Base64Encode(raw, rawLen, b64, b64Cap, &b64Len);
+    RtlSecureZeroMemory(raw, rawLen);
+    ::wknet::FreeNonPagedArray(raw);
+
+    const SIZE_T valueLen = 6 + b64Len;
+    auto* value = ::wknet::AllocateNonPagedArray<char>(valueLen + 1);
+    if (value == nullptr) {
+        ::wknet::FreeNonPagedArray(b64);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    RtlCopyMemory(value, "Basic ", 6);
+    RtlCopyMemory(value + 6, b64, b64Len);
+    value[valueLen] = 0;
+    ::wknet::FreeNonPagedArray(b64);
+
+    SessionClearAuth(session);
+    session->AuthHeaderValue = value;
+    session->AuthHeaderValueLength = valueLen;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SessionSetBearerAuth(Session* session, const char* token, SIZE_T tokenLength) noexcept
+{
+    NTSTATUS status = ::wknet::session::CheckPassiveLevel();
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+    if (!detail::IsValidSession(session) || token == nullptr || tokenLength == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    const SIZE_T valueLen = 7 + tokenLength;
+    auto* value = ::wknet::AllocateNonPagedArray<char>(valueLen + 1);
+    if (value == nullptr) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    RtlCopyMemory(value, "Bearer ", 7);
+    RtlCopyMemory(value + 7, token, tokenLength);
+    value[valueLen] = 0;
+    SessionClearAuth(session);
+    session->AuthHeaderValue = value;
+    session->AuthHeaderValueLength = valueLen;
+    return STATUS_SUCCESS;
+}
+
+void SessionClearCookies(Session* session) noexcept
+{
+    if (!detail::IsValidSession(session)) {
+        return;
+    }
+    ::wknet::session::CookieJarClear(&session->CookieJar);
+}
+
+
+
 }
 
 namespace wknet::websocket {

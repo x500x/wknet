@@ -8,16 +8,17 @@
 
 namespace wknet
 {
-    // 0 means no library-wide byte cap for buffered responses; callers can
-    // still set a nonzero MaxResponseBytes per session or per send.
-    constexpr SIZE_T WKNET_HARD_MAX_RESPONSE_BYTES = 0;
+    // Absolute library ceiling for buffered response aggregation (fail-closed).
+    // Session/send MaxResponseBytes of 0 means "use DefaultMaxResponseBytes".
+    constexpr SIZE_T WKNET_HARD_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
     constexpr SIZE_T WKNET_HARD_MAX_HEADER_SECTION = 64 * 1024;
     // Absolute library ceiling for header/trailer field counts (request + response).
     // Session MaxResponseHeaders may lower this per session; default is this value.
     constexpr SIZE_T WKNET_HARD_MAX_HEADERS = 512;
-    // 0 means decoded aggregate size follows the response buffer/caller cap.
-    // Decompression-bomb protection is enforced by expansion ratio.
-    constexpr SIZE_T WKNET_HARD_MAX_DECODED_BYTES = 0;
+    // Absolute ceiling for decoded Content-Encoding / Transfer-Encoding aggregate.
+    // Also bounded by the effective MaxResponseBytes for the send; expansion ratio
+    // remains a separate bomb defense.
+    constexpr SIZE_T WKNET_HARD_MAX_DECODED_BYTES = 64 * 1024 * 1024;
     // Per-coding expansion ceiling for Content-Encoding / Transfer-Encoding /
     // WebSocket permessage-deflate / EXI deflate blocks. Absolute size is still
     // bounded by MaxResponseBytes / destination capacity. 1024x is high enough

@@ -2124,7 +2124,81 @@ namespace
         webSocketTls13Only.MinVersion = wknet::http::TlsVersion::Tls13;
         webSocketTls13Only.MaxVersion = wknet::http::TlsVersion::Tls13;
 
-        // HTTP 快捷函数示例：这些入口直接创建并发送请求。
+        // 会话无关入口，以及无所属会话的 Request。
+        {
+            WKNET_SAMPLE_LOG("[HTTP示例] 会话无关 Get(url)\r\n");
+            wknet::http::Response* response = nullptr;
+            status = wknet::http::Get(HttpGetUrl, &response);
+            CaptureResponse("HTTP 会话无关 GET", results->HttpSessionlessGet, status, response);
+            wknet::http::ResponseRelease(response);
+            MergePublicHttpSampleStatus(aggregate, status, "HTTP 会话无关 GET");
+        }
+        {
+            WKNET_SAMPLE_LOG("[HTTP示例] 会话无关 Post(url, body)\r\n");
+            wknet::http::Body* body = nullptr;
+            status = wknet::http::BodyCreateBytes(jsonBytes, jsonLen, &body);
+            wknet::http::Response* response = nullptr;
+            if (NT_SUCCESS(status)) {
+                status = wknet::http::Post(HttpPostUrl, body, &response);
+            }
+            CaptureResponse("HTTP 会话无关 POST", results->HttpSessionlessPost, status, response);
+            wknet::http::ResponseRelease(response);
+            wknet::http::BodyRelease(body);
+            MergePublicHttpSampleStatus(aggregate, status, "HTTP 会话无关 POST");
+        }
+        {
+            WKNET_SAMPLE_LOG("[HTTP示例] 会话无关 AsyncGet(url)\r\n");
+            wknet::http::AsyncOp* op = nullptr;
+            status = wknet::http::AsyncGet(HttpGetUrl, &op);
+            if (NT_SUCCESS(status)) {
+                status = wknet::http::AsyncWait(op, AsyncWaitTimeoutMs);
+            }
+            wknet::http::Response* response = nullptr;
+            if (NT_SUCCESS(status)) {
+                status = wknet::http::AsyncGetResponse(op, &response);
+            }
+            CaptureResponse("HTTP 会话无关 AsyncGet", results->HttpSessionlessAsyncGet, status, response);
+            wknet::http::ResponseRelease(response);
+            wknet::http::AsyncRelease(op);
+            MergePublicHttpSampleStatus(aggregate, status, "HTTP 会话无关 AsyncGet");
+        }
+        {
+            WKNET_SAMPLE_LOG("[HTTP示例] RequestCreate() 无所属会话 → Set* → Send(request)\r\n");
+            wknet::http::Request* request = nullptr;
+            status = wknet::http::RequestCreate(&request);
+            if (NT_SUCCESS(status)) {
+                status = wknet::http::RequestSetMethod(request, wknet::http::Method::Get);
+            }
+            if (NT_SUCCESS(status)) {
+                status = wknet::http::RequestSetUrl(request, HttpGetUrl);
+            }
+            wknet::http::Response* response = nullptr;
+            if (NT_SUCCESS(status)) {
+                status = wknet::http::Send(request, &response);
+            }
+            CaptureResponse("HTTP 无所属会话 Request Send", results->HttpDetachedRequestSend, status, response);
+            wknet::http::ResponseRelease(response);
+            wknet::http::RequestRelease(request);
+            MergePublicHttpSampleStatus(aggregate, status, "HTTP 无所属会话 Request Send");
+        }
+        {
+            WKNET_SAMPLE_LOG("[HTTP示例] Session 默认请求头与 Bearer 身份验证\r\n");
+            status = wknet::http::SessionSetDefaultHeader(session, "User-Agent", "wknettest/session-default-demo");
+            if (NT_SUCCESS(status)) {
+                status = wknet::http::SessionSetBearerAuth(session, "demo-token", LiteralLength("demo-token"));
+            }
+            wknet::http::Response* authResponse = nullptr;
+            if (NT_SUCCESS(status)) {
+                status = wknet::http::Get(session, HttpGetUrl, &authResponse);
+            }
+            CaptureResponse("Session 默认请求头与身份验证", results->SessionDefaultHeaderAuth, status, authResponse);
+            wknet::http::ResponseRelease(authResponse);
+            wknet::http::SessionClearAuth(session);
+            wknet::http::SessionClearDefaultHeaders(session);
+            MergePublicHttpSampleStatus(aggregate, status, "Session 默认请求头与身份验证");
+        }
+
+        // HTTP 快捷函数示例：这些入口直接创建并发送请求（显式 Session，第 1 层）。
         status = RunShortcutHttp(session, "HTTP GET 快捷函数", wknet::http::Method::Get, HttpGetUrl, nullptr, 0, "无", results->HttpShortcutGet);
         MergePublicHttpSampleStatus(aggregate, status, "HTTP GET 快捷函数");
         status = RunShortcutHttp(session, "HTTP POST 快捷函数", wknet::http::Method::Post, HttpPostUrl, jsonBytes, jsonLen, "原始字节", results->HttpShortcutPost);

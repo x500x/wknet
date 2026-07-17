@@ -19,8 +19,9 @@ namespace wknet::session
         char TlsServerName[WKNET_HARD_MAX_ALT_SVC_HOST_BYTES + 1] = {};
         SIZE_T TlsServerNameLength = 0;
         CertificatePolicy CertificatePolicy = CertificatePolicy::Verify;
-        const tls::CertificateStore *CertificateStore = nullptr;
-        const tls::TlsClientCredential *ClientCredential = nullptr;
+        // Opaque identities for matching only; never dereference from the cache key.
+        SIZE_T CertificateStoreIdentity = 0;
+        SIZE_T ClientCredentialIdentity = 0;
         tls::TlsPolicy Policy = {};
         AddressFamily AddressFamily = AddressFamily::Any;
     };

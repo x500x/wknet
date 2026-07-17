@@ -116,6 +116,16 @@ namespace session
     _Must_inspect_result_
     NTSTATUS EngineDrainAsync() noexcept;
 
+    struct AsyncRuntimeConfig final
+    {
+        ULONG WorkerCount = 4;
+        ULONG QueueDepth = 256;
+    };
+
+    // Only succeeds when the async runtime is idle (not started or fully drained).
+    _Must_inspect_result_
+    NTSTATUS AsyncRuntimeConfigure(_In_ const AsyncRuntimeConfig& config) noexcept;
+
 #if defined(WKNET_USER_MODE_TEST)
     void TestSetAsyncAutoRun(bool enabled) noexcept;
     NTSTATUS TestRunAsyncOperation(_In_ AsyncOperationHandle operation) noexcept;

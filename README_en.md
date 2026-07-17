@@ -49,15 +49,10 @@ HTTP/3 defaults to **Auto**: first HTTPS on TCP, learn exact `h3` Alt-Svc only f
 
 NTSTATUS SimpleGet()
 {
-    wknet::http::Session* session = nullptr;
     wknet::http::Response* response = nullptr;
 
-    NTSTATUS status = wknet::http::SessionCreate(&session);
-    if (!NT_SUCCESS(status)) {
-        return status;
-    }
-
-    status = wknet::http::Get(session, "https://example.com/", &response);
+    // Session-less entry: library creates and manages a session
+    NTSTATUS status = wknet::http::Get("https://example.com/", &response);
     if (NT_SUCCESS(status) && response != nullptr) {
         ULONG code = wknet::http::ResponseStatusCode(response);
         const UCHAR* body = wknet::http::ResponseBody(response);
@@ -68,7 +63,6 @@ NTSTATUS SimpleGet()
         wknet::http::ResponseRelease(response);
     }
 
-    wknet::http::SessionClose(session);
     return status;
 }
 ```

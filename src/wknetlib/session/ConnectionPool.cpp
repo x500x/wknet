@@ -913,7 +913,8 @@ namespace
         return EffectiveConnectionKind(left.Kind) == EffectiveConnectionKind(right.Kind) && left.Port == right.Port &&
                left.AddressFamily == right.AddressFamily && left.MinTlsVersion == right.MinTlsVersion &&
                left.MaxTlsVersion == right.MaxTlsVersion && left.CertificatePolicy == right.CertificatePolicy &&
-               left.CertificateStore == right.CertificateStore && left.ClientCredential == right.ClientCredential &&
+               left.CertificateStoreIdentity == right.CertificateStoreIdentity &&
+               left.ClientCredentialIdentity == right.ClientCredentialIdentity &&
                left.MaxTls12Renegotiations == right.MaxTls12Renegotiations &&
                left.Policy.Profile == right.Policy.Profile &&
                left.Policy.EnableTls12RsaKeyExchange == right.Policy.EnableTls12RsaKeyExchange &&

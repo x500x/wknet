@@ -2480,8 +2480,8 @@ namespace
         legacyOversizedConfig.MaxResponseBytes = (64 * 1024 * 1024) + 1;
         wknet::http::Session* legacyOversizedSession = nullptr;
         status = wknet::http::SessionCreate(&legacyOversizedConfig, &legacyOversizedSession);
-        Expect(NT_SUCCESS(status), "SessionCreate accepts response limits above the old hard cap");
-        wknet::http::SessionClose(legacyOversizedSession);
+        Expect(status == STATUS_INVALID_PARAMETER, "SessionCreate rejects response limits above hard cap");
+        Expect(legacyOversizedSession == nullptr, "over-hard-cap SessionCreate does not allocate");
 
         const char* url = "http://example.com/large";
         wknet::http::Response* resp = nullptr;
@@ -2506,10 +2506,8 @@ namespace
         wknet::http::SendOptions legacyOversizedOptions = wknet::http::DefaultSendOptions();
         legacyOversizedOptions.MaxResponseBytes = (64 * 1024 * 1024) + 1;
         status = wknet::http::Send(session, request, &legacyOversizedOptions, &resp);
-        Expect(NT_SUCCESS(status), "Send accepts response limits above the old hard cap");
-        Expect(wknet::http::ResponseBodyLength(resp) == 5000, "legacy oversized limit returns large body");
-        wknet::http::ResponseRelease(resp);
-        resp = nullptr;
+        Expect(status == STATUS_INVALID_PARAMETER, "Send rejects response limits above hard cap");
+        Expect(resp == nullptr, "over-hard-cap Send does not allocate response");
 
         wknet::http::SendOptions largeOptions = wknet::http::DefaultSendOptions();
         largeOptions.MaxResponseBytes = 8192;
@@ -2521,16 +2519,21 @@ namespace
         wknet::http::RequestRelease(request);
         wknet::http::SessionClose(session);
 
-        wknet::http::SessionConfig unlimitedConfig = wknet::http::DefaultSessionConfig();
-        Expect(unlimitedConfig.MaxResponseBytes == 0, "DefaultSessionConfig leaves response aggregation unlimited");
-        wknet::http::Session* unlimitedSession = nullptr;
-        status = wknet::http::SessionCreate(&unlimitedConfig, &unlimitedSession);
-        Expect(NT_SUCCESS(status), "SessionCreate accepts unlimited response aggregation");
-        status = wknet::http::Get(unlimitedSession, url, Length(url), &resp);
-        Expect(NT_SUCCESS(status), "simple Get with default unlimited aggregation succeeds");
-        Expect(wknet::http::ResponseBodyLength(resp) == 5000, "default unlimited aggregation returns large body");
+        wknet::http::SessionConfig defaultConfig = wknet::http::DefaultSessionConfig();
+        Expect(
+            defaultConfig.MaxResponseBytes == wknet::http::DefaultMaxResponseBytes,
+            "DefaultSessionConfig uses DefaultMaxResponseBytes");
+        Expect(
+            defaultConfig.MaxResponseBytes == 16 * 1024 * 1024,
+            "DefaultMaxResponseBytes is 16 MiB");
+        wknet::http::Session* defaultSession = nullptr;
+        status = wknet::http::SessionCreate(&defaultConfig, &defaultSession);
+        Expect(NT_SUCCESS(status), "SessionCreate accepts default response aggregation");
+        status = wknet::http::Get(defaultSession, url, Length(url), &resp);
+        Expect(NT_SUCCESS(status), "simple Get with default MaxResponseBytes succeeds for 5 KiB body");
+        Expect(wknet::http::ResponseBodyLength(resp) == 5000, "default aggregation returns 5 KiB body");
         wknet::http::ResponseRelease(resp);
-        wknet::http::SessionClose(unlimitedSession);
+        wknet::http::SessionClose(defaultSession);
         wknet::http::test::SetHttpTransport(nullptr, nullptr);
     }
 
@@ -3777,7 +3780,7 @@ namespace
         base.MinTlsVersion = wknet::session::TlsVersion::Tls12;
         base.MaxTlsVersion = wknet::session::TlsVersion::Tls13;
         base.CertificatePolicy = wknet::session::CertificatePolicy::Verify;
-        base.CertificateStore = reinterpret_cast<const wknet::tls::CertificateStore*>(static_cast<uintptr_t>(0x1000));
+        base.CertificateStoreIdentity = static_cast<SIZE_T>(0x1000);
         memcpy(base.TlsServerName, "api.example.com", Length("api.example.com"));
         base.TlsServerNameLength = Length("api.example.com");
         memcpy(base.Alpn, "h2", Length("h2"));
@@ -3796,8 +3799,7 @@ namespace
             "connection pool key includes TLS server name");
 
         wknet::session::ConnectionPoolKey differentStore = base;
-        differentStore.CertificateStore =
-            reinterpret_cast<const wknet::tls::CertificateStore*>(static_cast<uintptr_t>(0x2000));
+        differentStore.CertificateStoreIdentity = static_cast<SIZE_T>(0x2000);
         Expect(
             !wknet::session::ConnectionPoolKeysEqual(base, differentStore),
             "connection pool key includes certificate store identity");
@@ -6485,11 +6487,14 @@ namespace
     void TestWknetHardLimitsAreStable() noexcept
     {
         static_assert(
-            wknet::WKNET_HARD_MAX_RESPONSE_BYTES == 0,
-            "response hard cap uses 0 to mean no low library-wide byte cap");
+            wknet::WKNET_HARD_MAX_RESPONSE_BYTES == 64 * 1024 * 1024,
+            "response hard cap is 64 MiB");
         static_assert(
-            wknet::http::DefaultMaxResponseBytes == 0,
-            "public default response aggregation is unlimited");
+            wknet::http::DefaultMaxResponseBytes == 16 * 1024 * 1024,
+            "public default response aggregation is 16 MiB");
+        static_assert(
+            wknet::http::DefaultMaxResponseBytes <= wknet::WKNET_HARD_MAX_RESPONSE_BYTES,
+            "default response cap must not exceed hard cap");
         static_assert(
             wknet::http::DefaultMaxWebSocketMessageBytes > 0,
             "websocket message default remains independently bounded");
@@ -6500,8 +6505,8 @@ namespace
             wknet::WKNET_HARD_MAX_HEADERS >= wknet::HttpMaxHeaders,
             "hard header count must cover the parser header count limit");
         static_assert(
-            wknet::WKNET_HARD_MAX_DECODED_BYTES == 0,
-            "decoded aggregate cap follows response/caller capacity");
+            wknet::WKNET_HARD_MAX_DECODED_BYTES == wknet::WKNET_HARD_MAX_RESPONSE_BYTES,
+            "decoded aggregate hard cap matches response hard cap");
         static_assert(
             wknet::WKNET_HARD_MAX_H2_CONCURRENT_STREAMS_LOCAL > 0,
             "local H2 stream cap must reject zero-stream configurations");
@@ -6530,7 +6535,13 @@ namespace
         workspaceOptions = {};
         workspaceOptions.MaxResponseBytes = (64 * 1024 * 1024) + 1;
         status = wknet::session::WorkspaceCreate(&workspaceOptions, &workspace);
-        Expect(NT_SUCCESS(status), "workspace accepts response limits above the old hard cap");
+        Expect(status == STATUS_INVALID_PARAMETER, "workspace rejects response limits above hard cap");
+        Expect(workspace == nullptr, "workspace output remains null when response hard cap is exceeded");
+
+        workspaceOptions = {};
+        workspaceOptions.MaxResponseBytes = 64 * 1024 * 1024;
+        status = wknet::session::WorkspaceCreate(&workspaceOptions, &workspace);
+        Expect(NT_SUCCESS(status), "workspace accepts response limit at hard cap");
         wknet::session::WorkspaceRelease(workspace);
         workspace = nullptr;
 

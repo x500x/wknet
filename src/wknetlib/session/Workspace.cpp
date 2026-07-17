@@ -45,7 +45,8 @@ namespace
     bool IsValidOptions(const WorkspaceOptions& options) noexcept
     {
         return IsSupportedWorkspacePoolType(options.PoolType) &&
-            options.RequestBufferBytes != 0;
+            options.RequestBufferBytes != 0 &&
+            options.MaxResponseBytes <= WKNET_HARD_MAX_RESPONSE_BYTES;
     }
 
     _Ret_maybenull_
