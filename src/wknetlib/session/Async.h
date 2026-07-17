@@ -10,7 +10,9 @@ namespace wknet
 {
 namespace session
 {
-    constexpr ULONG AsyncOperationMagic = 0x4B484131;
+    // Stable async-operation cookie (numeric value retained for ABI continuity).
+    constexpr ULONG WknetAsyncOperationMagic = 0x4B484131;
+    constexpr ULONG AsyncOperationMagic = WknetAsyncOperationMagic;
 
     enum class AsyncOperationKind : ULONG
     {

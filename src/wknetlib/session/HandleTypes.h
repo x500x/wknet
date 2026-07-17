@@ -37,6 +37,8 @@ namespace session
     constexpr SIZE_T InitialHeaderListCapacity = 8;
     constexpr SIZE_T MultipartBoundaryStorageLength = 64;
 
+    // Numeric handle tags are stable ABI cookies (historical values retained).
+    // Names are product-neutral; do not reintroduce legacy product-name literals.
     enum class HandleKind : ULONG
     {
         Session = 0x4B485331,

@@ -436,6 +436,8 @@
     <ClCompile Include="quic\QuicClock.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="quic\QuicCongestion.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="quic\QuicConnection.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicConnectionApi.cpp"><Filter>Source Files\quic</Filter></ClCompile>
+    <ClCompile Include="quic\QuicConnectionIo.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="quic\QuicCrypto.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="quic\QuicFlowControl.cpp"><Filter>Source Files\quic</Filter></ClCompile>
     <ClCompile Include="quic\QuicFrame.cpp"><Filter>Source Files\quic</Filter></ClCompile>

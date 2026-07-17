@@ -4,11 +4,12 @@
 #include "transport/ProxyConnect.h"
 #include "transport/Transport.h"
 #include "rtl/WorkspaceScratchAllocator.h"
-#include "transport/Transport.h"
 #include "session/HttpCache.h"
 #include "session/Http2RequestBuilder.h"
 #include "session/EngineImpl.h"
 #include "session/HandleAlloc.h"
+#include "session/HttpSessionWorkspace.hpp"
+#include "session/HttpAcceptEncodingHelpers.hpp"
 #include <wknet/codec/Codec.h>
 #include "http1/HttpContentEncoding.h"
 #include "http1/HttpParser.h"
@@ -55,9 +56,6 @@ namespace session
         HttpResponseTrailerScratchBytes +
         HttpHostHeaderScratchBytes +
         HttpRequestTargetScratchBytes;
-    constexpr char DefaultAcceptEncodingValue[] = "gzip, deflate, br, zstd, identity";
-    constexpr char DeflateUnavailableAcceptEncoding[] = "br, identity";
-    constexpr SIZE_T WorkspaceCacheMaxRetainedBytes = 256 * 1024;
 
     constexpr SIZE_T Http2HeaderScratchBytes =
         sizeof(http1::HttpHeader) * Http2MaxRequestHeaders;
@@ -123,83 +121,6 @@ namespace session
         _In_opt_ const codec::DecodeMaterials* materials,
         _Out_ http1::HttpContentDecodeResult* decoded) noexcept;
 
-    inline http1::HttpText DefaultAcceptEncoding() noexcept
-    {
-        return http1::MakeText(
-            codec::DeflateRuntimeAvailable() ?
-                DefaultAcceptEncodingValue :
-                DeflateUnavailableAcceptEncoding);
-    }
-
-    _Must_inspect_result_
-    inline NTSTATUS BuildEffectiveAcceptEncoding(
-        _In_ const HttpSendOptions& sendOptions,
-        _Inout_ Workspace& workspace,
-        _Out_ http1::HttpText* value) noexcept
-    {
-        if (value != nullptr) {
-            *value = {};
-        }
-        if (value == nullptr) {
-            return STATUS_INVALID_PARAMETER;
-        }
-        if (sendOptions.AcceptEncodingPreferenceCount == 0) {
-            *value = DefaultAcceptEncoding();
-            return STATUS_SUCCESS;
-        }
-        if (workspace.DecodedBody.Data == nullptr || workspace.DecodedBody.Length == 0) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        return http1::HttpContentEncoding::BuildAcceptEncodingHeader(
-            sendOptions.AcceptEncodingPreferences,
-            sendOptions.AcceptEncodingPreferenceCount,
-            reinterpret_cast<char*>(workspace.DecodedBody.Data),
-            workspace.DecodedBody.Length,
-            value);
-    }
-
-    _Must_inspect_result_
-    inline NTSTATUS BuildAcceptEncodingPolicyFromRequestHeaders(
-        _In_reads_(requestHeaderCount) const http1::HttpHeader* requestHeaders,
-        SIZE_T requestHeaderCount,
-        _Inout_ http1::HttpAcceptEncodingRules* rules,
-        _Out_ http1::HttpAcceptEncodingPolicy* policy) noexcept
-    {
-        if (policy != nullptr) {
-            *policy = {};
-        }
-        if (policy == nullptr ||
-            rules == nullptr ||
-            rules->Entries == nullptr ||
-            (requestHeaders == nullptr && requestHeaderCount != 0)) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        rules->EntryCount = 0;
-        rules->EmptyHeader = false;
-        bool foundAcceptEncoding = false;
-        for (SIZE_T index = 0; index < requestHeaderCount; ++index) {
-            const http1::HttpHeader& header = requestHeaders[index];
-            if (!http1::TextEqualsIgnoreCase(header.Name, http1::MakeText("Accept-Encoding"))) {
-                continue;
-            }
-
-            foundAcceptEncoding = true;
-            NTSTATUS status = http1::HttpContentEncoding::ParseAcceptEncoding(header.Value, rules);
-            if (!NT_SUCCESS(status)) {
-                return status;
-            }
-        }
-
-        if (!foundAcceptEncoding) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        policy->Rules = rules;
-        return STATUS_SUCCESS;
-    }
-
     inline bool RequestHasHeader(_In_ const Request& request, _In_z_ const char* name) noexcept
     {
         if (name == nullptr) {
@@ -235,185 +156,6 @@ namespace session
         parsed->BytesConsumed = snapshot.BodyLength;
     }
 
-    _Ret_maybenull_
-    inline Workspace* ExchangeSessionWorkspace(_In_ SessionHandle session, _In_opt_ Workspace* workspace) noexcept
-    {
-        if (session == nullptr) {
-            return nullptr;
-        }
-
-#if defined(WKNET_USER_MODE_TEST)
-        Workspace* previous = session->Workspace;
-        session->Workspace = workspace;
-        return previous;
-#else
-        return static_cast<Workspace*>(InterlockedExchangePointer(
-            reinterpret_cast<PVOID volatile*>(&session->Workspace),
-            workspace));
-#endif
-    }
-
-    _Ret_maybenull_
-    inline Workspace* CompareExchangeSessionWorkspace(
-        _In_ SessionHandle session,
-        _In_opt_ Workspace* workspace,
-        _In_opt_ Workspace* expected) noexcept
-    {
-        if (session == nullptr) {
-            return nullptr;
-        }
-
-#if defined(WKNET_USER_MODE_TEST)
-        Workspace* previous = session->Workspace;
-        if (previous == expected) {
-            session->Workspace = workspace;
-        }
-        return previous;
-#else
-        return static_cast<Workspace*>(InterlockedCompareExchangePointer(
-            reinterpret_cast<PVOID volatile*>(&session->Workspace),
-            workspace,
-            expected));
-#endif
-    }
-
-    inline SIZE_T WorkspaceRetainedBytes(_In_ const Workspace& workspace) noexcept
-    {
-        return workspace.Request.Length +
-            workspace.Response.Length +
-            workspace.DecodedBody.Length +
-            workspace.HttpHeaderScratch.Length +
-            workspace.Http2HeaderScratch.Length +
-            workspace.TlsHandshakeScratch.Length +
-            workspace.CertificateScratch.Length +
-            workspace.WebSocketFrameScratch.Length +
-            workspace.WebSocketSendFrameScratch.Length +
-            workspace.WebSocketPayloadScratch.Length;
-    }
-
-    inline bool CanCacheRequestWorkspace(
-        _In_ const Workspace& workspace,
-        SIZE_T requestBufferBytes) noexcept
-    {
-        return workspace.PoolType == PoolType::NonPaged &&
-            workspace.Request.Length >= requestBufferBytes &&
-            WorkspaceRetainedBytes(workspace) <= WorkspaceCacheMaxRetainedBytes;
-    }
-
-    inline NTSTATUS AcquireRequestWorkspace(
-        _In_ SessionHandle session,
-        SIZE_T maxResponseBytes,
-        _Outptr_ Workspace** workspace) noexcept
-    {
-        if (session == nullptr || workspace == nullptr) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        *workspace = nullptr;
-
-        Workspace* cached = ExchangeSessionWorkspace(session, nullptr);
-        if (cached != nullptr) {
-            if (cached->Request.Length >= session->Options.RequestBufferBytes) {
-                cached->MaxResponseBytes = maxResponseBytes;
-                WorkspaceReset(cached);
-                *workspace = cached;
-                return STATUS_SUCCESS;
-            }
-
-            WorkspaceReleaseToLookaside(cached, &session->WorkspaceLookaside);
-        }
-
-        WorkspaceOptions workspaceOptions = {};
-        workspaceOptions.PoolType = PoolType::NonPaged;
-        workspaceOptions.RequestBufferBytes = session->Options.RequestBufferBytes;
-        workspaceOptions.MaxResponseBytes = maxResponseBytes;
-        return WorkspaceCreateFromLookaside(
-            &workspaceOptions,
-            &session->WorkspaceLookaside,
-            workspace);
-    }
-
-    inline void ReleaseRequestWorkspace(_In_ SessionHandle session, _In_opt_ Workspace* workspace) noexcept
-    {
-        if (workspace == nullptr) {
-            return;
-        }
-
-        if (session == nullptr ||
-            !CanCacheRequestWorkspace(*workspace, session->Options.RequestBufferBytes)) {
-            WorkspaceReleaseToLookaside(workspace, session != nullptr ? &session->WorkspaceLookaside : nullptr);
-            return;
-        }
-
-        workspace->MaxResponseBytes = session->Options.MaxResponseBytes;
-        WorkspaceReset(workspace);
-
-        if (CompareExchangeSessionWorkspace(session, workspace, nullptr) != nullptr) {
-            WorkspaceReleaseToLookaside(workspace, &session->WorkspaceLookaside);
-        }
-    }
-
-    class WorkspaceGuard final
-    {
-    public:
-        WorkspaceGuard() noexcept = default;
-
-        ~WorkspaceGuard() noexcept
-        {
-            Reset();
-        }
-
-        WorkspaceGuard(const WorkspaceGuard&) = delete;
-        WorkspaceGuard& operator=(const WorkspaceGuard&) = delete;
-
-        _Must_inspect_result_
-        NTSTATUS Create(SIZE_T maxResponseBytes, SIZE_T requestBufferBytes) noexcept
-        {
-            Reset();
-
-            WorkspaceOptions workspaceOptions = {};
-            workspaceOptions.PoolType = PoolType::NonPaged;
-            workspaceOptions.RequestBufferBytes = requestBufferBytes;
-            workspaceOptions.MaxResponseBytes = maxResponseBytes;
-            return WorkspaceCreate(&workspaceOptions, &workspace_);
-        }
-
-        _Must_inspect_result_
-        NTSTATUS CreateForSession(_In_ SessionHandle session, SIZE_T maxResponseBytes) noexcept
-        {
-            Reset();
-            session_ = session;
-            return AcquireRequestWorkspace(session, maxResponseBytes, &workspace_);
-        }
-
-        void Reset() noexcept
-        {
-            if (session_ != nullptr) {
-                ReleaseRequestWorkspace(session_, workspace_);
-            }
-            else {
-                WorkspaceRelease(workspace_);
-            }
-            workspace_ = nullptr;
-            session_ = nullptr;
-        }
-
-        _Ret_maybenull_
-        Workspace* Get() noexcept
-        {
-            return workspace_;
-        }
-
-        _Must_inspect_result_
-        bool IsValid() const noexcept
-        {
-            return workspace_ != nullptr;
-        }
-
-    private:
-        SessionHandle session_ = nullptr;
-        Workspace* workspace_ = nullptr;
-    };
 
     _Must_inspect_result_
     inline NTSTATUS PrepareApiHttpHeaderScratch(

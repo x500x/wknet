@@ -15,6 +15,11 @@
 #endif
 namespace wknet::quic
 {
+#if defined(WKNET_USER_MODE_TEST)
+    // Shared across QuicConnection TU splits for test-only worker-start fault injection.
+    extern bool g_failWorkerStart;
+#endif
+
     enum class QuicCommandType : UCHAR
     {
         Connect,

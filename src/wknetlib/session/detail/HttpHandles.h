@@ -11,13 +11,23 @@
 namespace wknet::http {
 namespace detail
 {
-    constexpr ULONG HighSessionMagic = 0x4B485331;
-    constexpr ULONG HighRequestMagic = 0x4B485232;
-    constexpr ULONG HighHeadersMagic = 0x4B484432;
-    constexpr ULONG HighBodyMagic = 0x4B484232;
-    constexpr ULONG HighCacheMagic = 0x4B484332;
-    constexpr ULONG HighCertificateStoreMagic = 0x4B484353;
-    constexpr ULONG HighAsyncOpMagic = 0x4B484133;
+    // Stable public-handle cookies (numeric values retained for ABI continuity).
+    constexpr ULONG WknetHttpSessionMagic = 0x4B485331;
+    constexpr ULONG WknetHttpRequestMagic = 0x4B485232;
+    constexpr ULONG WknetHttpHeadersMagic = 0x4B484432;
+    constexpr ULONG WknetHttpBodyMagic = 0x4B484232;
+    constexpr ULONG WknetHttpCacheMagic = 0x4B484332;
+    constexpr ULONG WknetHttpCertificateStoreMagic = 0x4B484353;
+    constexpr ULONG WknetHttpAsyncOpMagic = 0x4B484133;
+
+    // Compatibility aliases used by existing translation units during rename.
+    constexpr ULONG HighSessionMagic = WknetHttpSessionMagic;
+    constexpr ULONG HighRequestMagic = WknetHttpRequestMagic;
+    constexpr ULONG HighHeadersMagic = WknetHttpHeadersMagic;
+    constexpr ULONG HighBodyMagic = WknetHttpBodyMagic;
+    constexpr ULONG HighCacheMagic = WknetHttpCacheMagic;
+    constexpr ULONG HighCertificateStoreMagic = WknetHttpCertificateStoreMagic;
+    constexpr ULONG HighAsyncOpMagic = WknetHttpAsyncOpMagic;
 
     enum class BodyStorageKind : ULONG
     {

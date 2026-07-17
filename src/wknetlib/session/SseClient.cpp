@@ -21,7 +21,8 @@ namespace session
 {
 namespace
 {
-    constexpr ULONG kSseClientMagic = 0x4B485353; // 'KHSS'
+    // Stable SSE client cookie (numeric value retained for ABI continuity).
+    constexpr ULONG kSseClientMagic = 0x4B485353;
     constexpr SIZE_T kDefaultQueuedEvents = 32;
     constexpr SIZE_T kHardMaxQueuedEvents = 4096;
 }

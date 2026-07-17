@@ -140,6 +140,8 @@
     <ClCompile Include="quic\QuicClock.cpp" />
     <ClCompile Include="quic\QuicCongestion.cpp" />
     <ClCompile Include="quic\QuicConnection.cpp" />
+    <ClCompile Include="quic\QuicConnectionApi.cpp" />
+    <ClCompile Include="quic\QuicConnectionIo.cpp" />
     <ClCompile Include="quic\QuicCrypto.cpp" />
     <ClCompile Include="quic\QuicFlowControl.cpp" />
     <ClCompile Include="quic\QuicFrame.cpp" />
