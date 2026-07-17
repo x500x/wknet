@@ -238,6 +238,95 @@ struct TlsClientCredential final {
 
 将 `const TlsClientCredential*` 赋给 `TlsConfig.ClientCredential`。私钥经 `Sign` 回调，库不持有原始私钥材料。
 
+## 示例
+
+### 从 PEM 包构建信任库并用于 Session
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS HttpsWithPemTrust(
+    _In_reads_bytes_(pemLength) const UCHAR* pem,
+    SIZE_T pemLength)
+{
+    using namespace wknet::http;
+
+    CertificateStore* store = nullptr;
+    NTSTATUS status = CertificateStoreCreate(nullptr, &store);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = CertificateStoreLoadPemBundle(store, pem, pemLength);
+    if (!NT_SUCCESS(status)) {
+        CertificateStoreClose(store);
+        return status;
+    }
+
+    SessionConfig config = DefaultSessionConfig();
+    config.Tls.Certificate = CertPolicy::Verify;
+    config.Tls.Store = store; // Store 在 Session 存活期内须保持有效
+
+    Session* session = nullptr;
+    Response* response = nullptr;
+    status = SessionCreate(&config, &session);
+    if (NT_SUCCESS(status)) {
+        status = Get(session, "https://example.com/", &response);
+    }
+
+    ResponseRelease(response);
+    SessionClose(session);
+    CertificateStoreClose(store);
+    return status;
+}
+```
+
+### 单次发送覆盖 TLS（含 NoVerify 仅测试）
+
+```cpp
+SendOptions* options = nullptr;
+SendOptionsCreate(&options);
+options->HasTlsOverride = true;
+options->Tls = DefaultTlsConfig();
+options->Tls.Certificate = CertPolicy::NoVerify; // 仅测试；生产用 Verify + Store
+
+Response* response = nullptr;
+GetEx(session, url, urlLen, nullptr, options, &response);
+ResponseRelease(response);
+SendOptionsRelease(options);
+```
+
+### 仅允许 TLS 1.3
+
+```cpp
+TlsConfig tls = DefaultTlsConfig();
+tls.MinVersion = TlsVersion::Tls13;
+tls.MaxVersion = TlsVersion::Tls13;
+tls.Certificate = CertPolicy::Verify;
+tls.Store = store;
+
+SessionConfig config = DefaultSessionConfig();
+config.Tls = tls;
+SessionCreate(&config, &session);
+```
+
+### SPKI Pin（摘要）
+
+```cpp
+CertificatePin pin = {};
+pin.HostName = "example.com";
+pin.HostNameLength = sizeof("example.com") - 1;
+// 填入 leaf SPKI SHA-256 到 pin.LeafSubjectPublicKeySha256
+
+CertificateStoreOptions opts = {};
+opts.Pins = &pin;
+opts.PinCount = 1;
+// 通常同时提供 TrustAnchors 或 AuthorityBundles
+
+CertificateStore* store = nullptr;
+CertificateStoreCreate(&opts, &store);
+```
+
 ## 相关链接
 
 - [会话与配置](session-config.md)

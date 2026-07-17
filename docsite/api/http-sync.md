@@ -218,6 +218,106 @@ enum class Method : ULONG {
 };
 ```
 
+## 示例
+
+### 会话 GET / POST
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS SyncGetPost()
+{
+    using namespace wknet::http;
+
+    Session* session = nullptr;
+    Response* response = nullptr;
+    NTSTATUS status = SessionCreate(&session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = Get(session, "https://example.com/", &response);
+    if (NT_SUCCESS(status) && response != nullptr) {
+        const ULONG code = ResponseStatusCode(response);
+        UNREFERENCED_PARAMETER(code);
+    }
+    ResponseRelease(response);
+    response = nullptr;
+
+    Body* body = nullptr;
+    static const char kJson[] = "{\"ok\":true}";
+    status = BodyCreateJsonCopy(kJson, sizeof(kJson) - 1, &body);
+    if (NT_SUCCESS(status)) {
+        status = Post(session, "https://example.com/api", body, &response);
+    }
+
+    BodyRelease(body);
+    ResponseRelease(response);
+    SessionClose(session);
+    return status;
+}
+```
+
+### 会话无关快捷路径
+
+```cpp
+Response* response = nullptr;
+NTSTATUS status = wknet::http::Get("https://example.com/", &response);
+// 或：Post(url, body, &response) / Send(Method::Get, url, headers, body, options, &response)
+wknet::http::ResponseRelease(response);
+```
+
+### SendOptions：限流、禁重定向、流式 OnBody
+
+```cpp
+static NTSTATUS OnBodyChunk(
+    void* /*context*/,
+    const UCHAR* data,
+    SIZE_T dataLength,
+    bool finalChunk)
+{
+    UNREFERENCED_PARAMETER(data);
+    UNREFERENCED_PARAMETER(dataLength);
+    UNREFERENCED_PARAMETER(finalChunk);
+    // 可被多次调用；仅最后一次 finalChunk == true
+    return STATUS_SUCCESS;
+}
+
+SendOptions* options = nullptr;
+NTSTATUS status = SendOptionsCreate(&options);
+if (NT_SUCCESS(status)) {
+    options->MaxResponseBytes = 1 * 1024 * 1024;
+    options->Flags = SendFlagDisableAutoRedirect;
+    options->OnBody = OnBodyChunk;
+    // 若既要回调又要聚合 body：options->Flags |= SendFlagAggregateWithCallbacks;
+
+    Response* response = nullptr;
+    status = GetEx(
+        session,
+        "https://example.com/large",
+        sizeof("https://example.com/large") - 1,
+        nullptr,
+        options,
+        &response);
+    ResponseRelease(response);
+    SendOptionsRelease(options);
+}
+```
+
+### 强制 IPv4 / 强制新连接
+
+```cpp
+SendOptions* options = nullptr;
+SendOptionsCreate(&options);
+options->Family = AddressFamily::Ipv4;
+options->ConnectionPolicy = ConnPolicy::ForceNew;
+
+Response* response = nullptr;
+GetEx(session, url, urlLen, nullptr, options, &response);
+ResponseRelease(response);
+SendOptionsRelease(options);
+```
+
 ## 相关链接
 
 - [请求与响应](request-response.md)
@@ -225,3 +325,4 @@ enum class Method : ULONG {
 - [会话与配置](session-config.md)
 - [证书与 TLS](tls-options.md)
 - [Cookbook](../cookbook.md)
+- [第一个请求](../first-request.md)

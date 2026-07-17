@@ -186,6 +186,121 @@ public:
 
 Other `crypto` headers (`Ed25519.h`, `KeyExchange.h`, …) are not aggregated by `Wknet.h`; include as needed.
 
+## Examples
+
+### Codec: single Gzip decode
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS DecodeGzipBody(
+    _In_reads_bytes_(srcLen) const char* src,
+    SIZE_T srcLen,
+    _Out_writes_bytes_(dstCap) char* dst,
+    SIZE_T dstCap,
+    _Out_ SIZE_T* outLen)
+{
+    return wknet::codec::DecodeOne(
+        wknet::codec::Coding::Gzip,
+        src,
+        srcLen,
+        dst,
+        dstCap,
+        outLen,
+        nullptr);
+}
+```
+
+### Codec: Content-Encoding chain (reverse order)
+
+```cpp
+// Content-Encoding: gzip, br → decode Brotli first, then Gzip
+wknet::codec::Coding codings[] = {
+    wknet::codec::Coding::Brotli,
+    wknet::codec::Coding::Gzip
+};
+
+char decoded[64 * 1024];
+char scratch[64 * 1024];
+wknet::codec::DecodeBuffers buffers = {};
+buffers.DecodedBody = decoded;
+buffers.DecodedBodyCapacity = sizeof(decoded);
+buffers.ScratchBody = scratch;
+buffers.ScratchBodyCapacity = sizeof(scratch);
+
+wknet::codec::DecodeResult result = {};
+NTSTATUS status = wknet::codec::DecodeChain(
+    codings,
+    2,
+    body,
+    bodyLen,
+    buffers,
+    result);
+// result.Body / result.BodyLength point at decoded output
+```
+
+### HTTP send path: negotiate Accept-Encoding
+
+```cpp
+using namespace wknet::http;
+
+AcceptEncodingPreference prefs[2] = {};
+prefs[0].Coding = AcceptCoding::Brotli;
+prefs[0].QValue = AcceptEncodingQValueMax;
+prefs[1].Coding = AcceptCoding::Gzip;
+prefs[1].QValue = 800;
+
+SendOptions* options = nullptr;
+SendOptionsCreate(&options);
+options->AcceptEncodingPreferences = prefs;
+options->AcceptEncodingPreferenceCount = 2;
+
+Response* response = nullptr;
+GetEx(session, url, urlLen, nullptr, options, &response);
+// Response Content-Encoding is decoded by the library when materials allow
+ResponseRelease(response);
+SendOptionsRelease(options);
+```
+
+### AEAD: AES-128-GCM encrypt/decrypt (sketch)
+
+```cpp
+using namespace wknet::crypto;
+
+UCHAR key[16] = { /* 16-byte key */ };
+UCHAR nonce[12] = { /* 12-byte nonce */ };
+UCHAR aad[] = { /* optional AAD */ };
+UCHAR plaintext[] = { /* ... */ };
+UCHAR ciphertext[sizeof(plaintext)];
+UCHAR tag[16];
+
+AeadKey aeadKey = {};
+aeadKey.Algorithm = AeadAlgorithm::Aes128Gcm;
+aeadKey.Key = key;
+aeadKey.KeyLength = sizeof(key);
+
+AeadParameters params = {};
+params.Nonce.Data = nonce;
+params.Nonce.Length = sizeof(nonce);
+params.Aad.Data = aad;
+params.Aad.Length = sizeof(aad);
+
+SIZE_T written = 0;
+NTSTATUS status = Aead::Encrypt(
+    nullptr, // optional CngProviderCache*
+    aeadKey,
+    params,
+    plaintext,
+    sizeof(plaintext),
+    ciphertext,
+    sizeof(ciphertext),
+    tag,
+    sizeof(tag),
+    &written);
+
+// Decrypt: params.Tag = { tag, sizeof(tag) }; then Aead::Decrypt(...)
+```
+
 ## See also
 
 - [Sync HTTP · AcceptEncoding](http-sync.en.md)

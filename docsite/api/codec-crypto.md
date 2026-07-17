@@ -186,6 +186,121 @@ public:
 
 其它 `crypto` 头（`Ed25519.h`、`KeyExchange.h` 等）未由 `Wknet.h` 聚合；按需单独包含。
 
+## 示例
+
+### Codec：单次 Gzip 解码
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS DecodeGzipBody(
+    _In_reads_bytes_(srcLen) const char* src,
+    SIZE_T srcLen,
+    _Out_writes_bytes_(dstCap) char* dst,
+    SIZE_T dstCap,
+    _Out_ SIZE_T* outLen)
+{
+    return wknet::codec::DecodeOne(
+        wknet::codec::Coding::Gzip,
+        src,
+        srcLen,
+        dst,
+        dstCap,
+        outLen,
+        nullptr);
+}
+```
+
+### Codec：Content-Encoding 链（逆序）
+
+```cpp
+// 若 Content-Encoding: gzip, br → 先 Brotli 再 Gzip
+wknet::codec::Coding codings[] = {
+    wknet::codec::Coding::Brotli,
+    wknet::codec::Coding::Gzip
+};
+
+char decoded[64 * 1024];
+char scratch[64 * 1024];
+wknet::codec::DecodeBuffers buffers = {};
+buffers.DecodedBody = decoded;
+buffers.DecodedBodyCapacity = sizeof(decoded);
+buffers.ScratchBody = scratch;
+buffers.ScratchBodyCapacity = sizeof(scratch);
+
+wknet::codec::DecodeResult result = {};
+NTSTATUS status = wknet::codec::DecodeChain(
+    codings,
+    2,
+    body,
+    bodyLen,
+    buffers,
+    result);
+// result.Body / result.BodyLength 指向解码输出
+```
+
+### HTTP 发送侧：协商 Accept-Encoding
+
+```cpp
+using namespace wknet::http;
+
+AcceptEncodingPreference prefs[2] = {};
+prefs[0].Coding = AcceptCoding::Brotli;
+prefs[0].QValue = AcceptEncodingQValueMax;
+prefs[1].Coding = AcceptCoding::Gzip;
+prefs[1].QValue = 800;
+
+SendOptions* options = nullptr;
+SendOptionsCreate(&options);
+options->AcceptEncodingPreferences = prefs;
+options->AcceptEncodingPreferenceCount = 2;
+
+Response* response = nullptr;
+GetEx(session, url, urlLen, nullptr, options, &response);
+// 响应 Content-Encoding 由库按可用材料自动解码（见 ContentCodingMaterials）
+ResponseRelease(response);
+SendOptionsRelease(options);
+```
+
+### AEAD：AES-128-GCM 加解密（摘要）
+
+```cpp
+using namespace wknet::crypto;
+
+UCHAR key[16] = { /* 16 字节密钥 */ };
+UCHAR nonce[12] = { /* 12 字节 nonce */ };
+UCHAR aad[] = { /* optional AAD */ };
+UCHAR plaintext[] = { /* ... */ };
+UCHAR ciphertext[sizeof(plaintext)];
+UCHAR tag[16];
+
+AeadKey aeadKey = {};
+aeadKey.Algorithm = AeadAlgorithm::Aes128Gcm;
+aeadKey.Key = key;
+aeadKey.KeyLength = sizeof(key);
+
+AeadParameters params = {};
+params.Nonce.Data = nonce;
+params.Nonce.Length = sizeof(nonce);
+params.Aad.Data = aad;
+params.Aad.Length = sizeof(aad);
+
+SIZE_T written = 0;
+NTSTATUS status = Aead::Encrypt(
+    nullptr, // 可选 CngProviderCache*
+    aeadKey,
+    params,
+    plaintext,
+    sizeof(plaintext),
+    ciphertext,
+    sizeof(ciphertext),
+    tag,
+    sizeof(tag),
+    &written);
+
+// Decrypt：params.Tag = { tag, sizeof(tag) }; 再 Aead::Decrypt(...)
+```
+
 ## 相关链接
 
 - [同步 HTTP · AcceptEncoding](http-sync.md)

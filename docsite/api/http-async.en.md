@@ -121,9 +121,84 @@ void Destroy() noexcept;
 - Call when `Async*` was used; sync-only paths may omit it.
 - Do not submit new async work after `Destroy`.
 
+## Examples
+
+### Async GET + wait + take Response
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS AsyncGetAndWait(wknet::http::Session* session)
+{
+    using namespace wknet::http;
+
+    AsyncOp* op = nullptr;
+    Response* response = nullptr;
+
+    NTSTATUS status = AsyncGet(session, "https://example.com/", &op);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = AsyncWait(op, 30000); // milliseconds; timeout status on timeout
+    if (NT_SUCCESS(status)) {
+        status = AsyncGetResponse(op, &response);
+    }
+    if (NT_SUCCESS(status) && response != nullptr) {
+        const ULONG code = ResponseStatusCode(response);
+        UNREFERENCED_PARAMETER(code);
+    }
+
+    ResponseRelease(response);
+    AsyncRelease(op); // also frees an untaken Response
+    return status;
+}
+```
+
+### Session-less async + completion callback
+
+```cpp
+static void OnComplete(void* context, NTSTATUS status)
+{
+    UNREFERENCED_PARAMETER(context);
+    UNREFERENCED_PARAMETER(status);
+    // May run on a worker thread; avoid long blocks or IRQL raises
+}
+
+AsyncOptions* options = nullptr;
+AsyncOptionsCreate(&options);
+options->OnComplete = OnComplete;
+options->CompletionContext = nullptr;
+
+AsyncOp* op = nullptr;
+NTSTATUS status = AsyncGetEx(
+    "https://example.com/",
+    sizeof("https://example.com/") - 1,
+    nullptr,
+    options,
+    &op);
+// ... AsyncWait / AsyncGetResponse ...
+AsyncRelease(op);
+AsyncOptionsRelease(options);
+// After any Async* use, call wknet::http::Destroy() on the unload path.
+```
+
+### Cancel
+
+```cpp
+AsyncOp* op = nullptr;
+NTSTATUS status = AsyncGet(session, "https://example.com/slow", &op);
+if (NT_SUCCESS(status)) {
+    (void)AsyncCancel(op);
+    (void)AsyncWait(op, 5000); // still Wait + Release after cancel
+    AsyncRelease(op);
+}
+```
+
 ## See also
 
 - [Sync HTTP](http-sync.en.md)
 - [Request & Response](request-response.en.md)
 - [WebSocket](websocket.en.md)
 - [Cookbook](../cookbook.en.md)
+- [First request](../first-request.en.md)

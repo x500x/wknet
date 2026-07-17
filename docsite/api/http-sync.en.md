@@ -218,6 +218,106 @@ enum class Method : ULONG {
 };
 ```
 
+## Examples
+
+### Session GET / POST
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS SyncGetPost()
+{
+    using namespace wknet::http;
+
+    Session* session = nullptr;
+    Response* response = nullptr;
+    NTSTATUS status = SessionCreate(&session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = Get(session, "https://example.com/", &response);
+    if (NT_SUCCESS(status) && response != nullptr) {
+        const ULONG code = ResponseStatusCode(response);
+        UNREFERENCED_PARAMETER(code);
+    }
+    ResponseRelease(response);
+    response = nullptr;
+
+    Body* body = nullptr;
+    static const char kJson[] = "{\"ok\":true}";
+    status = BodyCreateJsonCopy(kJson, sizeof(kJson) - 1, &body);
+    if (NT_SUCCESS(status)) {
+        status = Post(session, "https://example.com/api", body, &response);
+    }
+
+    BodyRelease(body);
+    ResponseRelease(response);
+    SessionClose(session);
+    return status;
+}
+```
+
+### Session-less shortcuts
+
+```cpp
+Response* response = nullptr;
+NTSTATUS status = wknet::http::Get("https://example.com/", &response);
+// or: Post(url, body, &response) / Send(Method::Get, url, headers, body, options, &response)
+wknet::http::ResponseRelease(response);
+```
+
+### SendOptions: cap, no redirect, streaming OnBody
+
+```cpp
+static NTSTATUS OnBodyChunk(
+    void* /*context*/,
+    const UCHAR* data,
+    SIZE_T dataLength,
+    bool finalChunk)
+{
+    UNREFERENCED_PARAMETER(data);
+    UNREFERENCED_PARAMETER(dataLength);
+    UNREFERENCED_PARAMETER(finalChunk);
+    // May be invoked multiple times; finalChunk is true only on the last call
+    return STATUS_SUCCESS;
+}
+
+SendOptions* options = nullptr;
+NTSTATUS status = SendOptionsCreate(&options);
+if (NT_SUCCESS(status)) {
+    options->MaxResponseBytes = 1 * 1024 * 1024;
+    options->Flags = SendFlagDisableAutoRedirect;
+    options->OnBody = OnBodyChunk;
+    // To keep an aggregated body while streaming: options->Flags |= SendFlagAggregateWithCallbacks;
+
+    Response* response = nullptr;
+    status = GetEx(
+        session,
+        "https://example.com/large",
+        sizeof("https://example.com/large") - 1,
+        nullptr,
+        options,
+        &response);
+    ResponseRelease(response);
+    SendOptionsRelease(options);
+}
+```
+
+### Force IPv4 / force new connection
+
+```cpp
+SendOptions* options = nullptr;
+SendOptionsCreate(&options);
+options->Family = AddressFamily::Ipv4;
+options->ConnectionPolicy = ConnPolicy::ForceNew;
+
+Response* response = nullptr;
+GetEx(session, url, urlLen, nullptr, options, &response);
+ResponseRelease(response);
+SendOptionsRelease(options);
+```
+
 ## See also
 
 - [Request & Response](request-response.en.md)
@@ -225,3 +325,4 @@ enum class Method : ULONG {
 - [Session & Config](session-config.en.md)
 - [TLS options](tls-options.en.md)
 - [Cookbook](../cookbook.en.md)
+- [First request](../first-request.en.md)

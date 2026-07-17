@@ -203,9 +203,116 @@ void ResponseRelease(_In_opt_ Response* response) noexcept;
 - body / header 指针在 `ResponseRelease` 前有效。
 - 流式 `OnHeader`/`OnBody`：`OnBody` 可被调用**多次**；`finalChunk` 仅在结束时为 true。未设 `SendFlagAggregateWithCallbacks` 时，聚合 body 可能为空。
 
+## 示例
+
+### Headers + JSON Body + 读响应
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS PostJsonAndRead()
+{
+    using namespace wknet::http;
+
+    Session* session = nullptr;
+    Headers* headers = nullptr;
+    Body* body = nullptr;
+    Response* response = nullptr;
+
+    NTSTATUS status = SessionCreate(&session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = HeadersCreate(&headers);
+    if (NT_SUCCESS(status)) {
+        status = HeadersAdd(headers, "X-Client", "wknet-demo");
+    }
+
+    static const char kJson[] = "{\"hello\":\"world\"}";
+    if (NT_SUCCESS(status)) {
+        status = BodyCreateJsonCopy(kJson, sizeof(kJson) - 1, &body);
+    }
+
+    if (NT_SUCCESS(status)) {
+        status = PostEx(
+            session,
+            "https://example.com/api",
+            sizeof("https://example.com/api") - 1,
+            headers,
+            body,
+            nullptr,
+            &response);
+    }
+
+    if (NT_SUCCESS(status) && response != nullptr) {
+        const ULONG code = ResponseStatusCode(response);
+        const UCHAR* respBody = ResponseBody(response);
+        const SIZE_T respLen = ResponseBodyLength(response);
+        const char* ct = nullptr;
+        SIZE_T ctLen = 0;
+        (void)ResponseGetHeader(response, "Content-Type", sizeof("Content-Type") - 1, &ct, &ctLen);
+        UNREFERENCED_PARAMETER(code);
+        UNREFERENCED_PARAMETER(respBody);
+        UNREFERENCED_PARAMETER(respLen);
+        UNREFERENCED_PARAMETER(ct);
+    }
+
+    ResponseRelease(response);
+    BodyRelease(body);
+    HeadersRelease(headers);
+    SessionClose(session);
+    return status;
+}
+```
+
+### Request 对象装配
+
+```cpp
+Request* request = nullptr;
+Response* response = nullptr;
+
+NTSTATUS status = RequestCreate(session, &request); // 或 RequestCreate(&request) 无所属会话
+if (NT_SUCCESS(status)) {
+    status = RequestSetMethod(request, Method::Get);
+}
+if (NT_SUCCESS(status)) {
+    status = RequestSetUrl(request, "https://example.com/");
+}
+if (NT_SUCCESS(status)) {
+    status = RequestSetHeader(
+        request,
+        "Accept", sizeof("Accept") - 1,
+        "application/json", sizeof("application/json") - 1);
+}
+if (NT_SUCCESS(status)) {
+    status = Send(request, &response); // 使用 Request 已装配的方法/URL
+}
+
+ResponseRelease(response);
+RequestRelease(request);
+```
+
+### 表单 Body
+
+```cpp
+NameValuePair pairs[2] = {};
+pairs[0].Name = "source"; pairs[0].NameLength = 6;
+pairs[0].Value = "kernel"; pairs[0].ValueLength = 6;
+pairs[1].Name = "kind"; pairs[1].NameLength = 4;
+pairs[1].Value = "form"; pairs[1].ValueLength = 4;
+
+Body* body = nullptr;
+NTSTATUS status = BodyCreateForm(pairs, 2, &body);
+// pairs 内指针须保持到发送完成
+// Post(session, url, body, &response);
+BodyRelease(body);
+```
+
 ## 相关链接
 
 - [同步 HTTP](http-sync.md)
 - [异步 HTTP](http-async.md)
 - [会话与配置](session-config.md)
 - [Cookbook](../cookbook.md)
+- [第一个请求](../first-request.md)

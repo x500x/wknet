@@ -59,6 +59,26 @@ Namespaces: `wknet::http` · `wknet::websocket` · `wknet::sse` · `wknet::codec
 
 `Wknet.h` includes the public headers above (`TlsCredential.h` via `Certificate.h`). Fine-grained includes may take only the headers needed.
 
+## Minimal example
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS Demo()
+{
+    wknet::http::Response* response = nullptr;
+    NTSTATUS status = wknet::http::Get("https://example.com/", &response);
+    if (NT_SUCCESS(status) && response != nullptr) {
+        const ULONG code = wknet::http::ResponseStatusCode(response);
+        UNREFERENCED_PARAMETER(code);
+    }
+    wknet::http::ResponseRelease(response); // accepts nullptr
+    return status;
+}
+```
+
+Use an explicit `Session` for connection reuse, default headers, cookies, or TLS trust anchors. Walkthrough: [First request](../first-request.md). Each API page ends with a short example for that surface.
+
 ## Defaults
 
 | Function | Returns |

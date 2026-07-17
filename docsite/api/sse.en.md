@@ -169,6 +169,85 @@ NTSTATUS Close(_In_opt_ SseClient* client) noexcept;
 
 SSE sits on true incremental response bodies: when `SendOptions.OnBody` is set, the library invokes it **multiple times** in arrival order; `finalChunk` is true only at the real end. For aggregated body only, leave `OnBody` null. See [Sync HTTP](http-sync.md).
 
+## Examples
+
+### Connect + Receive loop + Close
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS SseConsume(wknet::http::Session* session)
+{
+    using namespace wknet::sse;
+
+    static const char kUrl[] = "https://example.com/events";
+    SseClient* client = nullptr;
+    NTSTATUS status = Connect(session, kUrl, sizeof(kUrl) - 1, &client);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    for (;;) {
+        Event event = {};
+        status = Receive(client, &event);
+        if (!NT_SUCCESS(status)) {
+            break; // timeout / cancel / final disconnect
+        }
+        // event.Type / Data / Id valid until next successful Receive or Close
+        UNREFERENCED_PARAMETER(event);
+    }
+
+    (void)Close(client); // aborts a blocking Receive; accepts nullptr
+    return status;
+}
+```
+
+### ConnectConfig: Last-Event-ID / reconnect / callbacks
+
+```cpp
+using namespace wknet::sse;
+
+static NTSTATUS OnEvent(void* /*context*/, const Event* event)
+{
+    UNREFERENCED_PARAMETER(event);
+    return STATUS_SUCCESS;
+}
+
+ConnectConfig config = DefaultConnectConfig();
+static const char kUrl[] = "https://example.com/events";
+config.Url = kUrl;
+config.UrlLength = sizeof(kUrl) - 1;
+config.LastEventId = "42";
+config.LastEventIdLength = 2;
+config.AutoReconnect = true;
+config.MaxReconnectAttempts = 5;
+config.ReceiveTimeoutMs = 60000;
+config.OnEvent = OnEvent;
+// config.Tls.Store = trustStore;
+
+SseClient* client = nullptr;
+NTSTATUS status = Connect(session, &config, &client);
+// ...
+(void)Close(client);
+```
+
+### Custom Authorization header
+
+```cpp
+Header auth = {};
+auth.Name = "Authorization";
+auth.NameLength = sizeof("Authorization") - 1;
+auth.Value = "Bearer demo-token";
+auth.ValueLength = sizeof("Bearer demo-token") - 1;
+
+ConnectConfig config = DefaultConnectConfig();
+config.Url = kUrl;
+config.UrlLength = urlLen;
+config.Headers = &auth;
+config.HeaderCount = 1;
+// Do not override library-controlled Accept / Last-Event-ID / Cache-Control
+```
+
 ## Related
 
 - [Capability matrix](../capability-matrix.md)

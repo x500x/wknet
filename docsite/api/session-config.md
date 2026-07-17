@@ -201,9 +201,82 @@ struct CacheOptions final {
 | `DefaultHttp3AltSvcMaxEntries` | 64 |
 | `DefaultHttp3AltSvcMaxAgeSec` | 604800 |
 
+## 示例
+
+### 默认会话 + 默认请求头 / Bearer
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS SessionWithDefaults()
+{
+    using namespace wknet::http;
+
+    Session* session = nullptr;
+    Response* response = nullptr;
+    NTSTATUS status = SessionCreate(&session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = SessionSetDefaultHeader(session, "User-Agent", "my-driver/1.0");
+    if (NT_SUCCESS(status)) {
+        static const char kToken[] = "demo-token";
+        status = SessionSetBearerAuth(session, kToken, sizeof(kToken) - 1);
+    }
+    if (NT_SUCCESS(status)) {
+        status = Get(session, "https://example.com/api/me", &response);
+    }
+
+    ResponseRelease(response);
+    SessionClearAuth(session);
+    SessionClearDefaultHeaders(session);
+    SessionClose(session);
+    return status;
+}
+```
+
+### 自定义连接池与 HTTP/3
+
+```cpp
+SessionConfig config = DefaultSessionConfig();
+config.PoolCapacity = 16;
+config.MaxConnsPerHost = 4;
+config.IdleTimeoutMs = 60000;
+config.Http3.Mode = Http3ConnectMode::Auto; // 或 Disabled / Required
+// config.Tls.Store = trustStore;            // 生产路径应提供信任锚
+
+Session* session = nullptr;
+NTSTATUS status = SessionCreate(&config, &session);
+// ... Get / Post ...
+SessionClose(session);
+```
+
+### 会话级 Cache
+
+```cpp
+Cache* cache = nullptr;
+CacheOptions cacheOpts = {};
+cacheOpts.MaxBytes = 4 * 1024 * 1024;
+cacheOpts.MaxEntries = 128;
+cacheOpts.Mode = CacheMode::Private;
+
+NTSTATUS status = CacheCreate(&cacheOpts, &cache);
+if (NT_SUCCESS(status)) {
+    SessionConfig config = DefaultSessionConfig();
+    config.Cache = cache;
+    Session* session = nullptr;
+    status = SessionCreate(&config, &session);
+    // 发送期间 Cache* 须保持有效
+    SessionClose(session);
+    CacheRelease(cache);
+}
+```
+
 ## 相关链接
 
 - [API 总览](overview.md)
 - [同步 HTTP · SendOptions](http-sync.md)
 - [证书与 TLS](tls-options.md)
 - [HTTP/3 与 QUIC](../http3-quic.md)
+- [第一个请求](../first-request.md)

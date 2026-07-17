@@ -121,9 +121,84 @@ void Destroy() noexcept;
 - 使用过 `Async*` 时调用；纯同步路径可不调用。
 - 调用后不要再提交新的异步操作。
 
+## 示例
+
+### 异步 GET + Wait + 取 Response
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS AsyncGetAndWait(wknet::http::Session* session)
+{
+    using namespace wknet::http;
+
+    AsyncOp* op = nullptr;
+    Response* response = nullptr;
+
+    NTSTATUS status = AsyncGet(session, "https://example.com/", &op);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = AsyncWait(op, 30000); // 毫秒；超时返回超时状态
+    if (NT_SUCCESS(status)) {
+        status = AsyncGetResponse(op, &response);
+    }
+    if (NT_SUCCESS(status) && response != nullptr) {
+        const ULONG code = ResponseStatusCode(response);
+        UNREFERENCED_PARAMETER(code);
+    }
+
+    ResponseRelease(response);
+    AsyncRelease(op); // 未取走的 Response 一并释放
+    return status;
+}
+```
+
+### 会话无关异步 + 完成回调
+
+```cpp
+static void OnComplete(void* context, NTSTATUS status)
+{
+    UNREFERENCED_PARAMETER(context);
+    UNREFERENCED_PARAMETER(status);
+    // 可能在工作线程；勿长时间阻塞或提升 IRQL
+}
+
+AsyncOptions* options = nullptr;
+AsyncOptionsCreate(&options);
+options->OnComplete = OnComplete;
+options->CompletionContext = nullptr;
+
+AsyncOp* op = nullptr;
+NTSTATUS status = AsyncGetEx(
+    "https://example.com/",
+    sizeof("https://example.com/") - 1,
+    nullptr,
+    options,
+    &op);
+// ... AsyncWait / AsyncGetResponse ...
+AsyncRelease(op);
+AsyncOptionsRelease(options);
+// 使用过 Async* 时，卸载路径调用 wknet::http::Destroy();
+```
+
+### 取消
+
+```cpp
+AsyncOp* op = nullptr;
+NTSTATUS status = AsyncGet(session, "https://example.com/slow", &op);
+if (NT_SUCCESS(status)) {
+    (void)AsyncCancel(op);
+    (void)AsyncWait(op, 5000); // 取消后仍应 Wait + Release
+    AsyncRelease(op);
+}
+```
+
 ## 相关链接
 
 - [同步 HTTP](http-sync.md)
 - [请求与响应](request-response.md)
 - [WebSocket](websocket.md)
 - [Cookbook](../cookbook.md)
+- [第一个请求](../first-request.md)

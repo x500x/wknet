@@ -59,6 +59,26 @@
 
 `Wknet.h` 会包含上表中的公共头（`TlsCredential.h` 经 `Certificate.h` 引入）。细分包含时可只取所需头文件。
 
+## 最小示例
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS Demo()
+{
+    wknet::http::Response* response = nullptr;
+    NTSTATUS status = wknet::http::Get("https://example.com/", &response);
+    if (NT_SUCCESS(status) && response != nullptr) {
+        const ULONG code = wknet::http::ResponseStatusCode(response);
+        UNREFERENCED_PARAMETER(code);
+    }
+    wknet::http::ResponseRelease(response); // 接受 nullptr
+    return status;
+}
+```
+
+需要连接复用、默认头、Cookie、TLS 信任锚时使用显式 `Session`。分步说明见 [第一个请求](../first-request.md)；各页末尾有对应 API 的短示例。
+
 ## 默认配置
 
 | 函数 | 返回 |

@@ -222,6 +222,92 @@ NTSTATUS SelectedSubprotocol(
 - Requires a live `http::Session`; close WebSocket before or without concurrent session teardown.
 - After async connect, `AsyncGetWebSocket` then `AsyncRelease`.
 
+## Examples
+
+### Sync connect + text echo + close
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS WsEcho(wknet::http::Session* session)
+{
+    using namespace wknet::websocket;
+
+    static const char kUrl[] = "wss://echo.example/ws";
+    WebSocket* ws = nullptr;
+    NTSTATUS status = Connect(session, kUrl, sizeof(kUrl) - 1, &ws);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    static const char kMsg[] = "hello-from-wknet";
+    status = SendText(ws, kMsg, sizeof(kMsg) - 1);
+    if (NT_SUCCESS(status)) {
+        Message message = {};
+        status = Receive(ws, &message);
+        // message.Data is valid until the next Receive / Close
+        UNREFERENCED_PARAMETER(message);
+    }
+
+    (void)Close(ws); // frees the handle; accepts nullptr
+    return status;
+}
+```
+
+### ConnectConfig (TLS / subprotocol)
+
+```cpp
+using namespace wknet::websocket;
+
+ConnectConfig config = DefaultConnectConfig();
+static const char kUrl[] = "wss://echo.example/ws";
+config.Url = kUrl;
+config.UrlLength = sizeof(kUrl) - 1;
+config.Subprotocol = "chat";
+config.SubprotocolLength = 4;
+// config.Tls.Store = trustStore; // supply trust anchors on production wss paths
+config.AutoReplyPing = true;
+
+WebSocket* ws = nullptr;
+NTSTATUS status = Connect(session, &config, &ws);
+// ...
+(void)Close(ws);
+```
+
+### Async connect
+
+```cpp
+wknet::http::AsyncOp* op = nullptr;
+static const char kUrl[] = "wss://echo.example/ws";
+NTSTATUS status = ConnectAsync(session, kUrl, sizeof(kUrl) - 1, &op);
+if (NT_SUCCESS(status)) {
+    status = wknet::http::AsyncWait(op, 30000);
+}
+WebSocket* ws = nullptr;
+if (NT_SUCCESS(status)) {
+    status = AsyncGetWebSocket(op, &ws);
+}
+wknet::http::AsyncRelease(op);
+// use ws ...
+(void)Close(ws);
+```
+
+### Fragmented send
+
+```cpp
+SendOptions first = {};
+first.FinalFragment = false;
+(void)SendTextEx(ws, part1, part1Len, &first);
+
+SendOptions mid = {};
+mid.FinalFragment = false;
+(void)SendContinuationEx(ws, part2, part2Len, &mid);
+
+SendOptions last = {};
+last.FinalFragment = true;
+(void)SendContinuationEx(ws, part3, part3Len, &last);
+```
+
 ## See also
 
 - [Session & Config](session-config.en.md)

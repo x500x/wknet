@@ -169,6 +169,85 @@ NTSTATUS Close(_In_opt_ SseClient* client) noexcept;
 
 SSE 建立在 session 真增量响应体之上：`SendOptions.OnBody` 在启用时会按到达顺序**多次**回调，`finalChunk` 仅在真正结束时为 true。若只要聚合 body，不要设 `OnBody`。详见 [同步 HTTP](http-sync.md)。
 
+## 示例
+
+### 连接 + 循环 Receive + Close
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS SseConsume(wknet::http::Session* session)
+{
+    using namespace wknet::sse;
+
+    static const char kUrl[] = "https://example.com/events";
+    SseClient* client = nullptr;
+    NTSTATUS status = Connect(session, kUrl, sizeof(kUrl) - 1, &client);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    for (;;) {
+        Event event = {};
+        status = Receive(client, &event);
+        if (!NT_SUCCESS(status)) {
+            break; // 超时 / 取消 / 最终断开
+        }
+        // event.Type / Data / Id 在下次成功 Receive 或 Close 前有效
+        UNREFERENCED_PARAMETER(event);
+    }
+
+    (void)Close(client); // 可中止阻塞 Receive；接受 nullptr
+    return status;
+}
+```
+
+### ConnectConfig：Last-Event-ID / 重连 / 回调
+
+```cpp
+using namespace wknet::sse;
+
+static NTSTATUS OnEvent(void* /*context*/, const Event* event)
+{
+    UNREFERENCED_PARAMETER(event);
+    return STATUS_SUCCESS;
+}
+
+ConnectConfig config = DefaultConnectConfig();
+static const char kUrl[] = "https://example.com/events";
+config.Url = kUrl;
+config.UrlLength = sizeof(kUrl) - 1;
+config.LastEventId = "42";
+config.LastEventIdLength = 2;
+config.AutoReconnect = true;
+config.MaxReconnectAttempts = 5;
+config.ReceiveTimeoutMs = 60000;
+config.OnEvent = OnEvent;
+// config.Tls.Store = trustStore;
+
+SseClient* client = nullptr;
+NTSTATUS status = Connect(session, &config, &client);
+// ...
+(void)Close(client);
+```
+
+### 自定义 Authorization 头
+
+```cpp
+Header auth = {};
+auth.Name = "Authorization";
+auth.NameLength = sizeof("Authorization") - 1;
+auth.Value = "Bearer demo-token";
+auth.ValueLength = sizeof("Bearer demo-token") - 1;
+
+ConnectConfig config = DefaultConnectConfig();
+config.Url = kUrl;
+config.UrlLength = urlLen;
+config.Headers = &auth;
+config.HeaderCount = 1;
+// 不要覆盖库控制的 Accept / Last-Event-ID / Cache-Control
+```
+
 ## 相关链接
 
 - [能力边界](../capability-matrix.md)

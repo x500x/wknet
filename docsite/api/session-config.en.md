@@ -201,9 +201,82 @@ Assign `Cache*` to `SessionConfig.Cache` or `SendOptions.Cache`.
 | `DefaultHttp3AltSvcMaxEntries` | 64 |
 | `DefaultHttp3AltSvcMaxAgeSec` | 604800 |
 
+## Examples
+
+### Default session + default headers / Bearer
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS SessionWithDefaults()
+{
+    using namespace wknet::http;
+
+    Session* session = nullptr;
+    Response* response = nullptr;
+    NTSTATUS status = SessionCreate(&session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = SessionSetDefaultHeader(session, "User-Agent", "my-driver/1.0");
+    if (NT_SUCCESS(status)) {
+        static const char kToken[] = "demo-token";
+        status = SessionSetBearerAuth(session, kToken, sizeof(kToken) - 1);
+    }
+    if (NT_SUCCESS(status)) {
+        status = Get(session, "https://example.com/api/me", &response);
+    }
+
+    ResponseRelease(response);
+    SessionClearAuth(session);
+    SessionClearDefaultHeaders(session);
+    SessionClose(session);
+    return status;
+}
+```
+
+### Custom pool and HTTP/3
+
+```cpp
+SessionConfig config = DefaultSessionConfig();
+config.PoolCapacity = 16;
+config.MaxConnsPerHost = 4;
+config.IdleTimeoutMs = 60000;
+config.Http3.Mode = Http3ConnectMode::Auto; // or Disabled / Required
+// config.Tls.Store = trustStore;            // production paths should supply trust anchors
+
+Session* session = nullptr;
+NTSTATUS status = SessionCreate(&config, &session);
+// ... Get / Post ...
+SessionClose(session);
+```
+
+### Session-scoped cache
+
+```cpp
+Cache* cache = nullptr;
+CacheOptions cacheOpts = {};
+cacheOpts.MaxBytes = 4 * 1024 * 1024;
+cacheOpts.MaxEntries = 128;
+cacheOpts.Mode = CacheMode::Private;
+
+NTSTATUS status = CacheCreate(&cacheOpts, &cache);
+if (NT_SUCCESS(status)) {
+    SessionConfig config = DefaultSessionConfig();
+    config.Cache = cache;
+    Session* session = nullptr;
+    status = SessionCreate(&config, &session);
+    // Cache* must remain valid for the duration of sends
+    SessionClose(session);
+    CacheRelease(cache);
+}
+```
+
 ## See also
 
 - [API Overview](overview.en.md)
 - [Sync HTTP · SendOptions](http-sync.en.md)
 - [TLS options](tls-options.en.md)
 - [HTTP/3 & QUIC](../http3-quic.en.md)
+- [First request](../first-request.en.md)

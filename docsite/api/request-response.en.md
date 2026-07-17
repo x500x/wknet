@@ -203,9 +203,116 @@ void ResponseRelease(_In_opt_ Response* response) noexcept;
 - Body/header pointers valid until `ResponseRelease`.
 - Streaming `OnHeader`/`OnBody`: `OnBody` may run **multiple** times; `finalChunk` is true only at the end. Without `SendFlagAggregateWithCallbacks`, aggregated body may be empty.
 
+## Examples
+
+### Headers + JSON body + read response
+
+```cpp
+#include <wknet/Wknet.h>
+
+NTSTATUS PostJsonAndRead()
+{
+    using namespace wknet::http;
+
+    Session* session = nullptr;
+    Headers* headers = nullptr;
+    Body* body = nullptr;
+    Response* response = nullptr;
+
+    NTSTATUS status = SessionCreate(&session);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = HeadersCreate(&headers);
+    if (NT_SUCCESS(status)) {
+        status = HeadersAdd(headers, "X-Client", "wknet-demo");
+    }
+
+    static const char kJson[] = "{\"hello\":\"world\"}";
+    if (NT_SUCCESS(status)) {
+        status = BodyCreateJsonCopy(kJson, sizeof(kJson) - 1, &body);
+    }
+
+    if (NT_SUCCESS(status)) {
+        status = PostEx(
+            session,
+            "https://example.com/api",
+            sizeof("https://example.com/api") - 1,
+            headers,
+            body,
+            nullptr,
+            &response);
+    }
+
+    if (NT_SUCCESS(status) && response != nullptr) {
+        const ULONG code = ResponseStatusCode(response);
+        const UCHAR* respBody = ResponseBody(response);
+        const SIZE_T respLen = ResponseBodyLength(response);
+        const char* ct = nullptr;
+        SIZE_T ctLen = 0;
+        (void)ResponseGetHeader(response, "Content-Type", sizeof("Content-Type") - 1, &ct, &ctLen);
+        UNREFERENCED_PARAMETER(code);
+        UNREFERENCED_PARAMETER(respBody);
+        UNREFERENCED_PARAMETER(respLen);
+        UNREFERENCED_PARAMETER(ct);
+    }
+
+    ResponseRelease(response);
+    BodyRelease(body);
+    HeadersRelease(headers);
+    SessionClose(session);
+    return status;
+}
+```
+
+### Assemble a Request object
+
+```cpp
+Request* request = nullptr;
+Response* response = nullptr;
+
+NTSTATUS status = RequestCreate(session, &request); // or RequestCreate(&request) with no owner session
+if (NT_SUCCESS(status)) {
+    status = RequestSetMethod(request, Method::Get);
+}
+if (NT_SUCCESS(status)) {
+    status = RequestSetUrl(request, "https://example.com/");
+}
+if (NT_SUCCESS(status)) {
+    status = RequestSetHeader(
+        request,
+        "Accept", sizeof("Accept") - 1,
+        "application/json", sizeof("application/json") - 1);
+}
+if (NT_SUCCESS(status)) {
+    status = Send(request, &response); // uses method/URL already set on Request
+}
+
+ResponseRelease(response);
+RequestRelease(request);
+```
+
+### Form body
+
+```cpp
+NameValuePair pairs[2] = {};
+pairs[0].Name = "source"; pairs[0].NameLength = 6;
+pairs[0].Value = "kernel"; pairs[0].ValueLength = 6;
+pairs[1].Name = "kind"; pairs[1].NameLength = 4;
+pairs[1].Value = "form"; pairs[1].ValueLength = 4;
+
+Body* body = nullptr;
+NTSTATUS status = BodyCreateForm(pairs, 2, &body);
+// pointers inside pairs must remain valid until send completes
+// Post(session, url, body, &response);
+BodyRelease(body);
+```
+
 ## See also
 
 - [Sync HTTP](http-sync.en.md)
 - [Async HTTP](http-async.en.md)
 - [Session & Config](session-config.en.md)
 - [Cookbook](../cookbook.en.md)
+- [First request](../first-request.en.md)
