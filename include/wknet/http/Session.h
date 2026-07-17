@@ -3,6 +3,9 @@
 #include <wknet/http/Types.h>
 
 namespace wknet::http {
+    // IRQL: all Session* entry points require PASSIVE_LEVEL in kernel builds.
+    // Higher IRQL returns STATUS_INVALID_DEVICE_REQUEST (or void no-op for Clear*).
+
     _Must_inspect_result_
     NTSTATUS SessionCreate(_Out_ Session** session) noexcept;
 

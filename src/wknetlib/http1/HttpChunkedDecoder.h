@@ -9,6 +9,9 @@ namespace http1
     // Incremental HTTP/1.1 chunked body decoder (RFC 9112).
     // Feed wire bytes after the response header block; emits application
     // payload via OnData. Trailers are captured when the terminal chunk ends.
+    //
+    // Multi-KiB trailer line/arena buffers are heap-owned. Construct only via
+    // heap (new / AllocateNonPagedObject); do not place this type on the stack.
     class HttpChunkedDecoder final
     {
     public:
@@ -17,7 +20,15 @@ namespace http1
             _In_reads_bytes_opt_(dataLength) const UCHAR* data,
             SIZE_T dataLength);
 
-        HttpChunkedDecoder() noexcept = default;
+        HttpChunkedDecoder() noexcept;
+        ~HttpChunkedDecoder() noexcept;
+
+        HttpChunkedDecoder(const HttpChunkedDecoder&) = delete;
+        HttpChunkedDecoder& operator=(const HttpChunkedDecoder&) = delete;
+
+        // Allocate trailer line + arena buffers. Required before Feed.
+        _Must_inspect_result_
+        NTSTATUS Initialize() noexcept;
 
         void Reset() noexcept;
 
@@ -77,10 +88,12 @@ namespace http1
         SIZE_T chunkRemaining_ = 0;
         bool sawChunkExtension_ = false;
         bool sizeLineHasDigit_ = false;
+        // Small fixed buffer (32 B) — safe on object, object itself is heap-only.
         char sizeLine_[HttpMaxChunkSizeLineBytes] = {};
         SIZE_T sizeLineLength_ = 0;
 
-        char trailerLine_[HttpMaxHeaderLineBytes] = {};
+        // Heap: HttpMaxHeaderLineBytes (8 KiB).
+        char* trailerLine_ = nullptr;
         SIZE_T trailerLineLength_ = 0;
         bool trailerLineEmptyPending_ = false;
 
@@ -88,11 +101,11 @@ namespace http1
         SIZE_T trailerCapacity_ = 0;
         SIZE_T trailerCount_ = 0;
 
-        // Trailer name/value storage is borrowed from the line buffer copies
-        // into caller-owned HttpHeader views that point into trailerLine_ only
-        // transiently — for durable trailers we store into a small owned arena.
-        char trailerArena_[4096] = {};
+        // Heap arena for durable trailer name/value storage (4 KiB).
+        char* trailerArena_ = nullptr;
+        SIZE_T trailerArenaCapacity_ = 0;
         SIZE_T trailerArenaUsed_ = 0;
+        bool initialized_ = false;
     };
 }
 }

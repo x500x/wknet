@@ -165,39 +165,51 @@ namespace
         *value = v;
         return true;
     }
-}
 
-    NTSTATUS CookieJarInitialize(CookieJar* jar) noexcept
+    void LockCookieJar(_Inout_ CookieJar* jar) noexcept
     {
-        if (jar == nullptr) {
-            return STATUS_INVALID_PARAMETER;
+#if defined(WKNET_USER_MODE_TEST)
+        while (InterlockedCompareExchange(&jar->Lock, 1, 0) != 0) {
+            YieldProcessor();
         }
-        RtlZeroMemory(jar, sizeof(*jar));
-        return STATUS_SUCCESS;
+#else
+        if (InterlockedCompareExchange(&jar->LockState, 0, 0) != 2) {
+            if (InterlockedCompareExchange(&jar->LockState, 1, 0) == 0) {
+                ExInitializeFastMutex(&jar->Lock);
+                InterlockedExchange(&jar->LockState, 2);
+            } else {
+                LARGE_INTEGER delay = {};
+                delay.QuadPart = -10 * 1000;
+                while (InterlockedCompareExchange(&jar->LockState, 0, 0) != 2) {
+                    KeDelayExecutionThread(KernelMode, FALSE, &delay);
+                }
+            }
+        }
+        ExAcquireFastMutex(&jar->Lock);
+#endif
     }
 
-    void CookieJarClear(CookieJar* jar) noexcept
+    void UnlockCookieJar(_Inout_ CookieJar* jar) noexcept
     {
-        if (jar == nullptr) {
-            return;
-        }
-        jar->Count = 0;
-        jar->TotalBytes = 0;
-        if (jar->Items != nullptr) {
-            RtlZeroMemory(jar->Items, sizeof(Cookie) * jar->Capacity);
-        }
+#if defined(WKNET_USER_MODE_TEST)
+        InterlockedExchange(&jar->Lock, 0);
+#else
+        ExReleaseFastMutex(&jar->Lock);
+#endif
     }
 
-    void CookieJarDestroy(CookieJar* jar) noexcept
+    // Const-correct lock for read-only build path; cast is safe because Lock is mutable intent.
+    void LockCookieJar(_In_ const CookieJar* jar) noexcept
     {
-        if (jar == nullptr) {
-            return;
-        }
-        FreeNonPagedArray(jar->Items);
-        RtlZeroMemory(jar, sizeof(*jar));
+        LockCookieJar(const_cast<CookieJar*>(jar));
     }
 
-    NTSTATUS CookieJarSet(CookieJar* jar, const Cookie& cookie) noexcept
+    void UnlockCookieJar(_In_ const CookieJar* jar) noexcept
+    {
+        UnlockCookieJar(const_cast<CookieJar*>(jar));
+    }
+
+    NTSTATUS CookieJarSetLocked(CookieJar* jar, const Cookie& cookie) noexcept
     {
         if (jar == nullptr || cookie.NameLength == 0) {
             return STATUS_INVALID_PARAMETER;
@@ -263,6 +275,55 @@ namespace
         jar->TotalBytes += need;
         return STATUS_SUCCESS;
     }
+}
+
+    NTSTATUS CookieJarInitialize(CookieJar* jar) noexcept
+    {
+        if (jar == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        RtlZeroMemory(jar, sizeof(*jar));
+#if !defined(WKNET_USER_MODE_TEST)
+        ExInitializeFastMutex(&jar->Lock);
+        jar->LockState = 2;
+#endif
+        return STATUS_SUCCESS;
+    }
+
+    void CookieJarClear(CookieJar* jar) noexcept
+    {
+        if (jar == nullptr) {
+            return;
+        }
+        LockCookieJar(jar);
+        jar->Count = 0;
+        jar->TotalBytes = 0;
+        if (jar->Items != nullptr) {
+            RtlZeroMemory(jar->Items, sizeof(Cookie) * jar->Capacity);
+        }
+        UnlockCookieJar(jar);
+    }
+
+    void CookieJarDestroy(CookieJar* jar) noexcept
+    {
+        if (jar == nullptr) {
+            return;
+        }
+        // Destroy is only called once ownership is exclusive (session free).
+        FreeNonPagedArray(jar->Items);
+        RtlZeroMemory(jar, sizeof(*jar));
+    }
+
+    NTSTATUS CookieJarSet(CookieJar* jar, const Cookie& cookie) noexcept
+    {
+        if (jar == nullptr) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        LockCookieJar(jar);
+        const NTSTATUS status = CookieJarSetLocked(jar, cookie);
+        UnlockCookieJar(jar);
+        return status;
+    }
 
     NTSTATUS CookieJarStoreFromSetCookie(
         CookieJar* jar,
@@ -276,12 +337,41 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        char scheme[16] = {};
-        char host[256] = {};
-        char path[CookieJarMaxPathBytes + 1] = {};
+        // Heap scratch: Cookie alone is ~5.6 KiB; host/path add more. Never stack these.
+        auto* scheme = AllocateNonPagedArray<char>(16);
+        auto* host = AllocateNonPagedArray<char>(256);
+        auto* path = AllocateNonPagedArray<char>(CookieJarMaxPathBytes + 1);
+        auto* domainAttr = AllocateNonPagedArray<char>(256);
+        auto* cookie = AllocateNonPagedObject<Cookie>();
+        if (scheme == nullptr || host == nullptr || path == nullptr || domainAttr == nullptr || cookie == nullptr) {
+            FreeNonPagedArray(scheme);
+            FreeNonPagedArray(host);
+            FreeNonPagedArray(path);
+            FreeNonPagedArray(domainAttr);
+            FreeNonPagedObject(cookie);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
         SIZE_T schemeLen = 0, hostLen = 0, pathLen = 0;
         bool isHttps = false;
-        if (!ParseUrlParts(requestUrl, urlLength, scheme, sizeof(scheme), &schemeLen, host, sizeof(host), &hostLen, path, sizeof(path), &pathLen, &isHttps)) {
+        if (!ParseUrlParts(
+                requestUrl,
+                urlLength,
+                scheme,
+                16,
+                &schemeLen,
+                host,
+                256,
+                &hostLen,
+                path,
+                CookieJarMaxPathBytes + 1,
+                &pathLen,
+                &isHttps)) {
+            FreeNonPagedArray(scheme);
+            FreeNonPagedArray(host);
+            FreeNonPagedArray(path);
+            FreeNonPagedArray(domainAttr);
+            FreeNonPagedObject(cookie);
             return STATUS_INVALID_PARAMETER;
         }
 
@@ -291,11 +381,21 @@ namespace
         const SIZE_T nameStart = i;
         while (i < lineLength && setCookieLine[i] != '=' && setCookieLine[i] != ';') {
             if (!IsTokenChar(setCookieLine[i])) {
+                FreeNonPagedArray(scheme);
+                FreeNonPagedArray(host);
+                FreeNonPagedArray(path);
+                FreeNonPagedArray(domainAttr);
+                FreeNonPagedObject(cookie);
                 return STATUS_INVALID_PARAMETER;
             }
             ++i;
         }
         if (i == nameStart || i >= lineLength || setCookieLine[i] != '=') {
+            FreeNonPagedArray(scheme);
+            FreeNonPagedArray(host);
+            FreeNonPagedArray(path);
+            FreeNonPagedArray(domainAttr);
+            FreeNonPagedObject(cookie);
             return STATUS_INVALID_PARAMETER;
         }
         const SIZE_T nameLen = i - nameStart;
@@ -306,15 +406,19 @@ namespace
         }
         const SIZE_T valueLen = i - valueStart;
         if (nameLen > CookieJarMaxNameBytes || valueLen > CookieJarMaxValueBytes) {
+            FreeNonPagedArray(scheme);
+            FreeNonPagedArray(host);
+            FreeNonPagedArray(path);
+            FreeNonPagedArray(domainAttr);
+            FreeNonPagedObject(cookie);
             return STATUS_INVALID_PARAMETER;
         }
 
-        Cookie cookie = {};
-        CopyText(setCookieLine + nameStart, nameLen, cookie.Name, sizeof(cookie.Name), &cookie.NameLength);
-        CopyText(setCookieLine + valueStart, valueLen, cookie.Value, sizeof(cookie.Value), &cookie.ValueLength);
+        RtlZeroMemory(cookie, sizeof(*cookie));
+        CopyText(setCookieLine + nameStart, nameLen, cookie->Name, sizeof(cookie->Name), &cookie->NameLength);
+        CopyText(setCookieLine + valueStart, valueLen, cookie->Value, sizeof(cookie->Value), &cookie->ValueLength);
 
         bool hasDomain = false;
-        char domainAttr[256] = {};
         SIZE_T domainAttrLen = 0;
         bool hasPath = false;
 
@@ -348,28 +452,28 @@ namespace
 
             if (EqualsIgnoreCase(setCookieLine + attrStart, attrLen, "Domain", 6)) {
                 hasDomain = true;
-                CopyText(setCookieLine + valStart, valLen, domainAttr, sizeof(domainAttr), &domainAttrLen);
+                CopyText(setCookieLine + valStart, valLen, domainAttr, 256, &domainAttrLen);
             } else if (EqualsIgnoreCase(setCookieLine + attrStart, attrLen, "Path", 4)) {
                 hasPath = true;
-                CopyText(setCookieLine + valStart, valLen, cookie.Path, sizeof(cookie.Path), &cookie.PathLength);
+                CopyText(setCookieLine + valStart, valLen, cookie->Path, sizeof(cookie->Path), &cookie->PathLength);
             } else if (EqualsIgnoreCase(setCookieLine + attrStart, attrLen, "Secure", 6)) {
-                cookie.Secure = true;
+                cookie->Secure = true;
             } else if (EqualsIgnoreCase(setCookieLine + attrStart, attrLen, "HttpOnly", 8)) {
-                cookie.HttpOnly = true;
+                cookie->HttpOnly = true;
             } else if (EqualsIgnoreCase(setCookieLine + attrStart, attrLen, "SameSite", 8)) {
                 if (EqualsIgnoreCase(setCookieLine + valStart, valLen, "Strict", 6)) {
-                    cookie.SameSite = CookieSameSite::Strict;
+                    cookie->SameSite = CookieSameSite::Strict;
                 } else if (EqualsIgnoreCase(setCookieLine + valStart, valLen, "None", 4)) {
-                    cookie.SameSite = CookieSameSite::None;
+                    cookie->SameSite = CookieSameSite::None;
                 } else {
-                    cookie.SameSite = CookieSameSite::Lax;
+                    cookie->SameSite = CookieSameSite::Lax;
                 }
             } else if (EqualsIgnoreCase(setCookieLine + attrStart, attrLen, "Max-Age", 7)) {
                 ULONGLONG seconds = 0;
                 if (ParseULong(setCookieLine + valStart, valLen, &seconds)) {
-                    cookie.Persistent = true;
+                    cookie->Persistent = true;
                     // 100ns units
-                    cookie.ExpiresAt100ns = now100ns + seconds * 10000000ULL;
+                    cookie->ExpiresAt100ns = now100ns + seconds * 10000000ULL;
                 }
             }
         }
@@ -380,27 +484,35 @@ namespace
             hostLen,
             hasDomain ? domainAttr : nullptr,
             hasDomain ? domainAttrLen : 0,
-            cookie.Domain,
-            sizeof(cookie.Domain),
-            &cookie.DomainLength,
+            cookie->Domain,
+            sizeof(cookie->Domain),
+            &cookie->DomainLength,
             &hostOnly);
-        if (!NT_SUCCESS(status)) {
-            return status;
-        }
-        cookie.HostOnly = hostOnly;
+        if (NT_SUCCESS(status)) {
+            cookie->HostOnly = hostOnly;
 
-        if (!hasPath || cookie.PathLength == 0) {
-            CookieDefaultPath(path, pathLen, cookie.Path, sizeof(cookie.Path), &cookie.PathLength);
-        }
-        if (cookie.PathLength == 0) {
-            cookie.Path[0] = '/';
-            cookie.PathLength = 1;
-        }
-        if (cookie.SameSite == CookieSameSite::None && !cookie.Secure) {
-            return STATUS_INVALID_PARAMETER;
+            if (!hasPath || cookie->PathLength == 0) {
+                CookieDefaultPath(path, pathLen, cookie->Path, sizeof(cookie->Path), &cookie->PathLength);
+            }
+            if (cookie->PathLength == 0) {
+                cookie->Path[0] = '/';
+                cookie->PathLength = 1;
+            }
+            if (cookie->SameSite == CookieSameSite::None && !cookie->Secure) {
+                status = STATUS_INVALID_PARAMETER;
+            } else {
+                LockCookieJar(jar);
+                status = CookieJarSetLocked(jar, *cookie);
+                UnlockCookieJar(jar);
+            }
         }
 
-        return CookieJarSet(jar, cookie);
+        FreeNonPagedArray(scheme);
+        FreeNonPagedArray(host);
+        FreeNonPagedArray(path);
+        FreeNonPagedArray(domainAttr);
+        FreeNonPagedObject(cookie);
+        return status;
     }
 
     NTSTATUS CookieJarBuildHeader(
@@ -420,16 +532,47 @@ namespace
             return STATUS_INVALID_PARAMETER;
         }
 
-        char scheme[16] = {};
-        char host[256] = {};
-        char path[CookieJarMaxPathBytes + 1] = {};
+        auto* scheme = AllocateNonPagedArray<char>(16);
+        auto* host = AllocateNonPagedArray<char>(256);
+        auto* path = AllocateNonPagedArray<char>(CookieJarMaxPathBytes + 1);
+        auto* cookieReg = AllocateNonPagedArray<char>(256);
+        auto* hostReg = AllocateNonPagedArray<char>(256);
+        if (scheme == nullptr || host == nullptr || path == nullptr || cookieReg == nullptr || hostReg == nullptr) {
+            FreeNonPagedArray(scheme);
+            FreeNonPagedArray(host);
+            FreeNonPagedArray(path);
+            FreeNonPagedArray(cookieReg);
+            FreeNonPagedArray(hostReg);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
         SIZE_T schemeLen = 0, hostLen = 0, pathLen = 0;
         bool https = isHttps;
-        if (!ParseUrlParts(requestUrl, urlLength, scheme, sizeof(scheme), &schemeLen, host, sizeof(host), &hostLen, path, sizeof(path), &pathLen, &https)) {
+        if (!ParseUrlParts(
+                requestUrl,
+                urlLength,
+                scheme,
+                16,
+                &schemeLen,
+                host,
+                256,
+                &hostLen,
+                path,
+                CookieJarMaxPathBytes + 1,
+                &pathLen,
+                &https)) {
+            FreeNonPagedArray(scheme);
+            FreeNonPagedArray(host);
+            FreeNonPagedArray(path);
+            FreeNonPagedArray(cookieReg);
+            FreeNonPagedArray(hostReg);
             return STATUS_INVALID_PARAMETER;
         }
 
+        LockCookieJar(jar);
+
         SIZE_T out = 0;
+        NTSTATUS status = STATUS_SUCCESS;
         for (SIZE_T i = 0; i < jar->Count; ++i) {
             const Cookie& cookie = jar->Items[i];
             if (cookie.NameLength == 0) {
@@ -453,11 +596,10 @@ namespace
             }
             // SameSite: kernel client — Strict/Lax only same-site (eTLD+1 match)
             if (cookie.SameSite != CookieSameSite::None) {
-                char cookieReg[256] = {};
-                char hostReg[256] = {};
                 SIZE_T cr = 0, hr = 0;
-                const bool cookieOk = CookieRegistrableDomain(cookie.Domain, cookie.DomainLength, cookieReg, sizeof(cookieReg), &cr);
-                const bool hostOk = CookieRegistrableDomain(host, hostLen, hostReg, sizeof(hostReg), &hr);
+                const bool cookieOk = CookieRegistrableDomain(
+                    cookie.Domain, cookie.DomainLength, cookieReg, 256, &cr);
+                const bool hostOk = CookieRegistrableDomain(host, hostLen, hostReg, 256, &hr);
                 if (!cookieOk || !hostOk || !EqualsIgnoreCase(cookieReg, cr, hostReg, hr)) {
                     continue;
                 }
@@ -466,7 +608,8 @@ namespace
             // append name=value
             const SIZE_T need = cookie.NameLength + 1 + cookie.ValueLength + (out == 0 ? 0 : 2);
             if (out + need + 1 > destinationCapacity) {
-                return STATUS_BUFFER_TOO_SMALL;
+                status = STATUS_BUFFER_TOO_SMALL;
+                break;
             }
             if (out != 0) {
                 destination[out++] = ';';
@@ -480,10 +623,21 @@ namespace
                 destination[out++] = cookie.Value[j];
             }
         }
-        destination[out] = 0;
-        if (destinationLength != nullptr) {
-            *destinationLength = out;
+
+        UnlockCookieJar(jar);
+
+        if (NT_SUCCESS(status)) {
+            destination[out] = 0;
+            if (destinationLength != nullptr) {
+                *destinationLength = out;
+            }
         }
-        return STATUS_SUCCESS;
+
+        FreeNonPagedArray(scheme);
+        FreeNonPagedArray(host);
+        FreeNonPagedArray(path);
+        FreeNonPagedArray(cookieReg);
+        FreeNonPagedArray(hostReg);
+        return status;
     }
 }

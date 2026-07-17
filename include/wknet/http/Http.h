@@ -7,6 +7,9 @@
 
 namespace wknet::http {
 
+    // IRQL: all Send*/Get*/Post*/… entry points (session-less or session-bound)
+    // require PASSIVE_LEVEL in kernel builds. Higher IRQL → STATUS_INVALID_DEVICE_REQUEST.
+    //
     // Session-less entry points: library-managed Session; released before return on the sync path.
     _Must_inspect_result_
     NTSTATUS Send(

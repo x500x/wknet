@@ -344,7 +344,10 @@ namespace
         if (NT_SUCCESS(status)) {
             status = ApplyBodyToRequest(apiRequest, body, headers);
         }
-        // Apply session default headers first; request headers override on name collision.
+        // Snapshot session default headers / auth / cookies under ConfigLock so concurrent
+        // SessionSet* cannot race with Send prepare. Cookie header is heap-built:
+        // never put multi-KiB Cookie wire on the kernel stack.
+        detail::LockSessionConfig(session);
         if (NT_SUCCESS(status) && session->DefaultHeaders != nullptr) {
             status = ApplyHeadersToRequest(apiRequest, session->DefaultHeaders, false);
         }
@@ -367,34 +370,41 @@ namespace
             !FindHeader(headers, "Cookie", nullptr, nullptr) &&
             (session->DefaultHeaders == nullptr ||
              !FindHeader(session->DefaultHeaders, "Cookie", nullptr, nullptr))) {
-            char cookieHeader[8192] = {};
-            SIZE_T cookieLength = 0;
-            // Wall-clock for Max-Age expiry evaluation (user-mode tests use a fixed value).
+            auto* cookieHeader = ::wknet::AllocateNonPagedArray<char>(
+                ::wknet::session::CookieJarMaxHeaderBytes);
+            if (cookieHeader == nullptr) {
+                status = STATUS_INSUFFICIENT_RESOURCES;
+            } else {
+                SIZE_T cookieLength = 0;
+                // Wall-clock for Max-Age expiry evaluation (user-mode tests use a fixed value).
 #if defined(WKNET_USER_MODE_TEST)
-            const ULONGLONG now100ns = 1;
+                const ULONGLONG now100ns = 1;
 #else
-            LARGE_INTEGER t = {};
-            KeQuerySystemTimePrecise(&t);
-            const ULONGLONG now100ns = static_cast<ULONGLONG>(t.QuadPart);
+                LARGE_INTEGER t = {};
+                KeQuerySystemTimePrecise(&t);
+                const ULONGLONG now100ns = static_cast<ULONGLONG>(t.QuadPart);
 #endif
-            NTSTATUS cookieStatus = ::wknet::session::CookieJarBuildHeader(
-                &session->CookieJar,
-                url,
-                urlLength,
-                false,
-                now100ns,
-                cookieHeader,
-                sizeof(cookieHeader),
-                &cookieLength);
-            if (NT_SUCCESS(cookieStatus) && cookieLength != 0) {
-                status = ::wknet::session::HttpRequestSetHeader(
-                    apiRequest,
-                    "Cookie",
-                    6,
+                NTSTATUS cookieStatus = ::wknet::session::CookieJarBuildHeader(
+                    &session->CookieJar,
+                    url,
+                    urlLength,
+                    false,
+                    now100ns,
                     cookieHeader,
-                    cookieLength);
+                    ::wknet::session::CookieJarMaxHeaderBytes,
+                    &cookieLength);
+                if (NT_SUCCESS(cookieStatus) && cookieLength != 0) {
+                    status = ::wknet::session::HttpRequestSetHeader(
+                        apiRequest,
+                        "Cookie",
+                        6,
+                        cookieHeader,
+                        cookieLength);
+                }
+                ::wknet::FreeNonPagedArray(cookieHeader);
             }
         }
+        detail::UnlockSessionConfig(session);
         const bool skipContentType = body != nullptr && FindHeader(headers, "Content-Type", nullptr, nullptr);
         if (NT_SUCCESS(status)) {
             status = ApplyHeadersToRequest(apiRequest, headers, skipContentType);

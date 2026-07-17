@@ -158,6 +158,10 @@ NTSTATUS SessionCreate(const SessionConfig* config, Session** session) noexcept
     }
 
     (void)::wknet::session::CookieJarInitialize(&highSession->CookieJar);
+#if !defined(WKNET_USER_MODE_TEST)
+    ExInitializeFastMutex(&highSession->ConfigLock);
+    highSession->ConfigLockState = 2;
+#endif
     *session = highSession;
     return STATUS_SUCCESS;
 }
@@ -263,13 +267,17 @@ NTSTATUS SessionSetDefaultHeaderEx(
     if (!detail::IsValidSession(session) || name == nullptr || nameLength == 0) {
         return STATUS_INVALID_PARAMETER;
     }
+    detail::LockSessionConfig(session);
     if (session->DefaultHeaders == nullptr) {
         status = HeadersCreate(&session->DefaultHeaders);
         if (!NT_SUCCESS(status)) {
+            detail::UnlockSessionConfig(session);
             return status;
         }
     }
-    return HeadersAddEx(session->DefaultHeaders, name, nameLength, value, valueLength);
+    status = HeadersAddEx(session->DefaultHeaders, name, nameLength, value, valueLength);
+    detail::UnlockSessionConfig(session);
+    return status;
 }
 
 void SessionClearDefaultHeaders(Session* session) noexcept
@@ -277,8 +285,13 @@ void SessionClearDefaultHeaders(Session* session) noexcept
     if (!detail::IsValidSession(session)) {
         return;
     }
+    if (!NT_SUCCESS(::wknet::session::CheckPassiveLevel())) {
+        return;
+    }
+    detail::LockSessionConfig(session);
     HeadersRelease(session->DefaultHeaders);
     session->DefaultHeaders = nullptr;
+    detail::UnlockSessionConfig(session);
 }
 
 void SessionClearAuth(Session* session) noexcept
@@ -286,12 +299,17 @@ void SessionClearAuth(Session* session) noexcept
     if (session == nullptr || session->Magic != detail::HighSessionMagic) {
         return;
     }
+    if (!NT_SUCCESS(::wknet::session::CheckPassiveLevel())) {
+        return;
+    }
+    detail::LockSessionConfig(session);
     if (session->AuthHeaderValue != nullptr) {
         RtlSecureZeroMemory(session->AuthHeaderValue, session->AuthHeaderValueLength);
         ::wknet::FreeNonPagedArray(session->AuthHeaderValue);
         session->AuthHeaderValue = nullptr;
         session->AuthHeaderValueLength = 0;
     }
+    detail::UnlockSessionConfig(session);
 }
 
 NTSTATUS SessionSetBasicAuth(
@@ -344,9 +362,16 @@ NTSTATUS SessionSetBasicAuth(
     value[valueLen] = 0;
     ::wknet::FreeNonPagedArray(b64);
 
-    SessionClearAuth(session);
+    detail::LockSessionConfig(session);
+    if (session->AuthHeaderValue != nullptr) {
+        RtlSecureZeroMemory(session->AuthHeaderValue, session->AuthHeaderValueLength);
+        ::wknet::FreeNonPagedArray(session->AuthHeaderValue);
+        session->AuthHeaderValue = nullptr;
+        session->AuthHeaderValueLength = 0;
+    }
     session->AuthHeaderValue = value;
     session->AuthHeaderValueLength = valueLen;
+    detail::UnlockSessionConfig(session);
     return STATUS_SUCCESS;
 }
 
@@ -367,9 +392,16 @@ NTSTATUS SessionSetBearerAuth(Session* session, const char* token, SIZE_T tokenL
     RtlCopyMemory(value, "Bearer ", 7);
     RtlCopyMemory(value + 7, token, tokenLength);
     value[valueLen] = 0;
-    SessionClearAuth(session);
+    detail::LockSessionConfig(session);
+    if (session->AuthHeaderValue != nullptr) {
+        RtlSecureZeroMemory(session->AuthHeaderValue, session->AuthHeaderValueLength);
+        ::wknet::FreeNonPagedArray(session->AuthHeaderValue);
+        session->AuthHeaderValue = nullptr;
+        session->AuthHeaderValueLength = 0;
+    }
     session->AuthHeaderValue = value;
     session->AuthHeaderValueLength = valueLen;
+    detail::UnlockSessionConfig(session);
     return STATUS_SUCCESS;
 }
 
@@ -378,7 +410,12 @@ void SessionClearCookies(Session* session) noexcept
     if (!detail::IsValidSession(session)) {
         return;
     }
+    if (!NT_SUCCESS(::wknet::session::CheckPassiveLevel())) {
+        return;
+    }
+    detail::LockSessionConfig(session);
     ::wknet::session::CookieJarClear(&session->CookieJar);
+    detail::UnlockSessionConfig(session);
 }
 
 

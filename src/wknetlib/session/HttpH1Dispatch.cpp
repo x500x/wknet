@@ -1483,10 +1483,17 @@ namespace session
         }
 
         if (headerParsed.BodyKind == http1::HttpBodyKind::Chunked) {
-            // HttpChunkedDecoder embeds multi-KiB trailer buffers; keep it off the stack.
+            // HttpChunkedDecoder owns multi-KiB trailer buffers on the heap; keep the
+            // object itself off the stack as well.
             resources.Decoder = new http1::HttpChunkedDecoder();
             if (resources.Decoder == nullptr) {
                 return STATUS_INSUFFICIENT_RESOURCES;
+            }
+            {
+                const NTSTATUS initStatus = resources.Decoder->Initialize();
+                if (!NT_SUCCESS(initStatus)) {
+                    return initStatus;
+                }
             }
             resources.Decoder->SetTrailerStorage(responseTrailers, trailerCapacity);
             windowLength = 0;

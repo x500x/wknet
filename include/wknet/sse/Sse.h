@@ -3,6 +3,7 @@
 #include <wknet/http/Types.h>
 
 namespace wknet::sse {
+    // IRQL: Connect/Receive/Close entry points require PASSIVE_LEVEL in kernel builds.
     struct SseClient;
 
     struct Event final

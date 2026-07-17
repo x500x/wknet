@@ -64,6 +64,13 @@ struct Session final
     // Prebuilt Authorization header value without the field name; empty means no session-level Authorization.
     char* AuthHeaderValue = nullptr;
     SIZE_T AuthHeaderValueLength = 0;
+    // Serializes DefaultHeaders / Auth / CookieJar clear with concurrent Send prepare.
+#if defined(WKNET_USER_MODE_TEST)
+    volatile LONG ConfigLock = 0;
+#else
+    FAST_MUTEX ConfigLock = {};
+    volatile LONG ConfigLockState = 0;
+#endif
 };
 
 struct Request final
@@ -282,6 +289,44 @@ namespace detail
             request->Magic == HighRequestMagic &&
             request->Closed == 0 &&
             IsValidSession(request->Parent);
+    }
+
+    inline void LockSessionConfig(Session* session) noexcept
+    {
+        if (session == nullptr) {
+            return;
+        }
+#if defined(WKNET_USER_MODE_TEST)
+        while (InterlockedCompareExchange(&session->ConfigLock, 1, 0) != 0) {
+            YieldProcessor();
+        }
+#else
+        if (InterlockedCompareExchange(&session->ConfigLockState, 0, 0) != 2) {
+            if (InterlockedCompareExchange(&session->ConfigLockState, 1, 0) == 0) {
+                ExInitializeFastMutex(&session->ConfigLock);
+                InterlockedExchange(&session->ConfigLockState, 2);
+            } else {
+                LARGE_INTEGER delay = {};
+                delay.QuadPart = -10 * 1000;
+                while (InterlockedCompareExchange(&session->ConfigLockState, 0, 0) != 2) {
+                    KeDelayExecutionThread(KernelMode, FALSE, &delay);
+                }
+            }
+        }
+        ExAcquireFastMutex(&session->ConfigLock);
+#endif
+    }
+
+    inline void UnlockSessionConfig(Session* session) noexcept
+    {
+        if (session == nullptr) {
+            return;
+        }
+#if defined(WKNET_USER_MODE_TEST)
+        InterlockedExchange(&session->ConfigLock, 0);
+#else
+        ExReleaseFastMutex(&session->ConfigLock);
+#endif
     }
 
     inline bool AddSessionRef(Session* session) noexcept

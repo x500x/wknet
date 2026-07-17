@@ -3,6 +3,7 @@
 #include <wknet/http/Types.h>
 
 namespace wknet::http {
+    // IRQL: Destroy and AsyncRuntimeConfigure require PASSIVE_LEVEL in kernel builds.
     void Destroy() noexcept;
 
     struct AsyncRuntimeConfig final

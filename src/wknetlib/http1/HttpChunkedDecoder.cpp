@@ -37,6 +37,37 @@ namespace http1
         }
     }
 
+    HttpChunkedDecoder::HttpChunkedDecoder() noexcept = default;
+
+    HttpChunkedDecoder::~HttpChunkedDecoder() noexcept
+    {
+        ::wknet::FreeNonPagedArray(trailerLine_);
+        trailerLine_ = nullptr;
+        ::wknet::FreeNonPagedArray(trailerArena_);
+        trailerArena_ = nullptr;
+        trailerArenaCapacity_ = 0;
+        initialized_ = false;
+    }
+
+    NTSTATUS HttpChunkedDecoder::Initialize() noexcept
+    {
+        if (initialized_) {
+            return STATUS_SUCCESS;
+        }
+        trailerLine_ = ::wknet::AllocateNonPagedArray<char>(HttpMaxHeaderLineBytes);
+        trailerArena_ = ::wknet::AllocateNonPagedArray<char>(4096);
+        if (trailerLine_ == nullptr || trailerArena_ == nullptr) {
+            ::wknet::FreeNonPagedArray(trailerLine_);
+            trailerLine_ = nullptr;
+            ::wknet::FreeNonPagedArray(trailerArena_);
+            trailerArena_ = nullptr;
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        trailerArenaCapacity_ = 4096;
+        initialized_ = true;
+        return STATUS_SUCCESS;
+    }
+
     void HttpChunkedDecoder::Reset() noexcept
     {
         state_ = State::SizeLine;
@@ -48,7 +79,7 @@ namespace http1
         trailerLineEmptyPending_ = false;
         trailerCount_ = 0;
         trailerArenaUsed_ = 0;
-        // Keep trailer storage pointers; caller owns them.
+        // Keep trailer storage pointers and heap buffers; caller owns trailers_.
     }
 
     void HttpChunkedDecoder::SetTrailerStorage(
@@ -181,7 +212,8 @@ namespace http1
         const SIZE_T nameLength = colon;
         const SIZE_T valueLength = valueEnd - valueStart;
         const SIZE_T needed = nameLength + valueLength;
-        if (needed > sizeof(trailerArena_) - trailerArenaUsed_) {
+        if (trailerLine_ == nullptr || trailerArena_ == nullptr ||
+            needed > trailerArenaCapacity_ - trailerArenaUsed_) {
             state_ = State::Failed;
             return STATUS_BUFFER_OVERFLOW;
         }
@@ -217,7 +249,7 @@ namespace http1
         if (ch == '\r') {
             return STATUS_SUCCESS;
         }
-        if (trailerLineLength_ >= HttpMaxHeaderLineBytes) {
+        if (trailerLine_ == nullptr || trailerLineLength_ >= HttpMaxHeaderLineBytes) {
             state_ = State::Failed;
             return STATUS_INVALID_NETWORK_RESPONSE;
         }
@@ -236,6 +268,9 @@ namespace http1
             return STATUS_INVALID_PARAMETER;
         }
         *bytesConsumed = 0;
+        if (!initialized_ || trailerLine_ == nullptr || trailerArena_ == nullptr) {
+            return STATUS_INVALID_DEVICE_STATE;
+        }
         if (state_ == State::Complete) {
             return STATUS_SUCCESS;
         }

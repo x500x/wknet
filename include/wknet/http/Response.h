@@ -3,6 +3,7 @@
 #include <wknet/http/Types.h>
 
 namespace wknet::http {
+    // IRQL: Response query helpers and ResponseRelease require PASSIVE_LEVEL in kernel builds.
     ULONG ResponseStatusCode(_In_opt_ const Response* response) noexcept;
     const UCHAR* ResponseBody(_In_opt_ const Response* response) noexcept;
     SIZE_T ResponseBodyLength(_In_opt_ const Response* response) noexcept;

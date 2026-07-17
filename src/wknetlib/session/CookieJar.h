@@ -10,6 +10,9 @@ namespace wknet::session
     constexpr SIZE_T CookieJarMaxDomainBytes = 253;
     constexpr SIZE_T CookieJarMaxPathBytes = 1024;
     constexpr SIZE_T CookieJarMaxTotalBytes = 256 * 1024;
+    // Cookie request-header build budget (heap). Large enough for typical jars;
+    // overflow returns STATUS_BUFFER_TOO_SMALL rather than growing unboundedly.
+    constexpr SIZE_T CookieJarMaxHeaderBytes = 8 * 1024;
 
     enum class CookieSameSite : UCHAR
     {
@@ -18,6 +21,8 @@ namespace wknet::session
         None = 2
     };
 
+    // Large fixed fields live in heap-allocated Cookie entries (Items[]), never
+    // as automatic stack locals on parse/build paths.
     struct Cookie final
     {
         char Name[CookieJarMaxNameBytes + 1] = {};
@@ -42,6 +47,14 @@ namespace wknet::session
         SIZE_T Count = 0;
         SIZE_T Capacity = 0;
         SIZE_T TotalBytes = 0;
+        // Serializes jar mutation and snapshot builds so concurrent Send on the
+        // same Session cannot race Items/Count during Set-Cookie / Cookie header.
+#if defined(WKNET_USER_MODE_TEST)
+        volatile LONG Lock = 0;
+#else
+        FAST_MUTEX Lock = {};
+        volatile LONG LockState = 0;
+#endif
     };
 
     _Must_inspect_result_

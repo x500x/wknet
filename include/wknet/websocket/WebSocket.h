@@ -3,6 +3,7 @@
 #include <wknet/http/Types.h>
 
 namespace wknet::websocket {
+    // IRQL: Connect/Send/Receive/Close entry points require PASSIVE_LEVEL in kernel builds.
     _Must_inspect_result_
     NTSTATUS Connect(
         _In_ wknet::http::Session* session,

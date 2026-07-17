@@ -53,6 +53,7 @@ namespace
     void TestSingleChunk()
     {
         HttpChunkedDecoder decoder;
+        Expect(NT_SUCCESS(decoder.Initialize()), "initialize single");
         HttpHeader trailers[8] = {};
         decoder.SetTrailerStorage(trailers, 8);
         BodyCapture capture = {};
@@ -71,6 +72,7 @@ namespace
     void TestMultiChunkSplitFeeds()
     {
         HttpChunkedDecoder decoder;
+        Expect(NT_SUCCESS(decoder.Initialize()), "initialize multi");
         HttpHeader trailers[8] = {};
         decoder.SetTrailerStorage(trailers, 8);
         BodyCapture capture = {};
@@ -95,6 +97,7 @@ namespace
     void TestTrailers()
     {
         HttpChunkedDecoder decoder;
+        Expect(NT_SUCCESS(decoder.Initialize()), "initialize trailers");
         HttpHeader trailers[8] = {};
         decoder.SetTrailerStorage(trailers, 8);
         BodyCapture capture = {};
@@ -114,6 +117,7 @@ namespace
     void TestEmptyBody()
     {
         HttpChunkedDecoder decoder;
+        Expect(NT_SUCCESS(decoder.Initialize()), "initialize empty");
         BodyCapture capture = {};
         const char* wire = "0\r\n\r\n";
         SIZE_T consumed = 0;
@@ -126,6 +130,7 @@ namespace
     void TestChunkExtensionIgnored()
     {
         HttpChunkedDecoder decoder;
+        Expect(NT_SUCCESS(decoder.Initialize()), "initialize ext");
         BodyCapture capture = {};
         const char* wire = "5;ext=1\r\nhello\r\n0\r\n\r\n";
         SIZE_T consumed = 0;
@@ -137,6 +142,7 @@ namespace
     void TestBadCrLf()
     {
         HttpChunkedDecoder decoder;
+        Expect(NT_SUCCESS(decoder.Initialize()), "initialize bad crlf");
         BodyCapture capture = {};
         const char* wire = "5\r\nhelloXX0\r\n\r\n";
         SIZE_T consumed = 0;

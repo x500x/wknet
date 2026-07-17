@@ -3,6 +3,7 @@
 #include <wknet/http/Types.h>
 
 namespace wknet::http {
+    // IRQL: Request* mutators and release require PASSIVE_LEVEL in kernel builds.
     _Must_inspect_result_
     NTSTATUS RequestCreate(_Out_ Request** out) noexcept;
 
